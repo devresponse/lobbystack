@@ -47,7 +47,8 @@ describe("admin build release", () => {
   });
 
   it("passes Railway's commit SHA into the Docker build that runs next build", () => {
-    const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8");
+    // A Windows checkout with core.autocrlf has CRLF line endings.
+    const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8").replace(/\r\n/g, "\n");
     const buildStage = dockerfile.slice(0, dockerfile.indexOf(" AS runtime"));
     const commitArg = buildStage.indexOf("ARG RAILWAY_GIT_COMMIT_SHA\n");
     expect(commitArg).toBeGreaterThan(-1);

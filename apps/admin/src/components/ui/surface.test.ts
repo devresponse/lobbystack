@@ -22,6 +22,8 @@ const forbiddenSurfacePatterns = [
 const componentsDirectory = fileURLToPath(new URL("../", import.meta.url));
 const sourceModules = Object.fromEntries(readdirSync(componentsDirectory, { recursive: true })
   .filter((entry): entry is string => typeof entry === "string" && /\.tsx?$/.test(entry) && !entry.includes(".test."))
+  // Windows lists recursive entries with backslashes.
+  .map((entry) => entry.replaceAll("\\", "/"))
   .map((entry) => [entry === "ui/surface.tsx" ? "./surface.tsx" : entry, readFileSync(join(componentsDirectory, entry), "utf8")]));
 
 describe("surface styling", () => {

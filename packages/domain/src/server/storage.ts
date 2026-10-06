@@ -4,7 +4,7 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, 
 
 import { billingAccounts, businesses, calls, enqueueOutbox, knowledgeDocuments, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { getKnowledgeStorageLimitBytes } from "@lobbystack/shared";
-import { getKnowledgeStorageUsageBytes } from "./knowledge";
+import { getKnowledgeStorageUsageBytes, knowledgeStorageLimitMessage } from "./knowledge";
 import { isAllowedUploadContentType } from "@lobbystack/contracts";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
@@ -35,7 +35,7 @@ export async function createUpload(
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     if (input.purpose === "knowledge") await requireBusinessAdmin(tx, input);
     else await requireBusinessMembership(tx, input);
-    await tx.insert(storageObjects).values({ id: objectId, businessId: input.businessId, objectKey: key, purpose: input.purpose, fileName: input.fileName, contentType: input.contentType, contentLength: input.length, ...(input.checksum !== undefined ? { checksum: input.checksum } : {}), status: "pending", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) });
+    await tx.insert(storageObjects).values({ id: objectId, businessId: input.businessId, objectKey: key, purpose: input.purpose, fileName: input.fileName, contentType: input.contentType, contentLength: input.length, checksum: input.checksum, status: "pending", expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) });
   });
   const upload = await storage.createUpload({ key, contentType: input.contentType, length: input.length, ...(input.checksum !== undefined ? { checksum: input.checksum } : {}) });
   return { objectId, key, url: upload.url, ...(upload.headers ? { headers: upload.headers } : {}) };
@@ -67,7 +67,9 @@ export async function finalizeUpload(
       const [account] = await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId));
       const plan = billingPlanForAccount(account?.plan, business?.deploymentMode);
       const limit = getKnowledgeStorageLimitBytes(plan);
-      if (limit !== null && await getKnowledgeStorageUsageBytes(tx, input.businessId) + metadata.length > limit) throw new Error(`Knowledge storage limit reached. ${Math.ceil(limit / 1024 / 1024)} MB is included on this plan.`);
+      // The limit counts indexed text, which indexing checks once it's extracted.
+      // Refuse here only when the plan is already full.
+      if (limit !== null && await getKnowledgeStorageUsageBytes(tx, input.businessId) >= limit) throw new Error(knowledgeStorageLimitMessage(limit));
     }
     const finalized = await tx.update(storageObjects).set({ status: "ready", contentLength: metadata.length, contentType: metadata.contentType, ...(metadata.checksum ? { checksum: metadata.checksum } : {}), updatedAt: new Date() }).where(and(eq(storageObjects.id, input.objectId), eq(storageObjects.businessId, input.businessId), eq(storageObjects.status, "pending"))).returning({ id: storageObjects.id });
     if (!finalized.length) throw new Error("Upload is missing or already finalized.");

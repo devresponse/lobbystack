@@ -1,8 +1,10 @@
+import { isInterfaceLocale } from "@lobbystack/shared";
+
+import { DEFAULT_LOCALE, type SupportedLocale } from "./locale";
+
 const LANDING_SITE_URL =
   process.env.NEXT_PUBLIC_LANDING_SITE_URL?.replace(/\/$/, "") ??
   "https://lobbystack.com";
-
-const DEFAULT_LOCALE = "en";
 
 const translatedBasePaths = new Set([
   "/",
@@ -32,7 +34,7 @@ const translatedBasePaths = new Set([
   "/search/",
 ]);
 
-export type MarketingLocale = "en" | "fr";
+export type MarketingLocale = SupportedLocale;
 
 function normalizedPath(path = "/"): string {
   const pathname = path.split("#")[0]?.split("?")[0] || "/";
@@ -44,24 +46,16 @@ function normalizedPath(path = "/"): string {
   return pathname.endsWith("/") ? pathname : `${pathname}/`;
 }
 
-function isLocale(value: string | undefined): value is MarketingLocale {
-  return value === "en" || value === "fr";
-}
-
 function stripLocaleFromPath(path = "/"): string {
   const normalized = normalizedPath(path);
   const [, maybeLocale, ...rest] = normalized.split("/");
 
-  if (!isLocale(maybeLocale) || maybeLocale === DEFAULT_LOCALE) {
+  if (!isInterfaceLocale(maybeLocale) || maybeLocale === DEFAULT_LOCALE) {
     return normalized;
   }
 
   const stripped = `/${rest.join("/")}`;
   return normalizedPath(stripped === "/" ? "/" : stripped);
-}
-
-function hasTranslation(path = "/"): boolean {
-  return translatedBasePaths.has(stripLocaleFromPath(path));
 }
 
 export function localizeMarketingPath(
@@ -73,7 +67,7 @@ export function localizeMarketingPath(
   if (locale === DEFAULT_LOCALE) {
     return basePath;
   }
-  if (!hasTranslation(basePath)) {
+  if (!translatedBasePaths.has(basePath)) {
     return basePath;
   }
   if (basePath === "/") {

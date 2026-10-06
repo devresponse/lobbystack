@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { requestJson } from "@/lib/request-json";
+import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Building2, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -14,13 +16,6 @@ import { Input } from "@/components/ui/input";
 import { useTelemetry } from "@/components/product-analytics";
 import { recordPendingOnboardingBusiness } from "@/lib/onboarding-analytics";
 
-type Business = { businessId: string; name: string; active: boolean };
-
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, credentials: "include", headers: { "content-type": "application/json", ...(init?.headers ?? {}) } });
-  if (!response.ok) throw new Error((await response.json().catch(() => null) as { error?: string } | null)?.error ?? "Request failed.");
-  return await response.json() as T;
-}
 
 export function OnboardingBusinessSurface({ createNew = false }: { createNew?: boolean }) {
   const { t } = useTranslation("onboarding");
@@ -29,7 +24,7 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
   const queryClient = useQueryClient();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => requestJson<{ businesses: Business[] }>("/api/businesses") });
+  const { businesses, business: existing } = useActiveBusiness();
   const create = useMutation({
     mutationFn: () => requestJson<{ businessId: string }>("/api/businesses", {
       method: "POST",
@@ -49,15 +44,24 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
     },
   });
   useEffect(() => { prefetch("/onboarding/website"); }, [prefetch]);
-  const existing = businesses.data?.businesses.find((item) => item.active) ?? businesses.data?.businesses[0];
   useEffect(() => {
     if (existing && !createNew) setName(existing.name);
   }, [createNew, existing]);
   const update = useMutation({
-    mutationFn: () => requestJson(`/api/businesses?businessId=${encodeURIComponent(existing!.businessId)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ name: name.trim() }),
-    }),
+    mutationFn: async () => {
+      const businessId = encodeURIComponent(existing!.businessId);
+      await requestJson(`/api/businesses?businessId=${businessId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      // A claimed prospect demo starts on this step, unlike a new signup. The
+      // website step redirects back here until the stage moves on, and the
+      // server ignores this for a business that is already further along.
+      await requestJson(`/api/onboarding/stage?businessId=${businessId}`, {
+        method: "POST",
+        body: JSON.stringify({ to: "website" }),
+      });
+    },
     onSuccess: async () => {
       if (existing) telemetry.track("web.onboarding.business_name_submitted", { businessId: existing.businessId });
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });

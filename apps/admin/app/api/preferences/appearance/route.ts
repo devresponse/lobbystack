@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { hasMinimumRole, requireBusinessMembership } from "@lobbystack/domain";
 import { businesses } from "@lobbystack/db";
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
+import { runtimeDeploymentMode } from "@/lib/deployment-mode";
 
 export const dynamic = "force-dynamic";
 
@@ -13,7 +14,8 @@ export async function GET(request: Request) {
       const membership = await requireBusinessMembership(tx, { userId: session.user.id, businessId });
       const row = (await tx.select({ telemetryEnabled: businesses.telemetryEnabled }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
       if (!row) throw jsonError("Business not found.", 404);
-      return { ...row, canManageTenant: hasMinimumRole(membership.role, "business_admin") };
+      // Browser telemetry stamps this on every event once the workspace opts in.
+      return { ...row, canManageTenant: hasMinimumRole(membership.role, "business_admin"), deploymentMode: runtimeDeploymentMode() };
     }));
   } catch (error) { return asApiResponse(error); }
 }

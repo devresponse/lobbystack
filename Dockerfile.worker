@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1.7
-FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS build
+FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS build
 
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 
-RUN corepack enable && corepack prepare pnpm@10.30.3 --activate
+RUN npm install --global pnpm@10.30.3
 WORKDIR /app
 COPY pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY patches ./patches
@@ -15,7 +15,7 @@ COPY . .
 RUN node .github/build/prepare-image-workspace.mjs
 RUN pnpm install --offline --frozen-lockfile
 RUN pnpm --filter @lobbystack/worker... build
-RUN for package in config contracts db domain jobs providers shared telemetry; do \
+RUN for package in contracts db domain jobs providers shared telemetry; do \
       if [ -d "packages/$package/dist/$package/src" ]; then \
         cp -R "packages/$package/dist/$package/src/." "packages/$package/dist/"; \
       fi; \
@@ -24,7 +24,9 @@ RUN for package in config contracts db domain jobs providers shared telemetry; d
 RUN pnpm --config.allowUnusedPatches=true deploy --filter @lobbystack/worker --prod --legacy /prod/worker
 RUN find /prod/worker -type f -name '*.map' -delete
 
-FROM node:22-bookworm-slim@sha256:48e4b67d85f87bd551df43704e24d252f56cc5f8e9718841aace50f19948f0f9 AS runtime
+FROM node:26-bookworm-slim@sha256:662933cf47f013bc8e4beb31a6116448427a82057ba7c42c97e4c5ba766504c2 AS runtime
+# The pinned base image can lag Debian security fixes, so install them at build time.
+RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
 
 ARG SERVICE_VERSION=development
 ENV NODE_ENV=production

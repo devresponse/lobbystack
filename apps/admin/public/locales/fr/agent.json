@@ -153,7 +153,9 @@
           "placeholder": "Consultation, nouveaux clients",
           "hint": "Mots-clés séparés par des virgules pour catégoriser ces services."
         }
-      }
+      },
+      "deleteTitle": "Supprimer le service ?",
+      "deleteDescription": "Votre réceptionniste ne le proposera plus. Les rendez-vous passés l'affichent toujours."
     },
     "rules": {
       "title": "Règles",
@@ -238,7 +240,10 @@
     },
     "summary": {
       "label": "Résumé de l'entreprise",
-      "hint": "Le contexte essentiel que votre réceptionniste doit connaître."
+      "hint": "Ce que votre réceptionniste dit aux appelants au sujet de l'entreprise.",
+      "placeholder": "Par exemple : La Clinique familiale Maple est une clinique de Toronto qui offre des examens, des vaccins et de la physiothérapie.",
+      "regenerate": "Réécrire avec l'IA",
+      "regenerating": "L'IA le réécrit à partir de vos connaissances. Revenez dans une minute."
     },
     "bookingPolicy": {
       "label": "Politique de réservation",
@@ -323,7 +328,10 @@
     "deactivateEntry": "Désactiver l'entrée",
     "upload": "Téléverser",
     "uploading": "Téléversement…",
-    "saveFailed": "Nous n’avons pas pu enregistrer vos paramètres. Veuillez réessayer."
+    "saveFailed": "Nous n’avons pas pu enregistrer vos paramètres. Veuillez réessayer.",
+    "edit": "Modifier",
+    "cancel": "Annuler",
+    "editField": "Modifier : {{field}}"
   },
   "loading": {
     "workspace": "Chargement de l’espace de travail…",
@@ -333,5 +341,27 @@
   "readOnly": "L’accès lecteur est en lecture seule.",
   "empty": {
     "description": "Créez d'abord une entreprise, puis revenez ici pour configurer votre réceptionniste IA."
+  },
+  "hours": {
+    "title": "Heures d'ouverture",
+    "description": "L'agent propose des rendez-vous seulement pendant ces heures.",
+    "generated": "Nous avons rempli ces heures à partir de votre site web et de vos documents. Vérifiez-les.",
+    "empty": "Ajoutez vos heures pour que l'agent puisse réserver des rendez-vous.",
+    "closed": "Fermé",
+    "openOn": "Ouvert le {{day}}",
+    "opensAt": "Heure d'ouverture du {{day}}",
+    "closesAt": "Heure de fermeture du {{day}}",
+    "addWindow": "Ajouter des heures",
+    "removeWindow": "Retirer ces heures",
+    "save": "Enregistrer les heures",
+    "invalid": "Vérifiez le {{day}} : chaque fermeture doit suivre son ouverture, sans chevauchement.",
+    "noHoursAlert": {
+      "title": "Ajoutez vos heures d'ouverture pour réserver des rendez-vous",
+      "description": "L'agent propose des créneaux seulement pendant vos heures d'ouverture. En attendant, il prend un message.",
+      "action": "Ajouter les heures d'ouverture"
+    },
+    "edit": "Modifier",
+    "cancel": "Annuler",
+    "notSet": "Non définies"
   }
 }

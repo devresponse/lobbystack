@@ -80,10 +80,8 @@
       },
       "channels": {
         "title": "Channels",
-        "description": "How conversations reached your receptionist this week.",
+        "description": "Calls and messages by channel for the selected dates.",
         "labels": {
-          "voice": "Voice",
-          "sms": "SMS",
           "other": "Other"
         }
       }
@@ -107,13 +105,11 @@
       }
     },
     "chart": {
-      "title": "Calls per month",
-      "description": "Monthly call volume using your Convex call records."
+      "title": "Calls per month"
     },
     "recentCalls": {
       "title": "Recent Calls",
       "description": "{{count}} recent calls in the latest activity feed.",
-      "unknownCaller": "Unknown caller",
       "durationValue": "{{value}} sec"
     },
     "actionRequired": {
@@ -136,18 +132,12 @@
     "upcoming": {
       "title": "Upcoming",
       "description": "The next appointments on the calendar.",
-      "unknownContact": "Unknown contact",
       "unknownService": "Unknown service",
       "emptyTitle": "No upcoming appointments",
       "emptyDescription": "Future bookings will appear here as soon as they are created.",
       "status": {
         "booked": "Booked",
         "confirmed": "Confirmed"
-      },
-      "source": {
-        "voice": "Voice",
-        "sms": "SMS",
-        "dashboard": "Dashboard"
       },
       "withStaff": "with {{staff}}"
     }

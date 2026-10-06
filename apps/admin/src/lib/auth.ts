@@ -3,7 +3,6 @@ import { emailOTP } from "better-auth/plugins/email-otp";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { runWithAdapter } from "@better-auth/core/context";
-import Redis from "ioredis";
 import { z } from "zod";
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
@@ -11,14 +10,16 @@ import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { assertDatabaseRole, enqueueOutbox, withBusinessTransaction } from "@lobbystack/db";
 import { accounts, sessions, users, verifications } from "@lobbystack/db";
 
+import { configuredAppOrigins } from "./app-origins";
 import { getDatabase } from "./databases";
+import { SUPPORTED_LOCALES, resolveLocale, type SupportedLocale } from "./locale";
 import { ensureMcpResource, isDisabledOAuthEndpoint, mcpOAuthPlugins, needsMcpResource, oauthProviderSchema, registrationWithApplicationType } from "./oauth-provider";
 import { hashReplacementPassword, isLegacyScryptHash, meetsPasswordRequirements, verifyLegacyPassword } from "./password";
+import { readyRedis } from "./redis";
 import { trustedClientIp, trustedClientIpFromHeaders, trustedClientIpHeader } from "./trusted-client-ip";
-import { verifyTurnstileForSignUp } from "./turnstile";
+import { verifyTurnstile } from "./turnstile";
 
 let instance: any;
-let authRedis: Redis | undefined;
 let databaseRolesReady: Promise<void> | undefined;
 
 function assertAuthDatabaseRoles(): Promise<void> {
@@ -37,6 +38,13 @@ function assertAuthDatabaseRoles(): Promise<void> {
   );
   return databaseRolesReady;
 }
+
+const EXISTING_ACCOUNT_SUBJECTS: Record<SupportedLocale, string> = {
+  en: "You already have a LobbyStack account",
+  fr: "Votre compte LobbyStack existe déjà",
+  es: "Ya tiene una cuenta de LobbyStack",
+  sr: "Već imate LobbyStack nalog",
+};
 
 const enabledEmailOtpPaths = new Set([
   "/email-otp/request-password-reset",
@@ -59,45 +67,27 @@ function getEmailDatabase() {
 }
 
 function getAuthSecondaryStorage() {
-  const redisUrl = process.env.REDIS_URL;
-  if (!redisUrl) {
+  if (!process.env.REDIS_URL) {
     return undefined;
   }
-  if (!authRedis) {
-    authRedis = new Redis(redisUrl, {
-      connectionName: `${process.env.REDIS_PREFIX ?? "lobbystack"}:better-auth`,
-      connectTimeout: 2_000,
-      enableOfflineQueue: false,
-      lazyConnect: true,
-      maxRetriesPerRequest: 1,
-    });
-    authRedis.on("error", () => undefined);
-  }
   const prefix = `${process.env.REDIS_PREFIX ?? "lobbystack"}:better-auth:`;
+  const redis = async () => (await readyRedis())!;
   return {
-    get: async (key: string) => {
-      await waitForAuthRedis(authRedis!);
-      return await authRedis!.get(`${prefix}${key}`);
-    },
+    get: async (key: string) => await (await redis()).get(`${prefix}${key}`),
     set: async (key: string, value: string, ttl?: number) => {
-      await waitForAuthRedis(authRedis!);
+      const store = await redis();
       if (ttl !== undefined && ttl > 0) {
-        await authRedis!.setex(`${prefix}${key}`, ttl, value);
+        await store.setex(`${prefix}${key}`, ttl, value);
         return;
       }
-      await authRedis!.set(`${prefix}${key}`, value);
+      await store.set(`${prefix}${key}`, value);
     },
     delete: async (key: string) => {
-      await waitForAuthRedis(authRedis!);
-      await authRedis!.del(`${prefix}${key}`);
+      await (await redis()).del(`${prefix}${key}`);
     },
-    getAndDelete: async (key: string) => {
-      await waitForAuthRedis(authRedis!);
-      return await authRedis!.getdel(`${prefix}${key}`);
-    },
+    getAndDelete: async (key: string) => await (await redis()).getdel(`${prefix}${key}`),
     increment: async (key: string, ttl: number) => {
-      await waitForAuthRedis(authRedis!);
-      const result = await authRedis!.eval(
+      const result = await (await redis()).eval(
         "local count = redis.call('INCR', KEYS[1]); if count == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]); end; return count",
         1,
         `${prefix}${key}`,
@@ -108,21 +98,10 @@ function getAuthSecondaryStorage() {
   };
 }
 
-async function waitForAuthRedis(store: Redis): Promise<void> {
-  if (store.status === "ready") return;
-  if (store.status === "wait") {
-    await store.connect();
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
-    const cleanup = () => {
-      store.off("ready", onReady);
-      store.off("error", onError);
-    };
-    const onReady = () => { cleanup(); resolve(); };
-    const onError = (error: Error) => { cleanup(); reject(error); };
-    store.once("ready", onReady);
-    store.once("error", onError);
+/** Queues one auth email through the transactional outbox. */
+async function enqueueAuthEmailOutbox(input: { userId: string; dedupeKey: string; payload: Record<string, unknown> }): Promise<void> {
+  await withBusinessTransaction(getEmailDatabase().db, { actorType: "system" }, async (tx) => {
+    await enqueueOutbox(tx, { topic: "email.send", aggregateType: "auth_email", aggregateId: input.userId, dedupeKey: input.dedupeKey, payload: input.payload });
   });
 }
 
@@ -138,36 +117,28 @@ async function enqueueAuthEmail(input: {
     : input.purpose === "password_reset"
       ? "Reset your LobbyStack password"
       : "Confirm your LobbyStack email change";
-  await withBusinessTransaction(getEmailDatabase().db, { actorType: "system" }, async (tx) => {
-    await enqueueOutbox(tx, {
-      topic: "email.send",
-      aggregateType: "auth_email",
-      aggregateId: input.userId,
-      dedupeKey: `auth-email:${input.purpose}:${input.userId}:${urlHash}`,
-      payload: {
-        template: input.purpose === "verification" ? "verify_email" : input.purpose === "password_reset" ? "password_reset" : "verify_email",
-        to: input.email,
-        subject,
-        variables: { url: input.url },
-      },
-    });
+  await enqueueAuthEmailOutbox({
+    userId: input.userId,
+    dedupeKey: `auth-email:${input.purpose}:${input.userId}:${urlHash}`,
+    payload: {
+      template: input.purpose === "verification" ? "verify_email" : input.purpose === "password_reset" ? "password_reset" : "verify_email",
+      to: input.email,
+      subject,
+      variables: { url: input.url },
+    },
   });
 }
 
 async function enqueueEmailVerificationCode(input: { userId: string; email: string; otp: string; issuanceId: string }): Promise<boolean> {
-  await withBusinessTransaction(getEmailDatabase().db, { actorType: "system" }, async (tx) => {
-    await enqueueOutbox(tx, {
-      topic: "email.send",
-      aggregateType: "auth_email",
-      aggregateId: input.userId,
-      dedupeKey: `auth-email:verification-code:${input.userId}:${input.issuanceId}`,
-      payload: {
-        template: "verify_email",
-        to: input.email,
-        subject: "Your LobbyStack verification code",
-        variables: { code: input.otp },
-      },
-    });
+  await enqueueAuthEmailOutbox({
+    userId: input.userId,
+    dedupeKey: `auth-email:verification-code:${input.userId}:${input.issuanceId}`,
+    payload: {
+      template: "verify_email",
+      to: input.email,
+      subject: "Your LobbyStack verification code",
+      variables: { code: input.otp },
+    },
   });
   return true;
 }
@@ -238,13 +209,14 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
   const trustedIpHeader = trustedClientIpHeader();
   const database = getAuthDatabase();
   const secondaryStorage = getAuthSecondaryStorage();
+  const trustedOrigins = configuredAppOrigins(process.env, [], true);
   return betterAuth({
     database: drizzleAdapter(adapterDatabase ?? database.db, {
       provider: "pg",
       schema: { user: users, session: sessions, account: accounts, verification: verifications, ...oauthProviderSchema },
     }),
     baseURL: process.env.APP_BASE_URL ?? "http://localhost:3000",
-    trustedOrigins: (process.env.AUTH_TRUSTED_ORIGINS ?? process.env.APP_BASE_URL ?? "http://localhost:3000").split(",").map((value) => value.trim()).filter(Boolean),
+    trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : ["http://localhost:3000"],
     secret: process.env.BETTER_AUTH_SECRET ?? process.env.SESSION_ENCRYPTION_KEY ?? "development-only-change-me",
     ...(secondaryStorage ? { secondaryStorage } : {}),
     advanced: {
@@ -265,14 +237,10 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         if (type !== "forget-password") throw new Error("Only password recovery codes use the public OTP sender.");
         const user = (await database.db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1))[0];
         if (!user) return;
-        await withBusinessTransaction(getEmailDatabase().db, { actorType: "system" }, async (tx) => {
-          await enqueueOutbox(tx, {
-            topic: "email.send",
-            aggregateType: "auth_email",
-            aggregateId: user.id,
-            dedupeKey: `auth-reset-code:${user.id}:${randomUUID()}`,
-            payload: { template: "password_reset", to: email, subject: "Reset your LobbyStack password", variables: { code: otp } },
-          });
+        await enqueueAuthEmailOutbox({
+          userId: user.id,
+          dedupeKey: `auth-reset-code:${user.id}:${randomUUID()}`,
+          payload: { template: "password_reset", to: email, subject: "Reset your LobbyStack password", variables: { code: otp } },
         });
       },
     })],
@@ -290,16 +258,14 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
           }
           await assertEmailVerificationSendAllowed({ email: user.email, ...(remoteIp ? { remoteIp } : {}) });
           const stored = (await database.db.select({ preferredLocale: users.preferredLocale }).from(users).where(eq(users.id, user.id)).limit(1))[0];
-          const locale = stored?.preferredLocale === "fr" ? "fr" : "en";
+          const locale = resolveLocale(stored?.preferredLocale);
           const base = process.env.APP_BASE_URL ?? "http://localhost:3000";
-          await withBusinessTransaction(getEmailDatabase().db, { actorType: "system" }, async (tx) => {
-            await enqueueOutbox(tx, {
-              topic: "email.send", aggregateType: "auth_email", aggregateId: user.id,
-              dedupeKey: `auth-existing-account:${user.id}:${randomUUID()}`,
-              payload: { template: "existing_account", to: user.email,
-                subject: locale === "fr" ? "Votre compte LobbyStack existe déjà" : "You already have a LobbyStack account",
-                variables: { locale, signInUrl: new URL(`/${locale}/login`, base).href, resetUrl: new URL(`/${locale}/forgot-password`, base).href } },
-            });
+          await enqueueAuthEmailOutbox({
+            userId: user.id,
+            dedupeKey: `auth-existing-account:${user.id}:${randomUUID()}`,
+            payload: { template: "existing_account", to: user.email,
+              subject: EXISTING_ACCOUNT_SUBJECTS[locale],
+              variables: { locale, signInUrl: new URL(`/${locale}/login`, base).href, resetUrl: new URL(`/${locale}/forgot-password`, base).href } },
           });
         } catch (error) {
           if (!(error instanceof EmailVerificationRateLimitError)) throw error;
@@ -341,7 +307,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         }
         // Keep the link callback for the existing two-address email-change flow.
         const verificationUrl = new URL(url);
-        const recipientLocale = storedUser.preferredLocale === "fr" ? "fr" : "en";
+        const recipientLocale = resolveLocale(storedUser.preferredLocale);
         const confirmationUrl = new URL(`/${recipientLocale}/confirm-email-change`, process.env.APP_BASE_URL ?? "http://localhost:3000");
         confirmationUrl.searchParams.set("token", verificationUrl.searchParams.get("token") ?? "");
         confirmationUrl.searchParams.set("email", user.email);
@@ -354,7 +320,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         // insert and update. Declaring it keeps Better Auth's schema validator
         // aware that every user insert satisfies the required column.
         normalizedEmail: { type: "string", required: false, defaultValue: "", input: false, returned: false },
-        preferredLocale: { type: "string", required: false, defaultValue: "en", input: true, validator: { input: z.enum(["en", "fr"]) } },
+        preferredLocale: { type: "string", required: false, defaultValue: "en", input: true, validator: { input: z.enum(SUPPORTED_LOCALES) } },
       },
       changeEmail: {
         enabled: true,
@@ -419,7 +385,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
           : ctx.body?.["cf-turnstile-response"];
         const remoteIp = ctx.headers ? trustedClientIpFromHeaders(ctx.headers) : undefined;
         try {
-          await verifyTurnstileForSignUp({
+          await verifyTurnstile({
             token,
             ...(remoteIp ? { remoteIp } : {}),
           });
@@ -450,12 +416,4 @@ export type Session = { user: { id: string; name?: string | null; email?: string
 
 export async function getSession(headers: Headers): Promise<Session> {
   return (await getAuth().api.getSession({ headers })) as Session;
-}
-
-export async function requireSession(headers: Headers): Promise<NonNullable<Session>> {
-  const session = await getSession(headers);
-  if (!session) {
-    throw new Response("Unauthorized", { status: 401 });
-  }
-  return session;
 }

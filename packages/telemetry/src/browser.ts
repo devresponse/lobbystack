@@ -17,6 +17,12 @@ export type BrowserTelemetry = {
   reset: () => void;
   setOptOut: (optedOut: boolean) => void;
   setSensitiveRoute: (sensitive: boolean) => void;
+  /**
+   * Sets the deployment mode stamped on later events. The admin learns it from
+   * the server at runtime, because a value baked into the bundle at build time
+   * can differ from the one the deployment runs with.
+   */
+  setDeploymentMode: (mode: DeploymentMode) => void;
 };
 
 /** State the client already has before any setter runs. */
@@ -32,7 +38,7 @@ export function createBrowserTelemetry(
 ): BrowserTelemetry {
   let optedOut = state.optedOut ?? false;
   let sensitiveRoute = state.sensitiveRoute ?? false;
-  const deploymentMode = state.deploymentMode ?? "development";
+  let deploymentMode: DeploymentMode = state.deploymentMode ?? "development";
 
   function startSessionRecording() {
     if (!client || optedOut || sensitiveRoute) {
@@ -78,6 +84,9 @@ export function createBrowserTelemetry(
         client?.opt_in_capturing?.({ captureEventName: false });
         startSessionRecording();
       }
+    },
+    setDeploymentMode(mode) {
+      deploymentMode = mode;
     },
     setSensitiveRoute(sensitive) {
       if (sensitiveRoute === sensitive) {

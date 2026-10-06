@@ -27,6 +27,7 @@ export function createRecordedBrowserTelemetry() {
     reset() {},
     setOptOut() {},
     setSensitiveRoute() {},
+    setDeploymentMode() {},
   };
   return { telemetry, events: recorder.events, expectEvent: recorder.expectEvent };
 }

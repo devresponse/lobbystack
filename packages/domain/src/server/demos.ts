@@ -2,13 +2,13 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 
 import { and, desc, eq, sql } from "drizzle-orm";
 
-import { businessContextSnapshots, businessMemberships, businesses, calls, enqueueOutbox, knowledgeDocuments, prospectDemos, receptionistProfiles, services, staff, staffServiceAssignments, users, websiteIngestionJobs, withBusinessTransaction } from "@lobbystack/db";
+import { businessContextSnapshots, businessMemberships, businesses, calls, enqueueOutbox, knowledgeDocuments, prospectDemos, receptionistProfiles, services, staff, staffServiceAssignments, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
-import { recordProductEvent } from "./productEvents";
+import { recordProductEventBestEffort } from "./productEvents";
 
 export type ProspectDemoPublicState = "preparing" | "active" | "claimed" | "revoked" | "expired" | "invalid";
 
@@ -82,31 +82,15 @@ async function recordProspectDemoEvent(
     properties?: TelemetryProperties;
   },
 ): Promise<void> {
-  try {
-    await recordProductEvent(context, {
-      name: input.name,
-      businessId: input.businessId,
-      distinctId: getPostHogDistinctIdForProspectDemo(input.prospectDemoId),
-      actorType: input.actorType,
-      properties: {
-        prospectDemoId: input.prospectDemoId,
-        ...input.properties,
-      },
-    });
-  } catch {
-    // Best-effort: prospect-demo telemetry must not break the demo or claim flow.
-  }
-}
-
-export async function recordProspectDemoViewed(
-  context: DomainContext,
-  input: { businessId: string; prospectDemoId: string },
-): Promise<void> {
-  await recordProspectDemoEvent(context, {
-    name: "prospect_demo.viewed",
-    actorType: "system",
+  await recordProductEventBestEffort(context, {
+    name: input.name,
     businessId: input.businessId,
-    prospectDemoId: input.prospectDemoId,
+    distinctId: getPostHogDistinctIdForProspectDemo(input.prospectDemoId),
+    actorType: input.actorType,
+    properties: {
+      prospectDemoId: input.prospectDemoId,
+      ...input.properties,
+    },
   });
 }
 
@@ -123,24 +107,6 @@ export async function recordProspectDemoCallStarted(
       callId: input.callId,
       ...(input.channel !== undefined ? { channel: input.channel } : {}),
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
-    },
-  });
-}
-
-export async function recordProspectDemoCallCompleted(
-  context: DomainContext,
-  input: { businessId: string; prospectDemoId: string; callId: string; status: string; disposition?: string; providerDurationSeconds?: number },
-): Promise<void> {
-  await recordProspectDemoEvent(context, {
-    name: "prospect_demo.call_completed",
-    actorType: "worker",
-    businessId: input.businessId,
-    prospectDemoId: input.prospectDemoId,
-    properties: {
-      callId: input.callId,
-      status: input.status,
-      ...(input.disposition !== undefined ? { disposition: input.disposition } : {}),
-      ...(input.providerDurationSeconds !== undefined ? { providerDurationSeconds: input.providerDurationSeconds } : {}),
     },
   });
 }
@@ -173,56 +139,31 @@ async function resolveProspectDemoIdForCall(
 
 /**
  * Records the terminal state of a call once the caller has resolved the call's
- * business. It is a no-op for non-demo calls, and any lookup or emission failure
- * stays out of the call-completion response path.
+ * business. It is a no-op for non-demo calls. A failed demo lookup counts as a
+ * non-demo call so it never fails call completion; the event writes are
+ * already best-effort.
  */
 export async function recordProspectDemoCallOutcome(
   context: DomainContext,
   input: { businessId: string; callId: string; status: string; disposition?: string; providerDurationSeconds?: number },
 ): Promise<void> {
-  try {
-    const prospectDemoId = await resolveProspectDemoIdForCall(context, input);
-    if (!prospectDemoId) return;
-    if (input.status === "failed") {
-      await recordProspectDemoCallError(context, { businessId: input.businessId, prospectDemoId, callId: input.callId, reason: "call_failed" });
-      return;
-    }
-    await recordProspectDemoCallCompleted(context, {
-      businessId: input.businessId,
-      prospectDemoId,
+  const prospectDemoId = await resolveProspectDemoIdForCall(context, input).catch(() => undefined);
+  if (!prospectDemoId) return;
+  if (input.status === "failed") {
+    await recordProspectDemoCallError(context, { businessId: input.businessId, prospectDemoId, callId: input.callId, reason: "call_failed" });
+    return;
+  }
+  await recordProspectDemoEvent(context, {
+    name: "prospect_demo.call_completed",
+    actorType: "worker",
+    businessId: input.businessId,
+    prospectDemoId,
+    properties: {
       callId: input.callId,
       status: input.status,
       ...(input.disposition !== undefined ? { disposition: input.disposition } : {}),
       ...(input.providerDurationSeconds !== undefined ? { providerDurationSeconds: input.providerDurationSeconds } : {}),
-    });
-  } catch {
-    // Best-effort: completion telemetry must not fail the call-completion route.
-  }
-}
-
-export async function recordProspectDemoClaimSucceeded(
-  context: DomainContext,
-  input: { businessId: string; prospectDemoId: string; status: "claimed" | "already_claimed" },
-): Promise<void> {
-  await recordProspectDemoEvent(context, {
-    name: "prospect_demo.claim_succeeded",
-    actorType: "system",
-    businessId: input.businessId,
-    prospectDemoId: input.prospectDemoId,
-    properties: { status: input.status },
-  });
-}
-
-export async function recordProspectDemoClaimFailed(
-  context: DomainContext,
-  input: { businessId: string; prospectDemoId: string; reason: string },
-): Promise<void> {
-  await recordProspectDemoEvent(context, {
-    name: "prospect_demo.claim_failed",
-    actorType: "system",
-    businessId: input.businessId,
-    prospectDemoId: input.prospectDemoId,
-    properties: { reason: input.reason },
+    },
   });
 }
 
@@ -344,7 +285,17 @@ export async function revokeProspectDemo(context: DomainContext, input: { operat
     if (!demo) throw new Error("Prospect demo not found.");
     if (demo.status === "claimed") throw new Error("Claimed prospect demos cannot be revoked.");
     await tx.update(prospectDemos).set({ status: "revoked", updatedAt: new Date() }).where(eq(prospectDemos.id, demo.id));
+    await detachProspectDemoOperator(tx, businessId);
   });
+}
+
+/**
+ * Closing a demo takes it out of the operator's workspaces: the operator's
+ * membership is marked removed and its active business is cleared if it points
+ * here. Demo listing and status resolve by operator_user_id, so they keep working.
+ */
+async function detachProspectDemoOperator(tx: DatabaseTransaction, businessId: string): Promise<void> {
+  await tx.execute(sql`select app.detach_prospect_demo_operator(${businessId}::uuid)`);
 }
 
 export async function expireProspectDemos(context: DomainContext): Promise<number> {
@@ -378,7 +329,7 @@ export async function previewProspectDemo(context: DomainContext, token: string)
   // Only a published demo is an honest "viewed" signal. The demo surfaces poll
   // this endpoint while a demo is preparing, and polling stops once it is active.
   if (state === "active" && demo.prospect_demo_id && demo.business_id) {
-    await recordProspectDemoViewed(context, { businessId: demo.business_id, prospectDemoId: demo.prospect_demo_id });
+    await recordProspectDemoEvent(context, { name: "prospect_demo.viewed", actorType: "system", businessId: demo.business_id, prospectDemoId: demo.prospect_demo_id });
   }
   return {
     state,
@@ -418,18 +369,23 @@ export async function claimProspectDemo(
         target: [businessMemberships.businessId, businessMemberships.userId],
         set: { role: "business_owner", status: "active", updatedAt: new Date() },
       });
+      // The business now belongs to the prospect, so the operator leaves its
+      // team entirely. prospect_demos keeps the operator and claimant lineage.
       if (demo.operatorUserId !== input.userId) {
         await tx.delete(businessMemberships).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.userId, demo.operatorUserId)));
       }
       await tx.update(businesses).set({ onboardingStage: "create_business", updatedAt: new Date() }).where(eq(businesses.id, businessId));
       await tx.update(prospectDemos).set({ status: "claimed", claimedAt: new Date(), claimedByUserId: input.userId, updatedAt: new Date() }).where(eq(prospectDemos.id, demo.id));
+      // The operator's users row is outside this claimant's RLS scope; the
+      // resolver clears its active business if it still points at this demo.
+      await detachProspectDemoOperator(tx, businessId);
       await tx.update(users).set({ activeBusinessId: businessId, updatedAt: new Date() }).where(eq(users.id, input.userId));
       return { businessId, status: "claimed" as const };
     });
-    await recordProspectDemoClaimSucceeded(context, { businessId, prospectDemoId, status: result.status });
+    await recordProspectDemoEvent(context, { name: "prospect_demo.claim_succeeded", actorType: "system", businessId, prospectDemoId, properties: { status: result.status } });
     return result;
   } catch (error) {
-    await recordProspectDemoClaimFailed(context, { businessId, prospectDemoId, reason: claimFailureReason(error) });
+    await recordProspectDemoEvent(context, { name: "prospect_demo.claim_failed", actorType: "system", businessId, prospectDemoId, properties: { reason: claimFailureReason(error) } });
     throw error;
   }
 }

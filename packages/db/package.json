@@ -9,18 +9,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./schema": {
-      "types": "./dist/schema/index.d.ts",
-      "import": "./dist/schema/index.js"
-    },
-    "./rls": {
-      "types": "./dist/rls/context.d.ts",
-      "import": "./dist/rls/context.js"
-    },
-    "./outbox": {
-      "types": "./dist/outbox.d.ts",
-      "import": "./dist/outbox.js"
     }
   },
   "scripts": {
@@ -44,7 +32,7 @@
     "tsx": "^4.21.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.0.0",
     "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.8",
     "vitest": "^4.1.11"

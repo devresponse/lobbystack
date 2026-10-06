@@ -13,7 +13,7 @@ vi.mock("better-auth", () => ({ betterAuth: (config: unknown) => {
 } }));
 vi.mock("better-auth/api", async importOriginal => ({ ...await importOriginal<typeof import("better-auth/api")>(), createAuthMiddleware: (handler: unknown) => handler }));
 vi.mock("better-auth/adapters/drizzle", () => ({ drizzleAdapter: mocks.adapter }));
-vi.mock("./turnstile", () => ({ verifyTurnstileForSignUp: mocks.challenge }));
+vi.mock("./turnstile", () => ({ verifyTurnstile: mocks.challenge }));
 vi.mock("./email-verification-policy", async importOriginal => ({ ...await importOriginal<typeof import("./email-verification-policy")>(), assertEmailVerificationSendAllowed: mocks.allowed }));
 vi.mock("./databases", () => {
   const db = {
@@ -54,6 +54,13 @@ beforeEach(() => {
   mocks.select.mockResolvedValue([{ id: "user-1", email: "owner@example.invalid", emailVerified: false }]);
 });
 afterEach(() => vi.unstubAllEnvs());
+
+it("passes wildcard trusted origins through to Better Auth next to APP_BASE_URL", async () => {
+  vi.stubEnv("APP_BASE_URL", "https://app.example.test/");
+  vi.stubEnv("AUTH_TRUSTED_ORIGINS", " *.example.test , https://app.example.test, myapp://callback,not a url");
+  const { getAuth } = await import("./auth"); getAuth();
+  expect(mocks.config.trustedOrigins).toEqual(["https://app.example.test", "*.example.test", "myapp://callback", "not a url"]);
+});
 
 it("sends a localized sign-in reminder for a verified duplicate signup", async () => {
   const { getAuth } = await import("./auth"); getAuth();

@@ -1,12 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, ilike, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, ne, sql } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { getKnowledgeStorageLimitBytes, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { buildBusinessContextSnapshot } from "../snapshot";
-import { fuseKnowledgeRanks, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
-import { countKnowledgeTokens } from "@lobbystack/ai";
+import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
@@ -14,7 +13,9 @@ import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { getMeter } from "@lobbystack/telemetry/node";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { advanceOnboardingStageInTransaction } from "./onboarding";
-import { recordProductEvent } from "./productEvents";
+import { recordProductEventBestEffort } from "./productEvents";
+import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
+import { resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 
 const ragMeter = getMeter("lobbystack-rag");
 const searchDuration = ragMeter.createHistogram("rag.search.duration_ms", { unit: "ms" });
@@ -108,8 +109,8 @@ export async function createKnowledgeDocument(
       businessId: input.businessId,
       title: input.title.trim(),
       sourceType: input.sourceType,
-      ...(sourceUrl !== undefined ? { sourceUrl } : {}),
-      ...(input.storageObjectId !== undefined ? { storageObjectId: input.storageObjectId } : {}),
+      sourceUrl,
+      storageObjectId: input.storageObjectId,
       status: isWebsite ? "processing" : "pending",
     }).returning({ id: knowledgeDocuments.id });
     if (!document) {
@@ -174,6 +175,7 @@ export async function setKnowledgeDocumentActive(context: DomainContext, input: 
     const [document] = await tx.update(knowledgeDocuments).set({ active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
     if (!document) throw Object.assign(new Error("Knowledge document not found."), { status: 404 });
     await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: input.documentId, dedupeKey: `knowledge:${input.documentId}:active:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_activity_changed" } });
+    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_activity_changed" });
   });
 }
 
@@ -203,6 +205,7 @@ export async function deleteKnowledgeDocument(context: DomainContext, input: { u
     const [document] = await tx.delete(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
     if (!document) throw new Error("Knowledge document not found.");
     await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: document.id, dedupeKey: `knowledge:${document.id}:deleted:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_deleted" } });
+    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_deleted" });
   });
 }
 
@@ -224,6 +227,7 @@ export async function createKnowledgeSnippetInTransaction(
   const [snippet] = await tx.insert(knowledgeSnippets).values({ businessId: input.businessId, title: input.title.trim(), content: input.content.trim(), tags: input.tags ?? [], priority: input.priority ?? 0, active: input.active ?? true }).returning();
   if (!snippet) throw new Error("Knowledge snippet could not be created.");
   await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_created" } });
+  await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_created" });
   return snippet;
 }
 
@@ -233,9 +237,10 @@ export async function updateKnowledgeSnippet(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [snippet] = await tx.update(knowledgeSnippets).set({ ...(input.title !== undefined ? { title: input.title.trim() } : {}), ...(input.content !== undefined ? { content: input.content.trim() } : {}), ...(input.tags !== undefined ? { tags: input.tags } : {}), ...(input.priority !== undefined ? { priority: input.priority } : {}), ...(input.active !== undefined ? { active: input.active } : {}), updatedAt: new Date() }).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
+    const [snippet] = await tx.update(knowledgeSnippets).set({ ...(input.title !== undefined ? { title: input.title.trim() } : {}), ...(input.content !== undefined ? { content: input.content.trim() } : {}), tags: input.tags, priority: input.priority, active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
     if (!snippet) throw new Error("Knowledge snippet not found.");
     await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_updated" } });
+    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_updated" });
   });
 }
 
@@ -245,6 +250,7 @@ export async function deleteKnowledgeSnippet(context: DomainContext, input: { us
     const [snippet] = await tx.delete(knowledgeSnippets).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
     if (!snippet) throw new Error("Knowledge snippet not found.");
     await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_deleted" } });
+    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_deleted" });
   });
 }
 
@@ -253,17 +259,13 @@ type IndexDocumentInput = { businessId: string; documentId: string; text: string
 type IndexDocumentResult = { chunkCount: number; indexed: boolean; documentId: string };
 
 async function recordKnowledgeDocumentIndexed(context: DomainContext, input: { businessId: string; documentId: string }): Promise<void> {
-  try {
-    await recordProductEvent(context, {
-      name: "knowledge.document_indexed",
-      businessId: input.businessId,
-      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-      actorType: "worker",
-      properties: { documentId: input.documentId },
-    });
-  } catch {
-    // Product telemetry is best-effort and must not fail knowledge indexing.
-  }
+  await recordProductEventBestEffort(context, {
+    name: "knowledge.document_indexed",
+    businessId: input.businessId,
+    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+    actorType: "worker",
+    properties: { documentId: input.documentId },
+  });
 }
 
 export async function indexDocumentText(context: DomainContext, input: IndexDocumentInput): Promise<{ chunkCount: number }> {
@@ -273,30 +275,6 @@ export async function indexDocumentText(context: DomainContext, input: IndexDocu
 }
 
 /** Rebuild stored evidence without fetching the source or overwriting a concurrent edit. */
-export async function reindexStoredKnowledgeDocument(
-  context: DomainContext,
-  input: { businessId: string; documentId: string; expectedRevision: number },
-): Promise<{ chunkCount: number }> {
-  if (!context.embeddings) throw new Error("An embedding provider is required.");
-  const actor = { businessId: input.businessId, actorType: "worker" as const };
-  const text = await withBusinessTransaction(context.db, actor, async tx => {
-    const document = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1))[0];
-    if (!document || !document.active || document.status !== "indexed" || document.revision !== input.expectedRevision) throw new Error("Knowledge source changed or is not active and indexed.");
-    const chunks = await tx.select({ content: knowledgeChunks.content }).from(knowledgeChunks).where(and(eq(knowledgeChunks.businessId, input.businessId), eq(knowledgeChunks.documentId, input.documentId))).orderBy(asc(knowledgeChunks.sequence));
-    return chunks.map(chunk => chunk.content).join("\n\n");
-  });
-  const chunks = chunkText(text);
-  if (!chunks.length) throw new Error("No stored knowledge to reindex.");
-  const embeddings = await context.embeddings.embed(chunks);
-  const result = await withBusinessTransaction(context.db, actor, async tx => {
-    const document = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
-    if (!document || !document.active || document.status !== "indexed" || document.revision !== input.expectedRevision) throw new Error("Knowledge source changed during reindexing.");
-    return indexDocumentTextInTransaction(tx, { ...input, text, embeddings, ...(context.embeddings!.fingerprint ? { embeddingFingerprint: context.embeddings!.fingerprint } : {}) });
-  });
-  if (result.indexed) await recordKnowledgeDocumentIndexed(context, { businessId: input.businessId, documentId: result.documentId });
-  return { chunkCount: result.chunkCount };
-}
-
 async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: IndexDocumentInput, preserveImport = false): Promise<IndexDocumentResult> {
     const document = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
     if (!document) {
@@ -311,6 +289,15 @@ async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: In
     if (input.embeddings.length !== chunks.length || input.embeddings.some((embedding) => embedding.length === 0)) {
       await markKnowledgeDocumentFailedInTransaction(tx, input, document.revision, "Knowledge embeddings are unavailable or incomplete.");
       throw new Error("Knowledge embeddings are unavailable or incomplete.");
+    }
+    const limit = getKnowledgeStorageLimitBytes(await resolveBusinessBillingPlan(tx, input.businessId));
+    if (limit !== null) {
+      const newBytes = chunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, "utf8"), 0);
+      if (await getKnowledgeStorageUsageBytes(tx, input.businessId, { excludeDocumentId: input.documentId }) + newBytes > limit) {
+        // Retrying can't fit the text, so fail the document instead of throwing.
+        await markKnowledgeDocumentFailedInTransaction(tx, input, document.revision, knowledgeStorageLimitMessage(limit));
+        return { chunkCount: 0, indexed: false, documentId: input.documentId };
+      }
     }
     await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.documentId, input.documentId), eq(knowledgeChunks.businessId, input.businessId)));
     if (chunks.length > 0) {
@@ -328,6 +315,7 @@ async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: In
     }
     await tx.update(knowledgeDocuments).set({ status: preserveImport ? "processing" : "indexed", processingProgress: 100, contentHash: hashContent(input.text), revision: document.revision + (preserveImport ? 0 : 1), updatedAt: new Date() }).where(eq(knowledgeDocuments.id, input.documentId));
     if (!preserveImport) await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: input.documentId, dedupeKey: `knowledge:${input.documentId}:snapshot:${document.revision + 1}`, payload: { businessId: input.businessId, reason: "document_indexed" } });
+    if (!preserveImport) await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_indexed" });
     await enqueueOutbox(tx, {
       topic: "realtime.publish",
       businessId: input.businessId,
@@ -464,25 +452,25 @@ export async function searchKnowledgeEvidence(
   const current = candidates.length ? await execute(sql`${select} WHERE ${filters} AND (${sql.join(candidates.map(p => sql`(c.document_id = ${p.documentId} AND d.revision = ${p.sourceRevision} AND c.sequence BETWEEN ${p.sequence - 1} AND ${p.sequence + 1})`), sql` OR `)})`).catch(() => { validationFailed = true; return []; }) : [];
   const valid = new Map(current.map(p => [p.chunkId, p]));
   // Reserve the ranked primary passages first. Neighbors must not crowd out distinct candidates.
-  const matches = withinKnowledgeBudget(candidates.filter(p => valid.has(p.chunkId)), 3000, p => JSON.stringify(p));
+  const matches = withinKnowledgeBudget(candidates.filter(p => valid.has(p.chunkId)), KNOWLEDGE_SEARCH_TOKEN_BUDGET, p => JSON.stringify(p));
   for (let index = 0; index < matches.length; index += 1) {
     const p = matches[index]!;
     const neighbors = current.filter(row => row.documentId === p.documentId && row.sourceRevision === p.sourceRevision && Math.abs(row.sequence - p.sequence) <= 1).sort((a, b) => a.sequence - b.sequence);
     const expanded = { ...p, supportingChunkIds: neighbors.map(row => row.chunkId), content: neighbors.map(row => row.content).join("\n\n") };
     const proposed = matches.map((match, candidateIndex) => candidateIndex === index ? expanded : match);
-    if (proposed.reduce((sum, match) => sum + countKnowledgeTokens(JSON.stringify(match) + "\n"), 0) <= 3000) matches[index] = expanded;
+    if (proposed.reduce((sum, match) => sum + countKnowledgeTokens(JSON.stringify(match) + "\n"), 0) <= KNOWLEDGE_SEARCH_TOKEN_BUDGET) matches[index] = expanded;
   }
   const failed = validationFailed || (lexicalResult.status === "rejected" && semanticResult.status === "rejected");
   const outcome = matches.length ? "found" as const : failed ? "unavailable" as const : "empty" as const;
   const durationMs = performance.now() - startedAt;
   searchDuration.record(durationMs, { operation: "knowledge.search", mode, outcome });
   searchResultCount.record(matches.length, { operation: "knowledge.search", mode, outcome });
-  await recordProductEvent(context, {
+  await recordProductEventBestEffort(context, {
     name: "knowledge.search_executed",
     businessId: input.businessId,
     distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
     properties: { mode, outcome, resultCount: matches.length, durationMs, fallbackUsed: mode === "keyword", ...(input.callId ? { callId: input.callId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) },
-  }).catch(() => undefined);
+  });
   return { matches, mode, outcome, durationMs, ...(failed ? { failure: "search_unavailable" as const } : semanticResult.status === "rejected" ? { failure: "embedding_unavailable" as const } : {}) };
 }
 
@@ -521,7 +509,7 @@ export async function refreshBusinessSnapshot(
       throw new Error("Business not found.");
     }
     const [hours, closureRows, serviceRows, ruleRows, snippets, documents, numbers] = await Promise.all([
-      tx.select().from(businessHours).where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek)),
+      tx.select().from(businessHours).where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes)),
       tx.select().from(closures).where(eq(closures.businessId, input.businessId)).orderBy(asc(closures.startsAt)),
       tx.select().from(services).where(and(eq(services.businessId, input.businessId), eq(services.active, true))).orderBy(asc(services.name)),
       tx.select().from(agentRules).where(and(eq(agentRules.businessId, input.businessId), eq(agentRules.active, true))).orderBy(asc(agentRules.sortOrder)),
@@ -551,7 +539,8 @@ export async function refreshBusinessSnapshot(
       ...(currentProfile?.voiceInstructions ? { voiceInstructions: currentProfile.voiceInstructions } : {}),
       ...(currentProfile?.smsInstructions ? { smsInstructions: currentProfile.smsInstructions } : {}),
       ...(currentProfile?.chatInstructions ? { chatInstructions: currentProfile.chatInstructions } : {}),
-      summary: currentProfile?.summary ?? business[0].name,
+      // A sign-up placeholder says nothing about the business, so prompts get no summary until AI or a person writes one.
+      summary: currentProfile && currentProfile.summarySource !== "placeholder" ? currentProfile.summary : "",
       knowledgeDigest: withinKnowledgeBudget(documents, 1600, row => JSON.stringify(row)).map(row => JSON.stringify(row)).join("\n"),
       hours: hours.map((row) => ({ dayOfWeek: row.dayOfWeek, openMinutes: row.openMinutes, closeMinutes: row.closeMinutes })),
       closures: closureRows.map((row) => ({ startsAt: row.startsAt.toISOString(), endsAt: row.endsAt.toISOString(), reason: row.reason })),
@@ -584,28 +573,26 @@ export async function refreshBusinessSnapshot(
     await context.snapshotCache.set(input.businessId, builtSnapshot).catch(() => undefined);
   }
   snapshotRefreshDuration.record(performance.now() - startedAt, { operation: "snapshot.refresh" });
-  try {
-    await recordProductEvent(context, {
-      name: "business.snapshot_refreshed",
-      businessId: input.businessId,
-      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-      actorType: "worker",
-      properties: {},
-    });
-  } catch {
-    // Product telemetry is best-effort and must not fail the snapshot refresh.
-  }
+  await recordProductEventBestEffort(context, {
+    name: "business.snapshot_refreshed",
+    businessId: input.businessId,
+    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+    actorType: "worker",
+    properties: {},
+  });
   return version;
 }
 
-/** Counts uploaded files and extracted text in the canonical PostgreSQL representation. */
-export async function getKnowledgeStorageUsageBytes(tx: DatabaseTransaction, businessId: string): Promise<number> {
-  const [files, extracted] = await Promise.all([
-    tx.select({ bytes: sql<number>`coalesce(sum(${storageObjects.contentLength}), 0)` }).from(knowledgeDocuments)
-      .innerJoin(storageObjects, and(eq(knowledgeDocuments.storageObjectId, storageObjects.id), eq(storageObjects.businessId, businessId)))
-      .where(and(eq(knowledgeDocuments.businessId, businessId), sql`${storageObjects.status} <> 'deleted'`)),
-    tx.select({ bytes: sql<number>`coalesce(sum(octet_length(${knowledgeChunks.content})), 0)` }).from(knowledgeChunks)
-      .where(eq(knowledgeChunks.businessId, businessId)),
-  ]);
-  return Number(files[0]?.bytes ?? 0) + Number(extracted[0]?.bytes ?? 0);
+/**
+ * Counts the indexed text the receptionist searches, in UTF-8 bytes. Uploaded
+ * files don't count: a PDF's images and layout take space the agent never reads.
+ */
+export async function getKnowledgeStorageUsageBytes(tx: DatabaseTransaction, businessId: string, options: { excludeDocumentId?: string } = {}): Promise<number> {
+  const [extracted] = await tx.select({ bytes: sql<number>`coalesce(sum(octet_length(${knowledgeChunks.content})), 0)` }).from(knowledgeChunks)
+    .where(and(eq(knowledgeChunks.businessId, businessId), ...(options.excludeDocumentId ? [ne(knowledgeChunks.documentId, options.excludeDocumentId)] : [])));
+  return Number(extracted?.bytes ?? 0);
+}
+
+export function knowledgeStorageLimitMessage(limitBytes: number): string {
+  return `Knowledge storage limit reached. ${Math.ceil(limitBytes / 1024 / 1024)} MB of text is included on this plan.`;
 }

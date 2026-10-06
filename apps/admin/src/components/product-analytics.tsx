@@ -52,7 +52,10 @@ export function ProductAnalytics({ children }: { children?: ReactNode }) {
   const userId = session.isSuccess && !session.isFetching ? session.data?.user?.id : undefined;
   const businesses = useQuery({ queryKey: ["businesses"], enabled: Boolean(projectToken) && !sensitive, retry: false, queryFn: () => requestJson<{ businesses: Array<{ businessId: string; active: boolean }> }>("/api/businesses") });
   const businessId = selectActiveBusiness(businesses.data?.businesses)?.businessId;
-  const preference = useQuery({ queryKey: ["appearance-preferences", businessId], enabled: Boolean(projectToken && businessId) && !sensitive, retry: false, queryFn: () => requestJson<{ telemetryEnabled: boolean }>(`/api/preferences/appearance?businessId=${encodeURIComponent(businessId!)}`) });
+  const preference = useQuery({ queryKey: ["appearance-preferences", businessId], enabled: Boolean(projectToken && businessId) && !sensitive, retry: false, queryFn: () => requestJson<{ telemetryEnabled: boolean; deploymentMode?: DeploymentMode }>(`/api/preferences/appearance?businessId=${encodeURIComponent(businessId!)}`) });
+  // The server reports the mode it runs with. A build-time value can differ
+  // from it, as it did when Railway built the bundle without DEPLOYMENT_MODE.
+  const deploymentMode = preference.data?.deploymentMode ?? "development";
   const permitted = Boolean(projectToken && userId && businessId && preference.data?.telemetryEnabled === true && !sensitive);
   // Load the bundled recorder before opting in, so the SDK never fetches it
   // from the PostHog host. Visitors without telemetry never download it.
@@ -70,10 +73,7 @@ export function ProductAnalytics({ children }: { children?: ReactNode }) {
   allowedRef.current = allowed;
   // The SDK initializes opted out, so no event is collected before the tenant
   // and route checks below grant consent.
-  if (!telemetryRef.current) telemetryRef.current = createBrowserTelemetry(posthog, {
-    optedOut: true,
-    deploymentMode: (process.env.NEXT_PUBLIC_DEPLOYMENT_MODE ?? "development") as DeploymentMode,
-  });
+  if (!telemetryRef.current) telemetryRef.current = createBrowserTelemetry(posthog, { optedOut: true });
 
   useEffect(() => {
     const telemetry = telemetryRef.current;
@@ -91,6 +91,7 @@ export function ProductAnalytics({ children }: { children?: ReactNode }) {
       }
       return;
     }
+    telemetry.setDeploymentMode(deploymentMode);
     // Granting consent captures the current page as a pageview; later
     // navigations are captured by capture_pageview: history_change.
     telemetry.setOptOut(false);
@@ -120,7 +121,7 @@ export function ProductAnalytics({ children }: { children?: ReactNode }) {
         $groups: { business: businessGroup },
       });
     }
-  }, [allowed, businessId, pathname, preference.data?.telemetryEnabled, sensitive, userId]);
+  }, [allowed, businessId, deploymentMode, pathname, preference.data?.telemetryEnabled, sensitive, userId]);
   useEffect(() => {
     if (!allowed || !pathname || !businessId) return;
     const event = resolvePageEvent(pathname);

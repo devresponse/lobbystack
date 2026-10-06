@@ -1,5 +1,6 @@
 import { z } from "zod/v4";
 
+import { interfaceLocales } from "../locales";
 import { PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
@@ -12,7 +13,10 @@ const nullableTimestamp = timestamp.nullable();
 const inputTimestamp = z.iso.datetime({ offset: true }).describe("ISO 8601 timestamp with a Z or numeric offset.");
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, "Use E.164 format, for example +14165550134.").describe("Phone number in E.164 format.");
 const clock = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/, "Use 24-hour HH:MM.").describe("Local time as 24-hour HH:MM.");
+// A business's caller language is the language the AI receptionist speaks.
 const locale = z.enum(["en", "fr"]);
+// A contact's language picks the copy of the reminders and confirmations they receive.
+const contactLocale = z.enum(interfaceLocales).describe("Language for the contact's reminders and confirmations: en, fr, es or sr.");
 
 export const apiErrorCodes = [
   "invalid_request",
@@ -45,7 +49,7 @@ export const apiHoursWindowSchema = z.object({
   day: z.enum(weekdays),
   open: clock,
   close: clock,
-}).describe("Opening hours for one day. Days that are not listed are closed.");
+}).describe("One opening window on one day. A day with a break, such as lunch, has two windows. Days that are not listed are closed.");
 
 export const apiMeSchema = z.object({
   api_key: z.object({
@@ -75,7 +79,7 @@ export const apiBusinessUpdateSchema = z.strictObject({
   timezone: z.string().trim().min(1).max(80).optional(),
   locale: locale.optional(),
   website_url: z.url().max(2_000).nullable().optional(),
-  hours: z.array(apiHoursWindowSchema).max(7).optional().describe("Replaces the whole week. Omit a day to close it."),
+  hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
 });
 
 export const apiServiceSchema = z.object({
@@ -139,7 +143,7 @@ export const apiContactCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
   phone: e164.optional(),
   email: z.email().max(320).optional(),
-  locale: locale.optional(),
+  locale: contactLocale.optional(),
   timezone: z.string().trim().min(1).max(80).optional(),
 }).refine((value) => Boolean(value.phone || value.email), { message: "Provide a phone or an email.", path: ["phone"] });
 
@@ -147,7 +151,7 @@ export const apiContactUpdateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200).nullable().optional(),
   phone: e164.optional(),
   email: z.email().max(320).nullable().optional(),
-  locale: locale.nullable().optional(),
+  locale: contactLocale.nullable().optional(),
   timezone: z.string().trim().min(1).max(80).nullable().optional(),
 });
 

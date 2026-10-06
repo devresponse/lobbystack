@@ -79,7 +79,8 @@ function makeTx(overrides: { visitor?: Row | null; conversations?: Row[]; messag
         const rows = resultsFor(name);
         const hasOrderByLimit = name === "conversations" || name === "messages";
         const terminal = Object.assign(Promise.resolve(rows), {
-          limit: () => Promise.resolve(rows),
+          // Locking reads (`.for("update")`, `.for("share")`) return the same rows.
+          limit: () => Object.assign(Promise.resolve(rows), { for: () => Promise.resolve(rows) }),
           orderBy: () => (hasOrderByLimit ? Object.assign(Promise.resolve(rows), { limit: () => Promise.resolve(rows) }) : Promise.resolve(rows)),
           innerJoin: (joinTable: unknown) => ({
             where: () => {
@@ -100,14 +101,14 @@ function makeTx(overrides: { visitor?: Row | null; conversations?: Row[]; messag
         if (name === "widget_visitors") state.insertedVisitor = values;
         if (name === "contacts") state.insertedContact = values;
         const base = {
-          onConflictDoUpdate: () => ({ run: () => Promise.resolve() }),
+          onConflictDoUpdate: () => ({ run: () => Promise.resolve(), returning: () => Promise.resolve([{ contactId: values.contactId ?? null, contactLinkedAt: null }]) }),
           onConflictDoNothing: () => Object.assign(Promise.resolve([] as Row[]), { returning: () => Promise.resolve([{ id: conversationId }]) }),
           returning: () => Promise.resolve([{ id: conversationId }]),
         };
         return Object.assign(Promise.resolve([{ id: conversationId }]), base);
       },
     })),
-    update: vi.fn(() => ({
+    update: vi.fn((_table: unknown) => ({
       set: () => ({ where: () => Promise.resolve() }),
     })),
   };
@@ -146,6 +147,18 @@ describe("registerWidgetVisitor", () => {
     expect(state.insertedContact).not.toBeNull();
     expect((state.insertedContact as Row).email).toBe("ada@example.com");
     expect(state.insertedVisitor?.contactId).toBe(result.contactId);
+  });
+
+  it("links a lead to a matching contact without changing that contact's name or phone", async () => {
+    const victimId = "00000000-0000-4000-8000-000000000009";
+    const { tx, state } = makeTx({ visitor: null, contacts: [{ id: victimId }] });
+    mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => await callback(tx));
+
+    const result = await registerWidgetVisitor(context, { businessId, visitorId, name: "Mallory", email: "victim@example.com", phone: "+15145559999" });
+
+    expect(result.contactId).toBe(victimId);
+    expect(state.insertedContact).toBeNull();
+    expect(tx.update.mock.calls.map(([table]) => tableName(table))).not.toContain("contacts");
   });
 });
 

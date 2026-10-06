@@ -130,6 +130,10 @@ export const businesses = pgTable(
     phoneNumberReplacementReservedAt: timestamp("phone_number_replacement_reserved_at", { withTimezone: true }),
     phoneNumberReplacementUsedAt: timestamp("phone_number_replacement_used_at", { withTimezone: true }),
     telemetryEnabled: boolean("telemetry_enabled").default(true).notNull(),
+    // Who set the opening hours: none yet, AI from the knowledge sources, or a person.
+    hoursSource: varchar("hours_source", { length: 16 }).$type<"none" | "generated" | "operator">().default("none").notNull(),
+    hoursFingerprint: varchar("hours_fingerprint", { length: 64 }),
+    hoursGeneratedAt: timestamp("hours_generated_at", { withTimezone: true }),
     ...legacyId,
     ...timestamps,
   },
@@ -236,10 +240,11 @@ export const services = pgTable(
     description: text("description"),
     durationMinutes: integer("duration_minutes").notNull(),
     active: boolean("active").default(true).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [uniqueIndex("services_business_slug_unique").on(table.businessId, table.slug), index("services_business_idx").on(table.businessId)],
+  (table) => [uniqueIndex("services_business_slug_live_unique").on(table.businessId, table.slug).where(sql`${table.deletedAt} is null`), index("services_business_idx").on(table.businessId)],
 );
 
 export const staffServiceAssignments = pgTable(
@@ -263,7 +268,8 @@ export const businessHours = pgTable(
     closeMinutes: integer("close_minutes").notNull(),
     ...timestamps,
   },
-  (table) => [uniqueIndex("business_hours_business_day_unique").on(table.businessId, table.dayOfWeek)],
+  // A day can have several windows, such as a morning and an afternoon around a lunch break.
+  (table) => [uniqueIndex("business_hours_business_day_open_unique").on(table.businessId, table.dayOfWeek, table.openMinutes)],
 );
 
 export const closures = pgTable(
@@ -310,7 +316,7 @@ export const phoneNumbers = pgTable(
 );
 
 export const onboardingPhoneVerifications = pgTable("onboarding_phone_verifications", {
-  id: uuid("id").defaultRandom().primaryKey(), businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), phoneE164: varchar("phone_e164", { length: 32 }).notNull(), countryCode: varchar("country_code", { length: 2 }).notNull(), lineType: varchar("line_type", { length: 32 }), providerVerificationId: varchar("provider_verification_id", { length: 255 }), status: varchar("status", { length: 32 }).default("queued").notNull(), startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), approvedAt: timestamp("approved_at", { withTimezone: true }), attemptCount: integer("attempt_count").default(0).notNull(), lastError: text("last_error"), requestFingerprint: text("request_fingerprint").notNull(), ...timestamps,
+  id: uuid("id").defaultRandom().primaryKey(), businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }), userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }), phoneE164: varchar("phone_e164", { length: 32 }).notNull(), countryCode: varchar("country_code", { length: 2 }).notNull(), lineType: varchar("line_type", { length: 32 }), providerVerificationId: varchar("provider_verification_id", { length: 255 }), status: varchar("status", { length: 32 }).default("queued").notNull(), startedAt: timestamp("started_at", { withTimezone: true }).defaultNow().notNull(), expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(), approvedAt: timestamp("approved_at", { withTimezone: true }), attemptCount: integer("attempt_count").default(0).notNull(), lastError: text("last_error"), requestFingerprint: text("request_fingerprint").notNull(), codeHash: text("code_hash"), ...timestamps,
 }, (table) => [index("onboarding_phone_verifications_business_user_idx").on(table.businessId, table.userId, table.updatedAt), index("onboarding_phone_verifications_provider_idx").on(table.providerVerificationId), index("onboarding_phone_verifications_user_phone_status_idx").on(table.userId, table.phoneE164, table.status, table.updatedAt)]);
 
 export const onboardingNumberClaimEvents = pgTable("onboarding_number_claim_events", {
@@ -325,6 +331,12 @@ export const receptionistProfiles = pgTable(
     greeting: text("greeting").notNull(),
     tone: text("tone").notNull(),
     summary: text("summary").notNull(),
+    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
+    // from the knowledge sources) or "operator". Generation never replaces an
+    // operator's summary.
+    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
+    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
+    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
     bookingPolicy: text("booking_policy").notNull(),
     voiceInstructions: text("voice_instructions"),
     smsInstructions: text("sms_instructions"),
@@ -383,6 +395,9 @@ export const widgetVisitors = pgTable(
     id: uuid("id").primaryKey(),
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     contactId: uuid("contact_id").references(() => contacts.id, { onDelete: "set null" }),
+    // When the visitor was last linked to a contact. Deleting the contact clears
+    // contact_id but not this, so a later link only takes chats that started after it.
+    contactLinkedAt: timestamp("contact_linked_at", { withTimezone: true }),
     name: text("name"),
     email: text("email"),
     metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
@@ -821,6 +836,7 @@ export const operatorNotificationPreferences = pgTable(
     smsConsentRevokedAt: timestamp("sms_consent_revoked_at", { withTimezone: true }),
     smsConsentSource: varchar("sms_consent_source", { length: 64 }),
     smsConsentDisclosureVersion: varchar("sms_consent_disclosure_version", { length: 64 }),
+    smsConsentPhone: varchar("sms_consent_phone", { length: 32 }),
     ...timestamps,
   },
   (table) => [uniqueIndex("operator_notification_preferences_business_user_unique").on(table.businessId, table.userId), index("operator_notification_preferences_user_idx").on(table.userId, table.businessId)],

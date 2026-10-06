@@ -2,13 +2,15 @@ import { createHash, randomUUID } from "node:crypto";
 import Redis from "ioredis";
 import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
-import { hasSummarizableTranscript, type CallSummarizer } from "@lobbystack/agent-core";
+import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
 import { realtimeEventSchema, type JobEnvelope } from "@lobbystack/contracts";
-import { getPolarMeteredUsagePayload, type BillingUsageKind } from "@lobbystack/shared";
+import { getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, type BillingUsageKind } from "@lobbystack/shared";
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, deleteTranscriptForRetention, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, markNotificationSkipped, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseNotificationDelivery, releaseSmsDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
+import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, deleteTranscriptForRetention, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning } from "@lobbystack/domain";
+import { issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import type { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
@@ -48,7 +50,7 @@ export type WorkerDependencies = {
   email?: Pick<SmtpEmailProvider, "sendTemplate">;
   twilio?: Pick<TwilioProvider, "sendSms"> & Partial<Pick<TwilioProvider, "getMessagePricing" | "getCallPricing" | "findTrunkCall" | "releasePhoneNumber" | "verifyPhone" | "findOwnedPhoneNumber" | "purchasePhoneNumber" | "addNumberToSipTrunk">>;
   twilioAlerts?: Pick<TwilioProvider, "sendSms"> & { from: string };
-  polar?: { recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>; createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> };
+  polar?: { recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>; createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
   crawler?: { crawl(input: { url: string; limit?: number }): Promise<Array<{ url: string; title?: string; markdown?: string }>> };
   calendar?: CalendarOperations;
@@ -56,6 +58,8 @@ export type WorkerDependencies = {
   realtime?: Redis;
   /** Writes the one-line call summary. Without it, calls keep the transcript heuristic. */
   callSummarizer?: CallSummarizer;
+  businessSummarizer?: BusinessSummarizer;
+  businessHoursExtractor?: BusinessHoursExtractor;
   /** Sends one signed webhook. Defaults to the SSRF-guarded HTTPS sender. */
   webhookSender?: WebhookSender;
   /** Founder check-in sender. Without it, onboarding follow-up jobs are skipped. */
@@ -231,8 +235,58 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       await cancelRetiredPhoneVerificationSend(dependencies.domain, { businessId, attemptId });
       return { status: "skipped", entityId: attemptId };
     }
+    case "phoneVerification.sendCode": {
+      // Texts the code an operator requested to verify the phone for SMS
+      // alerts. The code exists only in memory here; the attempt keeps its hash.
+      const businessId = businessIdOrThrow(job);
+      const attemptId = String(job.payload.attemptId ?? "");
+      if (!attemptId) return { status: "skipped", entityId: attemptId };
+      const target = await issueOperatorPhoneVerificationCode(dependencies.domain, { businessId, attemptId });
+      if (!target) {
+        // A retry after the text went out but before the attempt was marked
+        // sent finds it still processing with a code. Finish the mark rather
+        // than leave the code screen waiting.
+        await markOperatorPhoneVerificationCodeSent(dependencies.domain, { businessId, attemptId });
+        return { status: "skipped", entityId: attemptId };
+      }
+      const sender = dependencies.twilioAlerts?.from === target.from ? dependencies.twilioAlerts : dependencies.twilio;
+      if (!sender) {
+        await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: "Alert SMS delivery is not configured." });
+        return { status: "skipped", entityId: attemptId };
+      }
+      const body = verificationCodeSmsBody(target.code, normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
+      // The code goes out from the alert sender, so it counts against the alert SMS quota.
+      const usageSourceKey = `alert_sms:phone_verification:${attemptId}`;
+      let usageEventId: string | undefined;
+      if (dependencies.domain.db) {
+        const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, estimatedSegments: estimateSmsSegments(body) });
+        if (!reservation.allowed) {
+          await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: reservation.errorCode ?? "Alert SMS quota reached." });
+          return { status: "skipped", entityId: attemptId };
+        }
+        usageEventId = reservation.usageEventId;
+      }
+      try {
+        await sender.sendSms({ to: target.to, from: target.from, body });
+      } catch (error) {
+        if (dependencies.domain.db) await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, segments: 0 }).catch(() => undefined);
+        const permanentCode = permanentSmsErrorCode(error);
+        const retry = !permanentCode && execution.isFinalAttempt === false;
+        await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry, error: permanentCode ? `Twilio error ${permanentCode}.` : "Verification delivery failed." });
+        // Twilio rejects this number on every attempt, so don't retry.
+        if (permanentCode) return { status: "skipped", entityId: attemptId };
+        throw error;
+      }
+      await markOperatorPhoneVerificationCodeSent(dependencies.domain, { businessId, attemptId });
+      if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+      return { status: "completed", entityId: attemptId };
+    }
     case "snapshot.refresh":
       return { status: "completed", entityId: await refreshBusinessSnapshot(dependencies.domain, { businessId: businessIdOrThrow(job) }) };
+    case "business.generateSummary":
+      return await generateBusinessSummary(dependencies, { businessId: businessIdOrThrow(job), force: job.payload.force === true });
+    case "business.extractHours":
+      return await extractBusinessHours(dependencies, { businessId: businessIdOrThrow(job) });
     case "knowledge.indexDocument": {
       const id = String(job.payload.documentId);
       const text = String(job.payload.text ?? "");
@@ -312,6 +366,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           if (websiteIngestionJobId) {
             await tx.update(websiteIngestionJobs).set({ status: "completed", importedCount: pages.length, indexedCount: indexedPages, errorCount: 0, lastError: null, updatedAt: new Date() }).where(and(eq(websiteIngestionJobs.id, websiteIngestionJobId), eq(websiteIngestionJobs.businessId, businessIdOrThrow(job)), ne(websiteIngestionJobs.status, "cancelled")));
             await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: businessIdOrThrow(job), aggregateType: "website_ingestion_job", aggregateId: websiteIngestionJobId, dedupeKey: `website-ingestion:${websiteIngestionJobId}:snapshot:${source?.revision ?? 0}`, payload: { businessId: businessIdOrThrow(job), reason: "website_ingestion_completed" } });
+            await enqueueKnowledgeDerivedRefresh(tx, { businessId: businessIdOrThrow(job), reason: "website_ingestion_completed" });
           }
         });
       } else if (websiteIngestionJobId && !documentId) {
@@ -461,7 +516,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         return { status: "skipped", entityId: verificationId };
       }
       try {
-        await dependencies.twilio.sendSms({ to: target.to, from: target.from, body: `LobbyStack verification code: ${target.code}. It expires in 10 minutes.` });
+        await dependencies.twilio.sendSms({ to: target.to, from: target.from, body: verificationCodeSmsBody(target.code) });
         await markAppointmentChangeOtpSent(dependencies.domain, { businessId, verificationId });
         return { status: "completed", entityId: verificationId };
       } catch (error) {
@@ -573,11 +628,15 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const request = await loadBillingCheckoutRequest(dependencies.domain, { businessId, requestId });
       if (!request) return { status: "skipped", entityId: requestId };
       try {
+        const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
         const checkout = await dependencies.polar.createCheckout({
           productId: polarCheckoutProductId(request.target, request.billingInterval),
           customerEmail: request.customerEmail,
           externalCustomerId: request.externalCustomerId,
-           successUrl: `${process.env.APP_BASE_URL ?? "http://localhost:3000"}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}?checkout=success&requestId=${encodeURIComponent(requestId)}`,
+          successUrl: `${planUrl}?checkout=success&requestId=${encodeURIComponent(requestId)}`,
+          // Polar's back arrow. Someone leaving checkout hasn't paid, so it
+          // returns to the plan page without the success marker.
+          returnUrl: planUrl,
           idempotencyKey: `billing-checkout:${requestId}`,
         });
         await markBillingCheckoutCreated(dependencies.domain, { businessId, requestId, ...checkout });
@@ -622,6 +681,12 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         } catch (error) {
           await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.eventKind });
           if (delivery.channel === "sms" && dependencies.domain.db) await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: `alert_sms:operator_notification:${delivery.id}`, segments: 0 }).catch(() => undefined);
+          const permanentCode = delivery.channel === "sms" ? permanentSmsErrorCode(error) : undefined;
+          if (permanentCode) {
+            // Twilio rejects this destination on every attempt, so don't retry.
+            await markOperatorNotificationSkipped(dependencies.domain, { businessId, deliveryId: delivery.id, error: `Twilio error ${permanentCode}.` });
+            return { status: "skipped", entityId: delivery.id };
+          }
           await releaseOperatorNotificationDelivery(dependencies.domain, { businessId, deliveryId: delivery.id, error: "Provider delivery failed." });
           throw error;
         }
@@ -635,11 +700,11 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       }
       const resolution = await resolveNotificationDelivery(dependencies.domain, { businessId, notificationId });
       if (!resolution) {
-        await releaseNotificationDelivery(dependencies.domain, { businessId, notificationId });
+        await transitionProcessingNotification(dependencies.domain, { businessId, notificationId }, "pending");
         return { status: "skipped", entityId: notificationId };
       }
       if (resolution.kind === "skipped") {
-        await markNotificationSkipped(dependencies.domain, { businessId, notificationId: resolution.notificationId });
+        await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: resolution.notificationId }, "skipped");
         return { status: "skipped", entityId: resolution.notificationId };
       }
       const delivery = resolution.delivery;
@@ -648,13 +713,13 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         let usageEventId: string | undefined;
         if (delivery.channel === "sms") {
           if (!dependencies.twilio || !delivery.from) {
-            await markNotificationSkipped(dependencies.domain, { businessId, notificationId: delivery.notificationId });
+            await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
             return { status: "skipped", entityId: delivery.notificationId };
           }
           if (dependencies.domain.db) {
             const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: `alert_sms:notification:${delivery.notificationId}`, estimatedSegments: estimateSmsSegments(delivery.body) });
             if (!reservation.allowed) {
-              await markNotificationSkipped(dependencies.domain, { businessId, notificationId: delivery.notificationId });
+              await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
               return { status: "skipped", entityId: delivery.notificationId };
             }
             usageEventId = reservation.usageEventId;
@@ -663,7 +728,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           providerMessageId = sent.providerMessageId;
         } else {
           if (!dependencies.email) {
-            await markNotificationSkipped(dependencies.domain, { businessId, notificationId: delivery.notificationId });
+            await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
             return { status: "skipped", entityId: delivery.notificationId };
           }
           const sent = await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.to, subject: delivery.subject, variables: { message: delivery.body }, idempotencyKey: `notification:${delivery.notificationId}` });
@@ -675,7 +740,12 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       } catch (error) {
         await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.kind, ...(delivery.relatedId ? { appointmentId: delivery.relatedId } : {}) });
         if (delivery.channel === "sms" && dependencies.domain.db) await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: `alert_sms:notification:${delivery.notificationId}`, segments: 0 }).catch(() => undefined);
-        await releaseNotificationDelivery(dependencies.domain, { businessId, notificationId: delivery.notificationId });
+        if (delivery.channel === "sms" && permanentSmsErrorCode(error)) {
+          // Twilio rejects this destination on every attempt, so don't retry.
+          await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "failed");
+          return { status: "skipped", entityId: delivery.notificationId };
+        }
+        await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "pending");
         throw error;
       }
       }
@@ -954,6 +1024,74 @@ async function generateCallSummary(
     }).catch(() => undefined);
     return undefined;
   }
+}
+
+/**
+ * Writes the business summary from its knowledge with AI. Skips a summary an
+ * operator wrote, a business with no knowledge yet, and knowledge that hasn't
+ * changed since the last summary unless the operator asked to regenerate.
+ */
+async function generateBusinessSummary(dependencies: WorkerDependencies, input: { businessId: string; force: boolean }): Promise<JobResult> {
+  const summarizer = dependencies.businessSummarizer;
+  if (!summarizer) return { status: "skipped", entityId: input.businessId };
+  const summaryInput = await loadBusinessSummaryInput(dependencies.domain, { businessId: input.businessId });
+  if (!summaryInput || summaryInput.summarySource === "operator") return { status: "skipped", entityId: input.businessId };
+  if (!summaryInput.sources.length) {
+    // Every source is gone: a generated summary would describe removed content.
+    const reset = summaryInput.summarySource === "generated" && await resetGeneratedBusinessSummary(dependencies.domain, { businessId: input.businessId, businessName: summaryInput.businessName });
+    return { status: reset ? "completed" : "skipped", entityId: input.businessId };
+  }
+  if (!input.force && summaryInput.summarySource === "generated" && summaryInput.fingerprint === summaryInput.currentFingerprint) return { status: "skipped", entityId: input.businessId };
+  const startedAt = performance.now();
+  let summary: string | null;
+  try {
+    const result = await summarizer.summarize({ businessName: summaryInput.businessName, locale: summaryInput.locale, sources: summaryInput.sources });
+    summary = result.summary;
+    await recordAiGenerationEvent(dependencies.domain, { ...result.usage, businessId: input.businessId, operation: "business.summary" }).catch(() => undefined);
+  } catch (error) {
+    // Only a stable category is recorded: provider errors can echo source text.
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    await recordAiGenerationEvent(dependencies.domain, { ...summarizer.modelId, businessId: input.businessId, operation: "business.summary", latencyMs: performance.now() - startedAt, isError: true, error: timedOut ? "generation_timeout" : "generation_failed" }).catch(() => undefined);
+    throw error;
+  }
+  if (!summary) return { status: "skipped", entityId: input.businessId };
+  const saved = await saveGeneratedBusinessSummary(dependencies.domain, { businessId: input.businessId, summary, fingerprint: summaryInput.fingerprint });
+  return { status: saved ? "completed" : "skipped", entityId: input.businessId };
+}
+
+/**
+ * Fills the opening hours with AI from the passages of the knowledge sources
+ * that look like they state them. Skips hours a person set, knowledge with no
+ * such passage, and passages already read. Hours the sources no longer state
+ * stay as they are: removing them would stop booking again.
+ */
+async function extractBusinessHours(dependencies: WorkerDependencies, input: { businessId: string }): Promise<JobResult> {
+  const extractor = dependencies.businessHoursExtractor;
+  if (!extractor) return { status: "skipped", entityId: input.businessId };
+  const hoursInput = await loadBusinessHoursInput(dependencies.domain, { businessId: input.businessId });
+  if (!hoursInput || hoursInput.hoursSource === "operator" || hoursInput.fingerprint === hoursInput.currentFingerprint) return { status: "skipped", entityId: input.businessId };
+  // Record the read even when there's nothing to extract, so the startup backfill doesn't queue this business again.
+  if ((hoursInput.hoursSource === "none" && hoursInput.existingWindows > 0) || !hoursInput.sources.length) {
+    await markBusinessHoursChecked(dependencies.domain, { businessId: input.businessId, fingerprint: hoursInput.fingerprint });
+    return { status: "skipped", entityId: input.businessId };
+  }
+  const startedAt = performance.now();
+  let extraction: Awaited<ReturnType<BusinessHoursExtractor["extract"]>>;
+  try {
+    extraction = await extractor.extract({ businessName: hoursInput.businessName, sources: hoursInput.sources });
+    await recordAiGenerationEvent(dependencies.domain, { ...extraction.usage, businessId: input.businessId, operation: "business.hours" }).catch(() => undefined);
+  } catch (error) {
+    // Only a stable category is recorded: provider errors can echo source text.
+    const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    await recordAiGenerationEvent(dependencies.domain, { ...extractor.modelId, businessId: input.businessId, operation: "business.hours", latencyMs: performance.now() - startedAt, isError: true, error: timedOut ? "generation_timeout" : "generation_failed" }).catch(() => undefined);
+    throw error;
+  }
+  if (extraction.result.status !== "found") {
+    await markBusinessHoursChecked(dependencies.domain, { businessId: input.businessId, fingerprint: hoursInput.fingerprint });
+    return { status: "skipped", entityId: input.businessId };
+  }
+  const saved = await saveGeneratedBusinessHours(dependencies.domain, { businessId: input.businessId, hours: extraction.result.hours, fingerprint: hoursInput.fingerprint });
+  return { status: saved ? "completed" : "skipped", entityId: input.businessId };
 }
 
 async function indexWebsitePage(

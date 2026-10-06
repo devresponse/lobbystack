@@ -5,7 +5,10 @@ import { useRouter } from "next/navigation";
 import { Check } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
+import { billingPlanCatalog, isPaidSubscription, type BillingPlanSlug } from "@lobbystack/shared";
 
+import { requestJson } from "@/lib/request-json";
+import { useActiveBusiness } from "@/hooks/use-active-business";
 import { PageHeader } from "@/components/page-header";
 import { startTestCall } from "@/lib/test-call-launcher";
 import { useCallSettleRefetch } from "@/lib/use-call-settle-refetch";
@@ -13,37 +16,45 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Surface } from "@/components/ui/surface";
+import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
+import { BookingWithoutHoursAlert, needsHoursForBooking, useBusinessHours } from "./business-hours-section";
 
 type StepId = "fullScan" | "sources" | "testCall" | "phoneNumber";
-type Business = { businessId: string; active: boolean; role: string };
+type Billing = { account: { plan: string | null; subscriptionState: string | null } | null };
 type Step = { id: StepId; name: string; description: string; status: string; documentId?: string | null };
 const order: StepId[] = ["fullScan", "sources", "testCall", "phoneNumber"];
 /** The call and the deeper read both happen in place, so they have no route. */
 const targets: Record<StepId, string | null> = { fullScan: null, sources: "/agent/knowledge?setup=upload", testCall: null, phoneNumber: "/settings/phone-number" };
 
 
-async function getJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { credentials: "include", ...init });
-  if (!response.ok) throw new Error("Unable to load setup status.");
-  return await response.json() as T;
-}
-
 export function LiveSetupGuideSurface() {
   const { t } = useTranslation("nav");
   const router = useRouter();
   const queryClient = useQueryClient();
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => getJson<{ businesses: Business[] }>("/api/businesses") });
-  const business = businesses.data?.businesses.find((item) => item.active) ?? businesses.data?.businesses[0];
+  const openUpgradePlanDialog = useOpenUpgradePlanDialog();
+  const { business } = useActiveBusiness();
   const canManage = Boolean(business && ["business_owner", "business_admin"].includes(business.role));
   // The call runs in place on this page, so nothing navigates when it ends and
   // the step would sit incomplete until a reload.
   const callSettleInterval = useCallSettleRefetch();
   const setup = useQuery({
     queryKey: ["setup", business?.businessId],
-    queryFn: () => getJson<{ steps: Step[] }>(`/api/setup?businessId=${encodeURIComponent(business!.businessId)}`),
+    queryFn: () => requestJson<{ steps: Step[] }>(`/api/setup?businessId=${encodeURIComponent(business!.businessId)}`),
     enabled: canManage,
     refetchInterval: () => callSettleInterval(),
   });
+  const billing = useQuery({
+    queryKey: ["billing", business?.businessId],
+    queryFn: () => requestJson<Billing>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`),
+    enabled: canManage,
+  });
+  // Instant booking with no opening hours books nothing, so say so above the steps.
+  const hours = useBusinessHours(canManage ? business?.businessId ?? "" : "");
+  const rawPlan = billing.data?.account?.plan;
+  const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
+  // A plan without an included number can't claim one, so the number page
+  // would only send them on to the plan picker.
+  const needsPlanForNumber = Boolean(billing.data) && billingPlanCatalog[plan].includedBusinessNumbers === 0;
   const steps = useMemo(() => order.map((id) => setup.data?.steps.find((step) => step.id === id) ?? { id, name: id, description: "", status: "complete" }), [setup.data?.steps]);
   const active = steps.find((step) => step.status === "needs setup")?.id ?? order[0]!;
   const [openStep, setOpenStep] = useState<StepId>(active);
@@ -52,10 +63,10 @@ export function LiveSetupGuideSurface() {
   const completed = steps.filter((step) => step.status === "complete" || step.status === "skipped").length;
   useEffect(() => { if (setup.data && completed === steps.length) router.replace("/"); }, [completed, router, setup.data, steps.length]);
   const expand = useMutation({
-    mutationFn: (documentId: string) => getJson(`/api/knowledge/${encodeURIComponent(documentId)}?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "expand" }) }),
+    mutationFn: (documentId: string) => requestJson(`/api/knowledge/${encodeURIComponent(documentId)}?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "expand" }) }),
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["setup", business?.businessId] }); router.push("/agent/knowledge"); },
   });
-  const skip = useMutation({ mutationFn: (stepId: StepId) => getJson<{ skippedSteps: string[] }>(`/api/setup?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ stepId, skipped: true }) }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["setup", business?.businessId] }); } });
+  const skip = useMutation({ mutationFn: (stepId: StepId) => requestJson<{ skippedSteps: string[] }>(`/api/setup?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ stepId, skipped: true }) }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["setup", business?.businessId] }); } });
 
   if (business && !canManage) return null;
   return (
@@ -66,6 +77,7 @@ export function LiveSetupGuideSurface() {
           {setup.isLoading ? <Skeleton className="h-6 w-72" /> : <div className="flex items-center gap-3 text-muted-foreground"><ProgressRing completed={completed} total={steps.length} /><p className="text-base">{t("sidebar.setupGuide.description", { completed, total: steps.length })}</p></div>}
           <Button disabled={skip.isPending} onClick={async () => { for (const step of steps.filter((item) => item.status === "needs setup")) await skip.mutateAsync(step.id); router.push("/"); }} type="button" variant="outline">{t("sidebar.setupGuide.skip")}</Button>
         </div>
+        {needsHoursForBooking(hours.data) ? <BookingWithoutHoursAlert /> : null}
         <Surface>
           {setup.isLoading ? order.map((id) => <Skeleton className="m-3 h-16 rounded-xl" key={id} />) : (
             <Accordion onValueChange={(value) => { const next = value[0] as StepId | undefined; if (next && steps.find((step) => step.id === next)?.status === "needs setup") setOpenStep(next); }} value={[openStep]}>
@@ -73,7 +85,7 @@ export function LiveSetupGuideSurface() {
                 const complete = step.status === "complete" || step.status === "skipped";
                 return <AccordionItem key={step.id} value={step.id}>
                   <AccordionTrigger aria-disabled={complete || undefined} className={complete ? "min-h-16 cursor-default px-6 [&_[data-icon=inline-end]]:opacity-0" : "min-h-16 px-6"} tabIndex={complete ? -1 : undefined}><span className="flex min-w-0 items-center gap-4"><StepMarker completed={complete} /><span className={complete ? "truncate text-base text-muted-foreground line-through decoration-muted-foreground/70" : "truncate text-base"}>{t(`sidebar.setupGuide.steps.${step.id}`)}</span></span></AccordionTrigger>
-                  <AccordionContent aria-labelledby="" className="px-6"><div className="flex gap-4"><span className="size-6 shrink-0" /><div className="flex min-w-0 flex-1 flex-col gap-4"><p className="max-w-lg text-base leading-6 text-muted-foreground">{t(`sidebar.setupGuide.stepDescriptions.${step.id}`)}</p><div className="flex items-center justify-between gap-4"><Button disabled={expand.isPending} onClick={() => { const target = targets[step.id]; if (target) router.push(target); else if (step.id === "fullScan") { if (step.documentId) expand.mutate(step.documentId); } else startTestCall(); }}>{t(`sidebar.setupGuide.stepActions.${step.id}`)}</Button><Button className="h-auto px-0 underline underline-offset-4" disabled={skip.isPending} onClick={async () => { await skip.mutateAsync(step.id); setOpenStep(steps[index + 1]?.id ?? step.id); }} variant="link">{t("sidebar.setupGuide.skipStep")}</Button></div></div></div></AccordionContent>
+                  <AccordionContent aria-labelledby="" className="px-6"><div className="flex gap-4"><span className="size-6 shrink-0" /><div className="flex min-w-0 flex-1 flex-col gap-4"><p className="max-w-lg text-base leading-6 text-muted-foreground">{t(`sidebar.setupGuide.stepDescriptions.${step.id}`)}</p><div className="flex items-center justify-between gap-4"><Button disabled={expand.isPending} onClick={() => { const target = targets[step.id]; if (step.id === "phoneNumber" && needsPlanForNumber) openUpgradePlanDialog(); else if (target) router.push(target); else if (step.id === "fullScan") { if (step.documentId) expand.mutate(step.documentId); } else startTestCall(); }}>{t(`sidebar.setupGuide.stepActions.${step.id}`)}</Button><Button className="h-auto px-0 underline underline-offset-4" disabled={skip.isPending} onClick={async () => { await skip.mutateAsync(step.id); setOpenStep(steps[index + 1]?.id ?? step.id); }} variant="link">{t("sidebar.setupGuide.skipStep")}</Button></div></div></div></AccordionContent>
                 </AccordionItem>;
               })}
             </Accordion>

@@ -1,50 +1,13 @@
 import { createHash } from "node:crypto";
 
-import { jobEnvelopeSchema, jobQueues, jobTypes, type JobEnvelope, type JobQueue, type JobType } from "@lobbystack/contracts";
+import { jobEnvelopeSchema, jobTypes, type JobEnvelope, type JobQueue, type JobType } from "@lobbystack/contracts";
 import { Queue, type JobsOptions, type QueueOptions, type WorkerOptions } from "bullmq";
 import Redis from "ioredis";
 
-export { jobEnvelopeSchema, jobQueues, jobTypes } from "@lobbystack/contracts";
-export type { JobEnvelope, JobQueue, JobType } from "@lobbystack/contracts";
+import { logRedisErrors } from "./redisErrors";
 
-export const queueForJobType: Record<JobType, JobQueue> = {
-  "email.send": "default",
-  "email.reconcileDelivery": "default",
-  "sms.send": "critical",
-  "appointment.sendChangeOtp": "critical",
-  "sms.syncPrice": "critical",
-  "call.syncPrice": "critical",
-  "billing.syncUsage": "critical",
-  "billing.reconcile": "default",
-  "billing.refreshUnitEconomics": "maintenance",
-  "billing.createCheckout": "critical",
-  "calendar.syncAppointment": "default",
-  "calendar.reconcileBusiness": "default",
-  "knowledge.extractDocument": "bulk",
-  "knowledge.crawlWebsite": "bulk",
-  "knowledge.indexDocument": "bulk",
-  "knowledge.reindexBusiness": "bulk",
-  "knowledge.reembedBusiness": "bulk",
-  "snapshot.refresh": "default",
-  "notification.dispatch": "default",
-  "notification.dailySummary": "maintenance",
-  "conversation.finalizeSession": "default",
-  "privacy.scrubMessage": "maintenance",
-  "privacy.deleteTranscript": "maintenance",
-  "privacy.deleteRecording": "maintenance",
-  "privacy.cleanupPendingUpload": "maintenance",
-  "phoneVerification.send": "critical",
-  "phoneNumber.provision": "critical",
-  "phoneNumber.reclaim": "maintenance",
-  "prospectDemo.expire": "maintenance",
-  "onboarding.sendFollowup": "default",
-  "affiliate.generatePayoutRun": "maintenance",
-  "telemetry.flush": "maintenance",
-  "outbox.backlogSample": "maintenance",
-  "realtime.publish": "default",
-  "webhook.deliver": "default",
-  "api.retention": "maintenance",
-};
+export { jobEnvelopeSchema, jobQueues, jobTypes, queueForJobType } from "@lobbystack/contracts";
+export type { JobEnvelope, JobQueue, JobType } from "@lobbystack/contracts";
 
 export type JobPayload = Record<string, unknown>;
 
@@ -55,7 +18,6 @@ export type EnqueueJobInput = {
   trace?: { traceparent?: string | undefined; tracestate?: string | undefined };
   idempotencyKey: string;
   delayMs?: number;
-  attempts?: number;
 };
 
 export type RedisClientOptions = {
@@ -64,14 +26,14 @@ export type RedisClientOptions = {
 };
 
 const DEFAULT_REDIS_URL = "redis://127.0.0.1:6379";
-
 export function createRedisConnection(options: RedisClientOptions = {}): Redis {
-  return new Redis(options.url ?? process.env.REDIS_URL ?? DEFAULT_REDIS_URL, {
+  const connectionName = `${options.prefix ?? process.env.REDIS_PREFIX ?? "lobbystack"}:client`;
+  return logRedisErrors(new Redis(options.url ?? process.env.REDIS_URL ?? DEFAULT_REDIS_URL, {
     maxRetriesPerRequest: null,
     enableReadyCheck: false,
     lazyConnect: true,
-    connectionName: `${options.prefix ?? process.env.REDIS_PREFIX ?? "lobbystack"}:client`,
-  });
+    connectionName,
+  }), connectionName);
 }
 
 export function createQueue(
@@ -109,10 +71,9 @@ export async function enqueueJob(
     idempotencyKey: input.idempotencyKey,
     scheduled: (input.delayMs ?? 0) > 0,
   });
+  // Attempts and backoff come from the queue's defaultJobOptions.
   const options: JobsOptions = {
     jobId,
-    attempts: input.attempts ?? 5,
-    backoff: { type: "exponential", delay: 1000 },
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),
   };
   await queue.add(input.type, envelope, options);
@@ -137,3 +98,4 @@ export function isKnownJobType(value: string): value is JobType {
 }
 
 export * from "./voicePresence";
+export { logRedisErrors } from "./redisErrors";

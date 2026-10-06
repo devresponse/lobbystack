@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { businessHours, calls, conversations, messages, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
+import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, markOutboxPublished, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
 import { reconcileBillingProviderEvent } from "./billing";
@@ -13,7 +13,11 @@ import { appendMessage } from "./conversations";
 import { runPrivacyRetentionSweep } from "./privacy";
 import { EXPIRED_UPLOAD_STATUS, deleteExpiredObjectsForBusiness, persistCallRecording } from "./storage";
 import { completeCall, upsertTranscript } from "./voice";
-import { claimNotificationDelivery, releaseNotificationDelivery, rescheduleAppointmentReminderInTransaction } from "./notifications";
+import { chunkText, indexDocumentText } from "./knowledge";
+import { loadBusinessSummaryInput, saveGeneratedBusinessSummary } from "./businessSummary";
+import { loadBusinessHoursInput, markBusinessHoursChecked, saveGeneratedBusinessHours } from "./businessHours";
+import { replaceBusinessHoursInTransaction } from "./catalog";
+import { claimNotificationDelivery, rescheduleAppointmentReminderInTransaction, transitionProcessingNotification } from "./notifications";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -211,6 +215,118 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
     });
   });
 
+  it("fails a document whose text would pass the plan's knowledge limit, counting text rather than files", async () => {
+    await rollbackTest(async (tx) => {
+      const [freeBusinessId, starterBusinessId] = [randomUUID(), randomUUID()];
+      await tx.insert(businesses).values([
+        { id: freeBusinessId, slug: freeBusinessId, name: "Free knowledge", timezone: "UTC", businessType: "test", deploymentMode: "cloud" },
+        { id: starterBusinessId, slug: starterBusinessId, name: "Starter knowledge", timezone: "UTC", businessType: "test", deploymentMode: "cloud" },
+      ]);
+      await tx.insert(billingAccounts).values({ businessId: starterBusinessId, billingKey: `business:${starterBusinessId}`, plan: "starter" });
+      // Each business already holds 1,040,000 bytes of indexed text, just under Free's 1 MB.
+      const existing = { [freeBusinessId]: randomUUID(), [starterBusinessId]: randomUUID() };
+      const incoming = { [freeBusinessId]: randomUUID(), [starterBusinessId]: randomUUID() };
+      for (const businessId of [freeBusinessId, starterBusinessId]) {
+        await tx.insert(knowledgeDocuments).values([
+          { id: existing[businessId]!, businessId, sourceType: "text", title: "Existing", status: "indexed" },
+          { id: incoming[businessId]!, businessId, sourceType: "text", title: "Incoming", status: "processing" },
+        ]);
+        await tx.insert(knowledgeChunks).values({ businessId, documentId: existing[businessId]!, sequence: 0, content: "x".repeat(1_040_000), contentHash: "existing" });
+      }
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const db = tx as unknown as Database;
+      const text = "Parking is behind the building. ".repeat(500);
+      const embeddings = chunkText(text).map(() => Array.from({ length: 1536 }, () => 0.01));
+
+      expect(await indexDocumentText({ db }, { businessId: freeBusinessId, documentId: incoming[freeBusinessId]!, text, embeddings })).toEqual({ chunkCount: 0 });
+      expect(await indexDocumentText({ db }, { businessId: starterBusinessId, documentId: incoming[starterBusinessId]!, text, embeddings })).toEqual({ chunkCount: embeddings.length });
+
+      await withBusinessTransaction(db, { businessId: freeBusinessId, actorType: "worker" }, async (workerTx) => {
+        const [document] = await workerTx.select({ status: knowledgeDocuments.status, error: knowledgeDocuments.error }).from(knowledgeDocuments).where(eq(knowledgeDocuments.id, incoming[freeBusinessId]!));
+        expect(document).toEqual({ status: "error", error: "Knowledge storage limit reached. 1 MB of text is included on this plan." });
+        expect(await workerTx.select({ id: knowledgeChunks.id }).from(knowledgeChunks).where(eq(knowledgeChunks.documentId, incoming[freeBusinessId]!))).toEqual([]);
+      });
+    });
+  });
+
+  it("loads a business's knowledge for its summary and never replaces a summary a person wrote", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Maple Family Clinic", timezone: "UTC", businessType: "test", deploymentMode: "cloud" });
+      await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Maple Family Clinic uses LobbyStack to answer calls.", bookingPolicy: "Confirm first.", transferMode: "never" });
+      const [indexed, pending] = [randomUUID(), randomUUID()];
+      await tx.insert(knowledgeDocuments).values([
+        { id: indexed, businessId, sourceType: "website", title: "Home", status: "indexed" },
+        { id: pending, businessId, sourceType: "upload", title: "Draft", status: "processing" },
+      ]);
+      await tx.insert(knowledgeChunks).values([
+        { businessId, documentId: indexed, sequence: 0, content: "A family practice in Toronto.", contentHash: "a" },
+        { businessId, documentId: indexed, sequence: 5, content: "Deep page detail.", contentHash: "b" },
+        { businessId, documentId: pending, sequence: 0, content: "Not indexed yet.", contentHash: "c" },
+      ]);
+      await tx.insert(knowledgeSnippets).values({ businessId, title: "Services", content: "Checkups and vaccinations." });
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const db = tx as unknown as Database;
+
+      const input = await loadBusinessSummaryInput({ db }, { businessId });
+      expect(input).toMatchObject({ businessName: "Maple Family Clinic", summarySource: "placeholder", currentFingerprint: null });
+      expect(input?.sources).toEqual([{ title: "Services", text: "Checkups and vaccinations." }, { title: "Home", text: "A family practice in Toronto." }]);
+
+      expect(await saveGeneratedBusinessSummary({ db }, { businessId, summary: "Maple Family Clinic is a family practice in Toronto.", fingerprint: input!.fingerprint })).toBe(true);
+      const reloaded = await loadBusinessSummaryInput({ db }, { businessId });
+      expect(reloaded).toMatchObject({ summarySource: "generated", currentFingerprint: input!.fingerprint });
+
+      await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
+        await workerTx.update(receptionistProfiles).set({ summary: "Written by the owner.", summarySource: "operator" }).where(eq(receptionistProfiles.businessId, businessId));
+      });
+      expect(await saveGeneratedBusinessSummary({ db }, { businessId, summary: "An AI rewrite.", fingerprint: "other" })).toBe(false);
+      await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
+        const [profile] = await workerTx.select({ summary: receptionistProfiles.summary }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+        expect(profile?.summary).toBe("Written by the owner.");
+      });
+    });
+  });
+
+  it("fills opening hours from the knowledge under worker RLS and never replaces hours a person set", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Salon Lepota", timezone: "Europe/Belgrade", businessType: "salon", deploymentMode: "cloud" });
+      const [contact, pricing] = [randomUUID(), randomUUID()];
+      await tx.insert(knowledgeDocuments).values([
+        { id: contact, businessId, sourceType: "website", title: "Kontakt", status: "indexed" },
+        { id: pricing, businessId, sourceType: "website", title: "Cenovnik", status: "indexed" },
+      ]);
+      await tx.insert(knowledgeChunks).values([
+        { businessId, documentId: contact, sequence: 0, content: "Dobrodošli u Salon Lepota.", contentHash: "a" },
+        { businessId, documentId: contact, sequence: 3, content: "Radno vreme: Pon-Pet 09-12h i 13-20h, Sub 09-15h.", contentHash: "b" },
+        { businessId, documentId: pricing, sequence: 0, content: "Šišanje 1200, farbanje 4500.", contentHash: "c" },
+      ]);
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const db = tx as unknown as Database;
+
+      const input = await loadBusinessHoursInput({ db }, { businessId });
+      expect(input).toMatchObject({ businessName: "Salon Lepota", hoursSource: "none", existingWindows: 0, currentFingerprint: null });
+      expect(input?.sources).toEqual([{ title: "Kontakt", text: "Radno vreme: Pon-Pet 09-12h i 13-20h, Sub 09-15h." }]);
+
+      // A split day saves as two rows on the same weekday.
+      const generated = [1, 2, 3, 4, 5].flatMap((dayOfWeek) => [{ dayOfWeek, openMinutes: 540, closeMinutes: 720 }, { dayOfWeek, openMinutes: 780, closeMinutes: 1200 }]);
+      expect(await saveGeneratedBusinessHours({ db }, { businessId, hours: generated, fingerprint: input!.fingerprint })).toBe(true);
+      expect(await loadBusinessHoursInput({ db }, { businessId })).toMatchObject({ hoursSource: "generated", existingWindows: 10, currentFingerprint: input!.fingerprint });
+
+      await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
+        await replaceBusinessHoursInTransaction(workerTx, { businessId, hours: [{ dayOfWeek: 1, openMinutes: 600, closeMinutes: 1080 }] });
+      });
+      expect(await saveGeneratedBusinessHours({ db }, { businessId, hours: generated, fingerprint: "other" })).toBe(false);
+      await markBusinessHoursChecked({ db }, { businessId, fingerprint: "other" });
+      await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
+        const rows = await workerTx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId));
+        expect(rows).toEqual([{ dayOfWeek: 1, openMinutes: 600 }]);
+        const [business] = await workerTx.select({ hoursSource: businesses.hoursSource, hoursFingerprint: businesses.hoursFingerprint }).from(businesses).where(eq(businesses.id, businessId));
+        expect(business).toEqual({ hoursSource: "operator", hoursFingerprint: input!.fingerprint });
+      });
+    });
+  });
+
   it("sets a plan-based recording retention window under worker RLS", async () => {
     await rollbackTest(async (tx) => {
       const businessId = randomUUID();
@@ -280,7 +396,7 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
         const [message] = await workerTx.select().from(outboxMessages).where(eq(outboxMessages.dedupeKey, `notification:${current!.id}:dispatch:2`));
         expect(message!.availableAt).toEqual(current!.scheduledFor);
         expect(await claimNotificationDelivery({ db }, { businessId, notificationId: old!.id })).toBe(false);
-        expect(await releaseNotificationDelivery({ db }, { businessId, notificationId: old!.id })).toBe(false);
+        expect(await transitionProcessingNotification({ db }, { businessId, notificationId: old!.id }, "pending")).toBe(false);
         expect(await claimNotificationDelivery({ db }, { businessId, notificationId: current!.id })).toBe(false);
         // Rescheduling inside 24 hours retires the old job without a late reminder.
         await rescheduleAppointmentReminderInTransaction(workerTx, { businessId, appointmentId, startsAt: new Date(Date.now() + 3_600_000), revision: 3 });

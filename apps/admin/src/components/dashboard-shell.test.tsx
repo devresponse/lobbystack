@@ -16,7 +16,8 @@ vi.mock("./nav-user", () => ({ NavUser: () => null }));
 const clients: QueryClient[] = [];
 beforeEach(() => {
   route.pathname = "/"; window.innerWidth = 1440;
-  vi.stubGlobal("matchMedia", vi.fn(query => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+  // useIsMobile caches its MediaQueryList, so `matches` follows innerWidth like a real one.
+  vi.stubGlobal("matchMedia", vi.fn(query => ({ get matches() { return query === "(max-width: 767px)" && window.innerWidth < 768; }, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function setup(role = "business_owner") {
@@ -49,7 +50,7 @@ describe("original shared navigation", () => {
     window.innerWidth = 390;
     const view = setup();
     for (const [label, href] of [["nav:items.calls", "/calls"], ["agent:sections.knowledge.title", "/agent/knowledge"], ["settings:sections.integrations", "/integrations"]]) {
-      await userEvent.click(screen.getByRole("button", { name: "Toggle sidebar" }));
+      await userEvent.click(screen.getByRole("button", { name: "accessibility.toggleSidebar" }));
       const dialog = await screen.findByRole("dialog");
       await userEvent.click(within(dialog).getByRole("button", { name: label! }));
       expect(route.router.push).toHaveBeenLastCalledWith(href);

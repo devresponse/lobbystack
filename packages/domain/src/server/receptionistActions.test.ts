@@ -5,19 +5,23 @@ const mocks = vi.hoisted(() => ({
   findAvailability: vi.fn(),
   recordProductEvent: vi.fn(),
   serviceRows: [] as Array<{ id: string; name: string; durationMinutes: number }>,
+  bookingRows: [] as Array<{ id: string; serviceName: string }>,
 }));
 
 vi.mock("@lobbystack/db", async (original) => ({
   ...(await original<typeof import("@lobbystack/db")>()),
   withBusinessTransaction: vi.fn(async (_db, _actor, callback) => callback({
-    select: () => ({ from: () => ({ where: () => ({ limit: async () => mocks.serviceRows }) }) }),
+    select: () => ({ from: () => ({
+      where: () => ({ limit: async () => mocks.serviceRows }),
+      innerJoin: () => ({ innerJoin: () => ({ where: () => ({ limit: async () => mocks.bookingRows }) }) }),
+    }) }),
   })),
 }));
 vi.mock("./booking", () => ({ bookAppointment: mocks.bookAppointment, findAvailability: mocks.findAvailability, cancelAppointmentForCaller: vi.fn(), rescheduleAppointmentForCaller: vi.fn() }));
-vi.mock("./productEvents", () => ({ recordProductEvent: mocks.recordProductEvent }));
+vi.mock("./productEvents", () => ({ recordProductEvent: mocks.recordProductEvent, recordProductEventBestEffort: mocks.recordProductEvent }));
 vi.mock("./callOutcome", () => ({ recordCallSchedulingProgress: vi.fn() }));
 
-import { bookForCaller, candidateStartTimes, findOpenings } from "./receptionistActions";
+import { bookForCaller, candidateStartTimes, findCallerBooking, findOpenings } from "./receptionistActions";
 
 const context = { db: {} as never };
 const weekdayHours = [1, 2, 3, 4, 5].map((dayOfWeek) => ({ dayOfWeek, openMinutes: 8 * 60, closeMinutes: 17 * 60 }));
@@ -25,6 +29,22 @@ const weekdayHours = [1, 2, 3, 4, 5].map((dayOfWeek) => ({ dayOfWeek, openMinute
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.serviceRows = [{ id: "svc_1", name: "Drain cleaning", durationMinutes: 60 }];
+  mocks.bookingRows = [];
+});
+
+describe("findCallerBooking", () => {
+  const input = { businessId: "biz_1", serviceName: "drain cleaning", startsAt: "2030-01-08T10:00:00.000-05:00", contactPhone: "+14165550100" };
+
+  it("returns the caller's confirmed booking for the same service and time, in one query", async () => {
+    mocks.bookingRows = [{ id: "appt_1", serviceName: "Drain cleaning" }];
+    await expect(findCallerBooking(context, input)).resolves.toEqual({ ok: true, appointmentId: "appt_1", serviceName: "Drain cleaning", startsAt: input.startsAt, alreadyBooked: true });
+  });
+
+  it("finds nothing when the caller has no such booking, or for a start time that isn't a date", async () => {
+    await expect(findCallerBooking(context, input)).resolves.toBeUndefined();
+    mocks.bookingRows = [{ id: "appt_1", serviceName: "Drain cleaning" }];
+    await expect(findCallerBooking(context, { ...input, startsAt: "next Tuesday" })).resolves.toBeUndefined();
+  });
 });
 
 describe("candidateStartTimes", () => {

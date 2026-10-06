@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-export { resolveOpenAiPricing } from "./aiPricing";
-export type { AiPricingRatesUsdPerMillionTokens, VersionedAiPricing } from "./aiPricing";
 export { isMaintenanceMode } from "./maintenance";
+export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, normalizeInterfaceLocale } from "./locales";
+export type { InterfaceLocale } from "./locales";
+import { interfaceLocales, type InterfaceLocale } from "./locales";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";
@@ -15,7 +16,23 @@ export const deploymentModes = [
 
 export const DEFAULT_WEB_CALL_MAX_DURATION_MS = 5 * 60 * 1000;
 export const MAX_WEB_CALL_MAX_DURATION_MS = 30 * 60 * 1000;
-export const WEB_CALL_STALE_GRACE_MS = 60 * 1000;
+
+/** Latency, tokens and cost of one AI model call, as AI generation events record them. */
+export type AiUsage = {
+  provider: string;
+  model: string;
+  latencyMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  cachedInputTokens?: number;
+  reasoningTokens?: number;
+  totalCostUsd?: number;
+  pricingVersion?: string;
+  pricingSource?: string;
+  pricingEffectiveDate?: string;
+  ratesUsdPerMillionTokens?: Record<string, number>;
+};
 
 export type BusinessType =
   | "clinic"
@@ -31,11 +48,10 @@ export type BusinessRole =
   | "scheduler"
   | "viewer";
 
-export type ChannelKind = "sms" | "voice" | "dashboard" | "web_chat";
-export type DocumentMimeType =
-  | "application/pdf"
-  | "text/plain"
-  | "text/markdown";
+/**
+ * Languages the AI receptionist speaks and the business default language.
+ * Interface languages (dashboard, widget UI, email) are {@link InterfaceLocale}.
+ */
 export type RuntimeLocale = "en" | "fr";
 
 export const runtimeLocales = ["en", "fr"] as const satisfies ReadonlyArray<RuntimeLocale>;
@@ -172,24 +188,6 @@ export type SmsConversationInput = {
   contactPhone: string;
 };
 
-export type VoiceToolName =
-  | "getBusinessHours"
-  | "getBusinessServices"
-  | "searchKnowledge"
-  | "findAvailability"
-  | "checkAvailability"
-  | "bookAppointment"
-  | "lookupAppointmentForChange"
-  | "verifyAppointmentForChange"
-  | "sendAppointmentChangeOtp"
-  | "verifyAppointmentChangeOtp"
-  | "cancelAppointment"
-  | "rescheduleAppointment"
-  | "transferCall"
-  | "takeMessage"
-  | "endCall"
-  | "setCallHold";
-
 export const demoBusinessId = "demo-clinic";
 
 export const demoSnapshot: BusinessContextSnapshot = {
@@ -269,7 +267,7 @@ export type WidgetConfig = {
   title?: string;
   subtitle?: string;
   greeting?: string;
-  localeOverride?: RuntimeLocale;
+  localeOverride?: InterfaceLocale;
   leadForm?: WidgetLeadFormConfig;
 };
 
@@ -298,20 +296,9 @@ export const widgetConfigSchema = z.object({
   title: z.string().max(160).optional(),
   subtitle: z.string().max(320).optional(),
   greeting: z.string().max(400).optional(),
-  localeOverride: z.enum(runtimeLocales).optional(),
+  localeOverride: z.enum(interfaceLocales).optional(),
   leadForm: widgetLeadFormConfigSchema.optional(),
 });
-
-export const widgetVisitorIdentitySchema = z.object({
-  widgetKey: z.string().min(1),
-  visitorId: z.string().uuid(),
-  name: z.string().max(160).optional(),
-  email: z.string().email().max(320).optional(),
-  phone: z.string().max(32).optional(),
-  metadata: z.record(z.unknown()).optional(),
-});
-
-export type WidgetVisitorIdentity = z.infer<typeof widgetVisitorIdentitySchema>;
 
 export const widgetSessionRequestSchema = z.object({
   widgetKey: z.string().min(1),
@@ -326,15 +313,6 @@ export const widgetSessionResponseSchema = z.object({
 });
 export type WidgetSessionResponse = z.infer<typeof widgetSessionResponseSchema>;
 
-export type WidgetChatRole = "user" | "assistant";
-
-export type WidgetChatPart =
-  | { type: "text"; text: string }
-  | { type: "text-delta"; delta: string }
-  | { type: "tool-invocation"; toolInvocation: Record<string, unknown> };
-
-export type WidgetChatReplyRole = "assistant" | "human";
-
 export const widgetChatRequestSchema = z.object({
   visitorId: z.string().uuid(),
   messageId: z.string().uuid(),
@@ -344,15 +322,6 @@ export const widgetChatRequestSchema = z.object({
 
 export type WidgetChatRequest = z.infer<typeof widgetChatRequestSchema>;
 
-export const widgetChatResponseSchema = z.object({
-  messageId: z.string().uuid(),
-  role: z.enum(["assistant", "human"]),
-  content: z.string(),
-  automationState: z.enum(["ai_active", "human_handoff"]).optional(),
-});
-
-export type WidgetChatResponse = z.infer<typeof widgetChatResponseSchema>;
-
 export const widgetLeadRequestSchema = z.object({
   visitorId: z.string().uuid(),
   name: z.string().max(160).optional(),
@@ -361,15 +330,6 @@ export const widgetLeadRequestSchema = z.object({
 });
 
 export type WidgetLeadRequest = z.infer<typeof widgetLeadRequestSchema>;
-
-export const widgetChatMessageRecordSchema = z.object({
-  id: z.string().uuid(),
-  role: z.enum(["user", "assistant"]),
-  content: z.string(),
-  createdAt: z.string().datetime(),
-});
-
-export type WidgetChatMessageRecord = z.infer<typeof widgetChatMessageRecordSchema>;
 
 export const widgetKeyConfigSchema = z.object({
   id: z.string().uuid(),
@@ -384,27 +344,6 @@ export const widgetKeyConfigSchema = z.object({
 export type WidgetKeyConfig = z.infer<typeof widgetKeyConfigSchema>;
 
 export {
-  getTerminalTwilioCallReconciliationFields,
-  isNormalizableRuntimeDisposition,
-  isTerminalTwilioCallStatus,
-  mapTwilioCallStatusToDisposition,
-  normalizeTwilioCallStatus,
-  shouldPreserveSpecificCallOutcome,
-} from "./voiceCallStatus";
-export type {
-  CallOutcomeRecord,
-  TerminalTwilioCallReconciliationFields,
-} from "./voiceCallStatus";
-export {
-  buildTwilioSignaturePayload,
-  computeTwilioSignature,
-  resolveTwilioWebhookUrl,
-  escapeXmlText,
-  normalizeTwilioFormFields,
-  validateTwilioSignature,
-} from "./twilioSecurity";
-export type { TwilioSignatureInput } from "./twilioSecurity";
-export {
   isTerminalTwilioMessageStatus,
   mapTwilioStatusToMessageStatus,
   mapTwilioStatusToNotificationStatus,
@@ -416,13 +355,22 @@ export type {
   NotificationDeliveryStatus,
   SmsMessageStatus,
 } from "./twilioMessageStatus";
+/** Strips trailing slashes with a linear scan; a `/\/+$/` regex backtracks on long runs of slashes. */
+export function trimTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
+  return value.slice(0, end);
+}
+
 export * from "./billing";
 export * from "./product-capabilities";
 export { normalizeAuthEmail } from "./auth";
+export { assertProductionSecrets } from "./productionSecrets";
 
 export { isTransferPermitted, normalizeTransferMode } from "./transferPolicy";
 
-export { OPERATOR_SMS_DISCLOSURE_TEXT, OPERATOR_SMS_DISCLOSURE_VERSION } from "./operatorSmsConsent";
+export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEXT, OPERATOR_SMS_DISCLOSURE_VERSION } from "./operatorSmsConsent";
+export { canTextNumber, permanentSmsErrorCode } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";
 

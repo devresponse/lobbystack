@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 
 import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction } from "@lobbystack/db";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
@@ -9,7 +9,7 @@ import { resolveCallOutcome } from "./callOutcome";
 import { buildConversationSessionSummary, extractCallerContext, normalizeCallSummaryLocale, sanitizeGeneratedCallerName, type CallSummaryLocale, type ConversationTranscriptTurn, type GeneratedCallSummary } from "./conversationSummary";
 import type { DomainContext } from "./context";
 import { queueOperatorAlertInTransaction, type OperatorNotificationEventKey } from "./notifications";
-import { recordProductEvent } from "./productEvents";
+import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
 
 export { buildConversationSessionSummary, type CallSummaryLocale, type ConversationTranscriptTurn, type GeneratedCallSummary } from "./conversationSummary";
@@ -141,7 +141,7 @@ export async function appendMessage(
       channel: input.channel,
       body: input.body,
       contentExpiresAt: retentionPlan ? contentExpiryForPlan(retentionPlan, "messages") : null,
-      ...(input.providerMessageId !== undefined ? { providerMessageId: input.providerMessageId } : {}),
+      providerMessageId: input.providerMessageId,
       aiGenerated: input.aiGenerated ?? false,
       status: input.direction === "outbound" ? "queued" : "received",
     }).onConflictDoNothing({ target: messages.providerMessageId }).returning({ id: messages.id });
@@ -194,16 +194,12 @@ export async function setAutomationState(
     return updated?.channel ?? null;
   });
   if (input.state !== "human_handoff" || !channel) return;
-  try {
-    await recordProductEvent(context, {
-      name: "conversation.automation_paused",
-      businessId: input.businessId,
-      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-      properties: { conversationId: input.conversationId, channel },
-    });
-  } catch {
-    // Product telemetry is best-effort and must not fail the automation change.
-  }
+  await recordProductEventBestEffort(context, {
+    name: "conversation.automation_paused",
+    businessId: input.businessId,
+    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+    properties: { conversationId: input.conversationId, channel },
+  });
 }
 
 export async function registerWidgetVisitor(
@@ -211,28 +207,67 @@ export async function registerWidgetVisitor(
   input: { businessId: string; visitorId: string; name?: string; email?: string; phone?: string; metadata?: Record<string, unknown> },
 ): Promise<{ visitorId: string; contactId: string | null }> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const existing = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId, metadata: widgetVisitors.metadata }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.visitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1))[0];
+    // Lock the visitor so a chat that starts while it is being linked waits for the link.
+    const existing = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId, contactLinkedAt: widgetVisitors.contactLinkedAt, metadata: widgetVisitors.metadata }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.visitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("update"))[0];
     let contactId = existing?.contactId ?? null;
     const suppliedIdentity = input.email !== undefined || input.phone !== undefined;
     if (!contactId && suppliedIdentity) {
       const contact = (input.email !== undefined ? (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.businessId, input.businessId), eq(contacts.email, input.email!))).limit(1))[0] : undefined)
         ?? (input.phone ? (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.businessId, input.businessId), eq(contacts.phone, input.phone))).limit(1))[0] : undefined);
       if (contact) {
+        // An anonymous visitor can't prove they own this contact, so link to it but never change it.
         contactId = contact.id;
       } else {
-        const [created] = await tx.insert(contacts).values({ businessId: input.businessId, ...(input.name ? { name: input.name } : {}), ...(input.email !== undefined ? { email: input.email } : {}), ...(input.phone ? { phone: input.phone } : {}) }).returning({ id: contacts.id });
+        const [created] = await tx.insert(contacts).values({ businessId: input.businessId, ...(input.name ? { name: input.name } : {}), email: input.email, ...(input.phone ? { phone: input.phone } : {}) }).returning({ id: contacts.id });
         contactId = created?.id ?? null;
         if (contactId) await emitWebhookEventInTransaction(tx, { businessId: input.businessId, type: "contact.created", resourceId: contactId });
       }
-      if (contactId && (input.name || input.phone)) {
-        await tx.update(contacts).set({ ...(input.name ? { name: input.name } : {}), ...(input.phone ? { phone: input.phone } : {}), updatedAt: new Date() }).where(and(eq(contacts.id, contactId), eq(contacts.businessId, input.businessId)));
-      }
     }
     const mergedMetadata = { ...(typeof existing?.metadata === "object" && existing.metadata !== null ? existing.metadata : {}), ...(input.metadata ?? {}) };
+    const newlyLinked = Boolean(contactId) && !existing?.contactId;
     if (existing) {
-      await tx.update(widgetVisitors).set({ ...(input.name ? { name: input.name } : {}), ...(input.email !== undefined ? { email: input.email } : {}), ...(input.metadata ? { metadata: mergedMetadata } : {}), ...(contactId ? { contactId } : {}), lastSeenAt: new Date(), updatedAt: new Date() }).where(and(eq(widgetVisitors.id, input.visitorId), eq(widgetVisitors.businessId, input.businessId)));
+      await tx.update(widgetVisitors).set({ ...(input.name ? { name: input.name } : {}), email: input.email, ...(input.metadata ? { metadata: mergedMetadata } : {}), ...(contactId ? { contactId } : {}), ...(newlyLinked ? { contactLinkedAt: sql`now()` } : {}), lastSeenAt: new Date(), updatedAt: new Date() }).where(and(eq(widgetVisitors.id, input.visitorId), eq(widgetVisitors.businessId, input.businessId)));
+      if (newlyLinked && contactId) {
+        // The visitor's chats from before it gave its details belong to this
+        // contact. Chats that already have a contact never move, and chats from
+        // before an earlier link stay with nobody: they may be a deleted
+        // contact's history on a shared browser.
+        await tx.update(conversations).set({ contactId }).where(and(
+          eq(conversations.businessId, input.businessId),
+          eq(conversations.widgetVisitorId, input.visitorId),
+          isNull(conversations.contactId),
+          ...(existing.contactLinkedAt ? [gt(conversations.createdAt, existing.contactLinkedAt)] : []),
+        ));
+      }
     } else {
-      await tx.insert(widgetVisitors).values({ id: input.visitorId, businessId: input.businessId, ...(input.name ? { name: input.name } : {}), ...(input.email !== undefined ? { email: input.email } : {}), metadata: mergedMetadata, ...(contactId ? { contactId } : {}), lastSeenAt: new Date(), updatedAt: new Date() }).onConflictDoUpdate({ target: widgetVisitors.id, set: { ...(input.name ? { name: input.name } : {}), ...(input.email !== undefined ? { email: input.email } : {}), metadata: mergedMetadata, ...(contactId ? { contactId } : {}), lastSeenAt: new Date(), updatedAt: new Date() } });
+      // A concurrent first registration can insert the visitor between our read
+      // and this insert. The conflict update then links the contact itself, so
+      // an anonymous insert winning the race can't drop the link.
+      const [visitor] = await tx.insert(widgetVisitors).values({ id: input.visitorId, businessId: input.businessId, ...(input.name ? { name: input.name } : {}), email: input.email, metadata: mergedMetadata, ...(contactId ? { contactId, contactLinkedAt: sql`now()` } : {}), lastSeenAt: new Date(), updatedAt: new Date() }).onConflictDoUpdate({
+        target: widgetVisitors.id,
+        set: {
+          ...(input.name ? { name: input.name } : {}),
+          email: input.email,
+          metadata: mergedMetadata,
+          ...(contactId ? {
+            contactId: sql`coalesce(${widgetVisitors.contactId}, excluded.contact_id)`,
+            contactLinkedAt: sql`case when ${widgetVisitors.contactId} is null then now() else ${widgetVisitors.contactLinkedAt} end`,
+          } : {}),
+          lastSeenAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }).returning({ contactId: widgetVisitors.contactId, contactLinkedAt: widgetVisitors.contactLinkedAt });
+      if (visitor?.contactId && visitor.contactId !== contactId) {
+        // The other registration linked the visitor first; keep its contact.
+        contactId = visitor.contactId;
+      } else if (contactId) {
+        // Chats the racing registration started belong to this contact.
+        await tx.update(conversations).set({ contactId }).where(and(
+          eq(conversations.businessId, input.businessId),
+          eq(conversations.widgetVisitorId, input.visitorId),
+          isNull(conversations.contactId),
+        ));
+      }
     }
     return { visitorId: input.visitorId, contactId };
   });
@@ -243,10 +278,11 @@ export async function getOrCreateWidgetConversation(
   input: { businessId: string; widgetVisitorId: string },
 ): Promise<{ conversationId: string }> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const visitor = (await tx.select({ id: widgetVisitors.id }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1))[0];
+    // The share lock makes a concurrent link wait, so a new chat either sees the contact or is claimed by the link.
+    const visitor = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("share"))[0];
     if (!visitor) throw new Error("Widget visitor not found.");
     const current = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
-    const conversationId = current[0]?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
+    const conversationId = current[0]?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
     if (!conversationId) {
       const existing = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"))).orderBy(desc(conversations.updatedAt)).limit(1);
       throw new Error(existing[0] ? "Widget conversation already exists and is closed." : "Conversation could not be created.");

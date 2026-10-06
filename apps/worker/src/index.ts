@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
-import { createCallSummarizer } from "@lobbystack/agent-core";
-import { assertProductionSecrets } from "@lobbystack/config";
+import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
+import { assertProductionSecrets, isMaintenanceMode } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, isKnownJobType, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -13,14 +13,15 @@ import { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import { getMeter, initializeTelemetry, redactOtelExceptionText, shutdownTelemetry, withSpan } from "@lobbystack/telemetry/node";
 import { redactJobError } from "./redactJobError";
 import { Worker } from "bullmq";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { handleJob, type WorkerDependencies } from "./handlers";
 import { startHealthServer } from "./health";
 import { createLiveCallHandler } from "./liveCalls";
 import { OutboxDispatcher } from "./outboxDispatcher";
-import { getWorkerStartupMode } from "./maintenance";
 import { configureSchedulers } from "./scheduler";
 import { getWorkerSnapshotCache } from "./snapshot-cache";
+import { logUnhandledRejections } from "./processGuards";
 
 function createEmailProvider(): SmtpEmailProvider | undefined {
   const host = process.env.SMTP_HOST;
@@ -30,11 +31,12 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
   }
   return new SmtpEmailProvider({
     host,
-    port: Number(process.env.SMTP_PORT ?? 587),
+    // A deploy template can leave optional inputs blank, so "" counts as unset.
+    port: Number(process.env.SMTP_PORT || 587),
     secure: process.env.SMTP_SECURE === "true",
     username: process.env.SMTP_USERNAME ?? "",
     password: process.env.SMTP_PASSWORD ?? "",
-    from: process.env.EMAIL_FROM ?? "LobbyStack <no-reply@localhost>",
+    from: process.env.EMAIL_FROM || "LobbyStack <no-reply@localhost>",
     ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}),
   });
 }
@@ -99,8 +101,9 @@ function createProductAnalytics(): WorkerDependencies["productAnalytics"] {
 }
 
 async function main(): Promise<void> {
-  const startupMode = getWorkerStartupMode(process.env);
-  if (!startupMode.startsConsumers) {
+  logUnhandledRejections();
+  // Sampled once at boot; it does not pause work already claimed by another process.
+  if (isMaintenanceMode(process.env)) {
     // Keep liveness available, but report unready and avoid all queue, scheduler, and provider startup.
     startHealthServer(Number(process.env.PORT ?? 3002), { ready: false, redis: false, database: false, storage: false, activeJobs: 0 });
     console.warn("Worker consumer startup is isolated by maintenance mode.");
@@ -118,18 +121,22 @@ async function main(): Promise<void> {
   const realtime = createRedisConnection({ prefix: process.env.REDIS_PREFIX ?? "lobbystack" });
   const queues = new Map<JobQueue, ReturnType<typeof createQueue>>();
   for (const queueName of jobQueues) {
-    queues.set(queueName, createQueue(queueName));
+    const queue = createQueue(queueName);
+    queue.on("error", (error) => console.error(JSON.stringify({ event: "queue.error", queue: queueName, message: redactOtelExceptionText(error.message) })));
+    queues.set(queueName, queue);
   }
   const refreshSchedulers = async () => {
     const businessRows = await withDispatcherTransaction(dispatcherDatabase.db, async (tx) => await tx.select({ id: businesses.id }).from(businesses));
-    await configureSchedulers(queues, businessRows.map((business) => business.id));
+    const businessIds = businessRows.map((business) => business.id);
+    await configureSchedulers(queues, businessIds);
+    return businessIds;
   };
-  await refreshSchedulers();
+  const businessIds = await refreshSchedulers();
   const schedulerRefresh = setInterval(() => void refreshSchedulers().catch((error) => console.error("scheduler refresh failed", redactOtelExceptionText(error instanceof Error ? error.message : String(error)))), 5 * 60_000);
   schedulerRefresh.unref();
   const state = { ready: false, redis: false, database: false, storage: false, activeJobs: 0 };
   const embeddings = createEmbeddingProvider();
-  const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) } });
+  const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) }, attachLock: realtime });
   const health = startHealthServer(Number(process.env.PORT ?? 3002), state, liveCalls.handle);
   const email = createEmailProvider();
   const onboardingFollowupSender = createOnboardingFollowupSender();
@@ -141,16 +148,48 @@ async function main(): Promise<void> {
   const calendar = createCalendarProvider();
   const productAnalytics = createProductAnalytics();
   const callSummarizer = createCallSummarizer();
+  const businessSummarizer = createBusinessSummarizer();
+  // Existing businesses got summaries before AI wrote them, so write one from
+  // each business's knowledge. BullMQ keeps the job id for a day; a later
+  // restart queues it again, and the job skips summaries an operator wrote,
+  // businesses with no knowledge, and knowledge that hasn't changed, so only
+  // the first run calls the model.
+  const summaryQueue = queues.get("bulk");
+  if (businessSummarizer && summaryQueue) {
+    for (const businessId of businessIds) {
+      await enqueueJob(summaryQueue, {
+        type: "business.generateSummary",
+        businessId,
+        payload: { businessId, reason: "backfill" },
+        idempotencyKey: `business-summary-backfill:${businessId}:v1`,
+      });
+    }
+  }
+  // Nothing filled opening hours before, so most businesses have none and
+  // instant booking found every time unavailable. Read each one's knowledge
+  // for its hours once. Every run records a fingerprint, so a restart only
+  // queues businesses the job hasn't read yet.
+  const businessHoursExtractor = createBusinessHoursExtractor();
+  if (businessHoursExtractor && summaryQueue) {
+    const hoursBusinesses = await withDispatcherTransaction(dispatcherDatabase.db, async (tx) => await tx.select({ id: businesses.id }).from(businesses).where(and(eq(businesses.hoursSource, "none"), isNull(businesses.hoursFingerprint))));
+    for (const business of hoursBusinesses) {
+      await enqueueJob(summaryQueue, {
+        type: "business.extractHours",
+        businessId: business.id,
+        payload: { businessId: business.id, reason: "backfill" },
+        idempotencyKey: `business-hours-backfill:${business.id}:v1`,
+      });
+    }
+  }
   if (embeddings) {
     const embeddingQueue = queues.get("bulk");
     if (embeddingQueue) {
-      const embeddingBusinesses = await withDispatcherTransaction(dispatcherDatabase.db, async (tx) => await tx.select({ id: businesses.id }).from(businesses));
-      for (const business of embeddingBusinesses) {
+      for (const businessId of businessIds) {
         await enqueueJob(embeddingQueue, {
           type: "knowledge.reembedBusiness",
-          businessId: business.id,
+          businessId,
           payload: { fingerprint: embeddings.fingerprint },
-          idempotencyKey: `knowledge-reembed:${business.id}:${embeddings.fingerprint}`,
+          idempotencyKey: `knowledge-reembed:${businessId}:${embeddings.fingerprint}`,
         });
       }
     }
@@ -164,6 +203,8 @@ async function main(): Promise<void> {
     ...(crawler ? { crawler } : {}),
     ...(productAnalytics ? { productAnalytics } : {}),
     ...(callSummarizer ? { callSummarizer } : {}),
+    ...(businessSummarizer ? { businessSummarizer } : {}),
+    ...(businessHoursExtractor ? { businessHoursExtractor } : {}),
     ...(email ? { email } : {}),
     ...(onboardingFollowupSender ? { onboardingFollowupSender } : {}),
     ...(embeddings ? { embeddings } : {}),
@@ -218,6 +259,9 @@ async function main(): Promise<void> {
         state.activeJobs -= 1;
       }
     }), createWorkerOptions(queueName));
+    // BullMQ emits connection problems as "error" events; without a listener
+    // Node treats one as fatal.
+    worker.on("error", (error) => console.error(JSON.stringify({ event: "worker.error", queue: queueName, message: redactOtelExceptionText(error.message) })));
     const failedJobs = getMeter("lobbystack-worker").createCounter("lobbystack.worker.jobs.failed");
     worker.on("failed", (job) => failedJobs.add(1, {
       "messaging.destination.name": queueName,
@@ -228,21 +272,8 @@ async function main(): Promise<void> {
   const dispatcher = new OutboxDispatcher(dispatcherDatabase.db, new Map(queues));
   const abort = new AbortController();
   const dispatchLoop = dispatcher.run(abort.signal).catch((error) => console.error("outbox dispatcher stopped", redactOtelExceptionText(error instanceof Error ? error.message : String(error))));
-  const redisChecks = await Promise.all([...queues.values()].map(async (queue) => {
-    try { await queue.getJobCounts(); return true; } catch { return false; }
-  }));
-  try {
-    await realtime.connect();
-    redisChecks.push(true);
-  } catch {
-    redisChecks.push(false);
-  }
-  state.redis = redisChecks.every(Boolean);
-  state.database = (await databaseHealthCheck(database)).ok;
-  state.storage = await storage.ensureReady().then(() => true).catch(() => false);
-  state.ready = state.redis && state.database && state.storage;
-  const healthRefresh = setInterval(() => void (async () => {
-    const [databaseStatus, storageStatus, ...queueStatuses] = await Promise.all([
+  const checkHealth = async () => {
+    const [databaseStatus, storageStatus, ...redisStatuses] = await Promise.all([
       databaseHealthCheck(database).then((result) => result.ok).catch(() => false),
       storage.ensureReady().then(() => true).catch(() => false),
       ...[...queues.values()].map(async (queue) => { try { await queue.getJobCounts(); return true; } catch { return false; } }),
@@ -250,16 +281,17 @@ async function main(): Promise<void> {
     ]);
     state.database = databaseStatus;
     state.storage = storageStatus;
-    state.redis = queueStatuses.every(Boolean);
+    state.redis = redisStatuses.every(Boolean);
     state.ready = state.database && state.redis && state.storage;
-  })(), 10_000);
+  };
+  await checkHealth();
+  const healthRefresh = setInterval(() => void checkHealth(), 10_000);
   healthRefresh.unref();
 
   const shutdown = async () => {
     clearInterval(schedulerRefresh);
     clearInterval(healthRefresh);
     abort.abort();
-    dispatcher.stop();
     // Finalize live calls while the database pool is still open.
     await liveCalls.closeAll();
     await Promise.allSettled([dispatchLoop, ...workers.map((worker) => worker.close()), ...[...queues.values()].map((queue) => queue.close()), realtime.quit(), database.pool.end(), dispatcherDatabase.pool.end(), new Promise<void>((resolve) => health.close(() => resolve())), shutdownTelemetry()]);

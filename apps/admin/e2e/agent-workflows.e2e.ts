@@ -94,12 +94,21 @@ test("service, rule and knowledge editors persist changes and enforce read-only 
     await page.goto(`${baseURL}/settings/notifications`);
     const smsSwitch = page.getByRole("switch", { name: settings.notifications.sources.sms.title, exact: true });
     await expect(smsSwitch).toBeEnabled();
+    // The phone is verified but no consent is on record, so the switch opens the
+    // confirm step, and closing it grants nothing.
     await smsSwitch.click();
-    await expect(dialog.getByRole("heading", { name: settings.notifications.smsConsent.title, exact: true })).toBeVisible();
-    await dialog.getByRole("button", { name: settings.notifications.smsConsent.cancel, exact: true }).click();
-    expect((await (await context.request.get(notificationUrl)).json()).smsConsent).toBe(false);
+    await expect(dialog.getByRole("heading", { name: settings.notifications.phoneVerification.confirm.title, exact: true })).toBeVisible();
+    await expect(dialog.getByText(settings.notifications.phoneVerification.confirm.consent, { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: settings.notifications.phoneVerification.cancel, exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(smsSwitch).not.toBeChecked();
+    const afterCancel = await (await context.request.get(notificationUrl)).json();
+    expect(afterCancel.smsConsent).toBe(false);
+    expect(afterCancel.smsEnabled).toBe(false);
+    // Consent comes from the confirm step's disclosure; record it as that step would.
+    expect((await context.request.put(notificationUrl, { headers, data: { ...initialPreferences, smsEnabled: false, smsConsent: true } })).status()).toBe(200);
+    await page.reload();
     await smsSwitch.click();
-    await dialog.getByRole("button", { name: settings.notifications.smsConsent.accept, exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect.poll(async () => (await (await context.request.get(notificationUrl)).json()).smsConsent).toBe(true);
     await page.reload();

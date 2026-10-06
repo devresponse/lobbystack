@@ -1,6 +1,7 @@
 "use client";
 
 import { selectActiveBusiness } from "@/lib/active-business";
+import { useActiveBusiness } from "@/hooks/use-active-business";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -12,15 +13,14 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Surface } from "@/components/ui/surface";
 import { Switch } from "@/components/ui/switch";
 import { requestJson } from "@/lib/request-json";
-import type { SupportedLocale, TimeFormatPreference } from "@/lib/locale";
+import { LOCALE_LABEL_KEYS, SUPPORTED_LOCALES, localeTag, type SupportedLocale, type TimeFormatPreference } from "@/lib/locale";
 
 export default function AppearancePage() {
   const { t } = useTranslation(["settings", "common"]);
   const { locale, setLocale, isSaving: isLocaleSaving } = useLocalePreference();
   const { timeFormatPreference, setTimeFormatPreference } = useAppearancePreference();
   const queryClient = useQueryClient();
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => requestJson<{ businesses: Array<{ businessId: string; active: boolean }> }>("/api/businesses") });
-  const businessId = selectActiveBusiness(businesses.data?.businesses)?.businessId;
+  const businessId = useActiveBusiness().business?.businessId;
   type Preference = { telemetryEnabled: boolean; canManageTenant: boolean };
   const appearance = useQuery({ queryKey: ["appearance-preferences", businessId], enabled: Boolean(businessId), queryFn: () => requestJson<Preference>(`/api/preferences/appearance?businessId=${encodeURIComponent(businessId!)}`) });
   const updateAppearance = useMutation({
@@ -45,7 +45,7 @@ export default function AppearancePage() {
         <Surface className="flex flex-col">
           <Item className="rounded-none border-x-0 border-t-0 border-b border-border last:border-b-0" variant="default">
             <ItemContent><ItemTitle>{t("appearance.language.label")}</ItemTitle><ItemDescription>{t("appearance.language.description")}</ItemDescription></ItemContent>
-            <ItemActions className="w-full sm:w-auto"><NativeSelect aria-label={t("common:language.ariaLabel")} disabled={isLocaleSaving} className="w-full sm:w-28" onChange={(event) => void setLocale(event.target.value as SupportedLocale)} value={locale}><NativeSelectOption value="en">{t("common:language.english")}</NativeSelectOption><NativeSelectOption value="fr">{t("common:language.french")}</NativeSelectOption></NativeSelect></ItemActions>
+            <ItemActions className="w-full sm:w-auto"><NativeSelect aria-label={t("common:language.ariaLabel")} disabled={isLocaleSaving} className="w-full sm:w-28" onChange={(event) => void setLocale(event.target.value as SupportedLocale)} value={locale}>{SUPPORTED_LOCALES.map((option) => <NativeSelectOption key={option} lang={localeTag(option)} value={option}>{t(LOCALE_LABEL_KEYS[option])}</NativeSelectOption>)}</NativeSelect></ItemActions>
           </Item>
           <Item className="rounded-none border-x-0 border-t-0 border-b border-border last:border-b-0" variant="default">
             <ItemContent><ItemTitle>{t("appearance.timeFormat.label")}</ItemTitle><ItemDescription>{t("appearance.timeFormat.description")}</ItemDescription></ItemContent>

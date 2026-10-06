@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { createInMemorySnapshotCache, deserializeSnapshot, serializeSnapshot, snapshotCacheKey, type SnapshotCacheClient } from "@lobbystack/domain";
+import { deserializeSnapshot, snapshotCacheKey } from "@lobbystack/domain";
 import { demoSnapshot } from "@lobbystack/shared";
 
-import { closeAdminSnapshotCache, getAdminSnapshotCache } from "./widget-snapshot-cache";
+import { closeRedis } from "./redis";
+import { getAdminSnapshotCache } from "./widget-snapshot-cache";
 
 beforeEach(() => {
   vi.stubEnv("REDIS_URL", "");
@@ -34,7 +35,7 @@ describe("admin widget snapshot cache (Redis-backed)", () => {
       businessId: "00000000-0000-4000-8000-000000000001",
       services: demoSnapshot.services.map((service, index) => ({ ...service, id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}` })),
     };
-    const raw = serializeSnapshot(snapshot);
+    const raw = JSON.stringify(snapshot);
     const parsed = deserializeSnapshot(raw);
     expect(parsed).not.toBeNull();
     expect(parsed?.businessId).toBe("00000000-0000-4000-8000-000000000001");
@@ -42,14 +43,8 @@ describe("admin widget snapshot cache (Redis-backed)", () => {
     expect(deserializeSnapshot(null)).toBeNull();
   });
 
-  it("round-trips a real snapshot through the in-memory cache used as a double", async () => {
-    const cache = createInMemorySnapshotCache() as SnapshotCacheClient;
-    await cache.set("00000000-0000-4000-8000-000000000002", demoSnapshot);
-    await expect(cache.get("00000000-0000-4000-8000-000000000002")).resolves.toEqual(demoSnapshot);
-  });
-
   it("does not leak a stale connection handle across tests", async () => {
-    await closeAdminSnapshotCache();
+    await closeRedis();
     const cache = getAdminSnapshotCache();
     await expect(cache.get("00000000-0000-4000-8000-000000000003")).resolves.toBeNull();
   });

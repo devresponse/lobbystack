@@ -1,0 +1,96 @@
+---
+title: "Entienda el autoalojamiento"
+description: "Conozca los servicios que ejecuta una implementación autoalojada de LobbyStack, cómo circulan los datos de las llamadas entre ellos y qué partes opera usted, desde Railway hasta sus propios servidores."
+sidebarTitle: "Descripción general del autoalojamiento"
+contentType: "Conceptual"
+---
+
+LobbyStack puede ejecutarse en un solo host de Docker o como servicios gestionados independientes. El autoalojamiento le da control sobre los datos de la aplicación, las credenciales, el uso de los proveedores, las copias de seguridad y las actualizaciones.
+
+<Note>
+  Las llamadas en vivo siguen necesitando Twilio, OpenAI y un endpoint HTTPS público para el panel. Las llamadas telefónicas también necesitan un trunk Elastic SIP de Twilio que envíe las llamadas a su proyecto de OpenAI.
+</Note>
+
+## Implemente en Railway
+
+La [plantilla de LobbyStack para Railway](https://railway.com/deploy/lobbystack) implementa los servicios de administración, worker y migración con PostgreSQL, Redis y un bucket de almacenamiento. Railway genera todos los secretos y las contraseñas de las bases de datos. Usted introduce una clave de API de OpenAI y sus credenciales de Twilio. Luego crea su cuenta en el dominio de administración y sigue los pasos de abajo.
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/lobbystack)
+
+### Después de implementar
+
+Las llamadas de prueba desde el navegador funcionan en cuanto termina la implementación. El correo electrónico, las llamadas telefónicas, la importación de sitios web y Google Calendar necesitan más configuración, y los pasos del teléfono y del calendario usan el dominio de administración que asigna Railway. Configure cada variable en el servicio indicado y luego implemente los cambios pendientes en Railway.
+
+#### Configure el correo electrónico
+
+El restablecimiento de contraseñas, los códigos de verificación, las invitaciones al equipo y las alertas a los operadores fallan hasta que el worker pueda enviar correo. En el servicio `worker`, configure:
+
+- `SMTP_HOST`, `SMTP_USERNAME` y `SMTP_PASSWORD` de su proveedor de correo
+- `SMTP_PORT`, que vale `587` por defecto, y `SMTP_SECURE`, que vale `false` por defecto. Use `465` y `true` si su proveedor exige TLS desde el inicio de la conexión.
+- `EMAIL_FROM`, una dirección desde la que su proveedor le permita enviar, como `LobbyStack <no-reply@example.com>`
+- `EMAIL_REPLY_TO`, si las respuestas deben ir a otra dirección
+
+#### Termine de configurar las llamadas telefónicas
+
+Las llamadas desde el navegador funcionan sin estos pasos. Las llamadas telefónicas necesitan un proyecto de OpenAI con SIP activado y un trunk Elastic SIP de Twilio:
+
+1. En el panel de OpenAI, agregue un webhook para `live.transport.incoming` que apunte a `https://su_dominio_de_administracion/api/webhooks/openai/live`.
+2. Configure el secreto de firma del webhook como `OPENAI_WEBHOOK_SECRET` en el servicio `admin`.
+3. En Twilio, cree un trunk Elastic SIP con el URI de origen `sip:su_id_de_proyecto_openai@sip.api.openai.com;transport=tls`.
+4. Configure el SID del trunk como `TWILIO_SIP_TRUNK_SID` en el servicio `worker`. Sin él, el worker no puede aprovisionar números de teléfono.
+
+La [guía del runtime de voz](https://github.com/lobbystack/lobbystack/blob/main/docs/voice/runtime.md#set-up-the-phone-path) (en inglés) explica la configuración de transferencias del trunk y cómo mover números existentes.
+
+#### Importe sitios web (opcional)
+
+Configure `FIRECRAWL_API_KEY` en el servicio `worker`. Sin ella, la importación de sitios web falla.
+
+#### Conecte Google Calendar (opcional)
+
+En Google Cloud, active la API de Google Calendar y cree un cliente OAuth para una aplicación web. Agregue `https://su_dominio_de_administracion/api/calendar/google/callback` como URI de redireccionamiento autorizado. Configure `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` en el servicio `admin`. La plantilla completa `GOOGLE_REDIRECT_URI`, y el worker lee los tres valores del servicio de administración.
+
+#### Use un dominio personalizado
+
+Agregue el dominio al servicio `admin` y luego configure `APP_BASE_URL` en el servicio `admin` con el valor `https://su_dominio`. Estas variables hacen referencia a ella y siguen el cambio:
+
+- `SITE_URL`, `AUTH_TRUSTED_ORIGINS`, `TWILIO_SMS_WEBHOOK_URL`, `TWILIO_STATUS_CALLBACK_URL` y `GOOGLE_REDIRECT_URI` en el servicio `admin`
+- `APP_BASE_URL`, `TWILIO_STATUS_CALLBACK_URL` y `GOOGLE_REDIRECT_URI` en el servicio `worker`
+
+Una implementación creada con una versión anterior de la plantilla tiene el dominio de Railway escrito en cada una de estas variables, así que modifíquelas todas. Después, apunte el webhook de OpenAI y el URI de redireccionamiento de Google al nuevo dominio. Los números de teléfono que aprovisionó antes del cambio conservan en Twilio sus URL anteriores de SMS y de devolución de llamada de estado hasta que las actualice allí.
+
+## Base oficial
+
+El archivo [`docker-compose.yml`](https://github.com/lobbystack/lobbystack/blob/main/docker-compose.yml) del repositorio ejecuta:
+
+- PostgreSQL con pgvector para los datos persistentes, el estado de autenticación y los embeddings de conocimiento
+- Redis para las colas, los límites de frecuencia y la coordinación en tiempo real
+- un volumen persistente de Docker para las grabaciones y los documentos subidos
+- el panel de administración de Next.js y la API HTTP
+- el worker en segundo plano y el despachador de la bandeja de salida transaccional, que también ejecuta cada llamada de GPT-Live
+- Caddy para dirigir el nombre de host del panel por HTTP simple, detrás del proxy o balanceador de carga que termina HTTPS
+
+LobbyStack no agrega contenedores de monitoreo a la pila de Compose. Los entornos de ejecución del servidor pueden enviar trazas, métricas y registros de OpenTelemetry a un backend compatible con OTLP que usted configure.
+
+## Flujo de datos
+
+1. El panel y la API leen y escriben en PostgreSQL mediante conexiones específicas de cada rol y seguridad a nivel de fila.
+2. Los efectos secundarios persistentes entran en la bandeja de salida de PostgreSQL en la misma transacción que los cambios de estado del negocio.
+3. El worker despacha los trabajos en cola y actualiza las instantáneas del contexto del negocio.
+4. OpenAI aloja el audio de las llamadas. El servicio de administración inicia cada llamada con la instantánea del negocio, y el worker responde a las solicitudes de GPT-Live sobre reservas, mensajes y transferencias.
+5. El servicio de administración y el worker comparten el proveedor de almacenamiento configurado. Las implementaciones de Compose en un solo host usan por defecto un volumen local persistente.
+
+## Responsabilidades
+
+Usted es responsable de:
+
+- la durabilidad de PostgreSQL, Redis y el almacenamiento de archivos
+- las copias de seguridad, los simulacros de restauración, las actualizaciones y el monitoreo
+- el DNS público y el TLS del panel
+- las credenciales de Twilio, OpenAI, correo electrónico, calendario, facturación y analíticas
+- la rotación de secretos y los roles de base de datos con privilegios mínimos
+
+Continúe con la [guía de implementación con Docker Compose](/es/self-hosting/docker-compose), las [variables de entorno](/es/self-hosting/environment-variables) y la [referencia de proveedores](/es/self-hosting/providers).
+
+<Warning>
+  El almacenamiento local requiere que el servicio de administración y el worker se ejecuten en el mismo host de Docker. Las implementaciones con contenedores de la aplicación en más de un host deben configurar `STORAGE_PROVIDER=s3` y usar AWS S3 o un servicio compatible.
+</Warning>

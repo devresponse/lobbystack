@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { normalizeBookingMode, type AppointmentChangePolicy, type BookingMode, type RuntimeLocale } from "@lobbystack/shared";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   Item,
   ItemActions,
@@ -17,11 +19,12 @@ import {
 } from "@/components/ui/item";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { PhoneInput } from "@/components/ui/phone-input";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Surface } from "@/components/ui/surface";
 import { Switch } from "@/components/ui/switch";
 import { useTelemetry } from "@/components/product-analytics";
+import { BookingWithoutHoursAlert, BusinessHoursSection, needsHoursForBooking, useBusinessHours } from "@/components/business-hours-section";
 
 type AgentBasicSettingsPageProps = {
   businessId: string;
@@ -79,18 +82,25 @@ export function AgentBasicSettingsPage({
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["agent-settings", businessId],
-    queryFn: () => requestJson<{ business: { defaultLocale: RuntimeLocale } | null; profile: { greeting: string; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null }>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
+    queryFn: () => requestJson<{ business: { defaultLocale: RuntimeLocale } | null; profile: { greeting: string; summary: string; summarySource: "placeholder" | "generated" | "operator"; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null }>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
     enabled: Boolean(businessId),
   });
   const configuration = query.data;
+  const hours = useBusinessHours(businessId);
   const isLoadingConfiguration = !businessId || query.isLoading;
-  async function saveProfile({ defaultLocale: locale, ...patch }: { businessId: string; defaultLocale?: RuntimeLocale; greeting?: string; transferNumber?: string | null; transferMode?: string; appointmentChangePolicy?: AppointmentChangePolicy; bookingMode?: BookingMode }) {
+  async function saveProfile({ defaultLocale: locale, ...patch }: { businessId: string; defaultLocale?: RuntimeLocale; greeting?: string; summary?: string; regenerateSummary?: true; transferNumber?: string | null; transferMode?: string; appointmentChangePolicy?: AppointmentChangePolicy; bookingMode?: BookingMode }) {
     await requestJson(`/api/agent?businessId=${encodeURIComponent(businessId)}`, { method: "PATCH", body: JSON.stringify({ ...patch, ...(locale ? { locale } : {}) }) });
     await queryClient.invalidateQueries({ queryKey: ["agent-settings", businessId] });
   }
   const persistedProfile = configuration?.profile;
+  // The sign-up placeholder isn't a summary, so it shows as empty.
+  const savedSummary = persistedProfile && persistedProfile.summarySource !== "placeholder" ? persistedProfile.summary : "";
 
   const [greeting, setGreeting] = useState("");
+  const [summary, setSummary] = useState("");
+  const [summaryStatus, setSummaryStatus] = useState<string | null>(null);
+  const [isSummarySaving, setIsSummarySaving] = useState(false);
+  const [isSummaryOpen, setIsSummaryOpen] = useState(false);
   const [defaultLocale, setDefaultLocale] = useState<RuntimeLocale>("en");
   const [transferNumber, setTransferNumber] = useState("");
   const [transferNumberInputValue, setTransferNumberInputValue] = useState("");
@@ -105,6 +115,7 @@ export function AgentBasicSettingsPage({
   const [transferStatus, setTransferStatus] = useState<string | null>(null);
   const [appointmentChangeStatus, setAppointmentChangeStatus] = useState<string | null>(null);
   const [isGreetingSaving, setIsGreetingSaving] = useState(false);
+  const [isGreetingOpen, setIsGreetingOpen] = useState(false);
   const [isLocaleSaving, setIsLocaleSaving] = useState(false);
   const [isTransferSaving, setIsTransferSaving] = useState(false);
   const [isAppointmentChangeSaving, setIsAppointmentChangeSaving] = useState(false);
@@ -115,6 +126,8 @@ export function AgentBasicSettingsPage({
       return;
     }
     setGreeting(profile.greeting);
+    // The sign-up placeholder isn't a summary, so the field starts empty.
+    setSummary(profile.summarySource === "placeholder" ? "" : profile.summary);
     setDefaultLocale(configuration.business?.defaultLocale ?? "en");
     setTransferNumber(profile.transferNumber ?? "");
     setTransferNumberInputValue(profile.transferNumber ?? "");
@@ -167,31 +180,36 @@ export function AgentBasicSettingsPage({
       return;
     }
 
-    const transferNumberResolution = resolveTransferNumberForSave({
-      rawInputValue: transferNumberInputValue,
-      validTransferNumber: transferNumber,
-    });
-    if (!transferNumberResolution.ok) {
-      setTransferStatus(t(transferNumberResolution.errorKey));
-      setTransferStatusTone("error");
-      return;
-    }
-
     setIsGreetingSaving(true);
     setGreetingStatus(null);
     try {
-      await saveProfile({
-        businessId,
-        defaultLocale,
-        greeting,
-        transferNumber: transferNumberResolution.value,
-      });
+      // Only the greeting: the dialog hides the other fields, so their drafts stay unsaved.
+      await saveProfile({ businessId, greeting });
       telemetry.track("web.agent.settings_saved", { businessId, setting: "greeting" });
       setGreetingStatus(t("agent:actions.saved"));
+      setIsGreetingOpen(false);
     } catch {
       toast.error(t("agent:actions.saveFailed"));
     } finally {
       setIsGreetingSaving(false);
+    }
+  }
+
+  async function saveSummary(regenerate: boolean): Promise<void> {
+    if (!canManageTenant || !persistedProfile || (!regenerate && !summary.trim())) {
+      return;
+    }
+    setIsSummarySaving(true);
+    setSummaryStatus(null);
+    try {
+      await saveProfile(regenerate ? { businessId, regenerateSummary: true } : { businessId, summary: summary.trim() });
+      telemetry.track("web.agent.settings_saved", { businessId, setting: regenerate ? "summary_regenerated" : "summary" });
+      setSummaryStatus(regenerate ? t("agent:fields.summary.regenerating") : t("agent:actions.saved"));
+      setIsSummaryOpen(false);
+    } catch {
+      toast.error(t("agent:actions.saveFailed"));
+    } finally {
+      setIsSummarySaving(false);
     }
   }
 
@@ -305,41 +323,99 @@ export function AgentBasicSettingsPage({
               <ItemContent>
                 <ItemTitle>{t("agent:fields.greeting.label")}</ItemTitle>
                 <ItemDescription>{t("agent:fields.greeting.hint")}</ItemDescription>
-                <div className="pt-2">
-                  {isLoadingConfiguration ? (
-                    <Skeleton className="h-10 w-full rounded-md sm:max-w-md" />
-                  ) : (
-                    <Input
-                      className="w-full sm:max-w-md"
-                      disabled={!canManageTenant}
-                      id="agent-greeting"
-                      onChange={(event) => {
-                        setGreeting(event.target.value);
-                        setGreetingStatus(null);
-                      }}
-                      placeholder={t("agent:fields.greeting.placeholder")}
-                      value={greeting}
-                    />
-                  )}
-                </div>
                 {greetingStatus ? <ItemDescription>{greetingStatus}</ItemDescription> : null}
               </ItemContent>
               <ItemActions className="w-full justify-end self-center sm:w-auto">
                 <Button
-                  disabled={
-                    isLoadingConfiguration ||
-                    isGreetingSaving ||
-                    !persistedProfile ||
-                    !canManageTenant
-                  }
-                  onClick={() => void saveGreeting()}
+                  aria-label={t("agent:actions.editField", { field: t("agent:fields.greeting.label") })}
+                  disabled={isLoadingConfiguration || !persistedProfile || !canManageTenant}
+                  onClick={() => {
+                    setGreeting(persistedProfile?.greeting ?? "");
+                    setGreetingStatus(null);
+                    setIsGreetingOpen(true);
+                  }}
                   size="sm"
                   type="button"
                   variant="outline"
                 >
-                  {isGreetingSaving ? t("agent:actions.saving") : t("agent:actions.save")}
+                  {t("agent:actions.edit")}
                 </Button>
               </ItemActions>
+              <Dialog onOpenChange={(open) => { if (!open && !isGreetingSaving) setIsGreetingOpen(false); }} open={isGreetingOpen}>
+                <DialogContent className="flex flex-col gap-4 sm:max-w-lg">
+                  <DialogHeader><DialogTitle>{t("agent:fields.greeting.label")}</DialogTitle></DialogHeader>
+                  <Textarea
+                    autoFocus
+                    disabled={!canManageTenant || isGreetingSaving}
+                    id="agent-greeting"
+                    onChange={(event) => setGreeting(event.target.value)}
+                    placeholder={t("agent:fields.greeting.placeholder")}
+                    rows={3}
+                    value={greeting}
+                  />
+                  <DialogFooter>
+                    <Button disabled={isGreetingSaving} onClick={() => setIsGreetingOpen(false)} type="button" variant="outline">{t("agent:actions.cancel")}</Button>
+                    <Button disabled={isGreetingSaving || !canManageTenant || !greeting.trim()} onClick={() => void saveGreeting()} type="button">
+                      {isGreetingSaving ? t("agent:actions.saving") : t("agent:actions.save")}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </Item>
+
+            <Item
+              className="rounded-none border-x-0 border-t-0 border-b border-border last:border-b-0"
+              variant="default"
+            >
+              <ItemContent>
+                <ItemTitle>{t("agent:fields.summary.label")}</ItemTitle>
+                <ItemDescription>{t("agent:fields.summary.hint")}</ItemDescription>
+                {summaryStatus ? <ItemDescription>{summaryStatus}</ItemDescription> : null}
+              </ItemContent>
+              <ItemActions className="w-full justify-end self-center sm:w-auto">
+                <Button
+                  aria-label={t("agent:actions.editField", { field: t("agent:fields.summary.label") })}
+                  disabled={isLoadingConfiguration || !persistedProfile || !canManageTenant}
+                  onClick={() => {
+                    setSummary(savedSummary);
+                    setSummaryStatus(null);
+                    setIsSummaryOpen(true);
+                  }}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                >
+                  {t("agent:actions.edit")}
+                </Button>
+              </ItemActions>
+              <Dialog onOpenChange={(open) => { if (!open && !isSummarySaving) setIsSummaryOpen(false); }} open={isSummaryOpen}>
+                <DialogContent className="flex flex-col gap-4 sm:max-w-lg">
+                  <DialogHeader><DialogTitle>{t("agent:fields.summary.label")}</DialogTitle></DialogHeader>
+                  <Textarea
+                    autoFocus
+                    disabled={!canManageTenant || isSummarySaving}
+                    id="agent-summary"
+                    maxLength={2000}
+                    onChange={(event) => setSummary(event.target.value)}
+                    placeholder={t("agent:fields.summary.placeholder")}
+                    rows={6}
+                    value={summary}
+                  />
+                  <DialogFooter className="sm:justify-between">
+                    {persistedProfile?.summarySource === "operator" ? (
+                      <Button disabled={isSummarySaving || !canManageTenant} onClick={() => void saveSummary(true)} type="button" variant="ghost">
+                        {t("agent:fields.summary.regenerate")}
+                      </Button>
+                    ) : <span />}
+                    <div className="flex gap-2">
+                      <Button disabled={isSummarySaving} onClick={() => setIsSummaryOpen(false)} type="button" variant="outline">{t("agent:actions.cancel")}</Button>
+                      <Button disabled={isSummarySaving || !canManageTenant || !summary.trim()} onClick={() => void saveSummary(false)} type="button">
+                        {isSummarySaving ? t("agent:actions.saving") : t("agent:actions.save")}
+                      </Button>
+                    </div>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
             </Item>
 
             <Item
@@ -514,7 +590,10 @@ export function AgentBasicSettingsPage({
               </ItemActions>
             </Item>
           </Surface>
+          {!isLoadingConfiguration && hours.data && needsHoursForBooking({ ...hours.data, bookingMode }) ? <BookingWithoutHoursAlert /> : null}
         </section>
+
+        <BusinessHoursSection businessId={businessId} canManage={canManageTenant} />
 
         <section className="flex flex-col gap-3">
           <h2 className="font-heading text-sm leading-snug font-medium">
@@ -615,7 +694,6 @@ export function AgentBasicSettingsPage({
 }
 
 export function LiveAgentBasicSettingsSurface() {
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => requestJson<{ businesses: Array<{ businessId: string; active: boolean; role: string }> }>("/api/businesses") });
-  const business = businesses.data?.businesses.find((item) => item.active) ?? businesses.data?.businesses[0];
+  const { business } = useActiveBusiness();
   return <AgentBasicSettingsPage businessId={business?.businessId ?? ""} canManageTenant={Boolean(business && ["business_owner", "business_admin"].includes(business.role))} />;
 }

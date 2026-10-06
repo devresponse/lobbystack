@@ -1,109 +1,181 @@
+import type { LanguageModelUsage } from "ai";
 import type OpenAI from "openai";
 import type { DelegationCreatedEvent } from "openai/resources/live/live";
 import { SidebandWS } from "openai/resources/live/sideband/ws";
 
 import type { ReceptionistAgent } from "../agent";
-import {
-  LiveLatencyTracker,
-  type LiveCallLatency,
-} from "./latency";
+import { DIRECT_ANSWER_TOOLS, directToolAnswer, fitToAppend, type DirectAnswerStep } from "./directAnswer";
+import { greetingCommand } from "./greeting";
+import { LiveLatencyTracker, type LiveCallLatency } from "./latency";
 
-type Turn = {
-  role: "caller" | "receptionist";
-  text: string;
-  endMs: number;
-};
+type Turn = { role: "caller" | "receptionist"; text: string; endMs: number };
 
 export type DelegationTiming = {
   delegationId: string;
   offsetMs: number;
   transcriptWaitMs: number;
+  /** Time spent waiting for an earlier request on the call to finish first. */
+  queueMs: number;
   agentMs: number;
   totalMs: number;
   tools: string[];
+  /** Model calls the agent made. A direct tool answer saves the last one. */
+  modelSteps: number;
+  /** The answer came straight from a tool result, with no model step to phrase it. */
+  directAnswer: boolean;
+  /** How long each step took, a model call plus the tools it called, in order. */
+  stepMs: number[];
+  /** Time spent running tools across all steps. The rest of agentMs is the model. */
+  toolMs: number;
   answer: string;
   failed: boolean;
+  /** The caller made a newer request before this one finished, so its result wasn't spoken. */
+  superseded: boolean;
+  /** Tokens across the agent's model steps, when the generation finished. */
+  usage?: LanguageModelUsage;
 };
 
 export type LiveCallSummary = {
   sessionId: string;
   durationMs: number;
-
-  /** Session length OpenAI bills for, when the session closed normally. */
+  /**
+   * Session length OpenAI bills for: the final usage from session.closed, or
+   * the latest session.usage.updated when the session never confirmed it.
+   */
   billedSeconds?: number;
-
+  /** False when the connection ended before OpenAI sent session.closed. */
+  usageConfirmed: boolean;
   delegations: DelegationTiming[];
   closeReason?: string;
-
   /** What the caller heard: when the receptionist first spoke and the gap before each answer. */
   latency?: LiveCallLatency;
+  /**
+   * The undocumented output audio events the sideband reflected: how many,
+   * where the first one started, and the timeline they covered. GPT-Live is
+   * full duplex, so these can cover silence; this shows how much.
+   */
+  outputAudio: { deltas: number; firstStartMs?: number; coveredMs: number; payloadBytes: number };
 };
 
 /** A finished stretch of speech by one side, numbered in call order. */
-export type LiveCallTurn = {
-  sequence: number;
-  speaker: "caller" | "assistant";
-  text: string;
+export type LiveCallTurn = { sequence: number; speaker: "caller" | "assistant"; text: string };
+
+export type LiveCallTimeout = "silence_timeout" | "duration_limit";
+
+export type GreetingEvent = {
+  /**
+   * "spoken": the receptionist's voice was heard; attempt 0 means the greeting
+   * in the session's starting history did it. "sent", "acknowledged" and
+   * "failed" track the fallback command.
+   */
+  step: "sent" | "acknowledged" | "spoken" | "failed";
+  attempt: number;
+  /** What sent the fallback command. */
+  trigger?: "fallback";
+  /** Milliseconds since the worker attached to the call. */
+  sinceAttachMs: number;
+  error?: string;
 };
 
-export type LiveCallTimeout =
-  | "silence_timeout"
-  | "duration_limit";
+/** What the controller needs from the business. The worker may still be loading it when the call connects. */
+export type LiveCallSetup = {
+  agent: ReceptionistAgent;
+  /**
+   * The business greeting. GPT-Live speaks it from the session's starting
+   * history; the controller only sends it again as a fallback.
+   */
+  greeting?: string;
+};
 
 export type LiveCallControllerOptions = {
   client: OpenAI;
   sessionId: string;
-  agent: ReceptionistAgent;
-
-  /** Spoken as soon as the call connects, so the caller doesn't have to speak first. */
-  greeting?: string;
-
+  /** A phone call ends through OpenAI's SIP hangup; a browser call by closing the session. */
+  phone: boolean;
+  setup: LiveCallSetup | Promise<LiveCallSetup>;
   /** Hang up after this long without either side speaking. */
   silenceTimeoutMs?: number;
-
   /** Hang up when the call runs this long. */
   maxDurationMs?: number;
-
   /** Audio is flowing: the session started. */
   onStarted?: () => void;
-
+  /** Each step of the greeting, for logs: sent, acknowledged, spoken or failed. */
+  onGreeting?: (event: GreetingEvent) => void;
   onTurn?: (turn: LiveCallTurn) => void;
   onTimeout?: (reason: LiveCallTimeout) => void;
   onDelegation?: (timing: DelegationTiming) => void;
   onClose?: (summary: LiveCallSummary) => void;
 };
 
-// Commentary appends are capped at 500 tokens; a spoken answer is far shorter.
-const MAX_ANSWER_CHARS = 1_200;
-
 // The caller's last words can arrive just after the delegation event.
 const TRANSCRIPT_WAIT_MS = 300;
+// GPT-Live speaks the greeting from the session's starting history about 2
+// seconds in. With no voice by this long after the worker sees the session
+// start, it sends the greeting command once more.
+const GREETING_FALLBACK_MS = 4_000;
+// Reflected output audio is 16-bit PCM at 24 kHz. A chunk this loud is voice;
+// silence on staging calls stayed far below it.
+const VOICE_RMS = 400;
+// Most answers take one or two seconds; past this the caller hears an update.
+const STILL_WORKING_MS = 4_000;
+// Requests run one at a time, so a stuck one would hold up every later one.
+// Past this it's abandoned and the caller hears that it couldn't be completed.
+const DELEGATION_TIMEOUT_MS = 30_000;
+// Past the sideband's 3-second replay window, session.started can't arrive.
+const LATE_ATTACH_MS = 3_500;
+// After session.close or a hangup, how long to wait for session.closed.
+const FINALIZE_TIMEOUT_MS = 15_000;
+// Ending the call waits for the goodbye: for it to start, then for its audio to finish.
+const GOODBYE_START_MS = 4_000;
+const GOODBYE_MAX_MS = 15_000;
+const GOODBYE_QUIET_MS = 1_000;
+const GOODBYE_POLL_MS = 200;
+// Actions the next request sees, newest last.
+const MAX_REMEMBERED_ACTIONS = 10;
 
-const GREETING_FALLBACK_MS = 1_500;
+// The facts GPT-Live receives when a request fails. Its instructions say what to do then.
+const FAILED_ANSWER = "The backend couldn't complete this request.";
+const STILL_WORKING = "Still checking. This is taking a few more seconds.";
 
-// How long to wait for the receptionist to start speaking after a fallback
-// greeting before deciding GPT-Live ignored it.
-const GREETING_CONFIRM_MS = 1_500;
+// Tools that change something. The next request on the call sees their results,
+// so a changed request reschedules instead of booking twice.
+const ACTION_TOOLS = new Set(["bookAppointment", "requestAppointment", "cancelAppointment", "rescheduleAppointment", "takeMessage", "transferCall", "endCall"]);
+// Lookups the next request can reuse instead of repeating.
+const REUSABLE_LOOKUPS = new Set(["findAvailability"]);
+const PROGRESS: Record<string, string> = {
+  findAvailability: "looked up open times",
+  bookAppointment: "tried to book the appointment",
+  requestAppointment: "tried to save the appointment request",
+  lookupAppointmentForChange: "looked up the caller's appointment",
+  verifyAppointmentForChange: "checked the caller's identity",
+  sendAppointmentChangeOtp: "sent a verification code",
+  verifyAppointmentChangeOtp: "checked the verification code",
+  cancelAppointment: "tried to cancel the appointment",
+  rescheduleAppointment: "tried to reschedule the appointment",
+  takeMessage: "tried to save the message",
+  transferCall: "tried to transfer the call",
+  searchKnowledge: "searched the business's documents",
+};
 
-const FALLBACK_ANSWER =
-  "Sorry, I couldn't check that just now. Offer to take a message so the team can follow up.";
+type PendingAppend = { kind: "greeting" | "answer" | "update"; delegationId?: string };
+type StepLike = DirectAnswerStep & { toolResults: Array<{ toolName: string; output: unknown }> };
 
-/**
- * Retry only the initial sideband attachment.
- *
- * This is deliberately not a general mid-call WebSocket reconnect mechanism.
- * Once the sideband has received a real session event, reconnecting can replay
- * transcripts/delegations and risks duplicate actions such as bookings,
- * transfers, or messages.
- *
- * Initial connection failures are safe to retry because the worker has not yet
- * processed a live session event or delegated action.
- */
-const SIDEBAND_INITIAL_RETRY_DELAYS_MS = [
-  250,
-  750,
-  1_500,
-] as const;
+/** Whether a base64 chunk of 16-bit PCM is loud enough to be speech. */
+export function isVoice(base64: string): boolean {
+  const bytes = Buffer.from(base64, "base64");
+  const samples = Math.floor(bytes.length / 2);
+  if (!samples) return false;
+  let sum = 0;
+  for (let index = 0; index < samples; index += 1) {
+    const sample = bytes.readInt16LE(index * 2);
+    sum += sample * sample;
+  }
+  return Math.sqrt(sum / samples) >= VOICE_RMS;
+}
+
+function succeeded(output: unknown): boolean {
+  return typeof output === "object" && output !== null && (output as { ok?: unknown }).ok !== false;
+}
 
 /**
  * Holds the sideband connection for one GPT-Live session for the whole call and
@@ -111,538 +183,195 @@ const SIDEBAND_INITIAL_RETRY_DELAYS_MS = [
  */
 export class LiveCallController {
   private readonly startedAt = Date.now();
+  private readonly attachedAt = performance.now();
   private readonly turns: Turn[] = [];
   private readonly delegations: DelegationTiming[] = [];
   private readonly abort = new AbortController();
-
-  private socket: SidebandWS | undefined;
-
-  /**
-   * Becomes true as soon as this controller receives a genuine event from the
-   * OpenAI live session. Before that point a failed sideband attachment can be
-   * retried safely.
-   */
-  private sidebandEstablished = false;
-
-  /**
-   * Number of initial attachment retries already scheduled/performed.
-   */
-  private sidebandRetryCount = 0;
-
-  private sidebandRetryTimer:
-    | ReturnType<typeof setTimeout>
-    | undefined;
-
-  /**
-   * Prevent the same delegation from being executed twice if OpenAI replays a
-   * recently-created delegation while an initial sideband connection is being
-   * recovered.
-   */
-  private readonly seenDelegationIds = new Set<string>();
-
-  private transcriptWaiters: Array<{
-    offsetMs: number;
-    resolve: () => void;
-  }> = [];
-
-  private emittedTurns = 0;
-
-  private silenceTimer:
-    | ReturnType<typeof setTimeout>
-    | undefined;
-
-  private durationTimer:
-    | ReturnType<typeof setTimeout>
-    | undefined;
-
   private readonly latency = new LiveLatencyTracker();
+  private readonly ready: Promise<LiveCallSetup>;
+  private socket: SidebandWS | undefined;
+  private transcriptWaiters: Array<{ offsetMs: number; resolve: () => void }> = [];
+  private emittedTurns = 0;
+  private silenceTimer: ReturnType<typeof setTimeout> | undefined;
+  private durationTimer: ReturnType<typeof setTimeout> | undefined;
+  private greetingFallbackTimer: ReturnType<typeof setTimeout> | undefined;
+  private finalizeTimer: ReturnType<typeof setTimeout> | undefined;
+  private started = false;
+  private greetingAttempts = 0;
+  private greetingSpoken = false;
+  private readonly pendingAppends = new Map<string, PendingAppend>();
+  // Delegations run one at a time in arrival order. A newer request supersedes
+  // an unfinished older one: its result goes to GPT-Live as background facts
+  // and to the next request, rather than being spoken over the newer answer.
+  private delegationQueue: Promise<void> = Promise.resolve();
+  private latestRevision = 0;
+  private runningDelegations = 0;
+  private unheardResults: string[] = [];
+  private readonly completedActions: string[] = [];
+  private latestLookup: string | undefined;
+  // The session timeline, to tell when the receptionist's audio has played out.
+  private timelineOrigin: number | undefined;
+  // The receptionist's speech, from output transcript text: where it ends on
+  // the session timeline, and when its latest words arrived.
+  private lastSpeechEndMs = 0;
+  private lastSpeechAt = Number.NEGATIVE_INFINITY;
+  private readonly outputAudio: LiveCallSummary["outputAudio"] = { deltas: 0, coveredMs: 0, payloadBytes: 0 };
+  private lastAnswerSentAt: number | undefined;
+  private ending = false;
+  private latestUsageSeconds: number | undefined;
+  private finished = false;
+  private resolveFinished!: () => void;
+  private readonly whenFinished = new Promise<void>((resolve) => { this.resolveFinished = resolve; });
 
-  constructor(
-    private readonly options: LiveCallControllerOptions,
-  ) {}
+  constructor(private readonly options: LiveCallControllerOptions) {
+    this.ready = Promise.resolve(options.setup);
+    // A failed setup ends the call; the worker reports it.
+    this.ready.catch(() => this.endSession());
+  }
 
   start(): void {
-    this.connectSideband();
-
-    this.resetSilenceTimer();
-
-    if (this.options.maxDurationMs) {
-      this.durationTimer = setTimeout(
-        () =>
-          this.options.onTimeout?.(
-            "duration_limit",
-          ),
-        this.options.maxDurationMs,
-      );
-    }
-
-    // If we attached after OpenAI's replay window,
-    // session.started may never arrive. Greet anyway unless
-    // the caller has already started talking.
-    setTimeout(() => {
-      if (
-        !this.started &&
-        !this.turns.some(
-          (turn) => turn.role === "caller",
-        )
-      ) {
-        this.sendGreeting();
-      }
-    }, GREETING_FALLBACK_MS);
-  }
-
-  /**
-   * Open the OpenAI sideband and register all listeners.
-   *
-   * A transient initial 502/503/504 or WebSocket handshake failure is retried.
-   * After the sideband is established, a close remains fatal because blindly
-   * reconnecting in the middle of a call can replay state-changing
-   * delegations.
-   */
-  private connectSideband(): void {
-    if (this.finished) return;
-
-    let socket: SidebandWS;
-
-    try {
-      socket = new SidebandWS(
-        this.options.client,
-        {
-          session_id: this.options.sessionId,
-        },
-      );
-    } catch (error) {
-      this.scheduleInitialSidebandRetry(
-        `constructor failed: ${this.errorMessage(
-          error,
-        )}`,
-      );
-      return;
-    }
-
+    const socket = new SidebandWS(this.options.client, { session_id: this.options.sessionId, graceful_close: true });
     this.socket = socket;
-
-    const isCurrentSocket = () =>
-      !this.finished && this.socket === socket;
-
-    socket.on(
-      "session.input_transcript.delta",
-      (event) => {
-        if (!isCurrentSocket()) return;
-
-        this.markSidebandEstablished();
-
-        this.measure(() =>
-          this.latency.callerTranscript(
-            event.start_ms,
-            event.end_ms,
-          ),
-        );
-
-        this.appendTranscript(
-          "caller",
-          event.delta,
-          event.end_ms,
-        );
-      },
-    );
-
-    socket.on(
-      "session.output_transcript.delta",
-      (event) => {
-        if (!isCurrentSocket()) return;
-
-        this.markSidebandEstablished();
-
-        this.measure(() =>
-          this.latency.receptionistTranscript(
-            event.start_ms,
-            event.end_ms,
-          ),
-        );
-
-        this.appendTranscript(
-          "receptionist",
-          event.delta,
-          event.end_ms,
-        );
-      },
-    );
-
-    // OpenAI reflects output audio to the sideband with
-    // timeline offsets, but the SDK's sideband event types
-    // leave it out. The socket still emits it.
-    (
-      socket as unknown as {
-        on(
-          type: string,
-          listener: (event: {
-            start_ms?: number;
-            end_ms?: number;
-          }) => void,
-        ): void;
-      }
-    ).on(
-      "session.output_audio.delta",
-      (event) => {
-        if (!isCurrentSocket()) return;
-
-        this.markSidebandEstablished();
-
-        this.measure(() =>
-          this.latency.receptionistAudio(
-            event.start_ms,
-            event.end_ms,
-          ),
-        );
-      },
-    );
-
-    socket.on(
-      "session.delegation.created",
-      (event) => {
-        if (!isCurrentSocket()) return;
-
-        this.markSidebandEstablished();
-
-        const delegationId =
-          event.delegation.id;
-
-        if (
-          this.seenDelegationIds.has(
-            delegationId,
-          )
-        ) {
-          console.warn(
-            JSON.stringify({
-              event:
-                "live.delegation_duplicate_ignored",
-              sessionId:
-                this.options.sessionId,
-              delegationId,
-            }),
-          );
-          return;
+    socket.on("session.input_transcript.delta", (event) => {
+      this.observeTimeline(event.end_ms);
+      this.measure(() => this.latency.callerTranscript(event.start_ms, event.end_ms));
+      this.appendTranscript("caller", event.delta, event.end_ms);
+    });
+    // OpenAI's guide: transcript events arrive for intervals that contain
+    // text, so words in session.output_transcript.delta are the evidence that
+    // the receptionist is speaking.
+    socket.on("session.output_transcript.delta", (event) => {
+      if (event.delta.trim()) this.heardSpeech(event.end_ms);
+      this.measure(() => this.latency.receptionistTranscript(event.start_ms, event.end_ms));
+      this.appendTranscript("receptionist", event.delta, event.end_ms);
+    });
+    // OpenAI reflects output audio to the sideband with timeline offsets, but
+    // the SDK's sideband event types leave it out. GPT-Live is full duplex, so
+    // the events run through silence too: only a loud chunk counts as speech.
+    (socket as unknown as { on(type: string, listener: (event: { delta?: unknown; start_ms?: number; end_ms?: number }) => void): void })
+      .on("session.output_audio.delta", (event) => {
+        this.outputAudio.deltas += 1;
+        if (typeof event.start_ms === "number") {
+          this.outputAudio.firstStartMs ??= event.start_ms;
+          if (typeof event.end_ms === "number") this.outputAudio.coveredMs += Math.max(0, event.end_ms - event.start_ms);
         }
-
-        this.seenDelegationIds.add(
-          delegationId,
-        );
-
-        void this.handleDelegation(event);
-      },
-    );
-
-    socket.on(
-      "session.closed",
-      (event) => {
-        if (!isCurrentSocket()) return;
-
-        this.markSidebandEstablished();
-
-        this.finish(
-          event.reason ?? undefined,
-          event.usage?.seconds,
-          true,
-        );
-      },
-    );
-
-    socket.on("error", (error) => {
-      if (!isCurrentSocket()) return;
-
-      const message = error.message;
-
-      console.error(
-        `[live] ${this.options.sessionId} sideband error`,
-        message,
-      );
-
-      /**
-       * Your observed Railway failure:
-       *
-       *   Unexpected server response: 504
-       *
-       * occurred before any useful sideband event. In that
-       * situation the GPT-Live session may still exist, so
-       * detach this failed socket and retry attaching to the
-       * same session.
-       */
-      if (!this.sidebandEstablished) {
-        this.detachFailedInitialSocket(
-          socket,
-          message,
-        );
-      }
-    });
-
-    socket.on("close", () => {
-      if (!isCurrentSocket()) return;
-
-      this.socket = undefined;
-
-      if (
-        !this.sidebandEstablished &&
-        this.scheduleInitialSidebandRetry(
-          "socket closed before session was established",
-        )
-      ) {
-        return;
-      }
-
-      this.finish("sideband_closed");
-    });
-
-    // GPT-Live waits for the caller by default. OpenAI's
-    // documented way to speak first is an instruction sent
-    // after session.started.
-    //
-    // The sideband replays recent events, so a late attach
-    // can still receive session.started.
+        if (typeof event.delta === "string") this.outputAudio.payloadBytes += event.delta.length;
+        // The events cover silence too, so only a loud chunk counts as speech.
+        if (typeof event.delta === "string" && isVoice(event.delta)) this.heardSpeech(event.end_ms);
+      });
+    socket.on("session.delegation.created", (event) => void this.handleDelegation(event));
+    socket.on("session.usage.updated", (event) => { this.latestUsageSeconds = event.usage.seconds; });
+    socket.on("session.closed", (event) => this.finish(event.reason ?? undefined, event.usage?.seconds, true));
+    socket.on("session.instructions.appended", (event) => this.acknowledge(event.client_event_id));
+    socket.on("session.commentary.appended", (event) => this.acknowledge(event.client_event_id));
+    socket.on("session.thinking.appended", (event) => this.acknowledge(event.client_event_id));
+    socket.on("error", (error) => this.handleError(error));
+    // The connection ended before session.closed: final usage is unconfirmed.
+    socket.on("close", () => this.finish("sideband_closed"));
+    // GPT-Live greets from the greeting command in the session's starting
+    // history (see session.ts). A command appended after session.started was
+    // often ignored on staging, so the worker only falls back to one when no
+    // voice follows. The sideband replays the last 3 seconds of events, so an
+    // attach within 3 seconds still sees session.started; the fallback timer
+    // also starts when the connection opens, for a later attach.
     socket.on("session.started", () => {
-      if (!isCurrentSocket()) return;
-
-      this.markSidebandEstablished();
-
+      if (this.started) return;
       this.started = true;
-
+      clearTimeout(this.greetingFallbackTimer);
+      this.greetingFallbackTimer = setTimeout(() => this.sendGreetingFallback(), GREETING_FALLBACK_MS);
       this.options.onStarted?.();
-
-      if (!this.fallbackGreetingSent) {
-        this.sendGreeting();
-        return;
-      }
-
-      // The fallback greeting may have been ignored because
-      // it was sent before the session started, or accepted
-      // because session.started was replayed late.
-      //
-      // If it was accepted the receptionist starts speaking
-      // soon; greet again only if nobody has spoken by then.
-      this.greetingRetryTimer =
-        setTimeout(
-          () => this.sendGreeting(),
-          GREETING_CONFIRM_MS,
-        );
     });
+    // A phone call's session starts before the worker attaches, so an attach
+    // past the replay window never sees session.started. A browser call's
+    // session starts after the attach, so it always does.
+    if (this.options.phone) {
+      (socket.socket as unknown as { on(type: "open", listener: () => void): void }).on("open", () => {
+        this.greetingFallbackTimer = setTimeout(() => {
+          if (!this.started) this.sendGreetingFallback();
+        }, LATE_ATTACH_MS);
+      });
+    }
+    this.resetSilenceTimer();
+    if (this.options.maxDurationMs) this.durationTimer = setTimeout(() => this.options.onTimeout?.("duration_limit"), this.options.maxDurationMs);
   }
 
-  /**
-   * Called when an initial sideband reports an error before a real session
-   * event has arrived.
-   */
-  private detachFailedInitialSocket(
-    socket: SidebandWS,
-    reason: string,
-  ): void {
-    if (
-      this.finished ||
-      this.socket !== socket
-    ) {
+  private send(event: Parameters<SidebandWS["send"]>[0], pending?: PendingAppend): void {
+    if (!this.socket || this.finished) return;
+    const eventId = (event as { event_id?: string }).event_id;
+    if (pending && eventId) this.pendingAppends.set(eventId, pending);
+    this.socket.send(event);
+  }
+
+  private acknowledge(clientEventId: string | undefined): void {
+    if (!clientEventId) return;
+    const pending = this.pendingAppends.get(clientEventId);
+    this.pendingAppends.delete(clientEventId);
+    if (pending?.kind === "greeting") this.reportGreeting("acknowledged");
+  }
+
+  // The caller said something, so a greeting would talk over them.
+  private callerSpoke(): boolean {
+    return this.turns.some((turn) => turn.role === "caller" && turn.text.trim() !== "");
+  }
+
+  // OpenAI's guide: read error events alongside acknowledgments, and use
+  // error.client_event_id to find the command that failed.
+  private handleError(error: Error): void {
+    const failed = (error as { error?: { client_event_id?: string; error?: { client_event_id?: string } } }).error;
+    const clientEventId = failed?.client_event_id ?? failed?.error?.client_event_id;
+    const pending = clientEventId ? this.pendingAppends.get(clientEventId) : undefined;
+    if (clientEventId) this.pendingAppends.delete(clientEventId);
+    console.error(`[live] ${this.options.sessionId} sideband error${clientEventId ? ` for ${clientEventId}` : ""}`, error.message);
+    if (!pending) return;
+    if (pending.kind === "greeting") {
+      this.reportGreeting("failed", undefined, error.message);
       return;
     }
+    // A rejected answer leaves the caller in silence: send a short failure
+    // instead, once. A rejected fallback isn't retried again.
+    if (pending.kind === "answer" && pending.delegationId && !clientEventId!.endsWith("_fallback")) {
+      this.send({ type: "session.commentary.append", delegation_id: pending.delegationId, content: FAILED_ANSWER, event_id: `${clientEventId}_fallback` }, { kind: "answer", delegationId: pending.delegationId });
+    }
+  }
 
-    this.socket = undefined;
+  // The receptionist is audibly speaking: in its transcript, or in loud reflected audio.
+  private heardSpeech(endMs: number | undefined): void {
+    this.greetingDone();
+    this.lastSpeechAt = performance.now();
+    this.resetSilenceTimer();
+    if (typeof endMs === "number") this.lastSpeechEndMs = Math.max(this.lastSpeechEndMs, endMs);
+  }
 
+  // One greeting command, when the greeting from the starting history wasn't heard.
+  private sendGreetingFallback(): void {
+    if (this.greetingSpoken || this.callerSpoke() || this.finished || this.greetingAttempts > 0) return;
+    void this.ready.then((setup) => {
+      const greeting = setup.greeting?.trim();
+      if (!greeting || this.finished || this.greetingSpoken || this.callerSpoke()) return;
+      this.greetingAttempts = 1;
+      this.send({ type: "session.instructions.append", delegation_id: null, content: greetingCommand(greeting), event_id: "greeting_1" }, { kind: "greeting" });
+      this.reportGreeting("sent", "fallback");
+    }, () => undefined);
+  }
+
+  /** The receptionist started speaking, so the greeting worked or isn't needed. */
+  private greetingDone(): void {
+    if (this.greetingSpoken) return;
+    this.greetingSpoken = true;
+    clearTimeout(this.greetingFallbackTimer);
+    this.reportGreeting("spoken");
+  }
+
+  private reportGreeting(step: GreetingEvent["step"], trigger?: GreetingEvent["trigger"], error?: string): void {
     try {
-      socket.close({
-        code: 1000,
-        reason:
-          "retrying initial sideband connection",
-      });
+      this.options.onGreeting?.({ step, attempt: this.greetingAttempts, ...(trigger ? { trigger } : {}), sinceAttachMs: Math.round(performance.now() - this.attachedAt), ...(error ? { error } : {}) });
     } catch {
-      // The failed socket may already be closed.
-    }
-
-    this.scheduleInitialSidebandRetry(
-      reason,
-    );
-  }
-
-  /**
-   * Returns true when a retry was scheduled.
-   *
-   * Returns false after the retry budget is exhausted.
-   */
-  private scheduleInitialSidebandRetry(
-    reason: string,
-  ): boolean {
-    if (
-      this.finished ||
-      this.sidebandEstablished
-    ) {
-      return false;
-    }
-
-    // An error event and its subsequent close event can both
-    // arrive for the same failed connection. Only schedule
-    // one replacement socket.
-    if (this.sidebandRetryTimer) {
-      return true;
-    }
-
-    const delay =
-      SIDEBAND_INITIAL_RETRY_DELAYS_MS[
-        this.sidebandRetryCount
-      ];
-
-    if (delay === undefined) {
-      console.error(
-        JSON.stringify({
-          event:
-            "live.sideband_retry_exhausted",
-          sessionId:
-            this.options.sessionId,
-          attempts:
-            this.sidebandRetryCount + 1,
-          reason,
-        }),
-      );
-
-      this.finish("sideband_closed");
-      return false;
-    }
-
-    this.sidebandRetryCount += 1;
-
-    console.warn(
-      JSON.stringify({
-        event: "live.sideband_retry",
-        sessionId:
-          this.options.sessionId,
-        retry:
-          this.sidebandRetryCount,
-        delayMs: delay,
-        reason,
-      }),
-    );
-
-    this.sidebandRetryTimer =
-      setTimeout(() => {
-        this.sidebandRetryTimer =
-          undefined;
-
-        if (
-          this.finished ||
-          this.sidebandEstablished
-        ) {
-          return;
-        }
-
-        this.connectSideband();
-      }, delay);
-
-    return true;
-  }
-
-  private markSidebandEstablished(): void {
-    if (this.sidebandEstablished) return;
-
-    this.sidebandEstablished = true;
-
-    if (this.sidebandRetryTimer) {
-      clearTimeout(
-        this.sidebandRetryTimer,
-      );
-      this.sidebandRetryTimer =
-        undefined;
-    }
-
-    console.info(
-      JSON.stringify({
-        event: "live.sideband_established",
-        sessionId:
-          this.options.sessionId,
-        retries:
-          this.sidebandRetryCount,
-      }),
-    );
-  }
-
-  private errorMessage(
-    error: unknown,
-  ): string {
-    return error instanceof Error
-      ? error.message
-      : String(error);
-  }
-
-  private started = false;
-
-  // GPT-Live ignores a greeting that arrives before the
-  // session starts, which the fallback can send on a slow
-  // connection. So the fallback and session.started each
-  // get one try, and session.started only greets again if
-  // nobody has spoken.
-  private fallbackGreetingSent = false;
-  private startedGreetingSent = false;
-
-  private greetingRetryTimer:
-    | ReturnType<typeof setTimeout>
-    | undefined;
-
-  private sendGreeting(): void {
-    const greeting =
-      this.options.greeting?.trim();
-
-    if (
-      !greeting ||
-      this.turns.length > 0
-    ) {
-      return;
-    }
-
-    if (
-      this.started
-        ? this.startedGreetingSent
-        : this.fallbackGreetingSent
-    ) {
-      return;
-    }
-
-    const socket = this.socket;
-
-    // Do not mark a greeting as sent if there is no live
-    // sideband to carry it. A reconnect can deliver it later.
-    if (!socket) return;
-
-    if (this.started) {
-      this.startedGreetingSent = true;
-    } else {
-      this.fallbackGreetingSent = true;
-    }
-
-    try {
-      socket.send({
-        type:
-          "session.instructions.append",
-        delegation_id: null,
-        content:
-          `Start the conversation now: say exactly "${greeting}" in the language of that greeting, then stop and listen to the caller.`,
-        event_id: "greeting",
-      });
-    } catch (error) {
-      // Allow a later retry to attempt the greeting again.
-      if (this.started) {
-        this.startedGreetingSent =
-          false;
-      } else {
-        this.fallbackGreetingSent =
-          false;
-      }
-
-      console.error(
-        `[live] ${this.options.sessionId} greeting send failed`,
-        this.errorMessage(error),
-      );
+      // Logging must never affect the call.
     }
   }
 
-  // Latency is telemetry: a failure here must never affect
-  // the call.
-  private measure(
-    record: () => void,
-  ): void {
+  // Latency is telemetry: a failure here must never affect the call.
+  private measure(record: () => void): void {
     try {
       record();
     } catch {
@@ -650,411 +379,338 @@ export class LiveCallController {
     }
   }
 
-  /**
-   * Stops handling the call and ends its session.
-   * Resolves once OpenAI has been asked to hang up.
-   */
-  close(): Promise<void> {
-    this.finish("sideband_closed");
-    return this.sessionEnded;
+  // The caller's words reach us no earlier than their end on the session
+  // timeline, so the smallest gap between arrival and end_ms places the
+  // timeline's start. Output audio can be generated ahead of playback, so it
+  // doesn't count.
+  private observeTimeline(endMs: number | undefined): void {
+    if (typeof endMs !== "number") return;
+    const origin = performance.now() - endMs;
+    this.timelineOrigin = this.timelineOrigin === undefined ? origin : Math.min(this.timelineOrigin, origin);
+  }
+
+  /** When the receptionist's speech so far will have finished playing, in performance.now() time. */
+  private playbackEndsAt(): number {
+    return this.timelineOrigin === undefined ? this.lastSpeechAt : this.timelineOrigin + this.lastSpeechEndMs;
   }
 
   /**
-   * Ends the whole session, which hangs up a browser call.
-   * OpenAI answers with session.closed.
+   * Ends the call once the receptionist has said goodbye. OpenAI's guide:
+   * close only when playback has finished and no pending work needs the session.
+   */
+  endAfterGoodbye(): void {
+    if (this.ending || this.finished) return;
+    this.ending = true;
+    const requestedAt = performance.now();
+    const check = () => {
+      if (this.finished) return;
+      const now = performance.now();
+      const answered = this.runningDelegations === 0;
+      const spokeAfterAnswer = this.lastAnswerSentAt !== undefined && this.lastSpeechAt >= this.lastAnswerSentAt;
+      const silentTooLong = answered && now - Math.max(this.lastAnswerSentAt ?? requestedAt, requestedAt) > GOODBYE_START_MS && !spokeAfterAnswer;
+      const playedOut = spokeAfterAnswer && now - this.lastSpeechAt > GOODBYE_QUIET_MS && now > this.playbackEndsAt();
+      if (now - requestedAt > GOODBYE_MAX_MS || silentTooLong || (answered && playedOut)) {
+        this.endSession();
+        return;
+      }
+      setTimeout(check, GOODBYE_POLL_MS);
+    };
+    setTimeout(check, GOODBYE_POLL_MS);
+  }
+
+  /**
+   * Ends the session: a SIP hangup for phone calls, session.close for browser
+   * calls. The sideband stays open until session.closed brings the final usage,
+   * or the finalization timeout passes.
    */
   endSession(): void {
-    this.socket?.send({
-      type: "session.close",
-    });
+    if (this.finished || this.finalizeTimer) return;
+    this.finalizeTimer = setTimeout(() => this.finish("finalize_timeout"), FINALIZE_TIMEOUT_MS);
+    if (this.options.phone) {
+      void this.options.client.live.sessions.hangup(this.options.sessionId).catch(() => this.send({ type: "session.close" }));
+    } else {
+      this.send({ type: "session.close" });
+    }
+  }
+
+  /** Ends the call and resolves once OpenAI has finalized it or the timeout passed. */
+  close(): Promise<void> {
+    this.endSession();
+    return this.whenFinished;
   }
 
   private resetSilenceTimer(): void {
-    if (
-      !this.options.silenceTimeoutMs ||
-      this.finished
-    ) {
-      return;
-    }
-
     clearTimeout(this.silenceTimer);
-
-    this.silenceTimer = setTimeout(
-      () =>
-        this.options.onTimeout?.(
-          "silence_timeout",
-        ),
-      this.options.silenceTimeoutMs,
-    );
+    // OpenAI's guide: transcript gaps alone don't establish silence, so a
+    // request still being answered counts as activity too. Reflected output
+    // audio doesn't: it can cover silence.
+    if (!this.options.silenceTimeoutMs || this.finished || this.runningDelegations > 0) return;
+    this.silenceTimer = setTimeout(() => this.options.onTimeout?.("silence_timeout"), this.options.silenceTimeoutMs);
   }
 
   // Report every turn except the one still in progress.
-  private emitFinishedTurns(
-    includeLast: boolean,
-  ): void {
-    const ready = includeLast
-      ? this.turns.length
-      : this.turns.length - 1;
-
-    for (
-      ;
-      this.emittedTurns < ready;
-      this.emittedTurns += 1
-    ) {
-      const turn =
-        this.turns[
-          this.emittedTurns
-        ]!;
-
-      this.options.onTurn?.({
-        sequence:
-          this.emittedTurns + 1,
-        speaker:
-          turn.role === "caller"
-            ? "caller"
-            : "assistant",
-        text: turn.text,
-      });
+  private emitFinishedTurns(includeLast: boolean): void {
+    const ready = includeLast ? this.turns.length : this.turns.length - 1;
+    for (; this.emittedTurns < ready; this.emittedTurns += 1) {
+      const turn = this.turns[this.emittedTurns]!;
+      this.options.onTurn?.({ sequence: this.emittedTurns + 1, speaker: turn.role === "caller" ? "caller" : "assistant", text: turn.text });
     }
   }
 
-  private appendTranscript(
-    role: Turn["role"],
-    delta: string,
-    endMs: number,
-  ): void {
+  private appendTranscript(role: Turn["role"], delta: string, endMs: number): void {
     this.resetSilenceTimer();
-
     const last = this.turns.at(-1);
-
     if (last?.role === role) {
       last.text += delta;
       last.endMs = endMs;
     } else {
-      this.turns.push({
-        role,
-        text: delta,
-        endMs,
-      });
-
+      this.turns.push({ role, text: delta, endMs });
       this.emitFinishedTurns(false);
     }
-
     if (role !== "caller") return;
-
-    this.transcriptWaiters =
-      this.transcriptWaiters.filter(
-        (waiter) => {
-          if (
-            endMs < waiter.offsetMs
-          ) {
-            return true;
-          }
-
-          waiter.resolve();
-          return false;
-        },
-      );
+    this.transcriptWaiters = this.transcriptWaiters.filter((waiter) => {
+      if (endMs < waiter.offsetMs) return true;
+      waiter.resolve();
+      return false;
+    });
   }
 
-  private async waitForCallerTranscript(
-    offsetMs: number,
-  ): Promise<void> {
-    const lastCaller = [
-      ...this.turns,
-    ]
-      .reverse()
-      .find(
-        (turn) =>
-          turn.role === "caller",
-      );
-
-    if (
-      lastCaller &&
-      lastCaller.endMs >= offsetMs
-    ) {
-      return;
-    }
-
-    await new Promise<void>(
-      (resolve) => {
-        const waiter = {
-          offsetMs,
-          resolve,
-        };
-
-        this.transcriptWaiters.push(
-          waiter,
-        );
-
-        setTimeout(() => {
-          this.transcriptWaiters =
-            this.transcriptWaiters.filter(
-              (item) =>
-                item !== waiter,
-            );
-
-          resolve();
-        }, TRANSCRIPT_WAIT_MS);
-      },
-    );
+  private async waitForCallerTranscript(offsetMs: number): Promise<void> {
+    const lastCaller = [...this.turns].reverse().find((turn) => turn.role === "caller");
+    if (lastCaller && lastCaller.endMs >= offsetMs) return;
+    await new Promise<void>((resolve) => {
+      const waiter = { offsetMs, resolve };
+      this.transcriptWaiters.push(waiter);
+      setTimeout(() => {
+        this.transcriptWaiters = this.transcriptWaiters.filter((item) => item !== waiter);
+        resolve();
+      }, TRANSCRIPT_WAIT_MS);
+    });
   }
 
   private conversationText(): string {
-    return this.turns
-      .map(
-        (turn) =>
-          `${
-            turn.role === "caller"
-              ? "Caller"
-              : "Receptionist"
-          }: ${turn.text.trim()}`,
-      )
-      .join("\n");
+    return this.turns.map((turn) => `${turn.role === "caller" ? "Caller" : "Receptionist"}: ${turn.text.trim()}`).join("\n");
   }
 
   private delegationPrompt(): string {
-    // The spoken transcript can lag or omit earlier answers,
-    // so list them explicitly; otherwise the agent re-answers
-    // requests it already handled.
-    const earlier = this.delegations
-      .filter((item) => !item.failed)
-      .map(
-        (item) => `- ${item.answer}`,
-      );
-
+    // The spoken transcript can lag or omit earlier answers, so list them
+    // explicitly; otherwise the agent re-answers requests it already handled.
+    const earlier = this.delegations.filter((item) => !item.failed && !item.superseded).map((item) => `- ${item.answer}`);
     return [
       `Conversation so far:\n${this.conversationText()}`,
-
-      earlier.length
-        ? `Answers you already gave in this call:\n${earlier.join(
-            "\n",
-          )}`
-        : "",
-
-      "The voice model handed you the caller's most recent request. Handle only that request; earlier requests are already answered. Reply with what the receptionist should say next.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
+      earlier.length ? `Answers already given in this call:\n${earlier.join("\n")}` : "",
+      this.completedActions.length ? `Actions already taken in this call, with their results. Don't repeat them; change them if the caller changed their request:\n${this.completedActions.join("\n")}` : "",
+      this.latestLookup ? `Latest lookup in this call. Reuse it while it still answers the request:\n${this.latestLookup}` : "",
+      this.unheardResults.length ? `Results of earlier requests the caller hasn't heard, because they asked something else first. Include them if they still matter:\n${this.unheardResults.map((result) => `- ${result}`).join("\n")}` : "",
+      "The voice model handed you the caller's most recent request. Handle that request; earlier requests are already answered. Return the relevant facts, the request's current status, and the next step.",
+    ].filter(Boolean).join("\n\n");
   }
 
-  private async handleDelegation(
-    event: DelegationCreatedEvent,
-  ): Promise<void> {
-    const delegationId =
-      event.delegation.id;
+  // Keeps what the next request needs from this one's tool calls.
+  private rememberResults(steps: StepLike[]): void {
+    for (const step of steps) {
+      for (const result of step.toolResults) {
+        const output = fitToAppend(JSON.stringify(result.output ?? null));
+        if (ACTION_TOOLS.has(result.toolName)) this.completedActions.push(`- ${result.toolName}: ${output}`);
+        if (REUSABLE_LOOKUPS.has(result.toolName)) this.latestLookup = `${result.toolName}: ${output}`;
+      }
+    }
+    this.completedActions.splice(0, Math.max(0, this.completedActions.length - MAX_REMEMBERED_ACTIONS));
+  }
 
-    const receivedAt =
-      performance.now();
+  // Quiet progress while the request isn't done. OpenAI's guide: say what
+  // finished and whether anything was booked yet, with session.thinking.append.
+  private reportProgress(delegationId: string, revision: number, steps: StepLike[], step: StepLike): void {
+    if (revision !== this.latestRevision || !step.toolCalls.length) return;
+    // A step that only called direct-answer tools is the last one; its result follows at once.
+    if (step.toolCalls.every((call) => DIRECT_ANSWER_TOOLS.includes(call.toolName))) return;
+    const done = step.toolResults.map((result) => `${PROGRESS[result.toolName] ?? `ran ${result.toolName}`}${succeeded(result.output) ? "" : " (it didn't go through)"}`);
+    const changed = steps.some((item) => item.toolResults.some((result) => ACTION_TOOLS.has(result.toolName) && result.toolName !== "endCall" && succeeded(result.output)));
+    const content = `Progress on the caller's request: ${done.join("; ") || "working on it"}. ${changed ? "" : "Nothing has been booked, changed or saved yet."}`.trim();
+    this.send({ type: "session.thinking.append", delegation_id: delegationId, content: fitToAppend(content), event_id: `progress_${delegationId}_${steps.length}` }, { kind: "update", delegationId });
+  }
 
-    await this.waitForCallerTranscript(
-      event.offset_ms,
-    );
-
-    const transcriptReadyAt =
-      performance.now();
-
-    let answer = FALLBACK_ANSWER;
-    let tools: string[] = [];
-    let failed = false;
-
+  private async handleDelegation(event: DelegationCreatedEvent): Promise<void> {
+    const delegationId = event.delegation.id;
+    const revision = ++this.latestRevision;
+    const receivedAt = performance.now();
+    this.runningDelegations += 1;
+    this.resetSilenceTimer();
+    const previous = this.delegationQueue;
+    let release!: () => void;
+    this.delegationQueue = new Promise<void>((resolve) => { release = resolve; });
     try {
-      const result =
-        await this.options.agent.generate(
-          {
-            prompt:
-              this.delegationPrompt(),
-            abortSignal:
-              this.abort.signal,
+      await this.waitForCallerTranscript(event.offset_ms);
+      const transcriptReadyAt = performance.now();
+      // One request at a time, so an action and a correction to it never race.
+      await previous;
+      const queueReadyAt = performance.now();
+      if (this.finished) return;
+
+      let answer = FAILED_ANSWER;
+      let tools: string[] = [];
+      let modelSteps = 0;
+      let directAnswer = false;
+      let failed = false;
+      let usage: LanguageModelUsage | undefined;
+      const stepMs: number[] = [];
+      const steps: StepLike[] = [];
+      let toolMs = 0;
+      let stepStartedAt = queueReadyAt;
+      // A slow answer gets a spoken update, so the caller knows it's still coming.
+      const stillWorking = setTimeout(() => {
+        if (revision === this.latestRevision) this.send({ type: "session.commentary.append", delegation_id: delegationId, content: STILL_WORKING, event_id: `working_${delegationId}` }, { kind: "update", delegationId });
+      }, STILL_WORKING_MS);
+      const delegationAbort = new AbortController();
+      const abortOnCallEnd = () => delegationAbort.abort();
+      this.abort.signal.addEventListener("abort", abortOnCallEnd);
+      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+      const timedOut = new Promise<never>((_resolve, reject) => {
+        timeoutTimer = setTimeout(() => {
+          delegationAbort.abort();
+          reject(new Error(`The request took over ${DELEGATION_TIMEOUT_MS / 1000} seconds.`));
+        }, DELEGATION_TIMEOUT_MS);
+      });
+      try {
+        const { agent } = await this.ready;
+        const result = await Promise.race([timedOut, agent.generate({
+          prompt: this.delegationPrompt(),
+          abortSignal: delegationAbort.signal,
+          onStepEnd: (step) => {
+            const now = performance.now();
+            stepMs.push(Math.round(now - stepStartedAt));
+            stepStartedAt = now;
+            steps.push(step as unknown as StepLike);
+            this.reportProgress(delegationId, revision, steps, step as unknown as StepLike);
           },
-        );
-
-      tools = result.steps.flatMap(
-        (step) =>
-          step.toolCalls.map(
-            (call) =>
-              call.toolName,
-          ),
-      );
-
-      if (result.text.trim()) {
-        answer = result.text
-          .trim()
-          .slice(
-            0,
-            MAX_ANSWER_CHARS,
-          );
+          onToolExecutionEnd: (execution) => { toolMs += execution.toolExecutionMs; },
+        })]);
+        tools = result.steps.flatMap((step) => step.toolCalls.map((call) => call.toolName));
+        modelSteps = result.steps.length;
+        usage = result.totalUsage;
+        this.rememberResults(result.steps as unknown as StepLike[]);
+        // When the loop stopped on a tool GPT-Live can speak from directly, the
+        // last step has no text of its own.
+        const direct = directToolAnswer(result.steps.at(-1));
+        directAnswer = direct !== undefined;
+        const text = direct ?? result.text.trim();
+        if (text) answer = fitToAppend(text);
+        else failed = true;
+      } catch (error) {
+        failed = true;
+        if (this.abort.signal.aborted) return;
+        console.error(`[live] ${this.options.sessionId} delegation ${delegationId} failed`, error instanceof Error ? error.message : error);
+      } finally {
+        clearTimeout(stillWorking);
+        clearTimeout(timeoutTimer);
+        this.abort.signal.removeEventListener("abort", abortOnCallEnd);
       }
-    } catch (error) {
-      failed = true;
+      const answeredAt = performance.now();
 
-      if (
-        this.abort.signal.aborted
-      ) {
-        return;
+      // OpenAI's guide: when the caller changes a request, ignore results from
+      // the outdated one. GPT-Live keeps it as background facts, and the newer
+      // request's backend sees it.
+      const superseded = revision < this.latestRevision;
+      if (superseded) {
+        if (!failed) this.unheardResults.push(answer);
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: fitToAppend(`The caller made a newer request before this one finished, so this result is background only: ${answer}`), event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+      } else {
+        this.unheardResults = [];
+        this.lastAnswerSentAt = performance.now();
+        this.send({ type: "session.commentary.append", delegation_id: delegationId, content: answer, event_id: `answer_${delegationId}` }, { kind: "answer", delegationId });
       }
 
-      console.error(
-        `[live] ${this.options.sessionId} delegation ${delegationId} failed`,
-        this.errorMessage(error),
-      );
+      const timing: DelegationTiming = {
+        delegationId,
+        offsetMs: event.offset_ms,
+        transcriptWaitMs: Math.round(transcriptReadyAt - receivedAt),
+        queueMs: Math.round(queueReadyAt - transcriptReadyAt),
+        agentMs: Math.round(answeredAt - queueReadyAt),
+        totalMs: Math.round(answeredAt - receivedAt),
+        tools,
+        modelSteps,
+        directAnswer,
+        stepMs,
+        toolMs: Math.round(toolMs),
+        answer,
+        failed,
+        superseded,
+        ...(usage ? { usage } : {}),
+      };
+      this.delegations.push(timing);
+      this.options.onDelegation?.(timing);
+    } finally {
+      this.runningDelegations -= 1;
+      this.resetSilenceTimer();
+      release();
     }
-
-    const answeredAt =
-      performance.now();
-
-    try {
-      this.socket?.send({
-        type:
-          "session.commentary.append",
-        delegation_id:
-          delegationId,
-        content: answer,
-        event_id:
-          `answer_${delegationId}`,
-      });
-    } catch (error) {
-      failed = true;
-
-      console.error(
-        `[live] ${this.options.sessionId} delegation ${delegationId} response send failed`,
-        this.errorMessage(error),
-      );
-    }
-
-    const timing: DelegationTiming = {
-      delegationId,
-      offsetMs:
-        event.offset_ms,
-      transcriptWaitMs:
-        Math.round(
-          transcriptReadyAt -
-            receivedAt,
-        ),
-      agentMs:
-        Math.round(
-          answeredAt -
-            transcriptReadyAt,
-        ),
-      totalMs:
-        Math.round(
-          answeredAt -
-            receivedAt,
-        ),
-      tools,
-      answer,
-      failed,
-    };
-
-    this.delegations.push(timing);
-
-    this.options.onDelegation?.(
-      timing,
-    );
   }
 
-  private finished = false;
-
-  private sessionEnded:
-    Promise<void> =
-    Promise.resolve();
-
-  private finish(
-    closeReason?: string,
-    billedSeconds?: number,
-    sessionClosed = false,
-  ): void {
+  private finish(closeReason?: string, billedSeconds?: number, sessionClosed = false): void {
     if (this.finished) return;
-
     this.finished = true;
-
-    if (this.sidebandRetryTimer) {
-      clearTimeout(
-        this.sidebandRetryTimer,
-      );
-      this.sidebandRetryTimer =
-        undefined;
-    }
-
-    /**
-     * Without the sideband nobody answers delegations, so
-     * end the session rather than leave the caller talking
-     * to GPT-Live while OpenAI keeps billing.
-     *
-     * When OpenAI itself already emitted session.closed,
-     * don't ask it to hang up again.
-     */
-    if (!sessionClosed) {
-      this.sessionEnded =
-        this.options.client.live.sessions
-          .hangup(
-            this.options.sessionId,
-          )
-          .then(
-            () => undefined,
-            () => undefined,
-          );
-    }
-
-    clearTimeout(
-      this.silenceTimer,
-    );
-
-    clearTimeout(
-      this.durationTimer,
-    );
-
-    clearTimeout(
-      this.greetingRetryTimer,
-    );
-
+    // Without the sideband nobody answers delegations, so end the session
+    // rather than leave the caller talking to it while OpenAI keeps billing.
+    if (!sessionClosed && !this.finalizeTimer) this.endWithoutSideband();
+    for (const timer of [this.silenceTimer, this.durationTimer, this.greetingFallbackTimer, this.finalizeTimer]) clearTimeout(timer);
     this.abort.abort();
-
-    const socket = this.socket;
-    this.socket = undefined;
-
-    try {
-      socket?.close({
-        code: 1000,
-        reason:
-          "session finished",
-      });
-    } catch {
-      // Already closed.
-    }
-
+    this.socket?.close({ code: 1000, reason: "session finished" });
     this.emitFinishedTurns(true);
-
-    let latency:
-      | LiveCallLatency
-      | undefined;
-
-    this.measure(() => {
-      latency =
-        this.latency.summarize();
-    });
-
+    let latency: LiveCallLatency | undefined;
+    this.measure(() => { latency = this.latency.summarize(); });
+    // OpenAI's guide: without session.closed, keep the latest observed usage
+    // and mark it unconfirmed.
+    const seconds = sessionClosed ? billedSeconds : this.latestUsageSeconds;
     this.options.onClose?.({
-      sessionId:
-        this.options.sessionId,
-      durationMs:
-        Date.now() -
-        this.startedAt,
-      delegations:
-        this.delegations,
-
-      ...(billedSeconds !==
-      undefined
-        ? { billedSeconds }
-        : {}),
-
-      ...(closeReason
-        ? { closeReason }
-        : {}),
-
-      ...(latency
-        ? { latency }
-        : {}),
+      sessionId: this.options.sessionId,
+      durationMs: Date.now() - this.startedAt,
+      usageConfirmed: sessionClosed && billedSeconds !== undefined,
+      delegations: this.delegations,
+      ...(seconds !== undefined ? { billedSeconds: seconds } : {}),
+      ...(closeReason ? { closeReason } : {}),
+      ...(latency ? { latency } : {}),
+      outputAudio: this.outputAudio,
     });
+    this.resolveFinished();
   }
+
+  // The sideband is gone. A phone call still has OpenAI's SIP hangup; a
+  // browser call is closed over a fresh sideband connection.
+  private endWithoutSideband(): void {
+    if (this.options.phone) {
+      void this.options.client.live.sessions.hangup(this.options.sessionId).catch(() => undefined);
+      return;
+    }
+    void closeLiveSession(this.options.client, this.options.sessionId);
+  }
+}
+
+/**
+ * Closes a session from the server with session.close over its own sideband
+ * connection, then waits for session.closed. Used for browser sessions, which
+ * OpenAI's SIP hangup doesn't cover.
+ */
+export async function closeLiveSession(client: OpenAI, sessionId: string, timeoutMs = 5_000): Promise<void> {
+  await new Promise<void>((resolve) => {
+    let socket: SidebandWS | undefined;
+    const done = () => {
+      clearTimeout(timer);
+      try {
+        socket?.close({ code: 1000, reason: "session closed" });
+      } catch {
+        // Already closed.
+      }
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    try {
+      socket = new SidebandWS(client, { session_id: sessionId, graceful_close: true });
+      socket.on("session.closed", done);
+      socket.on("close", done);
+      socket.on("error", () => undefined);
+      socket.send({ type: "session.close" });
+    } catch {
+      done();
+    }
+  });
 }

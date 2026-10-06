@@ -33,6 +33,20 @@ function weekdayToSnapshotDay(weekday: number): number {
   return weekday % 7;
 }
 
+/**
+ * Local minutes from midnight for the start and end of a time. A time that
+ * ends exactly at the next midnight ends at 1440, the same day, so it fits a
+ * window that closes at midnight.
+ */
+function localSpan(startLocal: DateTime, endLocal: DateTime): { startMinutes: number; endMinutes: number; endsSameLocalDay: boolean } {
+  const endsAtMidnight = endLocal.hour === 0 && endLocal.minute === 0 && endLocal.second === 0 && endLocal.hasSame(startLocal.plus({ days: 1 }), "day");
+  return {
+    startMinutes: startLocal.hour * 60 + startLocal.minute,
+    endMinutes: endsAtMidnight ? 1440 : endLocal.hour * 60 + endLocal.minute,
+    endsSameLocalDay: endsAtMidnight || endLocal.hasSame(startLocal, "day"),
+  };
+}
+
 function overlaps(
   candidateStart: Date,
   candidateEnd: Date,
@@ -40,6 +54,57 @@ function overlaps(
   existingEnd: Date,
 ): boolean {
   return candidateStart < existingEnd && existingStart < candidateEnd;
+}
+
+/**
+ * Why a time can't be booked, so the receptionist can tell a caller the truth
+ * instead of calling every refused time taken.
+ *   no_hours: the business has no opening hours at all
+ *   closed_day: the business is closed on that weekday
+ *   outside_hours: the business is open that day, but not for the whole service
+ *   closure: a planned closure covers the time
+ *   no_staff: no active staff member offers the service
+ *   calendar_not_synced: a connected calendar hasn't synced recently, so its busy time is unknown
+ *   taken: the time is already booked, or busy on the calendar
+ */
+export type UnavailableReason = "no_hours" | "closed_day" | "outside_hours" | "closure" | "no_staff" | "calendar_not_synced" | "taken";
+
+/**
+ * A booking or reschedule refused because the time isn't bookable. The
+ * message is the one these refusals always had; `reason` says why.
+ */
+export class BookingUnavailableError extends Error {
+  readonly reason: UnavailableReason;
+
+  constructor(reason: UnavailableReason, message = reason === "taken" ? "That appointment time is no longer available." : "No staff member is available for this service.") {
+    super(message);
+    this.name = "BookingUnavailableError";
+    this.reason = reason;
+  }
+}
+
+/**
+ * The opening-hours or closure reason a time can't be booked, or undefined
+ * when hours and closures allow it. Uses the same rules as computeAvailability.
+ */
+export function scheduleUnavailableReason(input: {
+  startsAt: string;
+  timezone: string;
+  serviceDurationMinutes: number;
+  hours: Array<HoursWindow>;
+  closures: Array<ClosureWindow>;
+}): "no_hours" | "closed_day" | "outside_hours" | "closure" | undefined {
+  if (!input.hours.length) return "no_hours";
+  const startUtc = isoToDateTime(input.startsAt);
+  const endUtc = startUtc.plus({ minutes: input.serviceDurationMinutes });
+  const startLocal = startUtc.setZone(input.timezone);
+  const endLocal = endUtc.setZone(input.timezone);
+  const windows = input.hours.filter((window) => window.dayOfWeek === weekdayToSnapshotDay(startLocal.weekday));
+  if (!windows.length) return "closed_day";
+  const { startMinutes, endMinutes, endsSameLocalDay } = localSpan(startLocal, endLocal);
+  if (!windows.some((window) => startMinutes >= window.openMinutes && endsSameLocalDay && endMinutes <= window.closeMinutes)) return "outside_hours";
+  if (input.closures.some((closure) => overlaps(startUtc.toJSDate(), endUtc.toJSDate(), isoToDate(closure.startsAt), isoToDate(closure.endsAt)))) return "closure";
+  return undefined;
 }
 
 export function computeAvailability(input: AvailabilityInput): Array<AvailabilitySlot> {
@@ -50,9 +115,7 @@ export function computeAvailability(input: AvailabilityInput): Array<Availabilit
   const requestedStartLocal = requestedStartUtc.setZone(input.request.timezone);
   const requestedEndLocal = requestedEndUtc.setZone(input.request.timezone);
   const weekday = weekdayToSnapshotDay(requestedStartLocal.weekday);
-  const startMinutes = requestedStartLocal.hour * 60 + requestedStartLocal.minute;
-  const endMinutes = requestedEndLocal.hour * 60 + requestedEndLocal.minute;
-  const endsSameLocalDay = requestedEndLocal.hasSame(requestedStartLocal, "day");
+  const { startMinutes, endMinutes, endsSameLocalDay } = localSpan(requestedStartLocal, requestedEndLocal);
 
   const openWindow = input.hours.find(
     (window) =>

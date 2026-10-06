@@ -1,5 +1,7 @@
 "use client";
 
+import { requestJson } from "@/lib/request-json";
+import { useActiveBusiness } from "@/hooks/use-active-business";
 import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
@@ -13,25 +15,19 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+import { getContactDisplayName } from "@/lib/contact-display";
 import { formatDateTime } from "@/lib/locale";
 import { useTelemetry } from "@/components/product-analytics";
 
-type Business = { businessId: string; active: boolean };
 type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; automationState: string | null; body: string; direction: string; status: string; createdAt: string };
-
-async function getJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { credentials: "include" });
-  if (!response.ok) throw new Error("Unable to load messages.");
-  return await response.json() as T;
-}
 
 function initials(name: string | null, fallback: string): string {
   if (!name) return fallback.slice(0, 2).toUpperCase();
   return name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("");
 }
 
-function conversationName(message: Message, t: (key: string) => string): string {
-  return message.contactName ?? message.visitorName ?? message.contactPhone ?? message.visitorEmail ?? t("page.unknownCaller");
+function conversationName(message: Message, locale: string, t: (key: string) => string): string {
+  return getContactDisplayName({ name: message.contactName ?? message.visitorName, phone: message.contactPhone, email: message.visitorEmail, channels: [message.channel] }, locale, t);
 }
 
 function conversationSubtitle(message: Message, t: (key: string) => string): string {
@@ -49,9 +45,8 @@ export function LiveMessagesSurface() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [channelFilter, setChannelFilter] = useState<"all" | "web_chat" | "sms">("all");
-  const businesses = useQuery({ queryKey: ["businesses"], queryFn: () => getJson<{ businesses: Business[] }>("/api/businesses") });
-  const business = businesses.data?.businesses.find((item) => item.active) ?? businesses.data?.businesses[0];
-  const messages = useQuery({ queryKey: ["messages", business?.businessId], queryFn: () => getJson<{ messages: Message[] }>("/api/messages"), enabled: Boolean(business) });
+  const { business } = useActiveBusiness();
+  const messages = useQuery({ queryKey: ["messages", business?.businessId], queryFn: () => requestJson<{ messages: Message[] }>("/api/messages"), enabled: Boolean(business) });
   const send = useMutation({
     mutationFn: async () => {
       if (!business || !selected) return;
@@ -84,10 +79,10 @@ export function LiveMessagesSurface() {
     return [...grouped.entries()].map(([id, items]) => {
       const sorted = items.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
       const latest = sorted.at(-1) ?? sorted[0]!;
-      return { id, messages: sorted, latest, displayName: conversationName(latest, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" };
+      return { id, messages: sorted, latest, displayName: conversationName(latest, i18n.language, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" };
     })
       .filter((conversation) => (channelFilter === "all" || conversation.channel === channelFilter) && [conversation.latest.contactName, conversation.latest.visitorName, conversation.latest.contactPhone, conversation.latest.visitorEmail, conversation.latest.body].filter(Boolean).join(" ").toLowerCase().includes(search.trim().toLowerCase()));
-  }, [messages.data, search, channelFilter, t]);
+  }, [messages.data, search, channelFilter, i18n.language, t]);
   const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedAutomation = selected?.latest.automationState === "human_handoff" ? "human_handoff" : "ai_active";
 

@@ -4,9 +4,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, releaseNotificationDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, queueDailyOperatorSummaries } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
+import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning } from "@lobbystack/domain";
 
 vi.mock("@lobbystack/domain", async (importOriginal) => {
@@ -28,6 +29,12 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     claimNotificationDelivery: vi.fn(),
     claimOperatorNotificationDelivery: vi.fn(),
     cancelRetiredPhoneVerificationSend: vi.fn(),
+    issueOperatorPhoneVerificationCode: vi.fn(),
+    markOperatorPhoneVerificationCodeSent: vi.fn(),
+    releaseOperatorPhoneVerificationCodeSend: vi.fn(),
+    reserveAlertSmsUsage: vi.fn(),
+    correctAlertSmsUsage: vi.fn(),
+    enqueueBillingUsageSync: vi.fn(),
     queueOnboardingFollowupEmail: vi.fn(),
     claimNumberProvisioning: vi.fn(),
     countPublishableOutboxMessages: vi.fn(),
@@ -46,7 +53,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     recordProductEvent: vi.fn(),
     recordSmsProviderPricing: vi.fn(),
     reconcileBillingProviderEvent: vi.fn(),
-    releaseNotificationDelivery: vi.fn(),
+    transitionProcessingNotification: vi.fn(),
     resolveNotificationDelivery: vi.fn(),
     runPrivacyRetentionSweep: vi.fn(),
   };
@@ -132,6 +139,102 @@ describe("worker handlers", () => {
     expect(result).toEqual({ status: "skipped", entityId: attemptId });
     expect(cancelRetiredPhoneVerificationSend).toHaveBeenCalledWith(domain, { businessId, attemptId });
     expect(verifyPhone).not.toHaveBeenCalled();
+  });
+
+  describe("operator phone verification codes", () => {
+    const codeJob = (businessId: string, attemptId: string, locale?: string): JobEnvelope => ({ jobId: randomUUID(), type: "phoneVerification.sendCode", queue: "critical", businessId, payload: { attemptId, ...(locale ? { locale } : {}) }, trace: {}, idempotencyKey: `phone-code:${attemptId}`, scheduled: false });
+
+    it("texts the code from the restricted alert sender and marks it sent", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      const alertSms = vi.fn().mockResolvedValue({ providerMessageId: "SMalert" }); const mainSms = vi.fn();
+      const result = await handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms: mainSms }, twilioAlerts: { from: "+14165550100", sendSms: alertSms } });
+      expect(result).toEqual({ status: "completed", entityId: attemptId });
+      expect(issueOperatorPhoneVerificationCode).toHaveBeenCalledWith(domain, { businessId, attemptId });
+      expect(alertSms).toHaveBeenCalledWith({ to: "+14165550123", from: "+14165550100", body: "LobbyStack verification code: 482913. It expires in 10 minutes." });
+      expect(mainSms).not.toHaveBeenCalled();
+      expect(markOperatorPhoneVerificationCodeSent).toHaveBeenCalledWith(domain, { businessId, attemptId });
+    });
+
+    it("texts the code in the operator's language", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const sendSms = vi.fn().mockResolvedValue({ providerMessageId: "SM1" });
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      await handleJob(codeJob(businessId, attemptId, "fr"), { domain: { db: undefined as never }, twilio: { sendSms } });
+      expect(sendSms).toHaveBeenCalledWith(expect.objectContaining({ body: "Code de vérification LobbyStack : 482913. Il expire dans 10 minutes." }));
+    });
+
+    it("meters the code against the alert SMS quota", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: {} as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      vi.mocked(reserveAlertSmsUsage).mockResolvedValue({ allowed: true, usageEventId: "usage-1" } as never);
+      const sendSms = vi.fn().mockResolvedValue({ providerMessageId: "SM1" });
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } })).resolves.toEqual({ status: "completed", entityId: attemptId });
+      expect(reserveAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, estimatedSegments: 1 });
+      expect(enqueueBillingUsageSync).toHaveBeenCalledWith(domain, { businessId, usageEventId: "usage-1" });
+    });
+
+    it("fails the attempt without texting when the alert SMS quota is used up", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: {} as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      vi.mocked(reserveAlertSmsUsage).mockResolvedValue({ allowed: false, errorCode: "alert_sms_quota_reached" } as never);
+      const sendSms = vi.fn();
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } })).resolves.toEqual({ status: "skipped", entityId: attemptId });
+      expect(sendSms).not.toHaveBeenCalled();
+      expect(releaseOperatorPhoneVerificationCodeSend).toHaveBeenCalledWith(domain, { businessId, attemptId, retry: false, error: "alert_sms_quota_reached" });
+    });
+
+    it("gives back the reserved usage when the send fails", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: {} as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      vi.mocked(reserveAlertSmsUsage).mockResolvedValue({ allowed: true, usageEventId: "usage-1" } as never);
+      vi.mocked(correctAlertSmsUsage).mockResolvedValue("usage-1");
+      const sendSms = vi.fn().mockRejectedValue(new Error("timeout"));
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } }, { isFinalAttempt: false })).rejects.toThrow("timeout");
+      expect(correctAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, segments: 0 });
+    });
+
+    it("uses the business's own number when it is the alert sender", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550199", code: "482913" });
+      const alertSms = vi.fn(); const mainSms = vi.fn().mockResolvedValue({ providerMessageId: "SMmain" });
+      await handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms: mainSms }, twilioAlerts: { from: "+14165550100", sendSms: alertSms } });
+      expect(mainSms).toHaveBeenCalledWith(expect.objectContaining({ from: "+14165550199" }));
+      expect(alertSms).not.toHaveBeenCalled();
+    });
+
+    it("skips an attempt that was replaced before the send", async () => {
+      const attemptId = randomUUID(); const sendSms = vi.fn();
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue(null);
+      await expect(handleJob(codeJob(randomUUID(), attemptId), { domain: { db: undefined as never }, twilio: { sendSms } })).resolves.toEqual({ status: "skipped", entityId: attemptId });
+      expect(sendSms).not.toHaveBeenCalled();
+    });
+
+    it("marks a code sent when a retry finds the text already went out", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never }; const sendSms = vi.fn();
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue(null);
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } })).resolves.toEqual({ status: "skipped", entityId: attemptId });
+      expect(sendSms).not.toHaveBeenCalled();
+      expect(markOperatorPhoneVerificationCodeSent).toHaveBeenCalledWith(domain, { businessId, attemptId });
+    });
+
+    it("fails the attempt without a retry when Twilio rejects the number", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      const sendSms = vi.fn().mockRejectedValue(Object.assign(new Error("unreachable"), { code: 21614 }));
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } }, { isFinalAttempt: false })).resolves.toEqual({ status: "skipped", entityId: attemptId });
+      expect(releaseOperatorPhoneVerificationCodeSend).toHaveBeenCalledWith(domain, { businessId, attemptId, retry: false, error: "Twilio error 21614." });
+      expect(markOperatorPhoneVerificationCodeSent).not.toHaveBeenCalled();
+    });
+
+    it("requeues a transient failure until the final attempt", async () => {
+      const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
+      vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
+      const sendSms = vi.fn().mockRejectedValue(new Error("timeout"));
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } }, { isFinalAttempt: false })).rejects.toThrow("timeout");
+      expect(releaseOperatorPhoneVerificationCodeSend).toHaveBeenLastCalledWith(domain, { businessId, attemptId, retry: true, error: "Verification delivery failed." });
+      await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } }, { isFinalAttempt: true })).rejects.toThrow("timeout");
+      expect(releaseOperatorPhoneVerificationCodeSend).toHaveBeenLastCalledWith(domain, { businessId, attemptId, retry: false, error: "Verification delivery failed." });
+    });
   });
 
   it("reconciles an owned Twilio number and puts it on the SIP trunk", async () => {
@@ -373,6 +476,37 @@ describe("worker handlers", () => {
     expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Billing checkout provider is not configured." });
     expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
     expect(markBillingCheckoutCreated).not.toHaveBeenCalled();
+  });
+
+  it("sends Polar's back arrow to the plan page without marking checkout successful", async () => {
+    const businessId = randomUUID();
+    const requestId = randomUUID();
+    const domain = { db: undefined as never };
+    vi.stubEnv("APP_BASE_URL", "https://app.example/");
+    vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete" } as Awaited<ReturnType<typeof loadBillingCheckoutRequest>>);
+    vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
+    const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
+
+    const result = await handleJob({
+      jobId: randomUUID(),
+      type: "billing.createCheckout",
+      queue: "critical",
+      businessId,
+      payload: { requestId },
+      trace: {},
+      idempotencyKey: `test:${randomUUID()}`,
+      scheduled: false,
+    }, { domain, polar: { recordUsage: vi.fn(), createCheckout } });
+
+    expect(result).toEqual({ status: "completed", entityId: requestId });
+    expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
+      productId: "product-starter-monthly",
+      successUrl: `https://app.example/settings/plan?checkout=success&requestId=${requestId}`,
+      returnUrl: "https://app.example/settings/plan",
+    }));
+    vi.unstubAllEnvs();
   });
 
   it("runs the global affiliate payout job without a business context", async () => {
@@ -652,7 +786,23 @@ describe("worker handlers", () => {
       domain: { db: undefined as never },
       twilio: { sendSms },
     })).rejects.toThrow(error);
-    expect(releaseNotificationDelivery).toHaveBeenCalledWith({ db: undefined as never }, { businessId, notificationId });
+    expect(transitionProcessingNotification).toHaveBeenCalledWith({ db: undefined as never }, { businessId, notificationId }, "pending");
+  });
+
+  it("stops retrying a text Twilio rejects for good, such as a country the account can't text", async () => {
+    const businessId = randomUUID();
+    const notificationId = randomUUID();
+    vi.mocked(claimNotificationDelivery).mockResolvedValue(true);
+    vi.mocked(resolveNotificationDelivery).mockResolvedValue({
+      kind: "ready",
+      delivery: { notificationId, businessId, channel: "sms", kind: "booking_confirmation", relatedId: "appointment_1", to: "+381695021111", from: "+14165550124", subject: "Appointment confirmed", body: "Your appointment is confirmed." },
+    });
+    const sendSms = vi.fn().mockRejectedValue(Object.assign(new Error("Permission to send an SMS has not been enabled for the region"), { code: 21408, status: 400 }));
+
+    await expect(handleJob({ ...notificationJob({ notificationId }), businessId }, { domain: { db: undefined as never }, twilio: { sendSms } })).resolves.toEqual({ status: "skipped", entityId: notificationId });
+    expect(transitionProcessingNotification).toHaveBeenCalledWith({ db: undefined as never }, { businessId, notificationId }, "failed");
+    expect(transitionProcessingNotification).not.toHaveBeenCalledWith(expect.anything(), expect.anything(), "pending");
+    expect(recordProductEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "notification.delivery_failed", businessId }));
   });
 
   it("emits workflow.started for an event-driven business-scoped job", async () => {

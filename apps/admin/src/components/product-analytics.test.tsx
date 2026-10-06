@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { consumeAuthSuccess, recordAuthSuccess } from "@/lib/auth-success-analytics";
 import { consumePendingOnboardingBusiness, recordPendingOnboardingBusiness } from "@/lib/onboarding-analytics";
 import { consumePendingWorkspaceSwitch, recordPendingWorkspaceSwitch } from "@/lib/workspace-analytics";
-import { isSensitiveAnalyticsRoute, ProductAnalytics } from "./product-analytics";
+import type { BrowserTelemetry } from "@lobbystack/telemetry/browser";
+import { isSensitiveAnalyticsRoute, ProductAnalytics, useTelemetry } from "./product-analytics";
 
 const mocks = vi.hoisted(() => ({
   pathname: "/calls",
@@ -101,6 +102,33 @@ describe("workspace telemetry preference", () => {
     });
     await waitFor(() => expect(mocks.posthog.group).toHaveBeenCalledWith("business", "business:business-2"));
     expect(mocks.posthog.opt_in_capturing).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("deployment mode on browser events", () => {
+  function TelemetryProbe({ onReady }: { onReady: (telemetry: BrowserTelemetry) => void }) {
+    onReady(useTelemetry());
+    return null;
+  }
+
+  it("stamps events with the mode the server reports, not a build-time value", async () => {
+    // A production bundle built without DEPLOYMENT_MODE used to tag every
+    // event "development" even though the server ran in "cloud" mode.
+    const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+    clients.push(client);
+    vi.stubGlobal("fetch", vi.fn((url: string) => {
+      if (url === "/api/auth/get-session") return Promise.resolve(Response.json({ user: { id: "operator" } }));
+      if (url === "/api/businesses") return Promise.resolve(Response.json({ businesses: [{ businessId: "business", active: true }] }));
+      if (url === "/api/preferences/appearance?businessId=business") return Promise.resolve(Response.json({ telemetryEnabled: true, canManageTenant: true, deploymentMode: "cloud" }));
+      return Promise.reject(new Error(`Unexpected request ${url}`));
+    }));
+    let telemetry: BrowserTelemetry | undefined;
+    render(<QueryClientProvider client={client}><ProductAnalytics><TelemetryProbe onReady={value => { telemetry = value; }} /></ProductAnalytics></QueryClientProvider>);
+
+    await waitFor(() => expect(mocks.posthog.capture).toHaveBeenCalledWith("web.page.calls_viewed", { businessId: "business", pathname: "/calls", deploymentMode: "cloud" }));
+    // The dashboard test-call widget reports through the same context.
+    telemetry!.track("web.voice.test_call_started", { businessId: "business" });
+    expect(mocks.posthog.capture).toHaveBeenLastCalledWith("web.voice.test_call_started", { businessId: "business", deploymentMode: "cloud" });
   });
 });
 

@@ -7,9 +7,17 @@ import { publicAssetVersion } from "./asset-version";
 import { releaseVersion } from "./src/lib/release-version";
 import { embeddableSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
+// One release identifies the build everywhere: browser error reports, the source
+// maps uploaded to PostHog, and the deployment ID below.
 const serviceVersion = releaseVersion();
 
 const nextConfig: NextConfig = {
+  // PostHog's source map step writes the release ID into each JS chunk after
+  // Turbopack has named it, so a chunk that did not change keeps its URL while
+  // its bytes change. Browsers cache those URLs as immutable and kept running
+  // chunks stamped with an old release. The deployment ID adds `?dpl=` to every
+  // asset URL, so each deploy's chunks are fetched fresh.
+  ...(serviceVersion === "development" ? {} : { deploymentId: serviceVersion }),
   experimental: {
     preloadEntriesOnStart: false,
     requestInsights: process.env.NODE_ENV === "development",
@@ -24,7 +32,8 @@ const nextConfig: NextConfig = {
     // deployment variable that can stay unchanged across deploys.
     NEXT_PUBLIC_ASSET_VERSION: publicAssetVersion(resolve(process.cwd(), "public"), serviceVersion),
     NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV ?? "development",
-    NEXT_PUBLIC_DEPLOYMENT_MODE: process.env.DEPLOYMENT_MODE ?? "development",
+    // No NEXT_PUBLIC_DEPLOYMENT_MODE: browser telemetry gets the mode from the
+    // server at runtime (src/lib/deployment-mode.ts).
   },
   output: "standalone",
   outputFileTracingExcludes: {
@@ -35,14 +44,13 @@ const nextConfig: NextConfig = {
   },
   transpilePackages: [
     "@lobbystack/agent-core",
-    "@lobbystack/ai",
-    "@lobbystack/config",
     "@lobbystack/contracts",
     "@lobbystack/db",
     "@lobbystack/domain",
     "@lobbystack/jobs",
     "@lobbystack/providers",
     "@lobbystack/shared",
+    "@lobbystack/web-voice",
   ],
   serverExternalPackages: process.env.NODE_ENV === "production"
     ? [

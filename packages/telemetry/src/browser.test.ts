@@ -85,6 +85,17 @@ describe("browser telemetry consent and recording state", () => {
     expect(client.reset).toHaveBeenCalledTimes(1);
   });
 
+  it("stamps later events with the deployment mode set at runtime", () => {
+    const client = createClient();
+    const telemetry = createBrowserTelemetry(client, { optedOut: false });
+
+    telemetry.track("web.voice.test_call_started", { businessId: "business" });
+    telemetry.setDeploymentMode("cloud");
+    telemetry.track("web.voice.test_call_started", { businessId: "business" });
+
+    expect(client.capture.mock.calls.map(([, properties]) => (properties as Record<string, unknown>).deploymentMode)).toEqual(["development", "cloud"]);
+  });
+
   it("tolerates a missing client", () => {
     const telemetry = createBrowserTelemetry(undefined, { optedOut: true });
     expect(() => {

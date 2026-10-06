@@ -80,10 +80,8 @@
       },
       "channels": {
         "title": "Canaux",
-        "description": "Comment les conversations ont atteint votre reception cette semaine.",
+        "description": "Appels et messages par canal pour les dates choisies.",
         "labels": {
-          "voice": "Voix",
-          "sms": "SMS",
           "other": "Autre"
         }
       }
@@ -107,13 +105,11 @@
       }
     },
     "chart": {
-      "title": "Appels par mois",
-      "description": "Volume mensuel d'appels à partir de vos enregistrements Convex."
+      "title": "Appels par mois"
     },
     "recentCalls": {
       "title": "Appels récents",
       "description": "{{count}} appels récents dans le flux d'activité.",
-      "unknownCaller": "Appelant inconnu",
       "durationValue": "{{value}} sec"
     },
     "actionRequired": {
@@ -136,19 +132,13 @@
     "upcoming": {
       "title": "À venir",
       "description": "Les prochains rendez-vous au calendrier.",
-      "unknownContact": "Contact inconnu",
       "unknownService": "Service inconnu",
-      "withStaff": "avec {{name}}",
+      "withStaff": "avec {{staff}}",
       "emptyTitle": "Aucun rendez-vous à venir",
       "emptyDescription": "Les futures réservations apparaîtront ici dès leur création.",
       "status": {
         "booked": "Réservé",
         "confirmed": "Confirmé"
-      },
-      "source": {
-        "voice": "Voix",
-        "sms": "SMS",
-        "dashboard": "Tableau de bord"
       }
     }
   },
@@ -220,6 +210,7 @@
       "title": "Écoutez votre agent répondre",
       "description": "Appelez-le depuis votre navigateur et écoutez comment il accueille un client.",
       "descriptionWithPages_one": "Il a lu {{count}} page de {{host}}. Appelez-le et posez une question que seule votre entreprise connaît.",
+      "descriptionWithPages_many": "Il a lu {{count}} pages de {{host}}. Appelez-le et posez une question que seule votre entreprise connaît.",
       "descriptionWithPages_other": "Il a lu {{count}} pages de {{host}}. Appelez-le et posez une question que seule votre entreprise connaît.",
       "cta": "Lancer un appel"
     },

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { PREFIXED_LOCALES, type Locale } from "@/i18n/config"
 import {
   DEFAULT_DESCRIPTION,
   DEFAULT_TITLE,
@@ -28,9 +29,14 @@ export const DISCOVERY_API_ANCHOR = absoluteUrl("/api")
 
 export const markdownAlternatePath = (pathname: string) => {
   const normalized = pathname.endsWith("/") ? pathname : `${pathname}/`
-  const hasLocalePrefix = normalized.startsWith("/fr/") || normalized === "/fr/"
-  const localePrefix = hasLocalePrefix ? "/fr" : ""
-  const basePath = normalized.replace(/^\/fr(?=\/|$)/, "") || "/"
+  const pathLocale = PREFIXED_LOCALES.find((locale) =>
+    normalized.startsWith(`/${locale}/`)
+  )
+  const hasLocalePrefix = pathLocale !== undefined
+  const localePrefix = pathLocale ? `/${pathLocale}` : ""
+  const basePath = pathLocale
+    ? normalized.slice(pathLocale.length + 1) || "/"
+    : normalized
   const localizedMarkdownBasePaths = new Set([
     "/",
     "/features/",
@@ -587,9 +593,9 @@ ${DEFAULT_DESCRIPTION}
 
 ## Pricing Snapshot
 
-- Free: $0/month with 30 browser voice minutes and a 25 MB knowledge base. Free has no telephone number, so it sends no texts and cannot transfer calls.
-- Starter: $30/month or $288/year ($24/month effective) with 150 voice minutes, 20 transfer attempts, 50 alert SMS segments, and 100 MB knowledge base.
-- Pro: $100/month or $960/year ($80/month effective) with 500 voice minutes, 100 transfer attempts, 200 alert SMS segments, and 500 MB knowledge base.
+- Free: $0/month with 30 browser voice minutes and a 1 MB knowledge base. Free has no telephone number, so it sends no texts and cannot transfer calls.
+- Starter: $30/month or $288/year ($24/month effective) with 150 voice minutes, 20 transfer attempts, 50 alert SMS segments, and 5 MB knowledge base.
+- Pro: $100/month or $960/year ($80/month effective) with 500 voice minutes, 100 transfer attempts, 200 alert SMS segments, and 20 MB knowledge base.
 - Starter overage: $0.20 per voice minute, $0.02 per transfer attempt, and $0.02 per alert SMS segment.
 - Pro overage: $0.18 per voice minute, $0.02 per transfer attempt, and $0.02 per alert SMS segment.
 - Spam calls and calls under 10 seconds are excluded from usage, so they do not count against included voice minutes or paid-plan overages.
@@ -640,9 +646,9 @@ LobbyStack has Free, Starter, Pro, and Enterprise options. Plans scale by usage 
 
 | Plan | Price | Included usage |
 | --- | ---: | --- |
-| Free | $0/month | 30 browser voice minutes, no telephone number, 25 MB knowledge base |
-| Starter | $30/month or $288/year | 150 voice minutes, 20 transfer attempts, 50 alert SMS segments, 100 MB knowledge base |
-| Pro | $100/month or $960/year | 500 voice minutes, 100 transfer attempts, 200 alert SMS segments, 500 MB knowledge base |
+| Free | $0/month | 30 browser voice minutes, no telephone number, 1 MB knowledge base |
+| Starter | $30/month or $288/year | 150 voice minutes, 20 transfer attempts, 50 alert SMS segments, 5 MB knowledge base |
+| Pro | $100/month or $960/year | 500 voice minutes, 100 transfer attempts, 200 alert SMS segments, 20 MB knowledge base |
 | Enterprise | Custom | Custom volume, multiple numbers, and self-hosting implementation support |
 
 ## Overage Rates
@@ -674,7 +680,85 @@ No. LobbyStack excludes spam calls from usage, so wrong numbers, robocalls, and 
 No. Calls under 10 seconds are excluded from usage and do not count against included voice minutes or paid-plan overages.
 `
 
-export const affiliateProgramMarkdown = (locale: "en" | "fr") => {
+export const affiliateProgramMarkdown = (locale: Locale) => {
+  if (locale === "es") {
+    return `---
+title: Programa de afiliados de LobbyStack | 20% de comisión
+description: Resumen público del programa de afiliados de LobbyStack.
+url: ${absoluteUrl("/es/affiliate-program/")}
+---
+
+# Programa de afiliados de LobbyStack
+
+Recomiende los planes alojados de LobbyStack a clientes de pago y gane una comisión.
+
+## Condiciones del programa
+
+| Condición | LobbyStack |
+| --- | --- |
+| Comisión | 20% |
+| Duración | Primeros 12 meses tras la atribución |
+| Período de retención | 30 días |
+| Pago mínimo | USD $100 |
+| Método de pago | PayPal |
+
+Los negocios referidos obtienen un 5% de descuento en los planes alojados de LobbyStack cuando se registran con su enlace.
+
+## Qué genera comisión
+
+Solo gana comisión por los pagos de planes alojados de LobbyStack. El autoalojamiento sin una suscripción de pago a LobbyStack no genera comisión.
+
+## Cómo empezar
+
+1. Inicie sesión y abra la página de afiliados en su panel.
+2. Añada su correo de PayPal.
+3. Comparta su enlace con negocios que necesitan atender mejor el teléfono y reservar citas.
+
+## Para quién es
+
+Agencias, consultores, creadores y operadores que recomiendan herramientas a pequeños negocios, servicios a domicilio, clínicas y salones.
+`
+  }
+
+  if (locale === "sr") {
+    return `---
+title: LobbyStack partnerski program | Provizija od 20%
+description: Javni pregled LobbyStack partnerskog programa.
+url: ${absoluteUrl("/sr/affiliate-program/")}
+---
+
+# LobbyStack partnerski program
+
+Preporučite hostovane LobbyStack pakete klijentima koji plaćaju i zaradite proviziju.
+
+## Uslovi programa
+
+| Uslov | LobbyStack |
+| --- | --- |
+| Provizija | 20% |
+| Trajanje | Prvih 12 meseci nakon pripisivanja |
+| Period zadržavanja | 30 dana |
+| Minimalna isplata | USD $100 |
+| Način isplate | PayPal |
+
+Preporučene firme dobijaju 5% popusta na hostovane LobbyStack pakete kada se registruju preko Vašeg linka.
+
+## Šta donosi proviziju
+
+Proviziju zarađujete samo na uplatama za hostovane LobbyStack pakete. Samostalno hostovanje bez plaćene LobbyStack pretplate ne donosi proviziju.
+
+## Kako da počnete
+
+1. Prijavite se i otvorite stranicu partnerskog programa na kontrolnoj tabli.
+2. Dodajte svoju PayPal e-adresu.
+3. Podelite link sa firmama kojima treba bolje pokrivanje telefona i zakazivanje termina.
+
+## Kome je namenjen
+
+Agencijama, konsultantima, kreatorima i operaterima koji preporučuju alate malim firmama, kućnim servisima, klinikama i salonima.
+`
+  }
+
   if (locale === "fr") {
     return `---
 title: Programme d'affiliation LobbyStack | 20 % de commission

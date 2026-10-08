@@ -77,12 +77,14 @@
         "title": {
           "label": "Naslov",
           "placeholder": "Radno vreme",
-          "hint": "Kratak, jasan naslov za ovu informaciju."
+          "hint": "Kratak, jasan naslov za ovu informaciju.",
+          "required": "Unesite naslov za ovu informaciju."
         },
         "content": {
           "label": "Sadržaj",
           "placeholder": "Radimo od ponedeljka do petka, od 9 do 17 časova.",
-          "hint": "Informacija koju recepcioner treba da koristi."
+          "hint": "Informacija koju recepcioner treba da koristi.",
+          "required": "Unesite informaciju koju recepcioner treba da koristi."
         },
         "tags": {
           "label": "Oznake (opciono)",
@@ -132,7 +134,8 @@
         "title": {
           "label": "Naslov",
           "placeholder": "Prve konsultacije",
-          "hint": "Kratak, jasan naziv ove usluge."
+          "hint": "Kratak, jasan naziv ove usluge.",
+          "required": "Unesite naziv ove usluge."
         },
         "content": {
           "label": "Sadržaj",
@@ -142,7 +145,8 @@
         "duration": {
           "label": "Trajanje",
           "placeholder": "30",
-          "hint": "Trajanje termina u minutima, za proveru slobodnih termina."
+          "hint": "Trajanje termina u minutima, za proveru slobodnih termina.",
+          "required": "Unesite ceo broj minuta, najmanje 1."
         },
         "active": {
           "label": "Može se zakazati",
@@ -196,12 +200,14 @@
         "title": {
           "label": "Naslov",
           "placeholder": "Zahteve za razgovor sa osobom preusmeri na Jovanu",
-          "hint": "Kratak, jasan naslov ovog pravila."
+          "hint": "Kratak, jasan naslov ovog pravila.",
+          "required": "Unesite naslov ovog pravila."
         },
         "content": {
           "label": "Sadržaj",
           "placeholder": "Kada neko traži da razgovara sa osobom, preusmeri poziv na 555-123-4567.",
-          "hint": "Opišite šta recepcioner treba da uradi."
+          "hint": "Opišite šta recepcioner treba da uradi.",
+          "required": "Opišite šta recepcioner treba da uradi."
         },
         "tags": {
           "label": "Oznake (opciono)",
@@ -310,6 +316,8 @@
     "saveChanges": "Sačuvaj izmene",
     "saving": "Čuvanje…",
     "saved": "Izmene su sačuvane",
+    "deleted": "Obrisano",
+    "importCancelled": "Uvoz je otkazan",
     "moreOptions": "Još opcija",
     "delete": "Obriši",
     "confirmDelete": "Potvrđujete?",

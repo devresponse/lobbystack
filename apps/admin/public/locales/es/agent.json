@@ -77,12 +77,14 @@
         "title": {
           "label": "Título",
           "placeholder": "Horario de atención",
-          "hint": "Un título breve y descriptivo para este conocimiento."
+          "hint": "Un título breve y descriptivo para este conocimiento.",
+          "required": "Escriba un título para este conocimiento."
         },
         "content": {
           "label": "Contenido",
           "placeholder": "Abrimos de lunes a viernes, de 9:00 a 17:00.",
-          "hint": "La información concreta que debe usar la recepcionista."
+          "hint": "La información concreta que debe usar la recepcionista.",
+          "required": "Escriba la información que debe usar la recepcionista."
         },
         "tags": {
           "label": "Etiquetas (opcional)",
@@ -132,7 +134,8 @@
         "title": {
           "label": "Título",
           "placeholder": "Consulta inicial",
-          "hint": "Un título breve y descriptivo para este servicio."
+          "hint": "Un título breve y descriptivo para este servicio.",
+          "required": "Escriba un nombre para este servicio."
         },
         "content": {
           "label": "Contenido",
@@ -142,7 +145,8 @@
         "duration": {
           "label": "Duración",
           "placeholder": "30",
-          "hint": "Duración de la cita en minutos, para comprobar la disponibilidad."
+          "hint": "Duración de la cita en minutos, para comprobar la disponibilidad.",
+          "required": "Escriba un número entero de minutos, al menos 1."
         },
         "active": {
           "label": "Reservable",
@@ -196,12 +200,14 @@
         "title": {
           "label": "Título",
           "placeholder": "Transferir a Jannie a quien pida hablar con una persona",
-          "hint": "Un título breve y descriptivo para esta regla."
+          "hint": "Un título breve y descriptivo para esta regla.",
+          "required": "Escriba un título para esta regla."
         },
         "content": {
           "label": "Contenido",
           "placeholder": "Cuando alguien pida hablar con una persona, transfiérala al 555-123-4567.",
-          "hint": "Describa lo que debe hacer la recepcionista."
+          "hint": "Describa lo que debe hacer la recepcionista.",
+          "required": "Describa lo que debe hacer la recepcionista."
         },
         "tags": {
           "label": "Etiquetas (opcional)",
@@ -310,6 +316,8 @@
     "saveChanges": "Guardar cambios",
     "saving": "Guardando…",
     "saved": "Cambios guardados",
+    "deleted": "Eliminado",
+    "importCancelled": "Importación cancelada",
     "moreOptions": "Más opciones",
     "delete": "Eliminar",
     "confirmDelete": "¿Confirmar?",

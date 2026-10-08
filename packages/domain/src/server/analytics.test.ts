@@ -46,6 +46,15 @@ describe("analytics SQL", () => {
       "hour",
     )).toHaveLength(500);
   });
+
+  it("fits the longest weekly range the analytics route allows (3493 days) without dropping the newest week", () => {
+    // Saturday start: the first bucket begins six days before the range.
+    const from = new Date("2026-01-03T00:00:00.000Z");
+    const to = new Date(from.getTime() + 3493 * 86_400_000);
+    const buckets = analyticsBucketStarts(from, to, "week");
+    expect(buckets.length).toBeLessThanOrEqual(500);
+    expect(new Date(buckets.at(-1)!).getTime() + 7 * 86_400_000).toBeGreaterThan(to.getTime());
+  });
 });
 
 

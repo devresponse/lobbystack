@@ -9,6 +9,7 @@ import {
   Field,
   FieldContent,
   FieldDescription,
+  FieldError,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -52,6 +53,9 @@ export function AddKnowledgeSheet({
   const [content, setContent] = useState("");
   const [tags, setTags] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const titleMissing = submitted && !title.trim();
+  const contentMissing = submitted && !content.trim();
   const titleId = useId();
   const contentId = useId();
   const tagsId = useId();
@@ -65,6 +69,7 @@ export function AddKnowledgeSheet({
       : t("agent:sections.knowledge.addKnowledgeDescription");
   const submitLabel = mode === "edit" ? t("agent:actions.saveChanges") : t("agent:actions.save");
   useEffect(() => {
+    setSubmitted(false);
     if (!open) {
       setTitle("");
       setContent("");
@@ -80,6 +85,7 @@ export function AddKnowledgeSheet({
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
+    setSubmitted(true);
     const trimmedTitle = title.trim();
     const trimmedContent = content.trim();
     if (trimmedTitle.length === 0 || trimmedContent.length === 0) {
@@ -107,13 +113,13 @@ export function AddKnowledgeSheet({
           <DialogTitle>{dialogTitle}</DialogTitle>
           <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
-        <form className="flex min-h-0 flex-col gap-6" onSubmit={(event) => void handleSubmit(event)}>
+        <form className="flex min-h-0 flex-col gap-6" noValidate onSubmit={(event) => void handleSubmit(event)}>
           {/* The fields scroll and the footer stays put, so a long paste never
               pushes the save button off screen. The inset keeps focus rings
               clear of the scroll edge. */}
           <div className="-m-1 min-h-0 overflow-y-auto p-1">
             <FieldGroup>
-              <Field>
+              <Field data-invalid={titleMissing || undefined}>
                 <FieldContent>
                   <FieldLabel htmlFor={titleId}>
                     {t("agent:sections.knowledge.fields.title.label")}
@@ -123,14 +129,17 @@ export function AddKnowledgeSheet({
                   </FieldDescription>
                 </FieldContent>
                 <Input
+                  aria-describedby={titleMissing ? `${titleId}-error` : undefined}
+                  aria-invalid={titleMissing || undefined}
                   id={titleId}
                   placeholder={t("agent:sections.knowledge.fields.title.placeholder")}
                   value={title}
                   onChange={(event) => setTitle(event.target.value)}
                 />
+                {titleMissing ? <FieldError id={`${titleId}-error`}>{t("agent:sections.knowledge.fields.title.required")}</FieldError> : null}
               </Field>
 
-              <Field>
+              <Field data-invalid={contentMissing || undefined}>
                 <FieldContent>
                   <FieldLabel htmlFor={contentId}>
                     {t("agent:sections.knowledge.fields.content.label")}
@@ -140,12 +149,15 @@ export function AddKnowledgeSheet({
                   </FieldDescription>
                 </FieldContent>
                 <Textarea
+                  aria-describedby={contentMissing ? `${contentId}-error` : undefined}
+                  aria-invalid={contentMissing || undefined}
                   className="max-h-[40svh] min-h-40 overflow-y-auto"
                   id={contentId}
                   placeholder={t("agent:sections.knowledge.fields.content.placeholder")}
                   value={content}
                   onChange={(event) => setContent(event.target.value)}
                 />
+                {contentMissing ? <FieldError id={`${contentId}-error`}>{t("agent:sections.knowledge.fields.content.required")}</FieldError> : null}
               </Field>
 
               <Field>

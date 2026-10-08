@@ -32,8 +32,8 @@
       "cards": {
         "calls": "Number of calls",
         "messages": "Number of messages",
-        "appointments": "Appointments Booked",
-        "agentResponseTime": "Agent Response Time"
+        "appointments": "Appointments booked",
+        "agentResponseTime": "Agent response time"
       },
       "controls": {
         "dateRange": "Date range",

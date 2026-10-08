@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 type SetupStep = { name: string; status: string };
 
-export function DashboardSetupGuideCard() {
+export function DashboardSetupGuideCard({ onNavigate }: { onNavigate?: () => void } = {}) {
   const { t } = useTranslation("nav");
   const { business } = useActiveBusiness();
   const canManage = Boolean(business && ["business_owner", "business_admin"].includes(business.role));
@@ -33,6 +33,7 @@ export function DashboardSetupGuideCard() {
         aria-label={t("sidebar.setupGuide.open")}
         className="h-auto w-full justify-start rounded-xl bg-foreground px-4 py-3 text-background hover:!bg-foreground hover:!text-background focus-visible:!bg-foreground focus-visible:!text-background active:!bg-foreground active:!text-background"
         nativeButton={false}
+        onClick={onNavigate}
         render={<Link href="/setup-guide" />}
         type="button"
         variant="ghost"

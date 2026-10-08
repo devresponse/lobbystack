@@ -100,12 +100,15 @@ function createProductAnalytics(): WorkerDependencies["productAnalytics"] {
   };
 }
 
+// Containers set PORT; local `pnpm dev` only has WORKER_PORT, which the admin's WORKER_INTERNAL_URL targets.
+const workerPort = Number(process.env.PORT || process.env.WORKER_PORT || 3002);
+
 async function main(): Promise<void> {
   logUnhandledRejections();
   // Sampled once at boot; it does not pause work already claimed by another process.
   if (isMaintenanceMode(process.env)) {
     // Keep liveness available, but report unready and avoid all queue, scheduler, and provider startup.
-    startHealthServer(Number(process.env.PORT ?? 3002), { ready: false, redis: false, database: false, storage: false, activeJobs: 0 });
+    startHealthServer(workerPort, { ready: false, redis: false, database: false, storage: false, activeJobs: 0 });
     console.warn("Worker consumer startup is isolated by maintenance mode.");
     return;
   }
@@ -137,7 +140,7 @@ async function main(): Promise<void> {
   const state = { ready: false, redis: false, database: false, storage: false, activeJobs: 0 };
   const embeddings = createEmbeddingProvider();
   const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) }, attachLock: realtime });
-  const health = startHealthServer(Number(process.env.PORT ?? 3002), state, liveCalls.handle);
+  const health = startHealthServer(workerPort, state, liveCalls.handle);
   const email = createEmailProvider();
   const onboardingFollowupSender = createOnboardingFollowupSender();
   const twilio = createTwilioProvider();

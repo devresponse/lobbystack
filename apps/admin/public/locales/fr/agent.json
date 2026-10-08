@@ -77,12 +77,14 @@
         "title": {
           "label": "Titre",
           "placeholder": "Heures d'ouverture",
-          "hint": "Un titre court et descriptif pour cette information."
+          "hint": "Un titre court et descriptif pour cette information.",
+          "required": "Saisissez un titre pour cette information."
         },
         "content": {
           "label": "Contenu",
           "placeholder": "Nous sommes ouverts du lundi au vendredi de 9h à 17h.",
-          "hint": "L'information réelle que le réceptionniste doit utiliser."
+          "hint": "L'information réelle que le réceptionniste doit utiliser.",
+          "required": "Saisissez l'information que le réceptionniste doit utiliser."
         },
         "tags": {
           "label": "Mots-clés (optionnel)",
@@ -132,7 +134,8 @@
         "title": {
           "label": "Titre",
           "placeholder": "Consultation initiale",
-          "hint": "Un titre court et descriptif pour ce service."
+          "hint": "Un titre court et descriptif pour ce service.",
+          "required": "Saisissez un nom pour ce service."
         },
         "content": {
           "label": "Contenu",
@@ -142,7 +145,8 @@
         "duration": {
           "label": "Durée",
           "placeholder": "30",
-          "hint": "Durée du rendez-vous en minutes pour vérifier les disponibilités."
+          "hint": "Durée du rendez-vous en minutes pour vérifier les disponibilités.",
+          "required": "Saisissez un nombre entier de minutes, au moins 1."
         },
         "active": {
           "label": "Réservable",
@@ -196,12 +200,14 @@
         "title": {
           "label": "Titre",
           "placeholder": "Transfert des appels",
-          "hint": "Un titre court et descriptif pour cette règle."
+          "hint": "Un titre court et descriptif pour cette règle.",
+          "required": "Saisissez un titre pour cette règle."
         },
         "content": {
           "label": "Contenu",
           "placeholder": "Transférez les appels urgents de facturation à l'accueil et envoyez un texto au gestionnaire après les heures d'ouverture.",
-          "hint": "Décrivez ce que le réceptionniste doit faire."
+          "hint": "Décrivez ce que le réceptionniste doit faire.",
+          "required": "Décrivez ce que le réceptionniste doit faire."
         },
         "tags": {
           "label": "Mots-clés (optionnel)",
@@ -310,6 +316,8 @@
     "saveChanges": "Enregistrer les modifications",
     "saving": "Enregistrement…",
     "saved": "Modifications enregistrées",
+    "deleted": "Supprimé",
+    "importCancelled": "Import annulé",
     "moreOptions": "Plus d options",
     "delete": "Supprimer",
     "confirmDelete": "Confirmer ?",

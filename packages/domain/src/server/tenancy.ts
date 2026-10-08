@@ -98,7 +98,7 @@ export async function createBusiness(
 export async function listUserBusinesses(
   db: Database,
   userId: string,
-): Promise<Array<{ businessId: string; name: string; slug: string; role: string; active: boolean; onboardingStage?: string }>> {
+): Promise<Array<{ businessId: string; name: string; slug: string; role: string; active: boolean; onboardingStage?: string; createdAt?: string }>> {
   const result = await withBusinessTransaction(db, { userId, actorType: "operator" }, async (tx) => {
     const [user] = await tx.select({ activeBusinessId: users.activeBusinessId }).from(users).where(eq(users.id, userId)).limit(1);
     const rows = await tx.execute(sql`select business_id, name, slug, role from app.list_user_businesses(${userId})`);
@@ -113,12 +113,13 @@ export async function listUserBusinesses(
         defaultLocale: businesses.defaultLocale,
         websiteUrl: businesses.websiteUrl,
         onboardingStage: businesses.onboardingStage,
+        createdAt: businesses.createdAt,
       }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
       if (detail) details.push(detail);
     }
     return { activeBusinessId: user?.activeBusinessId ?? null, rows: rows.rows, details };
   });
-  return result.rows.map((row) => { const detail = result.details.find((item) => item.id === String(row.business_id)); return { businessId: String(row.business_id), name: String(row.name), slug: String(row.slug), role: String(row.role), active: String(row.business_id) === result.activeBusinessId, ...(detail ? { timezone: detail.timezone, businessType: detail.businessType, defaultLocale: detail.defaultLocale, websiteUrl: detail.websiteUrl, onboardingStage: detail.onboardingStage } : {}) }; });
+  return result.rows.map((row) => { const detail = result.details.find((item) => item.id === String(row.business_id)); return { businessId: String(row.business_id), name: String(row.name), slug: String(row.slug), role: String(row.role), active: String(row.business_id) === result.activeBusinessId, ...(detail ? { timezone: detail.timezone, businessType: detail.businessType, defaultLocale: detail.defaultLocale, websiteUrl: detail.websiteUrl, onboardingStage: detail.onboardingStage, createdAt: detail.createdAt.toISOString() } : {}) }; });
 }
 
 export async function updateBusiness(

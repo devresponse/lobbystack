@@ -26,4 +26,14 @@ describe("generateEnv", () => {
 
     expect(output).toMatch(/^BETTER_AUTH_SECRET=[0-9a-f]{64}$/);
   });
+
+  it("fills a generated password into DATABASE_URL", () => {
+    const { output, generated } = generateEnv(
+      "POSTGRES_PASSWORD=replace-with-a-long-local-password\nDATABASE_URL=postgres://postgres:replace-with-a-long-local-password@127.0.0.1:15433/lobbystack",
+      () => "pw",
+    );
+
+    expect(output).toBe("POSTGRES_PASSWORD=pw\nDATABASE_URL=postgres://postgres:pw@127.0.0.1:15433/lobbystack");
+    expect(generated).toEqual(["POSTGRES_PASSWORD"]);
+  });
 });

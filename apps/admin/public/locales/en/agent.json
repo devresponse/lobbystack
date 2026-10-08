@@ -77,12 +77,14 @@
         "title": {
           "label": "Title",
           "placeholder": "Opening Hours",
-          "hint": "A short, descriptive title for this piece of knowledge."
+          "hint": "A short, descriptive title for this piece of knowledge.",
+          "required": "Enter a title for this knowledge."
         },
         "content": {
           "label": "Content",
           "placeholder": "We are open Monday to Friday from 9am to 5pm.",
-          "hint": "The actual information the receptionist should use."
+          "hint": "The actual information the receptionist should use.",
+          "required": "Enter the information the receptionist should use."
         },
         "tags": {
           "label": "Tags (optional)",
@@ -132,7 +134,8 @@
         "title": {
           "label": "Title",
           "placeholder": "Initial Consultation",
-          "hint": "A short, descriptive title for this service."
+          "hint": "A short, descriptive title for this service.",
+          "required": "Enter a name for this service."
         },
         "content": {
           "label": "Content",
@@ -142,7 +145,8 @@
         "duration": {
           "label": "Duration",
           "placeholder": "30",
-          "hint": "Appointment length in minutes for availability checks."
+          "hint": "Appointment length in minutes for availability checks.",
+          "required": "Enter a whole number of minutes, at least 1."
         },
         "active": {
           "label": "Bookable",
@@ -196,12 +200,14 @@
         "title": {
           "label": "Title",
           "placeholder": "Transfer requests to talk to someone to Jannie",
-          "hint": "A short, descriptive title for this rule."
+          "hint": "A short, descriptive title for this rule.",
+          "required": "Enter a title for this rule."
         },
         "content": {
           "label": "Content",
           "placeholder": "When someone asks to speak to a human, transfer them to 555-123-4567.",
-          "hint": "Describe what the receptionist should do."
+          "hint": "Describe what the receptionist should do.",
+          "required": "Describe what the receptionist should do."
         },
         "tags": {
           "label": "Tags (optional)",
@@ -310,6 +316,8 @@
     "saveChanges": "Save changes",
     "saving": "Saving…",
     "saved": "Changes saved",
+    "deleted": "Deleted",
+    "importCancelled": "Import cancelled",
     "moreOptions": "More options",
     "delete": "Delete",
     "confirmDelete": "Confirm?",

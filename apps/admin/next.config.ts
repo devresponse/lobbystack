@@ -18,6 +18,8 @@ const nextConfig: NextConfig = {
   // chunks stamped with an old release. The deployment ID adds `?dpl=` to every
   // asset URL, so each deploy's chunks are fetched fresh.
   ...(serviceVersion === "development" ? {} : { deploymentId: serviceVersion }),
+  // Extra hosts (e.g. an ngrok tunnel) that may load dev-only resources such as HMR.
+  allowedDevOrigins: (process.env.ALLOWED_DEV_ORIGINS ?? "").split(",").map((host) => host.trim()).filter(Boolean),
   experimental: {
     preloadEntriesOnStart: false,
     requestInsights: process.env.NODE_ENV === "development",

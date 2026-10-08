@@ -1,6 +1,6 @@
 import type { Locale } from "@/i18n/config"
 
-const APP_ORIGIN = "https://app.lobbystack.com"
+const APP_ORIGIN = import.meta.env.PUBLIC_APP_URL || "https://app.lobbystack.com"
 
 type AppAuthLinkOptions = {
   source?: "calculator"

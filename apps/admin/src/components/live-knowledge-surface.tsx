@@ -3,6 +3,7 @@
 import { getCoreRowModel, getPaginationRowModel, useReactTable, type PaginationState } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, FileText, Globe, MoreHorizontal, Pause, Play, Plus, Search, Text, Trash2, Upload } from "lucide-react";
+import { toast } from "sonner";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -148,6 +149,6 @@ export function LiveKnowledgeSurface() {
     <AddKnowledgeSheet mode={editingSnippet ? "edit" : "create"} snippet={editingSnippet} open={form === "text"} onOpenChange={(open) => { if (!open) { setForm(null); setEditingSnippet(null); } }} save={async (values) => { if (editingSnippet) await updateSnippet.mutateAsync({ id: editingSnippet.id, ...values }); else await addSnippet.mutateAsync(values); }} />
     <ImportWebsiteKnowledgeSheet open={form === "website"} onOpenChange={(open) => { if (!open) setForm(null); }} save={async (sourceUrl) => { await addWebsite.mutateAsync({ title: sourceUrl, sourceUrl }); }} />
     <UploadKnowledgeDocumentSheet open={form === "upload"} onOpenChange={(open) => { if (!open) setForm(null); }} upload={async (values) => { await uploadDocument.mutateAsync(values); }} />
-    <ConfirmActionDialog confirmVariant="destructive" cancelLabel={t("actions.deleteCancel")} confirmLabel={t(cancellingImport ? "actions.cancelImport" : "actions.delete")} description={t(cancellingImport ? "actions.cancelImportDescription" : "actions.deleteDescription")} onConfirm={async () => { if (!deleteCandidate) return; if (deleteCandidate.entryType === "snippet") await deleteSnippet.mutateAsync(deleteCandidate.id); else await documentAction.mutateAsync({ id: deleteCandidate.id, method: cancellingImport ? "PATCH" : "DELETE", ...(cancellingImport ? { action: "cancel" } : {}) }); }} onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }} open={deleteCandidate !== null} pending={deleteSnippet.isPending || documentAction.isPending} title={t(cancellingImport ? "actions.cancelImportTitle" : "actions.deleteTitle")} />
+    <ConfirmActionDialog confirmVariant="destructive" cancelLabel={t("actions.deleteCancel")} confirmLabel={t(cancellingImport ? "actions.cancelImport" : "actions.delete")} description={t(cancellingImport ? "actions.cancelImportDescription" : "actions.deleteDescription")} onConfirm={async () => { if (!deleteCandidate) return; if (deleteCandidate.entryType === "snippet") await deleteSnippet.mutateAsync(deleteCandidate.id); else await documentAction.mutateAsync({ id: deleteCandidate.id, method: cancellingImport ? "PATCH" : "DELETE", ...(cancellingImport ? { action: "cancel" } : {}) }); toast.success(t(cancellingImport ? "actions.importCancelled" : "actions.deleted")); }} onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }} open={deleteCandidate !== null} pending={deleteSnippet.isPending || documentAction.isPending} title={t(cancellingImport ? "actions.cancelImportTitle" : "actions.deleteTitle")} />
   </div></PageSurface>;
 }

@@ -3,6 +3,7 @@
 import { getCoreRowModel, getPaginationRowModel, useReactTable, type PaginationState } from "@tanstack/react-table";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, MoreHorizontal, Pause, Play, Plus, Search, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -17,7 +18,7 @@ import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
-import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel } from "./ui/field";
+import { Field, FieldContent, FieldDescription, FieldError, FieldGroup, FieldLabel } from "./ui/field";
 import { Input } from "./ui/input";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { Textarea } from "./ui/textarea";
@@ -100,7 +101,7 @@ export function RulesSurface() {
         </TableCard>
         <DataTablePagination labels={{ rowsPerPage: t("pagination.rowsPerPage"), pageOf: (page, total) => t("pagination.pageOf", { page, total }), firstPage: t("pagination.firstPage"), previousPage: t("pagination.previousPage"), nextPage: t("pagination.nextPage"), lastPage: t("pagination.lastPage"), goToPage: (page) => t("pagination.goToPage", { page }) }} table={table} /></>}
         <RuleDialog editingRule={editingRule} onOpenChange={(open) => { setDialogOpen(open); if (!open) setEditingRule(null); }} open={dialogOpen} pending={createRule.isPending || updateRule.isPending} save={async (input) => { if (editingRule) await updateRule.mutateAsync({ ruleId: editingRule.id, ...input }); else await createRule.mutateAsync(input); setDialogOpen(false); setEditingRule(null); }} />
-        <ConfirmActionDialog confirmVariant="destructive" cancelLabel={t("actions.deleteCancel")} confirmLabel={t("actions.delete")} description={t("actions.deleteDescription")} onConfirm={async () => { if (deleteCandidate) await deleteRule.mutateAsync(deleteCandidate.id); }} onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }} open={deleteCandidate !== null} pending={deleteRule.isPending} title={t("actions.deleteTitle")} />
+        <ConfirmActionDialog confirmVariant="destructive" cancelLabel={t("actions.deleteCancel")} confirmLabel={t("actions.delete")} description={t("actions.deleteDescription")} onConfirm={async () => { if (!deleteCandidate) return; await deleteRule.mutateAsync(deleteCandidate.id); toast.success(t("actions.deleted")); }} onOpenChange={(open) => { if (!open) setDeleteCandidate(null); }} open={deleteCandidate !== null} pending={deleteRule.isPending} title={t("actions.deleteTitle")} />
       </div>
     </PageSurface>
   );
@@ -112,6 +113,9 @@ function RuleDialog({ editingRule, onOpenChange, open, pending, save }: { editin
   const contentId = useId();
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
-  useEffect(() => { if (open) { setTitle(editingRule?.title ?? ""); setContent(editingRule?.content ?? ""); } }, [editingRule, open]);
-  return <Dialog onOpenChange={onOpenChange} open={open}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>{t(editingRule ? "sections.rules.editKnowledge" : "sections.rules.addKnowledge")}</DialogTitle><DialogDescription>{t(editingRule ? "sections.rules.editKnowledgeDescription" : "sections.rules.addKnowledgeDescription")}</DialogDescription></DialogHeader><form className="flex flex-col gap-6" onSubmit={(event) => { event.preventDefault(); if (!pending && title.trim() && content.trim()) void save({ title: title.trim(), content: content.trim() }); }}><FieldGroup><Field><FieldContent><FieldLabel htmlFor={titleId}>{t("sections.rules.fields.title.label")}</FieldLabel><FieldDescription>{t("sections.rules.fields.title.hint")}</FieldDescription></FieldContent><Input id={titleId} onChange={(event) => setTitle(event.target.value)} placeholder={t("sections.rules.fields.title.placeholder")} value={title} /></Field><Field><FieldContent><FieldLabel htmlFor={contentId}>{t("sections.rules.fields.content.label")}</FieldLabel><FieldDescription>{t("sections.rules.fields.content.hint")}</FieldDescription></FieldContent><Textarea className="min-h-40" id={contentId} onChange={(event) => setContent(event.target.value)} placeholder={t("sections.rules.fields.content.placeholder")} value={content} /></Field></FieldGroup><DialogFooter><Button className="w-full" disabled={pending} type="submit">{pending ? t("actions.saving") : t(editingRule ? "actions.saveChanges" : "actions.save")}</Button></DialogFooter></form></DialogContent></Dialog>;
+  const [submitted, setSubmitted] = useState(false);
+  useEffect(() => { if (open) { setTitle(editingRule?.title ?? ""); setContent(editingRule?.content ?? ""); setSubmitted(false); } }, [editingRule, open]);
+  const titleMissing = submitted && !title.trim();
+  const contentMissing = submitted && !content.trim();
+  return <Dialog onOpenChange={onOpenChange} open={open}><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>{t(editingRule ? "sections.rules.editKnowledge" : "sections.rules.addKnowledge")}</DialogTitle><DialogDescription>{t(editingRule ? "sections.rules.editKnowledgeDescription" : "sections.rules.addKnowledgeDescription")}</DialogDescription></DialogHeader><form className="flex flex-col gap-6" noValidate onSubmit={(event) => { event.preventDefault(); setSubmitted(true); if (!pending && title.trim() && content.trim()) void save({ title: title.trim(), content: content.trim() }); }}><FieldGroup><Field data-invalid={titleMissing || undefined}><FieldContent><FieldLabel htmlFor={titleId}>{t("sections.rules.fields.title.label")}</FieldLabel><FieldDescription>{t("sections.rules.fields.title.hint")}</FieldDescription></FieldContent><Input aria-describedby={titleMissing ? `${titleId}-error` : undefined} aria-invalid={titleMissing || undefined} id={titleId} onChange={(event) => setTitle(event.target.value)} placeholder={t("sections.rules.fields.title.placeholder")} value={title} />{titleMissing ? <FieldError id={`${titleId}-error`}>{t("sections.rules.fields.title.required")}</FieldError> : null}</Field><Field data-invalid={contentMissing || undefined}><FieldContent><FieldLabel htmlFor={contentId}>{t("sections.rules.fields.content.label")}</FieldLabel><FieldDescription>{t("sections.rules.fields.content.hint")}</FieldDescription></FieldContent><Textarea aria-describedby={contentMissing ? `${contentId}-error` : undefined} aria-invalid={contentMissing || undefined} className="min-h-40" id={contentId} onChange={(event) => setContent(event.target.value)} placeholder={t("sections.rules.fields.content.placeholder")} value={content} />{contentMissing ? <FieldError id={`${contentId}-error`}>{t("sections.rules.fields.content.required")}</FieldError> : null}</Field></FieldGroup><DialogFooter><Button className="w-full" disabled={pending} type="submit">{pending ? t("actions.saving") : t(editingRule ? "actions.saveChanges" : "actions.save")}</Button></DialogFooter></form></DialogContent></Dialog>;
 }

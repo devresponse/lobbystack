@@ -11,6 +11,8 @@ import { stableLastmodForUrl } from "./src/lib/sitemap.ts"
 
 const SITE_URL = "https://lobbystack.com"
 const INDEXNOW_KEY = process.env.INDEXNOW_KEY
+// The voice demo calls this origin, so the CSP must allow connecting to it.
+const LIVE_CALL_ORIGIN = process.env.PUBLIC_LIVE_CALL_ENDPOINT ? new URL(process.env.PUBLIC_LIVE_CALL_ENDPOINT).origin : ""
 const DEFAULT_LOCALE = "en"
 // Keep in sync with SUPPORTED_LOCALES and localeMeta in src/i18n/config.ts.
 const LOCALES = ["en", "fr", "es", "sr"]
@@ -137,7 +139,7 @@ export default defineConfig({
       },
       directives: [
         "default-src 'self'",
-        "connect-src 'self' https://app.cal.com https://app.lobbystack.com http://localhost:3000 http://127.0.0.1:3000 https://cloudflareinsights.com https://ts.lobbystack.com https://us.i.posthog.com",
+        `connect-src 'self' https://app.cal.com https://app.lobbystack.com http://localhost:3000 http://127.0.0.1:3000 ${LIVE_CALL_ORIGIN} https://cloudflareinsights.com https://ts.lobbystack.com https://us.i.posthog.com`,
         "frame-src 'self' https://app.cal.com",
         "img-src 'self' data: https://app.cal.com https://images.unsplash.com https://i.pravatar.cc https://ts.lobbystack.com https://us.i.posthog.com",
       ],

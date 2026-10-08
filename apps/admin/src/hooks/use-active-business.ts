@@ -16,6 +16,7 @@ export type Business = {
   defaultLocale?: string;
   websiteUrl?: string | null;
   onboardingStage?: string;
+  createdAt?: string;
 };
 
 /** Loads the operator's workspaces and picks the server-selected active one. */

@@ -11,15 +11,24 @@ const PLACEHOLDER_PREFIX = "replace-with-";
 
 export function generateEnv(example, random = () => randomBytes(32).toString("hex")) {
   const generated = [];
+  const valuesByPlaceholder = new Map();
   const output = example
     .split("\n")
     .map((line) => {
       const match = /^([A-Z0-9_]+)=(.*)$/.exec(line);
-      if (!match || !match[2].startsWith(PLACEHOLDER_PREFIX)) return line;
-      const [, key] = match;
+      if (!match) return line;
+      const [, key, value] = match;
+      if (!value.startsWith(PLACEHOLDER_PREFIX)) {
+        // Reuse generated secrets inside composite values such as DATABASE_URL.
+        let resolved = value;
+        for (const [placeholder, secret] of valuesByPlaceholder) resolved = resolved.replaceAll(placeholder, secret);
+        return `${key}=${resolved}`;
+      }
       if (PROVIDER_CREDENTIALS.has(key)) return `${key}=`;
       generated.push(key);
-      return `${key}=${random()}`;
+      const secret = random();
+      valuesByPlaceholder.set(value, secret);
+      return `${key}=${secret}`;
     })
     .join("\n");
   return { output, generated };

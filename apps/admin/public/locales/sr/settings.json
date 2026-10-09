@@ -392,6 +392,23 @@
       "twentyFourHour": "24 časa",
       "ampm": "AM/PM"
     },
+    "timezone": {
+      "label": "Vremenska zona firme",
+      "description": "Izaberite vremensku zonu za radno vreme i termine.",
+      "saveFailed": "Nismo uspeli da sačuvamo vremensku zonu. Pokušajte ponovo.",
+      "regions": {
+        "africa": "Afrika",
+        "america": "Amerika",
+        "antarctica": "Antarktik",
+        "arctic": "Arktik",
+        "asia": "Azija",
+        "atlantic": "Atlantik",
+        "australia": "Australija",
+        "europe": "Evropa",
+        "indian": "Indijski okean",
+        "pacific": "Pacifik"
+      }
+    },
     "theme": {
       "label": "Tema",
       "description": "Izaberite željenu temu.",

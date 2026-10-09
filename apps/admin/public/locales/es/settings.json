@@ -392,6 +392,23 @@
       "twentyFourHour": "24 horas",
       "ampm": "AM/PM"
     },
+    "timezone": {
+      "label": "Zona horaria del negocio",
+      "description": "Elija la zona horaria de su horario de atención y sus citas.",
+      "saveFailed": "No pudimos guardar su zona horaria. Inténtelo de nuevo.",
+      "regions": {
+        "africa": "África",
+        "america": "América",
+        "antarctica": "Antártida",
+        "arctic": "Ártico",
+        "asia": "Asia",
+        "atlantic": "Atlántico",
+        "australia": "Australia",
+        "europe": "Europa",
+        "indian": "Océano Índico",
+        "pacific": "Pacífico"
+      }
+    },
     "theme": {
       "label": "Tema",
       "description": "Elija su tema visual preferido.",

@@ -143,6 +143,44 @@ export async function updateBusinessInTransaction(
   if (!business) throw new Error("Business not found.");
 }
 
+/**
+ * Whether a value names an IANA time zone, such as America/Vancouver or UTC,
+ * that Intl and Luxon accept. UTC offsets such as +05:00 don't name a zone.
+ */
+export function isIanaTimeZone(value: string): boolean {
+  if (value.length > 80 || !/^[A-Za-z][\w+-]*(?:\/[\w+-]+)*$/.test(value)) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sets the time zone the business's opening hours and new bookings use, and
+ * refreshes the receptionist's snapshot, which offers times in it. Booked
+ * appointments keep the zone they were booked in. Callers authorize first.
+ */
+export async function updateBusinessTimezoneInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; timezone: string },
+): Promise<string> {
+  const timezone = input.timezone.trim();
+  if (!isIanaTimeZone(timezone)) throw Object.assign(new Error("timezone must be an IANA time zone, such as America/Vancouver."), { status: 400, code: "invalid_timezone" });
+  const [business] = await tx.update(businesses).set({ timezone, updatedAt: new Date() }).where(eq(businesses.id, input.businessId)).returning({ id: businesses.id });
+  if (!business) throw Object.assign(new Error("Business not found."), { status: 404 });
+  await enqueueOutbox(tx, {
+    topic: "snapshot.refresh",
+    businessId: input.businessId,
+    aggregateType: "business",
+    aggregateId: input.businessId,
+    dedupeKey: `business:${input.businessId}:timezone:${Date.now()}`,
+    payload: { businessId: input.businessId, reason: "timezone_updated" },
+  });
+  return timezone;
+}
+
 export async function switchWorkspace(
   context: DomainContext,
   input: { userId: string; businessId: string },

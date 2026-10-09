@@ -10,7 +10,7 @@ const execute = vi.fn();
 function query() { const chain = Promise.resolve(batches.shift() ?? []) as Chain; for (const method of ["from", "innerJoin", "leftJoin", "where", "orderBy", "limit"] as const) chain[method] = () => chain; return chain; }
 const provider = { getBusyBlocks: vi.fn(), upsertEvent: vi.fn(), deleteEvent: vi.fn(), refreshAccessToken: vi.fn() };
 const dependencies = { domain: { db: {} as never }, calendar: provider };
-const appointment = { id: "appointment", status: "confirmed", startsAt: new Date("2026-09-14T10:00:00Z"), endsAt: new Date("2026-09-14T10:30:00Z"), externalEventId: "event", serviceName: "Service", contactName: null, connectionId: "connection", calendarId: "selected", connectionStatus: "connected", provider: "google" };
+const appointment = { id: "appointment", status: "confirmed", startsAt: new Date("2026-09-14T10:00:00Z"), endsAt: new Date("2026-09-14T10:30:00Z"), timezone: "America/Vancouver", externalEventId: "event", serviceName: "Service", contactName: null, connectionId: "connection", calendarId: "selected", connectionStatus: "connected", provider: "google" };
 
 beforeEach(() => {
   vi.clearAllMocks(); vi.stubEnv("ENCRYPTION_KEY", "fixture-key");
@@ -36,6 +36,11 @@ it("uses deterministic event identity for creates and reschedules", async () => 
   batches = [[{ ...appointment, externalEventId: null }], [{ ...appointment, externalEventId: null }]];
   await syncAppointmentCalendar(dependencies, { businessId: "business", appointmentId: "appointment" });
   expect(provider.upsertEvent).toHaveBeenCalledWith(expect.objectContaining({ clientEventId: expect.stringMatching(/^a[a-f0-9]{31}$/), calendarId: "selected" }));
+});
+
+it("writes the booked instant and the zone the appointment was booked in", async () => {
+  await syncAppointmentCalendar(dependencies, { businessId: "business", appointmentId: "appointment" });
+  expect(provider.upsertEvent).toHaveBeenCalledWith(expect.objectContaining({ startsAt: "2026-09-14T10:00:00.000Z", endsAt: "2026-09-14T10:30:00.000Z", timeZone: "America/Vancouver" }));
 });
 
 it("preserves busy data on one calendar failure and still reconciles other connections", async () => {

@@ -15,6 +15,17 @@ describe("GoogleCalendarProvider", () => {
     expect(JSON.parse(String(request.body))).toMatchObject({ id: "a1234567890abcdef", summary: "Appointment" });
   });
 
+  it("sends the exact instants labelled with the appointment's timezone", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ id: "event-1" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new GoogleCalendarProvider({ clientId: "client", clientSecret: "secret", redirectUri: "https://app.example/oauth" });
+
+    await provider.upsertEvent({ accessToken: "access", calendarId: "primary", clientEventId: "a1234567890abcdef", title: "Appointment", startsAt: "2026-10-10T17:00:00.000Z", endsAt: "2026-10-10T17:30:00.000Z", timeZone: "America/Vancouver" });
+    const body = JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.start).toEqual({ dateTime: "2026-10-10T17:00:00.000Z", timeZone: "America/Vancouver" });
+    expect(body.end).toEqual({ dateTime: "2026-10-10T17:30:00.000Z", timeZone: "America/Vancouver" });
+  });
+
   it("treats a deterministic insert conflict as an already-created event", async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status: 409 }).mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: "a1234567890abcdef" }) });
     vi.stubGlobal("fetch", fetchMock);

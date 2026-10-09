@@ -108,11 +108,17 @@ export class GoogleCalendarProvider {
     throw new Error("Google Calendar availability exceeded the page limit.");
   }
 
-  async upsertEvent(input: { accessToken: string; calendarId: string; eventId?: string; clientEventId?: string; title: string; startsAt: string; endsAt: string; description?: string }): Promise<{ externalEventId: string }> {
+  /**
+   * Creates or replaces an event. `startsAt` and `endsAt` are exact instants;
+   * `timeZone` is the IANA zone the appointment was booked in, so Google
+   * labels the event with the business's zone instead of the calendar's.
+   */
+  async upsertEvent(input: { accessToken: string; calendarId: string; eventId?: string; clientEventId?: string; title: string; startsAt: string; endsAt: string; timeZone?: string; description?: string }): Promise<{ externalEventId: string }> {
     assertCertificationCalendar(input.calendarId);
     const method = input.eventId ? "PUT" : "POST";
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(input.calendarId)}/events${input.eventId ? `/${encodeURIComponent(input.eventId)}` : ""}`;
-    const response = await fetch(url, { method, headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ ...(input.clientEventId && !input.eventId ? { id: input.clientEventId } : {}), summary: input.title, description: input.description, start: { dateTime: input.startsAt }, end: { dateTime: input.endsAt } }) });
+    const zone = input.timeZone ? { timeZone: input.timeZone } : {};
+    const response = await fetch(url, { method, headers: { authorization: `Bearer ${input.accessToken}`, "content-type": "application/json" }, body: JSON.stringify({ ...(input.clientEventId && !input.eventId ? { id: input.clientEventId } : {}), summary: input.title, description: input.description, start: { dateTime: input.startsAt, ...zone }, end: { dateTime: input.endsAt, ...zone } }) });
     if (!response.ok) {
       if (!input.eventId && input.clientEventId && response.status === 409) return await this.upsertEvent({ ...input, eventId: input.clientEventId });
       throw new Error(`Google Calendar event write failed with status ${response.status}.`);

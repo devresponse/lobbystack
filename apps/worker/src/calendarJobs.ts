@@ -27,7 +27,7 @@ export async function syncAppointmentCalendar(dependencies: Dependencies, input:
   if (!dependencies.calendar || !appointmentId) return { status: "skipped", entityId: appointmentId };
   const provider = dependencies.calendar;
   const load = async (tx: DatabaseTransaction) => (await tx.select({
-    id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, endsAt: appointments.endsAt,
+    id: appointments.id, status: appointments.status, startsAt: appointments.startsAt, endsAt: appointments.endsAt, timezone: appointments.timezone,
     externalEventId: appointments.calendarExternalId, serviceName: services.name, contactName: contacts.name,
     connectionId: calendarConnections.id, calendarId: calendarConnections.selectedCalendarId, connectionStatus: calendarConnections.status,
     provider: calendarConnections.provider,
@@ -57,7 +57,7 @@ export async function syncAppointmentCalendar(dependencies: Dependencies, input:
         await provider.deleteEvent({ accessToken: token, calendarId: current.calendarId, eventId: current.externalEventId ?? clientEventId });
         await updateAppointmentSyncStateInTransaction(tx, { businessId, appointmentId, state: "synced" });
       } else {
-        const external = await provider.upsertEvent({ accessToken: token, calendarId: current.calendarId, clientEventId, ...(current.externalEventId ? { eventId: current.externalEventId } : {}), title: current.serviceName, startsAt: current.startsAt.toISOString(), endsAt: current.endsAt.toISOString(), ...(current.contactName ? { description: `Appointment for ${current.contactName}` } : {}) });
+        const external = await provider.upsertEvent({ accessToken: token, calendarId: current.calendarId, clientEventId, ...(current.externalEventId ? { eventId: current.externalEventId } : {}), title: current.serviceName, startsAt: current.startsAt.toISOString(), endsAt: current.endsAt.toISOString(), timeZone: current.timezone, ...(current.contactName ? { description: `Appointment for ${current.contactName}` } : {}) });
         await updateAppointmentSyncStateInTransaction(tx, { businessId, appointmentId, state: "synced", externalEventId: external.externalEventId });
       }
       return { status: "completed", entityId: appointmentId };

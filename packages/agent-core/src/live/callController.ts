@@ -251,6 +251,9 @@ const TRANSFER_FAILED = "The transfer to a person didn't go through. In the lang
 // so a changed request reschedules instead of booking twice. endCall isn't one:
 // a call that goes on after it was cancelled, and the next request may end it again.
 const ACTION_TOOLS = new Set(["bookAppointment", "requestAppointment", "requestAppointmentCancellation", "cancelAppointment", "rescheduleAppointment", "takeMessage", "transferCall"]);
+// The caller's answer about texts. The next request sees only the latest one,
+// in one slot, and saving it doesn't count as booking or changing anything.
+const ANSWER_TOOLS = new Set(["recordTextPreference"]);
 // Lookups the next request can reuse instead of repeating.
 const REUSABLE_LOOKUPS = new Set(["findAvailability"]);
 const PROGRESS: Record<string, string> = {
@@ -264,6 +267,7 @@ const PROGRESS: Record<string, string> = {
   verifyAppointmentChangeOtp: "checked the verification code",
   cancelAppointment: "tried to cancel the appointment",
   rescheduleAppointment: "tried to reschedule the appointment",
+  recordTextPreference: "tried to save the caller's answer about texts",
   takeMessage: "tried to save the message",
   transferCall: "tried to transfer the call",
   searchKnowledge: "searched the business's documents",
@@ -728,21 +732,27 @@ export class LiveCallController {
    * agent, which ended it. The hangup waits until the request is answered,
    * GPT-Live's goodbye after that answer has played (or it stayed silent for
    * GOODBYE_START_MS), and both sides have been quiet for
-   * CALLER_DONE_QUIET_MS, or CALLER_DONE_MAX_MS at most. The caller speaking
-   * after that request, or another request, cancels it, and the call goes on.
-   * `onCancelled` runs then, or at once when the call can't end this way.
+   * CALLER_DONE_QUIET_MS, or CALLER_DONE_MAX_MS at most. When the caller
+   * speaks after that request, even before the agent ended the call, the
+   * caller check decides; without one, or when they want more, or on another
+   * request, it's cancelled and the call goes on. `onCancelled` runs then, or
+   * at once when the call can't end this way.
    */
   endWhenCallerDone(onCancelled?: () => void): void {
     if (this.ending || this.finished || this.pendingHangup) return;
     const answering = this.answering;
     const afterMs = answering?.offsetMs ?? this.timelineNow();
-    // A newer request, a transfer, or the caller already speaking again means the call isn't over.
-    this.hangupCancelled = (answering !== undefined && answering.revision !== this.latestRevision) || this.transfer !== undefined || this.lastCallerStartMs > afterMs;
+    // GPT-Live can hand the call over mid-sentence, so the caller may already
+    // have said more. Those words get the same check as words after the
+    // hangup was requested; without a check, the call goes on.
+    const callerSpoke = this.lastCallerStartMs > afterMs;
+    // A newer request or a transfer means the call isn't over.
+    this.hangupCancelled = (answering !== undefined && answering.revision !== this.latestRevision) || this.transfer !== undefined || (callerSpoke && !this.callerDone);
     if (this.hangupCancelled) {
       onCancelled?.();
       return;
     }
-    const hangup: PendingHangup = { afterMs, requestedAt: performance.now(), ...(onCancelled ? { onCancelled } : {}) };
+    const hangup: PendingHangup = { afterMs, requestedAt: performance.now(), ...(callerSpoke ? { callerSpoke } : {}), ...(onCancelled ? { onCancelled } : {}) };
     this.pendingHangup = hangup;
     setTimeout(() => this.hangUpWhenQuiet(hangup), GOODBYE_POLL_MS);
   }
@@ -984,7 +994,11 @@ export class LiveCallController {
     for (const step of steps) {
       for (const result of step.toolResults) {
         const output = fitToAppend(JSON.stringify(result.output ?? null));
-        if (ACTION_TOOLS.has(result.toolName)) this.completedActions.push(`- ${result.toolName}: ${output}`);
+        if (ANSWER_TOOLS.has(result.toolName)) {
+          const previous = this.completedActions.findIndex((line) => line.startsWith(`- ${result.toolName}:`));
+          if (previous >= 0) this.completedActions.splice(previous, 1);
+        }
+        if (ACTION_TOOLS.has(result.toolName) || ANSWER_TOOLS.has(result.toolName)) this.completedActions.push(`- ${result.toolName}: ${output}`);
         if (REUSABLE_LOOKUPS.has(result.toolName)) this.latestLookup = `${result.toolName}: ${output}`;
       }
     }

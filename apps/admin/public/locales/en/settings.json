@@ -392,6 +392,23 @@
       "twentyFourHour": "24-hour",
       "ampm": "AM/PM"
     },
+    "timezone": {
+      "label": "Business timezone",
+      "description": "Choose the timezone for your opening hours and appointments.",
+      "saveFailed": "We couldn’t save your timezone. Please try again.",
+      "regions": {
+        "africa": "Africa",
+        "america": "Americas",
+        "antarctica": "Antarctica",
+        "arctic": "Arctic",
+        "asia": "Asia",
+        "atlantic": "Atlantic",
+        "australia": "Australia",
+        "europe": "Europe",
+        "indian": "Indian Ocean",
+        "pacific": "Pacific"
+      }
+    },
     "theme": {
       "label": "Theme",
       "description": "Choose your preferred visual theme.",

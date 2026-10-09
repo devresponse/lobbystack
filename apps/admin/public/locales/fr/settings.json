@@ -392,6 +392,23 @@
       "twentyFourHour": "24 h",
       "ampm": "AM/PM"
     },
+    "timezone": {
+      "label": "Fuseau horaire de l'entreprise",
+      "description": "Choisissez le fuseau horaire de vos heures d'ouverture et de vos rendez-vous.",
+      "saveFailed": "Nous n’avons pas pu enregistrer votre fuseau horaire. Veuillez réessayer.",
+      "regions": {
+        "africa": "Afrique",
+        "america": "Amériques",
+        "antarctica": "Antarctique",
+        "arctic": "Arctique",
+        "asia": "Asie",
+        "atlantic": "Atlantique",
+        "australia": "Australie",
+        "europe": "Europe",
+        "indian": "Océan Indien",
+        "pacific": "Pacifique"
+      }
+    },
     "theme": {
       "label": "Thème",
       "description": "Choisissez votre thème visuel préféré.",

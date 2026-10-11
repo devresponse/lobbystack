@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiKnowledgeEntryCreateSchema, parseApiInput } from "./schemas";
+import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
+import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -36,6 +37,16 @@ describe("parseApiInput", () => {
 
   it("says Invalid input for an unknown knowledge entry type", () => {
     expect(parseApiInput(apiKnowledgeEntryCreateSchema, { type: "video" })).toEqual({ ok: false, details: [{ path: "type", message: "Invalid input" }] });
+  });
+
+  it("takes upload file names that name a file, up to the shared size limit", () => {
+    const upload = { file_name: "prices.pdf", content_type: "application/pdf", length: KNOWLEDGE_UPLOAD_MAX_BYTES, checksum_sha256: `${"A".repeat(43)}=` };
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, upload).ok).toBe(true);
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, file_name: ".env" }).ok).toBe(true);
+    for (const fileName of [".", "..", " .. "]) {
+      expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, file_name: fileName })).toEqual({ ok: false, details: [{ path: "file_name", message: "Use the file's name, such as prices.pdf." }] });
+    }
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, length: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 }).ok).toBe(false);
   });
 
   it("accepts start times with or without seconds", () => {

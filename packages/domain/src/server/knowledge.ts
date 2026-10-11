@@ -634,3 +634,11 @@ export async function getKnowledgeStorageUsageBytes(tx: DatabaseTransaction, bus
 export function knowledgeStorageLimitMessage(limitBytes: number): string {
   return `Knowledge storage limit reached. ${Math.ceil(limitBytes / 1024 / 1024)} MB of text is included on this plan.`;
 }
+
+/** Refuses new knowledge for a business whose plan already holds all the text it includes. */
+export class KnowledgeStorageLimitError extends Error {
+  constructor(limitBytes: number) {
+    super(knowledgeStorageLimitMessage(limitBytes));
+    this.name = "KnowledgeStorageLimitError";
+  }
+}

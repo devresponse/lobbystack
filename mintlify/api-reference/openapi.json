@@ -3198,6 +3198,266 @@
         }
       }
     },
+    "/knowledge/uploads": {
+      "post": {
+        "operationId": "createKnowledgeUpload",
+        "summary": "Start a file upload",
+        "description": "Reserves an upload for a document up to 10 MB and returns where to send it. Send the file's bytes with PUT to upload_url, with exactly upload_headers, within about 15 minutes. Then call POST /knowledge/uploads/{upload_id}/complete. An unfinished upload expires after a day.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeUploadCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeUpload"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/knowledge/uploads/{upload_id}/complete": {
+      "post": {
+        "operationId": "completeKnowledgeUpload",
+        "summary": "Finish a file upload",
+        "description": "Checks the uploaded file against the upload request and queues it to be read. Returns the new file source. Completing an upload again returns the same source. A file that hasn't arrived yet is a 409 conflict: send it to upload_url, or start a new upload if upload_url has expired. A file that doesn't match the request is a 400. A business whose plan has no room for more knowledge text gets a 409 plan_limit_reached. Send {} to keep the file name as its title.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "upload_id",
+            "in": "path",
+            "required": true,
+            "description": "The upload id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeUploadComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeSource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/knowledge/sources/{source_id}/cancel": {
       "post": {
         "operationId": "cancelKnowledgeSource",
@@ -4446,7 +4706,8 @@
                   "method_not_allowed",
                   "internal_error",
                   "business_required",
-                  "key_owner_inactive"
+                  "key_owner_inactive",
+                  "plan_limit_reached"
                 ]
               },
               "message": {
@@ -5907,6 +6168,116 @@
           "type",
           "url"
         ],
+        "additionalProperties": false
+      },
+      "KnowledgeUpload": {
+        "type": "object",
+        "properties": {
+          "upload_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "upload_url": {
+            "type": "string",
+            "description": "Send the file's bytes here with PUT."
+          },
+          "upload_headers": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Send exactly these headers with the PUT."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When upload_url stops working, about 15 minutes after it was made."
+          }
+        },
+        "required": [
+          "upload_id",
+          "upload_url",
+          "upload_headers",
+          "expires_at"
+        ],
+        "additionalProperties": false,
+        "description": "Where to send a file before completing its upload."
+      },
+      "KnowledgeUploadCreate": {
+        "type": "object",
+        "properties": {
+          "file_name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "[^.]",
+            "description": "The file's name, such as prices.pdf."
+          },
+          "content_type": {
+            "type": "string",
+            "enum": [
+              "application/pdf",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "text/plain",
+              "text/markdown",
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "image/tiff"
+            ],
+            "description": "PDF, Word (DOCX), plain text, Markdown, or a JPEG, PNG, WebP or TIFF image."
+          },
+          "length": {
+            "type": "integer",
+            "exclusiveMinimum": 0,
+            "maximum": 10485760,
+            "description": "The file's size in bytes, up to 10 MB."
+          },
+          "checksum_sha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$",
+            "description": "The base64-encoded SHA-256 of the file's bytes."
+          }
+        },
+        "required": [
+          "file_name",
+          "content_type",
+          "length",
+          "checksum_sha256"
+        ],
+        "additionalProperties": false
+      },
+      "KnowledgeUploadComplete": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "Defaults to the file name.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "tags": {
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          }
+        },
         "additionalProperties": false
       },
       "WebhookEndpoint": {

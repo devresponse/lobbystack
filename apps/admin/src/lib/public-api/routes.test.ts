@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { apiOperations } from "@lobbystack/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+const storageProvider = vi.hoisted(() => ({ name: "storage" }));
 const domain = vi.hoisted(() => ({
   resolveApiKey: vi.fn(),
   touchApiKeyLastUsed: vi.fn(async () => undefined),
@@ -27,6 +28,8 @@ const domain = vi.hoisted(() => ({
   expandKnowledgeSourceForApi: vi.fn(),
   retryKnowledgeSourceForApi: vi.fn(),
   cancelKnowledgeSourceForApi: vi.fn(),
+  createKnowledgeUploadForApi: vi.fn(),
+  completeKnowledgeUploadForApi: vi.fn(),
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
@@ -34,6 +37,7 @@ const domain = vi.hoisted(() => ({
 
 vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
 vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
+vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
 vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/errors")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
@@ -216,6 +220,29 @@ describe("knowledge sources", () => {
     expect(response.status).toBe(status);
     expect(operation()).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), sourceId);
     const malformed = await route()(call("/knowledge/sources/x/expand", { method: "POST" }), { params: Promise.resolve({ source_id: "x" }) });
+    expect(malformed.status).toBe(400);
+  });
+
+  it("reserves an upload with the storage provider and checks the request first", async () => {
+    const upload = { upload_id: sourceId, upload_url: "https://storage.example/put", upload_headers: { "content-type": "application/pdf" }, expires_at: "2026-10-11T12:15:00.000Z" };
+    domain.createKnowledgeUploadForApi.mockResolvedValue(upload);
+    const body = { file_name: "prices.pdf", content_type: "application/pdf", length: 2048, checksum_sha256: `${"A".repeat(43)}=` };
+    const response = await v1.createKnowledgeUpload(call("/knowledge/uploads", { method: "POST", body: JSON.stringify(body) }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ data: upload });
+    expect(domain.createKnowledgeUploadForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), body, storageProvider);
+    for (const bad of [{ ...body, content_type: "application/zip" }, { ...body, length: 10 * 1024 * 1024 + 1 }, { ...body, checksum_sha256: "nope" }, { ...body, file_name: ".." }]) {
+      expect((await v1.createKnowledgeUpload(call("/knowledge/uploads", { method: "POST", body: JSON.stringify(bad) }))).status).toBe(400);
+    }
+    expect(domain.createKnowledgeUploadForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("completes an upload by its id and answers 202 with the file source", async () => {
+    domain.completeKnowledgeUploadForApi.mockResolvedValue({ ...source, type: "file", url: null, page_limit: null, status: "pending" });
+    const response = await v1.completeKnowledgeUpload(call(`/knowledge/uploads/${sourceId}/complete`, { method: "POST", body: JSON.stringify({ title: "Price list" }) }), { params: Promise.resolve({ upload_id: sourceId }) });
+    expect(response.status).toBe(202);
+    expect(domain.completeKnowledgeUploadForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId, { title: "Price list" }, storageProvider);
+    const malformed = await v1.completeKnowledgeUpload(call("/knowledge/uploads/x/complete", { method: "POST", body: "{}" }), { params: Promise.resolve({ upload_id: "x" }) });
     expect(malformed.status).toBe(400);
   });
 

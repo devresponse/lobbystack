@@ -1,10 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeDocuments, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
 import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeSourceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
@@ -12,7 +12,7 @@ import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, createAppointmentForApi, createContactForApi, createKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -412,6 +412,80 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     await expectApiError(createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "elm-api.example/about" }), 409, "conflict");
     await expectApiError(expandKnowledgeSourceForApi(context, a.caller, page!.id), 400, "invalid_request");
     await expectApiError(retryKnowledgeSourceForApi(context, a.caller, page!.id), 400, "invalid_request");
+  });
+
+  describe("file uploads", () => {
+    // Stands in for S3 or local storage: holds what a client has PUT.
+    const stored = new Map<string, { length: number; contentType: string; checksum?: string }>();
+    const storage = {
+      createUpload: async (input: { key: string; contentType: string }) => ({ url: `https://storage.test/${input.key}`, headers: { "content-type": input.contentType }, expiresAt: new Date(Date.now() + 900_000) }),
+      headObject: async ({ key }: { key: string }) => stored.get(key) ?? null,
+      deleteObject: async () => undefined,
+      createDownloadUrl: async () => "https://storage.test/download",
+    };
+    const checksum = createHash("sha256").update("price list").digest("base64");
+    const request = { file_name: "prices.pdf", content_type: "application/pdf" as const, length: 10, checksum_sha256: checksum };
+    const keyOf = async (uploadId: string) => (await admin!.db.select({ key: storageObjects.objectKey }).from(storageObjects).where(eq(storageObjects.id, uploadId)))[0]!.key;
+
+    it("completes an upload once its file arrives, and returns the same source when completed again", async () => {
+      const context = { db: worker!.db };
+      const upload = await createKnowledgeUploadForApi(context, a.caller, request, storage);
+      expect(upload.upload_url).toContain(upload.upload_id);
+      expect(upload.expires_at).not.toBeNull();
+      await expectApiError(completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage), 409, "conflict");
+      stored.set(await keyOf(upload.upload_id), { length: 10, contentType: "application/pdf", checksum });
+      const source = await completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, { title: "Price list" }, storage);
+      expect(source).toMatchObject({ type: "file", title: "Price list", url: null, status: "pending", page_limit: null });
+      expect(apiKnowledgeSourceSchema.safeParse(source).success).toBe(true);
+      const [extract] = await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "knowledge.extractDocument"), eq(outboxMessages.aggregateId, source.id)));
+      expect(extract).toBeDefined();
+      expect((await completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage)).id).toBe(source.id);
+      await expectApiError(completeKnowledgeUploadForApi(context, b.caller, upload.upload_id, {}, storage), 404, "not_found");
+    });
+
+    it("refuses a stored file that doesn't match its upload request", async () => {
+      const context = { db: worker!.db };
+      const upload = await createKnowledgeUploadForApi(context, a.caller, request, storage);
+      stored.set(await keyOf(upload.upload_id), { length: 11, contentType: "application/pdf", checksum });
+      await expectApiError(completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage), 400, "invalid_request");
+      await expectApiError(completeKnowledgeUploadForApi(context, a.caller, randomUUID(), {}, storage), 404, "not_found");
+    });
+
+    it("treats an expired upload, or one that isn't a knowledge document, as not found", async () => {
+      const context = { db: worker!.db };
+      const upload = await createKnowledgeUploadForApi(context, a.caller, request, storage);
+      stored.set(await keyOf(upload.upload_id), { length: 10, contentType: "application/pdf", checksum });
+      await admin!.db.update(storageObjects).set({ expiresAt: new Date(Date.now() - 1_000) }).where(eq(storageObjects.id, upload.upload_id));
+      await expectApiError(completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage), 404, "not_found");
+      const [attachment] = await admin!.db.insert(storageObjects).values({ businessId: a.businessId, objectKey: `${a.businessId}/attachment/${randomUUID()}/note.pdf`, purpose: "attachment", fileName: "note.pdf", contentType: "application/pdf", contentLength: 10, status: "pending" }).returning({ id: storageObjects.id, key: storageObjects.objectKey });
+      stored.set(attachment!.key, { length: 10, contentType: "application/pdf" });
+      await expectApiError(completeKnowledgeUploadForApi(context, a.caller, attachment!.id, {}, storage), 404, "not_found");
+    });
+
+    it("makes one source when two completions race", async () => {
+      const context = { db: worker!.db };
+      const upload = await createKnowledgeUploadForApi(context, a.caller, request, storage);
+      stored.set(await keyOf(upload.upload_id), { length: 10, contentType: "application/pdf", checksum });
+      const [first, second] = await Promise.all([0, 1].map(async () => await completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage)));
+      expect(second!.id).toBe(first!.id);
+      expect(await admin!.db.select({ id: knowledgeDocuments.id }).from(knowledgeDocuments).where(eq(knowledgeDocuments.storageObjectId, upload.upload_id))).toHaveLength(1);
+    });
+
+    it("refuses an upload with plan_limit_reached once the plan's knowledge text is full, and keeps it pending", async () => {
+      const context = { db: worker!.db };
+      // Business b is on Free, which includes 1 MB of text. Fill it.
+      const [full] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "text", title: "Full", status: "indexed" }).returning({ id: knowledgeDocuments.id });
+      try {
+        await admin!.db.insert(knowledgeChunks).values([0, 1].map((sequence) => ({ businessId: b.businessId, documentId: full!.id, sequence, content: "x".repeat(530_000), contentHash: `full-${sequence}` })));
+        const upload = await createKnowledgeUploadForApi(context, b.caller, request, storage);
+        stored.set(await keyOf(upload.upload_id), { length: 10, contentType: "application/pdf", checksum });
+        await expectApiError(completeKnowledgeUploadForApi(context, b.caller, upload.upload_id, {}, storage), 409, "plan_limit_reached");
+        const [object] = await admin!.db.select({ status: storageObjects.status }).from(storageObjects).where(eq(storageObjects.id, upload.upload_id));
+        expect(object?.status).toBe("pending");
+      } finally {
+        await admin!.db.delete(knowledgeDocuments).where(eq(knowledgeDocuments.id, full!.id));
+      }
+    });
   });
 
   it("takes the first website as the business's website while onboarding", async () => {

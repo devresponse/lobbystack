@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { interfaceLocales } from "../locales";
-import { PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
+import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
 // these schemas, and the OpenAPI document is generated from them, so the docs,
@@ -40,6 +40,7 @@ export const apiErrorCodes = [
   "internal_error",
   "business_required",
   "key_owner_inactive",
+  "plan_limit_reached",
 ] as const;
 export type ApiErrorCode = (typeof apiErrorCodes)[number];
 
@@ -273,6 +274,36 @@ export const apiKnowledgeSourceCreateSchema = z.strictObject({
   url: z.string().trim().min(1).max(2_000).describe("The site to read, such as https://example.com. A site that is already a source returns that source."),
 });
 
+export const knowledgeUploadContentTypes = [
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+  "text/markdown",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/tiff",
+] as const;
+
+export const apiKnowledgeUploadCreateSchema = z.strictObject({
+  file_name: z.string().trim().min(1).max(255).regex(/[^.]/, "Use the file's name, such as prices.pdf.").describe("The file's name, such as prices.pdf."),
+  content_type: z.enum(knowledgeUploadContentTypes).describe("PDF, Word (DOCX), plain text, Markdown, or a JPEG, PNG, WebP or TIFF image."),
+  length: z.number().int().positive().max(KNOWLEDGE_UPLOAD_MAX_BYTES).describe("The file's size in bytes, up to 10 MB."),
+  checksum_sha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/, "Use the base64 SHA-256 of the file.").describe("The base64-encoded SHA-256 of the file's bytes."),
+});
+
+export const apiKnowledgeUploadSchema = z.object({
+  upload_id: id,
+  upload_url: z.string().describe("Send the file's bytes here with PUT."),
+  upload_headers: z.record(z.string(), z.string()).describe("Send exactly these headers with the PUT."),
+  expires_at: nullableTimestamp.describe("When upload_url stops working, about 15 minutes after it was made."),
+}).describe("Where to send a file before completing its upload.");
+
+export const apiKnowledgeUploadCompleteSchema = z.strictObject({
+  title: z.string().trim().min(1).max(1_000).optional().describe("Defaults to the file name."),
+  tags: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
+});
+
 export const apiWebhookEventTypeSchema = z.enum(webhookEventTypes);
 
 export const apiWebhookEndpointSchema = z.object({
@@ -355,6 +386,9 @@ export type ApiKnowledgeEntry = z.infer<typeof apiKnowledgeEntrySchema>;
 export type ApiKnowledgeEntryCreate = z.infer<typeof apiKnowledgeEntryCreateSchema>;
 export type ApiKnowledgeSource = z.infer<typeof apiKnowledgeSourceSchema>;
 export type ApiKnowledgeSourceCreate = z.infer<typeof apiKnowledgeSourceCreateSchema>;
+export type ApiKnowledgeUpload = z.infer<typeof apiKnowledgeUploadSchema>;
+export type ApiKnowledgeUploadCreate = z.infer<typeof apiKnowledgeUploadCreateSchema>;
+export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadCompleteSchema>;
 export type ApiWebhookEndpoint = z.infer<typeof apiWebhookEndpointSchema>;
 export type ApiWebhookEndpointCreate = z.infer<typeof apiWebhookEndpointCreateSchema>;
 export type ApiWebhookEndpointUpdate = z.infer<typeof apiWebhookEndpointUpdateSchema>;

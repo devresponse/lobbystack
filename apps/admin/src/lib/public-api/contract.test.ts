@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { apiKeyScopes, apiOperations, apiScopesInUse, buildOpenApiDocument, businessApiKeyScopes, oauthGrantableScopes, offeredApiKeyScopes, platformOnlyScopes, webhookEventTypes, type ApiOperation } from "@lobbystack/shared";
+import { isAllowedUploadContentType } from "@lobbystack/contracts";
+import { apiKeyScopes, apiOperations, apiScopesInUse, buildOpenApiDocument, businessApiKeyScopes, knowledgeUploadContentTypes, oauthGrantableScopes, offeredApiKeyScopes, platformOnlyScopes, webhookEventTypes, type ApiOperation } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 const adminRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -52,6 +53,10 @@ describe("v1 contract", () => {
       if (operation.scope && platformOnlyScopes.includes(operation.scope as never)) expect(operation.business, operationId).toBe("none");
       if (operation.business === "none") expect(operation.tag, operationId).toBe("Platform");
     }
+  });
+
+  it("accepts for API uploads only file types the storage layer accepts for knowledge", () => {
+    for (const contentType of knowledgeUploadContentTypes) expect(isAllowedUploadContentType("knowledge", contentType), contentType).toBe(true);
   });
 
   it("publishes the business type and onboarding stage on the Business object", () => {

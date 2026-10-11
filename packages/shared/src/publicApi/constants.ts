@@ -109,6 +109,8 @@ export const PUBLIC_API_MAX_PAGE_SIZE = 100;
 export const PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE = 120;
 export const PUBLIC_API_IDEMPOTENCY_TTL_HOURS = 24;
 export const PUBLIC_API_AVAILABILITY_MAX_DAYS = 7;
+/** The largest document a knowledge upload may be, from the API or the dashboard. */
+export const KNOWLEDGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
  * Seconds to wait before each retry after a failed delivery. The first attempt

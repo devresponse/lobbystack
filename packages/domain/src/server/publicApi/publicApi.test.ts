@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeSourceSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
+import { KnowledgeStorageLimitError } from "../knowledge";
 import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiKey, normalizeScopes } from "./apiKeys";
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
 import { apiErrorFromDomain } from "./operations";
@@ -73,6 +74,8 @@ describe("knowledge sources", () => {
     expect(apiErrorFromDomain(Object.assign(new Error("Knowledge document not found."), { status: 404 }), "Knowledge source")).toMatchObject({ status: 404, code: "not_found", message: "Knowledge source not found." });
     expect(apiErrorFromDomain(Object.assign(new Error("Only a processing knowledge document can be cancelled."), { status: 409 }), "Knowledge source")).toMatchObject({ status: 409, code: "conflict" });
     expect(apiErrorFromDomain(Object.assign(new Error("Only a website import can be read further."), { status: 400 }), "Knowledge source")).toMatchObject({ status: 400, code: "invalid_request" });
+    // A full plan has its own code, so clients don't retry it like a file that hasn't arrived.
+    expect(apiErrorFromDomain(new KnowledgeStorageLimitError(1024 * 1024), "Upload")).toMatchObject({ status: 409, code: "plan_limit_reached", message: "Knowledge storage limit reached. 1 MB of text is included on this plan." });
     const crash = new Error("connection refused");
     expect(apiErrorFromDomain(crash, "Knowledge source")).toBe(crash);
   });

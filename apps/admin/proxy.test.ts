@@ -27,6 +27,16 @@ it("guards the widget-keys admin route while leaving the public widget API open 
   expect(publicRoute.status).toBe(200);
 });
 
+it("lets API clients PUT to signed local storage URLs without an Origin, and still guards the dashboard upload route", () => {
+  const signedUpload = proxy(new NextRequest("http://localhost:3210/api/storage/local?token=signed", { method: "PUT" }));
+  expect(signedUpload.status).toBe(200);
+  const dashboardUpload = proxy(new NextRequest("http://localhost:3210/api/uploads", { method: "POST", headers: { origin: "https://untrusted.invalid" } }));
+  expect(dashboardUpload.status).toBe(403);
+  // Only the signed upload route itself is exempt, not routes whose paths start the same way.
+  const lookalike = proxy(new NextRequest("http://localhost:3210/api/storage/local-files", { method: "PUT", headers: { origin: "https://untrusted.invalid" } }));
+  expect(lookalike.status).toBe(403);
+});
+
 it("overwrites supplied locale headers and tolerates malformed cookies", () => {
   const response = proxy(new NextRequest("http://localhost:3210/fr/login", { headers: { cookie: "lobbystack.locale=%E0%A4%A", "accept-language": "en", "x-lobbystack-locale": "en", "x-lobbystack-pathname": "/settings" } }));
   expect(response.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");

@@ -1,11 +1,13 @@
 import {
   cancelAppointmentForApi,
   cancelKnowledgeSourceForApi,
+  completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
+  createKnowledgeUploadForApi,
   createWebhookEndpoint,
   deleteWebhookEndpoint,
   expandKnowledgeSourceForApi,
@@ -45,6 +47,8 @@ import {
   apiContactUpdateSchema,
   apiKnowledgeEntryCreateSchema,
   apiKnowledgeSourceCreateSchema,
+  apiKnowledgeUploadCompleteSchema,
+  apiKnowledgeUploadCreateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
   webhookEventScope,
@@ -52,6 +56,7 @@ import {
   type WebhookEventType,
 } from "@lobbystack/shared";
 
+import { getStorageProvider } from "../storage";
 import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam, type ApiCredential, type RestApiCaller } from "./http";
 
 // One function per v1 operation. The route files under app/api/v1 only bind
@@ -146,6 +151,11 @@ export const v1 = {
   createKnowledgeSource: (request: Request) => handleApiRequest(request, "createKnowledgeSource", async ({ context, caller }) => ({ body: data(await createKnowledgeSourceForApi(context, caller, await readApiBody(request, apiKnowledgeSourceCreateSchema))) })),
   expandKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "expandKnowledgeSource", async ({ context, caller }) => ({ body: data(await expandKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
   retryKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "retryKnowledgeSource", async ({ context, caller }) => ({ body: data(await retryKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
+  createKnowledgeUpload: (request: Request) => handleApiRequest(request, "createKnowledgeUpload", async ({ context, caller }) => ({ body: data(await createKnowledgeUploadForApi(context, caller, await readApiBody(request, apiKnowledgeUploadCreateSchema), getStorageProvider())) })),
+  completeKnowledgeUpload: (request: Request, { params }: Params<"upload_id">) => handleApiRequest(request, "completeKnowledgeUpload", async ({ context, caller }) => {
+    const uploadId = uuidParam((await params).upload_id, "upload_id");
+    return { body: data(await completeKnowledgeUploadForApi(context, caller, uploadId, await readApiBody(request, apiKnowledgeUploadCompleteSchema), getStorageProvider())) };
+  }),
   cancelKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "cancelKnowledgeSource", async ({ context, caller }) => ({ body: data(await cancelKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
 
   listWebhooks: (request: Request) => handleApiRequest(request, "listWebhooks", async ({ context, caller }) => ({ body: { data: (await listWebhookEndpoints(context, { businessId: caller.businessId, manager: webhookManager(caller) })).map(toApiEndpoint), next_cursor: null, has_more: false } })),

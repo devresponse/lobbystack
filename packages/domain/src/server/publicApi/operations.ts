@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, platformPartnerBusinesses, receptionistProfiles, services, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   isApiKeyScope,
@@ -25,6 +25,9 @@ import {
   type ApiKnowledgeEntryCreate,
   type ApiKnowledgeSource,
   type ApiKnowledgeSourceCreate,
+  type ApiKnowledgeUpload,
+  type ApiKnowledgeUploadComplete,
+  type ApiKnowledgeUploadCreate,
   type ApiMe,
   type ApiMessage,
   type ApiService,
@@ -35,8 +38,9 @@ import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { replaceBusinessHoursInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
-import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction } from "../knowledge";
+import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
+import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
@@ -111,7 +115,7 @@ export function callerAudit(caller: ApiCaller): ApiAudit {
 
 /**
  * The person an API call acts for, for operations that need one, such as
- * uploads, number claims, checkout and invites. A platform key acts as its
+ * number claims, checkout and invites. A platform key acts as its
  * owner and an OAuth grant as the user who granted it. A per-business key acts
  * as the person who created it, but only while they are still an owner or
  * admin of the business; otherwise the call is refused with key_owner_inactive.
@@ -558,6 +562,7 @@ export async function createKnowledgeEntryForApi(context: DomainContext, caller:
  */
 export function apiErrorFromDomain(error: unknown, what: string): unknown {
   if (error instanceof PublicApiError || typeof error !== "object" || error === null) return error;
+  if (error instanceof KnowledgeStorageLimitError) return new PublicApiError(409, "plan_limit_reached", error.message);
   const { status, code } = error as { status?: unknown; code?: unknown };
   const message = error instanceof Error ? error.message : "The request is invalid.";
   if (code === "website_url_invalid") return invalidRequest(message, [{ path: "url", message }]);
@@ -652,4 +657,58 @@ export async function retryKnowledgeSourceForApi(context: DomainContext, caller:
 
 export async function cancelKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
   return await changeKnowledgeSource(context, caller, documentId, { eventType: "api.knowledge_source.cancelled", run: async (tx) => await cancelKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId }) });
+}
+
+// File uploads: reserve, PUT the bytes to storage, then complete.
+
+/** Reserves a document upload and returns the signed URL to PUT its bytes to. */
+export async function createKnowledgeUploadForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeUploadCreate, storage: StorageProvider): Promise<ApiKnowledgeUpload> {
+  const request = { businessId: caller.businessId, purpose: "knowledge", fileName: input.file_name, contentType: input.content_type, length: input.length, checksum: input.checksum_sha256 };
+  const planned = planUpload(request);
+  await inBusiness(context, caller, async (tx) => {
+    await insertPendingUploadInTransaction(tx, { ...request, ...planned });
+    await audit(tx, caller, { eventType: "api.knowledge_upload.created", entityType: "storage_object", entityId: planned.objectId, payload: { contentType: input.content_type, length: input.length } });
+  });
+  const upload = await storage.createUpload({ key: planned.key, contentType: input.content_type, length: input.length, checksum: input.checksum_sha256 });
+  return { upload_id: planned.objectId, upload_url: upload.url, upload_headers: upload.headers ?? {}, expires_at: upload.expiresAt?.toISOString() ?? null };
+}
+
+/** The source an upload already became, for a completion that is repeated or lost a race. */
+async function completedUpload(context: DomainContext, caller: ApiCaller, uploadId: string): Promise<ApiKnowledgeSource> {
+  return await inBusiness(context, caller, async (tx) => {
+    const [document] = await tx.select({ id: knowledgeDocuments.id }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.storageObjectId, uploadId))).limit(1);
+    const source = document ? await loadKnowledgeSourceResource(tx, caller.businessId, document.id) : null;
+    if (!source) throw notFound("Upload");
+    return source;
+  });
+}
+
+/**
+ * Checks the stored file against its upload request, then makes it a file
+ * source queued to be read. Completing again returns the same source.
+ */
+export async function completeKnowledgeUploadForApi(context: DomainContext, caller: ApiCaller, uploadId: string, input: ApiKnowledgeUploadComplete, storage: StorageProvider): Promise<ApiKnowledgeSource> {
+  const object = await inBusiness(context, caller, async (tx) => (await tx.select().from(storageObjects).where(and(eq(storageObjects.id, uploadId), eq(storageObjects.businessId, caller.businessId), eq(storageObjects.purpose, "knowledge"))).limit(1))[0]);
+  if (!object) throw notFound("Upload");
+  if (object.status === "ready") return await completedUpload(context, caller, uploadId);
+  if (object.status !== "pending" || (object.expiresAt && object.expiresAt.getTime() <= Date.now())) throw notFound("Upload");
+  const metadata = await storage.headObject({ key: object.objectKey });
+  if (!metadata) throw conflict("The file hasn't arrived yet. Send it with PUT to upload_url, then complete the upload. If upload_url has expired, start a new upload.");
+  if (metadata.length !== object.contentLength || metadata.contentType !== object.contentType || (object.checksum && metadata.checksum !== object.checksum)) {
+    throw invalidRequest("The stored file doesn't match its upload request. Check its size, content type and SHA-256, then start a new upload.");
+  }
+  try {
+    return await inBusiness(context, caller, async (tx) => {
+      const documentId = await completeUploadInTransaction(tx, { businessId: caller.businessId, objectId: uploadId, purpose: "knowledge", fileName: object.fileName, metadata, title: input.title, tags: input.tags });
+      if (!documentId) throw new Error("The knowledge upload made no document.");
+      await audit(tx, caller, { eventType: "api.knowledge_upload.completed", entityType: "knowledge_document", entityId: documentId, payload: { uploadId } });
+      const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
+      if (!source) throw new Error("The file source could not be read back.");
+      return source;
+    });
+  } catch (error) {
+    // Another request completed it first.
+    if (error instanceof Error && error.message === "Upload is missing or already finalized.") return await completedUpload(context, caller, uploadId);
+    throw apiErrorFromDomain(error, "Upload");
+  }
 }

@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { apiKeyScopes, apiOperations, apiScopesInUse, buildOpenApiDocument, businessApiKeyScopes, oauthGrantableScopes, offeredApiKeyScopes, platformOnlyScopes, webhookEventTypes } from "@lobbystack/shared";
+import { apiKeyScopes, apiOperations, apiScopesInUse, buildOpenApiDocument, businessApiKeyScopes, oauthGrantableScopes, offeredApiKeyScopes, platformOnlyScopes, webhookEventTypes, type ApiOperation } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 const adminRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -33,14 +33,31 @@ describe("v1 contract", () => {
     expect(JSON.stringify(document)).not.toContain("\"pattern\":\"^([0-9a-fA-F]{8}");
   });
 
-  it("documents the LobbyStack-Business header on every operation", () => {
+  it("documents the LobbyStack-Business header on every operation that acts on a business", () => {
     const document = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" }) as { paths: Record<string, Record<string, { parameters?: Array<{ name: string; in: string; required?: boolean; description: string }> }>> };
-    for (const operation of Object.values(apiOperations)) {
+    for (const operation of Object.values(apiOperations) as ApiOperation[]) {
       const header = document.paths[operation.path]?.[operation.method.toLowerCase()]?.parameters?.find((parameter) => parameter.name === "LobbyStack-Business");
+      if (operation.business === "none") {
+        expect(header, `${operation.method} ${operation.path}`).toBeUndefined();
+        continue;
+      }
       expect(header, `${operation.method} ${operation.path}`).toMatchObject({ in: "header" });
       expect(header?.required).toBeUndefined();
       expect(header?.description).toContain(operation.path === "/me" ? "Optional here" : "Required with a platform key");
     }
+  });
+
+  it("puts platform-only scopes only on platform operations, which act on no one business", () => {
+    for (const [operationId, operation] of Object.entries(apiOperations) as Array<[string, ApiOperation]>) {
+      if (operation.scope && platformOnlyScopes.includes(operation.scope as never)) expect(operation.business, operationId).toBe("none");
+      if (operation.business === "none") expect(operation.tag, operationId).toBe("Platform");
+    }
+  });
+
+  it("requires an Idempotency-Key on POST /businesses and documents it", () => {
+    expect(apiOperations.createBusiness).toMatchObject({ idempotent: "required", business: "none", scope: "businesses:create" });
+    const document = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" }) as { paths: Record<string, Record<string, { parameters?: Array<{ name: string; required?: boolean }> }>> };
+    expect(document.paths["/businesses"]?.post?.parameters).toContainEqual(expect.objectContaining({ name: "Idempotency-Key", required: true }));
   });
 
   it("keeps platform-only scopes off per-business keys, OAuth grants and Settings", () => {

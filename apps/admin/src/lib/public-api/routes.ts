@@ -1,6 +1,7 @@
 import {
   cancelAppointmentForApi,
   createAppointmentForApi,
+  createBusinessForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
   createWebhookEndpoint,
@@ -13,7 +14,9 @@ import {
   getCallForApi,
   getContactForApi,
   getWebhookEndpoint,
+  idempotencyRequestHash,
   listAppointmentsForApi,
+  listBusinessesForApi,
   listCallsForApi,
   listContactsForApi,
   listMessagesForApi,
@@ -32,6 +35,7 @@ import {
 import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
+  apiBusinessCreateSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
   apiContactUpdateSchema,
@@ -95,6 +99,13 @@ export const v1 = {
   }),
   getBusiness: (request: Request) => handleApiRequest(request, "getBusiness", async ({ context, caller }) => ({ body: data(await getBusinessForApi(context, caller)) })),
   updateBusiness: (request: Request) => handleApiRequest(request, "updateBusiness", async ({ context, caller }) => ({ body: data(await updateBusinessForApi(context, caller, await readApiBody(request, apiBusinessUpdateSchema))) })),
+  createBusiness: (request: Request) => handleApiRequest(request, "createBusiness", async ({ context, credential, actingUserId, idempotencyKey }) => {
+    if (!idempotencyKey) throw new Error("POST /businesses requires an Idempotency-Key.");
+    const body = await readApiBody(request, apiBusinessCreateSchema);
+    const result = await createBusinessForApi(context, { key: credential, actingUserId, idempotencyKey, requestHash: idempotencyRequestHash(body), body });
+    return { body: data(result.business), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
+  }),
+  listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller), next_cursor: null, has_more: false } })),
   listStaff: (request: Request) => handleApiRequest(request, "listStaff", async ({ context, caller }) => ({ body: { data: await listStaffForApi(context, caller), next_cursor: null, has_more: false } })),
 

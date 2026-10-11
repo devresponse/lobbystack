@@ -259,6 +259,34 @@ describe("platform keys in the v1 request pipeline", () => {
     }
   });
 
+  it("lets only platform keys call an operation that acts on no one business", async () => {
+    const handler = vi.fn();
+    const keyWithEverything: ResolvedApiKey = { ...key, scopes: ["business:read", "businesses:create"] };
+    const response = await handleApiRequest(request("/businesses", { method: "POST", headers: { authorization: "Bearer lsk_x", "idempotency-key": "k" } }), "createBusiness", handler, { resolveKey: async () => keyWithEverything, rateLimit: allow });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: { code: "forbidden", message: expect.stringContaining("Only platform keys") } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("gives a business-less operation the key, its owner and the Idempotency-Key, and ignores LobbyStack-Business", async () => {
+    const dependencies = platform({ scopes: ["businesses:create"] });
+    const handler = vi.fn(async (_input: unknown) => ({ status: 201, body: { data: { id: "b1" } }, headers: { "Idempotent-Replayed": "true" } }));
+    const response = await handleApiRequest(request("/businesses", { method: "POST", body: "{}", headers: { authorization: `Bearer ${token}`, "idempotency-key": "onboard-acme", "LobbyStack-Business": "not-a-uuid" } }), "createBusiness", handler, dependencies);
+    expect(response.status).toBe(201);
+    expect(response.headers.get("idempotent-replayed")).toBe("true");
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ actingUserId: ownerId, idempotencyKey: "onboard-acme", credential: expect.objectContaining({ kind: "platform_key", partnerId: "alloplace" }) }));
+    expect(dependencies.requirePlatformBusiness).not.toHaveBeenCalled();
+    expect(domain.runIdempotent).not.toHaveBeenCalled();
+  });
+
+  it("requires an Idempotency-Key where the operation says so", async () => {
+    const handler = vi.fn();
+    const response = await handleApiRequest(request("/businesses", { method: "POST", body: "{}", headers: { authorization: `Bearer ${token}` } }), "createBusiness", handler, platform({ scopes: ["businesses:create"] }));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: { code: "invalid_request", message: expect.stringContaining("Idempotency-Key"), details: [{ path: "Idempotency-Key", message: "Required." }] } });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("keeps serving per-business keys when PLATFORM_API_KEYS is malformed", async () => {
     vi.stubEnv("PLATFORM_API_KEYS", "{not json");
     try {

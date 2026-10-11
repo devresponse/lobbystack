@@ -92,6 +92,25 @@ export const apiBusinessUpdateSchema = z.strictObject({
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
 });
 
+export const apiBusinessCreateSchema = z.strictObject({
+  name: z.string().trim().min(1).max(200),
+  timezone: z.string().trim().min(1).max(80).describe("IANA time zone, for example America/Toronto."),
+  business_type: z.string().trim().min(1).max(64).optional().describe("Defaults to service_company, the type the dashboard uses."),
+  slug: z.string().trim().min(2).max(120).optional().describe("Lowercase letters, digits and hyphens. Made from the name when left out. Another business already using it is a 409."),
+  locale: locale.optional().describe("Default language for callers: en or fr. Defaults to en."),
+  website_url: z.url().max(2_000).optional(),
+});
+
+export const apiBusinessSummarySchema = z.object({
+  id,
+  name: z.string(),
+  timezone: z.string().describe("IANA time zone, for example America/Toronto."),
+  locale: z.string().describe("Default language for callers: en or fr."),
+  website_url: z.string().nullable(),
+  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
+  created_at: timestamp,
+}).describe("A business the platform key's partner onboarded.");
+
 export const apiServiceSchema = z.object({
   id,
   name: z.string(),
@@ -297,6 +316,8 @@ export const apiWebhookTestEventSchema = eventEnvelope(WEBHOOK_TEST_EVENT_TYPE, 
 export type ApiMe = z.infer<typeof apiMeSchema>;
 export type ApiBusiness = z.infer<typeof apiBusinessSchema>;
 export type ApiBusinessUpdate = z.infer<typeof apiBusinessUpdateSchema>;
+export type ApiBusinessCreate = z.infer<typeof apiBusinessCreateSchema>;
+export type ApiBusinessSummary = z.infer<typeof apiBusinessSummarySchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
 export type ApiStaff = z.infer<typeof apiStaffSchema>;

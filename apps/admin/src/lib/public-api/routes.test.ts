@@ -20,6 +20,8 @@ const domain = vi.hoisted(() => ({
   listStaffForApi: vi.fn(),
   getMeForApi: vi.fn(),
   getPlatformMeForApi: vi.fn(),
+  createBusinessForApi: vi.fn(),
+  listBusinessesForApi: vi.fn(),
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
@@ -307,5 +309,66 @@ describe("platform keys on v1 routes", () => {
     const response = await v1.getMe(platformCall("/me"));
     expect(response.status).toBe(401);
     expect(domain.getPlatformMeForApi).not.toHaveBeenCalled();
+  });
+
+  describe("POST /businesses", () => {
+    const business = { id: "3f2a9c1e-5b7d-8e8a-9c21-7d4e5f6a8b90", name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: null, booking_mode: "request", hours: [], created_at: "2026-10-11T21:00:00.000Z", updated_at: "2026-10-11T21:00:00.000Z" };
+    const post = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": "onboard-acme" }) => v1.createBusiness(platformCall("/businesses", { method: "POST", headers, body: JSON.stringify(body) }));
+
+    it("creates the business as the key's owner, keyed by the Idempotency-Key", async () => {
+      domain.createBusinessForApi.mockResolvedValue({ business, replayed: false });
+      const response = await post({ name: " Acme Plumbing ", timezone: "America/Toronto" });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ data: business });
+      expect(response.headers.get("idempotent-replayed")).toBeNull();
+      expect(domain.createBusinessForApi).toHaveBeenCalledWith(expect.anything(), {
+        key: expect.objectContaining({ kind: "platform_key", platformKeyId: entry.id, partnerId: "alloplace" }),
+        actingUserId: ownerId,
+        idempotencyKey: "onboard-acme",
+        requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        body: { name: "Acme Plumbing", timezone: "America/Toronto" },
+      });
+    });
+
+    it("marks a replayed creation", async () => {
+      domain.createBusinessForApi.mockResolvedValue({ business, replayed: true });
+      const response = await post({ name: "Acme Plumbing", timezone: "America/Toronto" });
+      expect(response.status).toBe(201);
+      expect(response.headers.get("idempotent-replayed")).toBe("true");
+    });
+
+    it("hashes the same request the same way, whatever its key order or spacing", async () => {
+      domain.createBusinessForApi.mockResolvedValue({ business, replayed: false });
+      await post({ name: "Acme Plumbing", timezone: "America/Toronto", locale: "fr" });
+      await post({ locale: "fr", timezone: "America/Toronto", name: "  Acme Plumbing" });
+      const [first, second] = domain.createBusinessForApi.mock.calls.map(([, input]) => (input as { requestHash: string }).requestHash);
+      expect(second).toBe(first);
+    });
+
+    it("validates the body before creating anything", async () => {
+      const response = await post({ name: "Acme", timezone: "America/Toronto", owner: "someone" });
+      expect(response.status).toBe(400);
+      expect(domain.createBusinessForApi).not.toHaveBeenCalled();
+    });
+
+    it("refuses a request without an Idempotency-Key", async () => {
+      const response = await post({ name: "Acme", timezone: "America/Toronto" }, {});
+      expect(response.status).toBe(400);
+      expect(domain.createBusinessForApi).not.toHaveBeenCalled();
+    });
+
+    it("refuses a per-business key", async () => {
+      const response = await v1.createBusiness(call("/businesses", { method: "POST", headers: { "Idempotency-Key": "k" }, body: JSON.stringify({ name: "Acme", timezone: "UTC" }) }));
+      expect(response.status).toBe(403);
+      expect(domain.createBusinessForApi).not.toHaveBeenCalled();
+    });
+  });
+
+  it("lists the businesses the key's partner onboarded, a page at a time", async () => {
+    domain.listBusinessesForApi.mockResolvedValue({ data: [], next_cursor: null, has_more: false });
+    const response = await v1.listBusinesses(platformCall("/businesses?limit=10&cursor=abc"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [], next_cursor: null, has_more: false });
+    expect(domain.listBusinessesForApi).toHaveBeenCalledWith(expect.anything(), { partnerId: "alloplace", limit: 10, cursor: "abc" });
   });
 });

@@ -36,6 +36,9 @@
     },
     {
       "name": "Webhooks"
+    },
+    {
+      "name": "Platform"
     }
   ],
   "paths": {
@@ -341,6 +344,249 @@
           },
           "409": {
             "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/businesses": {
+      "post": {
+        "operationId": "createBusiness",
+        "summary": "Create a business",
+        "description": "Platform keys only. Creates a business owned by the account in the key's owner_email, and lets every key of the same partner act on it. Idempotency-Key is required: a retry with the same value returns the business it created, however much later, and a different body with that value is a 422.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "businesses:create",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Required. A unique value, up to 255 characters, that makes retries of this request safe.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BusinessCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Business"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), including a missing Idempotency-Key.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the businesses:create scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listBusinesses",
+        "summary": "List onboarded businesses",
+        "description": "Platform keys only. Lists the active businesses the key's partner onboarded, newest first.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BusinessSummary"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1155,6 +1401,16 @@
               }
             }
           },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "429": {
             "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
             "content": {
@@ -1702,6 +1958,16 @@
           },
           "409": {
             "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2518,6 +2784,16 @@
           },
           "409": {
             "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3989,6 +4265,99 @@
           }
         },
         "additionalProperties": false
+      },
+      "BusinessCreate": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "IANA time zone, for example America/Toronto."
+          },
+          "business_type": {
+            "description": "Defaults to service_company, the type the dashboard uses.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "slug": {
+            "description": "Lowercase letters, digits and hyphens. Made from the name when left out. Another business already using it is a 409.",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 120
+          },
+          "locale": {
+            "description": "Default language for callers: en or fr. Defaults to en.",
+            "type": "string",
+            "enum": [
+              "en",
+              "fr"
+            ]
+          },
+          "website_url": {
+            "type": "string",
+            "maxLength": 2000,
+            "format": "uri"
+          }
+        },
+        "required": [
+          "name",
+          "timezone"
+        ],
+        "additionalProperties": false
+      },
+      "BusinessSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "name": {
+            "type": "string"
+          },
+          "timezone": {
+            "type": "string",
+            "description": "IANA time zone, for example America/Toronto."
+          },
+          "locale": {
+            "type": "string",
+            "description": "Default language for callers: en or fr."
+          },
+          "website_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "onboarding_stage": {
+            "type": "string",
+            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "timezone",
+          "locale",
+          "website_url",
+          "onboarding_stage",
+          "created_at"
+        ],
+        "additionalProperties": false,
+        "description": "A business the platform key's partner onboarded."
       },
       "Service": {
         "type": "object",

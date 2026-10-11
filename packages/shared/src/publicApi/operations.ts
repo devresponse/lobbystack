@@ -6,7 +6,9 @@ import {
   apiAppointmentRescheduleSchema,
   apiAppointmentSchema,
   apiAvailabilitySlotSchema,
+  apiBusinessCreateSchema,
   apiBusinessSchema,
+  apiBusinessSummarySchema,
   apiBusinessUpdateSchema,
   apiCallDetailSchema,
   apiCallSchema,
@@ -41,14 +43,16 @@ export type ApiOperation = {
   /** null: any valid key may call it. */
   scope: ApiKeyScope | null;
   /**
-   * Every operation acts on one business: a per-business key's own, or the one
+   * Most operations act on one business: a per-business key's own, or the one
    * a platform key names in the LobbyStack-Business header. optional: a
-   * platform key may leave the header out.
+   * platform key may leave the header out. none: the operation acts on no one
+   * business, so only platform keys may call it.
    */
-  business?: "optional";
+  business?: "optional" | "none";
   params?: Param[];
   list?: boolean;
-  idempotent?: boolean;
+  /** true: Idempotency-Key makes retries safe. required: the request must send one. */
+  idempotent?: boolean | "required";
   request?: string;
   response: string;
   status: 200 | 201 | 202;
@@ -68,6 +72,8 @@ export const apiOperations = {
   getMe: { method: "GET", path: "/me", tag: "Business", summary: "Check an API key", description: "Returns the key and its business. Any valid key can call it, whatever its scopes, so integrations use it to test a connection. A platform key can call it without the LobbyStack-Business header.", scope: null, business: "optional", response: "Me", status: 200 },
   getBusiness: { method: "GET", path: "/business", tag: "Business", summary: "Get the business", scope: "business:read", response: "Business", status: 200 },
   updateBusiness: { method: "PATCH", path: "/business", tag: "Business", summary: "Update the business", description: "Updates basic fields and opening hours. Sending hours replaces the whole week.", scope: "business:write", request: "BusinessUpdate", response: "Business", status: 200 },
+  createBusiness: { method: "POST", path: "/businesses", tag: "Platform", summary: "Create a business", description: "Platform keys only. Creates a business owned by the account in the key's owner_email, and lets every key of the same partner act on it. Idempotency-Key is required: a retry with the same value returns the business it created, however much later, and a different body with that value is a 422.", scope: "businesses:create", business: "none", idempotent: "required", request: "BusinessCreate", response: "Business", status: 201 },
+  listBusinesses: { method: "GET", path: "/businesses", tag: "Platform", summary: "List onboarded businesses", description: "Platform keys only. Lists the active businesses the key's partner onboarded, newest first.", scope: "business:read", business: "none", list: true, params: [...pageParams], response: "BusinessSummary", status: 200 },
   listServices: { method: "GET", path: "/services", tag: "Business", summary: "List services", description: "Lists the active services customers can book.", scope: "business:read", list: true, response: "Service", status: 200 },
   listStaff: { method: "GET", path: "/staff", tag: "Business", summary: "List staff", description: "Lists everyone who can take appointments, active or not. Pass an active staff id as staff_id to GET /availability, POST /appointments or reschedule.", scope: "business:read", list: true, response: "Staff", status: 200 },
   listCalls: { method: "GET", path: "/calls", tag: "Calls", summary: "List calls", description: "Newest first. Filter by start time to read one day or one week.", scope: "calls:read", list: true, params: [...pageParams, { name: "started_after", in: "query", description: "Only calls that started at or after this time.", schema: { type: "string", format: "date-time" } }, { name: "started_before", in: "query", description: "Only calls that started before this time.", schema: { type: "string", format: "date-time" } }], response: "Call", status: 200 },
@@ -109,6 +115,8 @@ const componentSchemas: Record<string, z.ZodType> = {
   Me: apiMeSchema,
   Business: apiBusinessSchema,
   BusinessUpdate: apiBusinessUpdateSchema,
+  BusinessCreate: apiBusinessCreateSchema,
+  BusinessSummary: apiBusinessSummarySchema,
   Service: apiServiceSchema,
   Staff: apiStaffSchema,
   Call: apiCallSchema,
@@ -168,6 +176,7 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     const body = operation.list
       ? { type: "object", required: ["data", "next_cursor", "has_more"], properties: { data, next_cursor: { type: ["string", "null"], description: "Pass as cursor to get the next page. Null on the last page." }, has_more: { type: "boolean" } } }
       : { type: "object", required: ["data"], properties: { data } };
+    const platformOnly = operation.business === "none";
     const businessParam: Param = {
       name: BUSINESS_HEADER,
       in: "header",
@@ -176,7 +185,10 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
         : "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
       schema: { type: "string", format: "uuid" },
     };
-    const params = [...(operation.params ?? []), businessParam, ...(operation.idempotent ? [{ name: "Idempotency-Key", in: "header", description: "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.", schema: { type: "string", maxLength: 255 } } satisfies Param] : [])];
+    const idempotencyParam: Param = operation.idempotent === "required"
+      ? { name: "Idempotency-Key", in: "header", required: true, description: "Required. A unique value, up to 255 characters, that makes retries of this request safe.", schema: { type: "string", maxLength: 255 } }
+      : { name: "Idempotency-Key", in: "header", description: "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.", schema: { type: "string", maxLength: 255 } };
+    const params = [...(operation.params ?? []), ...(platformOnly ? [] : [businessParam]), ...(operation.idempotent ? [idempotencyParam] : [])];
     paths[operation.path] ??= {};
     paths[operation.path]![operation.method.toLowerCase()] = {
       operationId,
@@ -189,11 +201,14 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
       ...(operation.request ? { requestBody: { required: true, content: { "application/json": { schema: ref(operation.request) } } } } : {}),
       responses: {
         [String(operation.status)]: { description: operation.status === 201 ? "Created" : operation.status === 202 ? "Accepted" : "OK", content: { "application/json": { schema: body } } },
-        400: errorResponse(operation.business === "optional" ? "The request is invalid (invalid_request)." : "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required)."),
+        400: errorResponse(operation.idempotent === "required"
+          ? "The request is invalid (invalid_request), including a missing Idempotency-Key."
+          : operation.business ? "The request is invalid (invalid_request)." : "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required)."),
         401: errorResponse("The API key is missing, invalid, or revoked (unauthorized)."),
-        403: errorResponse(["Refused.", ...(operation.scope ? [`insufficient_scope: the key lacks the ${operation.scope} scope.`] : []), `forbidden: a per-business key named another business in ${BUSINESS_HEADER}.`, "key_owner_inactive: a platform key's owner_email has no verified LobbyStack account."].join(" ")),
-        404: errorResponse(operation.path.includes("{") ? "Not found (not_found), including a business a platform key cannot act on." : "A platform key named a business it cannot act on (not_found)."),
+        403: errorResponse(["Refused.", ...(operation.scope ? [`insufficient_scope: the key lacks the ${operation.scope} scope.`] : []), platformOnly ? "forbidden: only platform keys can call this endpoint." : `forbidden: a per-business key named another business in ${BUSINESS_HEADER}.`, "key_owner_inactive: a platform key's owner_email has no verified LobbyStack account."].join(" ")),
+        ...(platformOnly && !operation.path.includes("{") ? {} : { 404: errorResponse(operation.path.includes("{") ? "Not found (not_found), including a business a platform key cannot act on." : "A platform key named a business it cannot act on (not_found).") }),
         ...(operation.method !== "GET" ? { 409: errorResponse("The request conflicts with the current state.") } : {}),
+        ...(operation.idempotent ? { 422: errorResponse("The Idempotency-Key was already used with a different request body (idempotency_key_reused).") } : {}),
         429: { ...errorResponse("Too many requests (rate_limited). Wait for the Retry-After header's number of seconds."), headers: { "Retry-After": { schema: { type: "integer" }, description: "Seconds to wait." } } },
       },
     };
@@ -220,7 +235,7 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     },
     servers: [{ url: input.serverUrl }],
     security: [{ bearerAuth: [] }],
-    tags: ["Business", "Calls", "Contacts", "Appointments", "Messages", "Knowledge", "Webhooks"].map((name) => ({ name })),
+    tags: ["Business", "Calls", "Contacts", "Appointments", "Messages", "Knowledge", "Webhooks", "Platform"].map((name) => ({ name })),
     paths,
     webhooks,
     components: {

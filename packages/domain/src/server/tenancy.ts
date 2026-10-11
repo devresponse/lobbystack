@@ -60,9 +60,9 @@ export async function createBusiness(
   input: CreateBusinessInput,
 ): Promise<{ businessId: string; membershipId: string }> {
   const timezone = requireIanaTimeZone(input.timezone);
+  // Refuse a bad slug before taking any locks.
+  if (input.slug !== undefined) cleanSlug(input.slug);
   const businessId = randomUUID();
-  const generatedSlug = input.name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 96).replace(/-$/, "") || "business";
-  const baseSlug = input.slug === undefined ? generatedSlug : cleanSlug(input.slug);
   return await withBusinessTransaction(context.db, {
     userId: input.userId,
     businessId,
@@ -74,59 +74,80 @@ export async function createBusiness(
     if ((owned.rows[0]?.count ?? 0) >= maxOwnedBusinesses) {
       throw Object.assign(new Error(`Too many workspaces. One account can own up to ${maxOwnedBusinesses}.`), { status: 403 });
     }
-    let business: { id: string } | undefined;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const insert = tx.insert(businesses).values({
-        id: businessId,
-        name: input.name.trim(),
-        slug: attempt === 0 ? baseSlug : `${baseSlug}-${randomBytes(6).toString("hex")}`,
-        timezone,
-        businessType: input.businessType,
-        deploymentMode: input.deploymentMode ?? "cloud",
-        onboardingStage: "website",
-      });
-      // Only generated slugs are replaceable. Target this constraint explicitly
-      // so unrelated insert failures still roll back the transaction.
-      [business] = await (input.slug === undefined ? insert.onConflictDoNothing({ target: businesses.slug }) : insert).returning({ id: businesses.id });
-      if (business) break;
-    }
-    if (!business) {
-      throw new Error("Business could not be created.");
-    }
-    const [membership] = await tx.insert(businessMemberships).values({
-      businessId,
-      userId: input.userId,
-      role: "business_owner",
-      status: "active",
-    }).returning({ id: businessMemberships.id });
-    if (!membership) {
-      throw new Error("Business owner membership could not be created.");
-    }
-    // Booking assigns every appointment to a staff member. Businesses that don't
-    // manage a team get one hidden member that stands for the business itself.
-    await tx.insert(staff).values({ businessId, name: input.name.trim(), timezone });
-    await tx.insert(receptionistProfiles).values({
-      businessId,
-      greeting: `Thanks for calling ${input.name.trim()}.`,
-      tone: "warm and direct",
-      summary: `${input.name.trim()} uses LobbyStack to answer calls.`,
-      bookingPolicy: "Only confirm a booking after availability is checked.",
-      voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
-      smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",
-      transferMode: "on_request",
-      appointmentChangePolicy: defaultAppointmentChangePolicy,
-    });
+    const created = await insertBusinessInTransaction(tx, { businessId, userId: input.userId, name: input.name, slug: input.slug, timezone, businessType: input.businessType, deploymentMode: input.deploymentMode });
     await tx.update(users).set({ activeBusinessId: businessId, updatedAt: new Date() }).where(eq(users.id, input.userId));
-    await enqueueOutbox(tx, {
-      topic: "snapshot.refresh",
-      businessId,
-      aggregateType: "business",
-      aggregateId: businessId,
-      dedupeKey: `business:${businessId}:snapshot:initial`,
-      payload: { businessId, reason: "business_created" },
-    });
-    return { businessId, membershipId: membership.id };
+    return created;
   });
+}
+
+/**
+ * Inserts a business with what every new business needs: its owner, the staff
+ * member that stands for it, a receptionist profile, and its first snapshot.
+ * The transaction must be scoped to businessId, and timezone must already be
+ * an IANA name. A generated slug gets a random suffix when taken; a taken slug
+ * the caller chose fails with a unique violation.
+ */
+export async function insertBusinessInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; userId: string; name: string; slug?: string | undefined; timezone: string; businessType: string; deploymentMode?: string | undefined; defaultLocale?: string | undefined; websiteUrl?: string | undefined },
+): Promise<{ businessId: string; membershipId: string }> {
+  const { businessId, timezone } = input;
+  const name = input.name.trim();
+  const generatedSlug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 96).replace(/-$/, "") || "business";
+  const baseSlug = input.slug === undefined ? generatedSlug : cleanSlug(input.slug);
+  let business: { id: string } | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const insert = tx.insert(businesses).values({
+      id: businessId,
+      name,
+      slug: attempt === 0 ? baseSlug : `${baseSlug}-${randomBytes(6).toString("hex")}`,
+      timezone,
+      businessType: input.businessType,
+      deploymentMode: input.deploymentMode ?? "cloud",
+      onboardingStage: "website",
+      ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale } : {}),
+      ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
+    });
+    // Only generated slugs are replaceable. Target this constraint explicitly
+    // so unrelated insert failures still roll back the transaction.
+    [business] = await (input.slug === undefined ? insert.onConflictDoNothing({ target: businesses.slug }) : insert).returning({ id: businesses.id });
+    if (business) break;
+  }
+  if (!business) {
+    throw new Error("Business could not be created.");
+  }
+  const [membership] = await tx.insert(businessMemberships).values({
+    businessId,
+    userId: input.userId,
+    role: "business_owner",
+    status: "active",
+  }).returning({ id: businessMemberships.id });
+  if (!membership) {
+    throw new Error("Business owner membership could not be created.");
+  }
+  // Booking assigns every appointment to a staff member. Businesses that don't
+  // manage a team get one hidden member that stands for the business itself.
+  await tx.insert(staff).values({ businessId, name, timezone });
+  await tx.insert(receptionistProfiles).values({
+    businessId,
+    greeting: `Thanks for calling ${name}.`,
+    tone: "warm and direct",
+    summary: `${name} uses LobbyStack to answer calls.`,
+    bookingPolicy: "Only confirm a booking after availability is checked.",
+    voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
+    smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",
+    transferMode: "on_request",
+    appointmentChangePolicy: defaultAppointmentChangePolicy,
+  });
+  await enqueueOutbox(tx, {
+    topic: "snapshot.refresh",
+    businessId,
+    aggregateType: "business",
+    aggregateId: businessId,
+    dedupeKey: `business:${businessId}:snapshot:initial`,
+    payload: { businessId, reason: "business_created" },
+  });
+  return { businessId, membershipId: membership.id };
 }
 
 export async function listUserBusinesses(

@@ -1,7 +1,9 @@
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { createHash } from "node:crypto";
+
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, platformPartnerBusinesses, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   isApiKeyScope,
@@ -11,6 +13,8 @@ import {
   type ApiAppointmentCreate,
   type ApiAvailabilitySlot,
   type ApiBusiness,
+  type ApiBusinessCreate,
+  type ApiBusinessSummary,
   type ApiBusinessUpdate,
   type ApiCall,
   type ApiCallDetail,
@@ -32,11 +36,12 @@ import type { DomainContext } from "../context";
 import { createKnowledgeSnippetInTransaction } from "../knowledge";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
-import { ianaTimeZone, updateBusinessInTransaction } from "../tenancy";
+import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
 import {
   clockToMinutes,
+  decodeCursor,
   listAppointmentResources,
   listCallResources,
   listContactResources,
@@ -47,8 +52,10 @@ import {
   loadBusinessResource,
   loadCallDetailResource,
   loadContactResource,
+  pageSize,
   serializeContact,
   serializeKnowledgeEntry,
+  toPage,
   type Page,
   type PageRequest,
 } from "./resources";
@@ -204,6 +211,84 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
     if (!business) throw notFound("Business");
     return business;
   });
+}
+
+// Businesses, for platform keys
+
+/**
+ * The id POST /businesses gives the business made for one platform key and
+ * Idempotency-Key, so a retry finds that business instead of making another.
+ * A UUIDv8 from SHA-256: other keys can't produce it.
+ */
+export function platformBusinessId(platformKeyId: string, idempotencyKey: string): string {
+  const bytes = createHash("sha256").update(`lobbystack:platform-business:v1:${platformKeyId}:${idempotencyKey}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x80;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+/**
+ * Creates a business for a platform key. The key's owner owns it until the
+ * customer claims it, and every key of the key's partner may act on it. The
+ * Idempotency-Key decides the business id, so a retry returns the business it
+ * made, and a different body with the same key is idempotency_key_reused.
+ * The audit row keeps the request's hash for that check.
+ */
+export async function createBusinessForApi(
+  context: DomainContext,
+  input: { key: ResolvedPlatformKey; actingUserId: string; idempotencyKey: string; requestHash: string; body: ApiBusinessCreate },
+): Promise<{ business: ApiBusiness; replayed: boolean }> {
+  const timezone = ianaTimeZone(input.body.timezone);
+  if (!timezone) throw invalidRequest("timezone is not a valid IANA time zone.", [{ path: "timezone", message: "Use an IANA time zone such as America/Toronto." }]);
+  const businessId = platformBusinessId(input.key.platformKeyId, input.idempotencyKey);
+  const caller: PlatformKeyCaller = { businessId, platformKeyId: input.key.platformKeyId, partnerId: input.key.partnerId, actingUserId: input.actingUserId, actor: "platform_key" };
+  const created = async (): Promise<ApiBusiness | null> => await inBusiness(context, caller, async (tx) => {
+    const [row] = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "api.business.created"))).limit(1);
+    if (!row) return null;
+    if ((row.payload as { requestHash?: unknown } | null)?.requestHash !== input.requestHash) throw new PublicApiError(422, "idempotency_key_reused", "This Idempotency-Key was used with a different request body.");
+    // A business since suspended or unlinked from the partner is gone for this key, as on every other endpoint.
+    const [business] = await tx.select({ status: businesses.status }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+    const [link] = await tx.select({ businessId: platformPartnerBusinesses.businessId }).from(platformPartnerBusinesses).where(and(eq(platformPartnerBusinesses.businessId, businessId), eq(platformPartnerBusinesses.partnerId, input.key.partnerId))).limit(1);
+    if (business?.status !== "active" || !link) throw notFound("Business");
+    return await loadBusinessResource(tx, businessId);
+  });
+
+  const existing = await created();
+  if (existing) return { business: existing, replayed: true };
+  try {
+    const business = await inBusiness(context, caller, async (tx) => {
+      await insertBusinessInTransaction(tx, { businessId, userId: input.actingUserId, name: input.body.name, slug: input.body.slug, timezone, businessType: input.body.business_type ?? "service_company", defaultLocale: input.body.locale, websiteUrl: input.body.website_url });
+      await tx.insert(platformPartnerBusinesses).values({ businessId, partnerId: input.key.partnerId, createdByPlatformKeyId: input.key.platformKeyId });
+      await audit(tx, caller, { eventType: "api.business.created", entityType: "business", entityId: businessId, payload: { requestHash: input.requestHash } });
+      return await loadBusinessResource(tx, businessId);
+    });
+    if (!business) throw new Error("The new business could not be read back.");
+    return { business, replayed: false };
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // A retry that ran at the same time created it first.
+    const raced = await created();
+    if (raced) return { business: raced, replayed: true };
+    throw conflict("Another business already uses this slug.");
+  }
+}
+
+/** The active businesses a partner onboarded, newest first. */
+export async function listBusinessesForApi(context: DomainContext, input: { partnerId: string } & PageRequest): Promise<Page<ApiBusinessSummary>> {
+  const limit = pageSize(input.limit);
+  const cursor = decodeCursor(input.cursor);
+  // The links and businesses are tenant-isolated, so a resolver reads one partner's page.
+  const rows = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => (await tx.execute<{ business_id: string; name: string; timezone: string; default_locale: string; website_url: string | null; onboarding_stage: string; created_at: Date | string }>(sql`select business_id, name, timezone, default_locale, website_url, onboarding_stage, created_at from app.list_platform_partner_businesses(${input.partnerId}, ${cursor?.at.toISOString() ?? null}::timestamptz, ${cursor?.id ?? null}::uuid, ${limit + 1}::int)`)).rows);
+  return toPage(rows, limit, (row) => ({
+    id: row.business_id,
+    name: row.name,
+    timezone: row.timezone,
+    locale: row.default_locale,
+    website_url: row.website_url,
+    onboarding_stage: row.onboarding_stage,
+    created_at: new Date(row.created_at).toISOString(),
+  }), (row) => ({ at: new Date(row.created_at), id: row.business_id }));
 }
 
 export async function listServicesForApi(context: DomainContext, caller: ApiCaller): Promise<ApiService[]> {

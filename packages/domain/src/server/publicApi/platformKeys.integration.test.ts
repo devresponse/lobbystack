@@ -3,12 +3,12 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, auditLogs, businessMemberships, businesses, contacts, createDatabaseClient, idempotencyKeys, outboxMessages, platformPartnerBusinesses, users } from "@lobbystack/db";
+import { apiKeys, auditLogs, businessMemberships, businesses, contacts, createDatabaseClient, idempotencyKeys, outboxMessages, platformPartnerBusinesses, receptionistProfiles, staff, users } from "@lobbystack/db";
 
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { PublicApiError } from "./errors";
 import { runIdempotent } from "./idempotency";
-import { createContactForApi, createKnowledgeEntryForApi, getPlatformMeForApi, resolveActingUserId, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { createBusinessForApi, createContactForApi, createKnowledgeEntryForApi, getPlatformMeForApi, listBusinessesForApi, platformBusinessId, resolveActingUserId, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { generatePlatformKey, linkPlatformPartnerBusiness, requirePlatformBusinessAccess, resolvePlatformKey, resolvePlatformKeyOwner } from "./platformKeys";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -38,6 +38,7 @@ const ownerEmail = `platform-owner-${ownerId}@example.invalid`;
 const unverifiedId = randomUUID();
 const unverifiedEmail = `platform-unverified-${unverifiedId}@example.invalid`;
 const memberId = randomUUID();
+const createdBusinessIds: string[] = [];
 
 async function expectApiError(promise: Promise<unknown>, status: number, code: string) {
   const error = await promise.then(() => null, (value: unknown) => value);
@@ -60,7 +61,7 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
   });
 
   afterAll(async () => {
-    const ids = [businessA, businessB];
+    const ids = [businessA, businessB, ...createdBusinessIds];
     await admin?.db.delete(idempotencyKeys).where(inArray(idempotencyKeys.businessId, ids));
     await admin?.db.delete(contacts).where(inArray(contacts.businessId, ids));
     await admin?.db.delete(outboxMessages).where(inArray(outboxMessages.businessId, ids));
@@ -158,6 +159,97 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
     const generated = generateApiKey();
     await admin!.db.insert(apiKeys).values({ businessId: businessA, name: "Seeded with every scope", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["business:read", "businesses:create", "users:create"] });
     expect((await resolveApiKey({ db: worker!.db }, generated.key))?.scopes).toEqual(["business:read"]);
+  });
+
+  describe("businesses created by a platform key", () => {
+    const { key, entry } = generatePlatformKey({ name: "Acme onboarding", partner: "acme", ownerEmail });
+    const resolved = () => resolvePlatformKey(key, { PLATFORM_API_KEYS: JSON.stringify([entry]) })!;
+    const create = (idempotencyKey: string, body: Parameters<typeof createBusinessForApi>[1]["body"], requestHash = `hash-${idempotencyKey}`) =>
+      createBusinessForApi({ db: worker!.db }, { key: resolved(), actingUserId: ownerId, idempotencyKey, requestHash, body });
+
+    it("creates the business as the key's owner and links it to the key's partner", async () => {
+      const idempotencyKey = `onboard-${randomUUID()}`;
+      const result = await create(idempotencyKey, { name: " Acme Plumbing ", timezone: "america/toronto", locale: "fr", website_url: "https://acme.example" });
+      createdBusinessIds.push(result.business.id);
+      expect(result.replayed).toBe(false);
+      expect(result.business).toMatchObject({ id: platformBusinessId(entry.id, idempotencyKey), name: "Acme Plumbing", timezone: "America/Toronto", locale: "fr", website_url: "https://acme.example" });
+      const businessId = result.business.id;
+      expect(await admin!.db.select({ userId: businessMemberships.userId, role: businessMemberships.role }).from(businessMemberships).where(eq(businessMemberships.businessId, businessId))).toEqual([{ userId: ownerId, role: "business_owner" }]);
+      expect(await admin!.db.select({ partnerId: platformPartnerBusinesses.partnerId, createdBy: platformPartnerBusinesses.createdByPlatformKeyId }).from(platformPartnerBusinesses).where(eq(platformPartnerBusinesses.businessId, businessId))).toEqual([{ partnerId: "acme", createdBy: entry.id }]);
+      expect(await admin!.db.select({ id: staff.id }).from(staff).where(eq(staff.businessId, businessId))).toHaveLength(1);
+      expect(await admin!.db.select({ id: receptionistProfiles.businessId }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId))).toHaveLength(1);
+      const [audit] = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "api.business.created")));
+      expect(audit?.payload).toEqual({ actor: "platform_key", platformKeyId: entry.id, partnerId: "acme", actingUserId: ownerId, requestHash: `hash-${idempotencyKey}` });
+      expect(await admin!.db.select({ topic: outboxMessages.topic }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "snapshot.refresh")))).not.toHaveLength(0);
+      // The partner's keys can act on it right away.
+      await requirePlatformBusinessAccess({ db: worker!.db }, { businessId, partnerId: "acme", access: "partner" });
+    });
+
+    it("returns the same business for a retry and refuses a different body with the same key", async () => {
+      const idempotencyKey = `retry-${randomUUID()}`;
+      const first = await create(idempotencyKey, { name: "Retry Dental", timezone: "UTC" });
+      createdBusinessIds.push(first.business.id);
+      const again = await create(idempotencyKey, { name: "Retry Dental", timezone: "UTC" });
+      expect(again).toEqual({ business: first.business, replayed: true });
+      await expectApiError(create(idempotencyKey, { name: "Someone Else", timezone: "UTC" }, "a-different-hash"), 422, "idempotency_key_reused");
+      expect(await admin!.db.select({ id: businesses.id }).from(businesses).where(eq(businesses.name, "Someone Else"))).toEqual([]);
+    });
+
+    it("creates one business when two retries run at once", async () => {
+      const idempotencyKey = `race-${randomUUID()}`;
+      const results = await Promise.all([create(idempotencyKey, { name: "Race Clinic", timezone: "UTC" }), create(idempotencyKey, { name: "Race Clinic", timezone: "UTC" })]);
+      createdBusinessIds.push(results[0].business.id);
+      expect(results[1].business.id).toBe(results[0].business.id);
+      expect(results.map((result) => result.replayed).sort()).toEqual([false, true]);
+      expect(await admin!.db.select({ id: businesses.id }).from(businesses).where(eq(businesses.name, "Race Clinic"))).toHaveLength(1);
+    });
+
+    it("answers a retry for a business that was since suspended with 404, like every other endpoint", async () => {
+      const idempotencyKey = `paused-${randomUUID()}`;
+      const first = await create(idempotencyKey, { name: "Paused Spa", timezone: "UTC" });
+      createdBusinessIds.push(first.business.id);
+      await admin!.db.update(businesses).set({ status: "suspended" }).where(eq(businesses.id, first.business.id));
+      await expectApiError(create(idempotencyKey, { name: "Paused Spa", timezone: "UTC" }), 404, "not_found");
+    });
+
+    it("refuses a slug another business uses", async () => {
+      const [taken] = await admin!.db.select({ slug: businesses.slug }).from(businesses).where(eq(businesses.id, businessA));
+      await expectApiError(create(`slug-${randomUUID()}`, { name: "Copycat", timezone: "UTC", slug: taken!.slug }), 409, "conflict");
+    });
+
+    it("lists only the partner's active businesses, newest first, a page at a time", async () => {
+      const otherKey = generatePlatformKey({ name: "Other onboarding", partner: "other", ownerEmail });
+      const other = await createBusinessForApi({ db: worker!.db }, { key: resolvePlatformKey(otherKey.key, { PLATFORM_API_KEYS: JSON.stringify([otherKey.entry]) })!, actingUserId: ownerId, idempotencyKey: `other-${randomUUID()}`, requestHash: "h", body: { name: "Other Partner Co", timezone: "UTC" } });
+      createdBusinessIds.push(other.business.id);
+      const suspended = await create(`suspended-${randomUUID()}`, { name: "Closed Shop", timezone: "UTC" });
+      createdBusinessIds.push(suspended.business.id);
+      await admin!.db.update(businesses).set({ status: "suspended" }).where(eq(businesses.id, suspended.business.id));
+
+      const seen: string[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await listBusinessesForApi({ db: worker!.db }, { partnerId: "acme", limit: 1, ...(cursor ? { cursor } : {}) });
+        expect(page.data.length).toBeLessThanOrEqual(1);
+        seen.push(...page.data.map((business) => business.id));
+        cursor = page.next_cursor ?? undefined;
+      } while (cursor);
+      const expected = await admin!.db.select({ id: businesses.id, createdAt: businesses.createdAt }).from(platformPartnerBusinesses).innerJoin(businesses, eq(businesses.id, platformPartnerBusinesses.businessId)).where(and(eq(platformPartnerBusinesses.partnerId, "acme"), eq(businesses.status, "active")));
+      expect(seen).toEqual(expected.sort((x, y) => y.createdAt.getTime() - x.createdAt.getTime() || (y.id < x.id ? -1 : 1)).map((row) => row.id));
+      expect(seen).not.toContain(other.business.id);
+      expect(seen).not.toContain(suspended.business.id);
+      expect(seen.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("lets only the worker list a partner's businesses", async () => {
+      const denied = await app!.db.execute(sql`select * from app.list_platform_partner_businesses('acme', null, null, 10)`).then(() => null, (value: unknown) => value);
+      expect(String((denied as { cause?: unknown } | null)?.cause ?? denied)).toMatch(/permission denied/);
+      // The worker role still gets nothing outside a worker context.
+      const rows = await worker!.db.transaction(async (tx) => {
+        await tx.execute(sql`select set_config('app.actor_type', 'operator', true)`);
+        return (await tx.execute(sql`select business_id from app.list_platform_partner_businesses('acme', null, null, 10)`)).rows;
+      });
+      expect(rows).toEqual([]);
+    });
   });
 
   it("acts as a per-business key's creator only while they own or run the business", async () => {

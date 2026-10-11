@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { apiKeyScopes } from "@lobbystack/shared";
+import { apiKeyScopes, isUuid } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
-import { callerAudit, callerPrincipalId, type PlatformKeyCaller } from "./operations";
+import { callerAudit, callerPrincipalId, platformBusinessId, type PlatformKeyCaller } from "./operations";
 import { generatePlatformKey, isPlatformKeyToken, isWellFormedPlatformKey, parsePlatformKeys, PlatformKeyConfigError, resolvePlatformKey } from "./platformKeys";
 
 function environment(...entries: unknown[]) {
@@ -95,6 +95,18 @@ describe("platform keys", () => {
     expect(() => parsePlatformKeys(JSON.stringify([first, { ...second, id: first.id }]))).toThrow(/same id/);
     expect(() => parsePlatformKeys(JSON.stringify([first, { ...second, prefix: first.prefix }]))).toThrow(/same prefix/);
     expect(() => parsePlatformKeys(JSON.stringify([first, { ...second, hash: first.hash }]))).toThrow(/same hash/);
+  });
+
+  it("derives one business id per platform key and Idempotency-Key", () => {
+    const keyId = "8b0c3f8e-1d2a-4b5c-9e6f-7a8b9c0d1e2f";
+    const id = platformBusinessId(keyId, "onboard-acme");
+    expect(isUuid(id)).toBe(true);
+    // Version 8 and the RFC 9562 variant, so it is a valid UUID everywhere.
+    expect(id[14]).toBe("8");
+    expect(["8", "9", "a", "b"]).toContain(id[19]);
+    expect(platformBusinessId(keyId, "onboard-acme")).toBe(id);
+    expect(platformBusinessId(keyId, "onboard-acme-2")).not.toBe(id);
+    expect(platformBusinessId("1c8d2e3f-4051-4b62-9c73-8d94ea5b6c7d", "onboard-acme")).not.toBe(id);
   });
 
   it("attributes platform key calls to the key, its partner and its owner", () => {

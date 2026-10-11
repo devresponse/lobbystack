@@ -4,15 +4,15 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeSourceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -493,6 +493,107 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     await createKnowledgeSourceForApi({ db: worker!.db }, b.caller, { type: "website", url: "https://birch-api.example" });
     const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, b.businessId));
     expect(business).toEqual({ websiteUrl: "https://birch-api.example/", stage: "knowledge" });
+  });
+
+  it("lists, edits and deletes knowledge entries, and keeps an FAQ an FAQ", async () => {
+    const context = { db: worker!.db };
+    const faq = await createKnowledgeEntryForApi(context, a.caller, { type: "faq", question: "Do you park?", answer: "Behind the building." });
+    const text = await createKnowledgeEntryForApi(context, a.caller, { type: "text", title: "Holidays", content: "Closed on public holidays." });
+    const ids = async (type?: "text" | "faq", caller: ApiKeyCaller = a.caller) => (await listKnowledgeEntriesForApi(context, caller, { type })).data.map((entry) => entry.id);
+    expect(await ids()).toEqual(expect.arrayContaining([faq.id, text.id]));
+    expect(await ids("faq")).toContain(faq.id);
+    expect(await ids("faq")).not.toContain(text.id);
+    expect(await ids("text")).toContain(text.id);
+    expect(await ids("text")).not.toContain(faq.id);
+    expect(await ids(undefined, b.caller)).not.toContain(faq.id);
+    // One page at a time, with no entry on two pages.
+    const first = await listKnowledgeEntriesForApi(context, a.caller, { limit: 1 });
+    expect(first.has_more).toBe(true);
+    const second = await listKnowledgeEntriesForApi(context, a.caller, { limit: 1, cursor: first.next_cursor! });
+    expect([first.data[0]?.id, second.data[0]?.id].sort()).toEqual([faq.id, text.id].sort());
+
+    // Tags sent without the FAQ marker keep the FAQ an FAQ.
+    const edited = await updateKnowledgeEntryForApi(context, a.caller, faq.id, { content: "Free parking behind the building.", tags: ["parking", "faq", "parking"], priority: 3, active: false });
+    expect(edited).toMatchObject({ id: faq.id, type: "faq", title: "Do you park?", content: "Free parking behind the building.", tags: ["parking"], priority: 3, active: false });
+    expect(apiKnowledgeEntrySchema.safeParse(edited).success).toBe(true);
+    expect(await getKnowledgeEntryForApi(context, a.caller, faq.id)).toEqual(edited);
+    const refreshes = async (id: string) => await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateId, id)));
+    expect(await refreshes(faq.id)).toContainEqual({ payload: expect.objectContaining({ reason: "snippet_updated" }) });
+    const [updatedAudit] = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, faq.id), eq(auditLogs.eventType, "api.knowledge.updated")));
+    expect(updatedAudit?.payload).toMatchObject({ fields: ["content", "tags", "priority", "active"] });
+    // A text entry can't turn into an FAQ through its tags.
+    expect(await updateKnowledgeEntryForApi(context, a.caller, text.id, { tags: ["faq"] })).toMatchObject({ type: "text", tags: [] });
+    // An empty change, or one to the values it already has, writes nothing.
+    const updatedAt = async () => (await admin!.db.select({ at: knowledgeSnippets.updatedAt }).from(knowledgeSnippets).where(eq(knowledgeSnippets.id, text.id)))[0]!.at.getTime();
+    const before = await updatedAt();
+    await updateKnowledgeEntryForApi(context, a.caller, text.id, {});
+    await updateKnowledgeEntryForApi(context, a.caller, text.id, { title: "Holidays", active: true });
+    expect(await updatedAt()).toBe(before);
+
+    await expectApiError(getKnowledgeEntryForApi(context, b.caller, faq.id), 404, "not_found");
+    await expectApiError(updateKnowledgeEntryForApi(context, b.caller, faq.id, { active: true }), 404, "not_found");
+    await expectApiError(deleteKnowledgeEntryForApi(context, b.caller, faq.id), 404, "not_found");
+    await deleteKnowledgeEntryForApi(context, a.caller, faq.id);
+    await expectApiError(getKnowledgeEntryForApi(context, a.caller, faq.id), 404, "not_found");
+    await expectApiError(deleteKnowledgeEntryForApi(context, a.caller, faq.id), 404, "not_found");
+    expect(await refreshes(faq.id)).toContainEqual({ payload: expect.objectContaining({ reason: "snippet_deleted" }) });
+    expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, faq.id), eq(auditLogs.eventType, "api.knowledge.deleted")))).toHaveLength(1);
+  });
+
+  it("lists websites, pages and files apart, and turns one off or deletes it", async () => {
+    const context = { db: worker!.db };
+    const website = await createKnowledgeSourceForApi(context, b.caller, { type: "website", url: "https://cedar-api.example" });
+    const [page] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "website", title: "Menu", sourceUrl: "https://cedar-api.example/menu", status: "indexed" }).returning({ id: knowledgeDocuments.id });
+    const [file] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Prices", status: "error", error: "Unreadable." }).returning({ id: knowledgeDocuments.id });
+    // A status the API doesn't know reads, and filters, as processing.
+    const [queued] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Hours", status: "queued" }).returning({ id: knowledgeDocuments.id });
+    await admin!.db.insert(knowledgeChunks).values({ businessId: b.businessId, documentId: page!.id, sequence: 0, content: "Soup of the day.", contentHash: "menu-0" });
+    type Filter = { type?: "website" | "page" | "file"; status?: "pending" | "processing" | "indexed" | "error" | "cancelled" };
+    const ids = async (filter: Filter, caller: ApiKeyCaller = b.caller) => (await listKnowledgeSourcesForApi(context, caller, filter)).data.map((source) => source.id);
+    expect(await ids({})).toEqual(expect.arrayContaining([website.id, page!.id, file!.id, queued!.id]));
+    expect(await ids({}, a.caller)).not.toContain(page!.id);
+    expect(await ids({ type: "website" })).toContain(website.id);
+    expect(await ids({ type: "website" })).not.toContain(page!.id);
+    expect(await ids({ type: "page" })).toContain(page!.id);
+    expect(await ids({ type: "page" })).not.toContain(website.id);
+    expect(await ids({ type: "file", status: "error" })).toContain(file!.id);
+    expect(await ids({ type: "file", status: "indexed" })).not.toContain(file!.id);
+    expect(await ids({ status: "processing" })).toEqual(expect.arrayContaining([website.id, queued!.id]));
+    expect(await getKnowledgeSourceForApi(context, b.caller, queued!.id)).toMatchObject({ type: "file", status: "processing" });
+    // One page at a time, with no source on two pages.
+    const first = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2 });
+    const second = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2, cursor: first.next_cursor! });
+    expect(first.has_more).toBe(true);
+    expect(second.data).toHaveLength(2);
+    expect(second.data.filter((source) => first.data.some((seen) => seen.id === source.id))).toEqual([]);
+    const read = await getKnowledgeSourceForApi(context, b.caller, page!.id);
+    expect(read).toMatchObject({ type: "page", url: "https://cedar-api.example/menu", page_limit: null, active: true });
+    expect(apiKnowledgeSourceSchema.safeParse(read).success).toBe(true);
+
+    expect(await updateKnowledgeSourceForApi(context, b.caller, page!.id, { active: false })).toMatchObject({ id: page!.id, active: false });
+    const refreshes = async (id: string) => await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateId, id)));
+    expect(await refreshes(page!.id)).toContainEqual({ payload: expect.objectContaining({ reason: "document_activity_changed" }) });
+    // Sending the state it already has writes and audits nothing.
+    await updateKnowledgeSourceForApi(context, b.caller, page!.id, { active: false });
+    expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, page!.id), eq(auditLogs.eventType, "api.knowledge_source.updated")))).toHaveLength(1);
+    expect(await refreshes(page!.id)).toHaveLength(1);
+    await expectApiError(updateKnowledgeSourceForApi(context, a.caller, page!.id, { active: true }), 404, "not_found");
+    // Crawl actions belong to the website, not its pages.
+    await expectApiError(retryKnowledgeSourceForApi(context, b.caller, page!.id), 400, "invalid_request");
+
+    await deleteKnowledgeSourceForApi(context, b.caller, website.id);
+    await expectApiError(getKnowledgeSourceForApi(context, b.caller, website.id), 404, "not_found");
+    await expectApiError(deleteKnowledgeSourceForApi(context, b.caller, website.id), 404, "not_found");
+    // Its crawl goes with it.
+    expect(await admin!.db.select({ id: websiteIngestionJobs.id }).from(websiteIngestionJobs).where(eq(websiteIngestionJobs.rootDocumentId, website.id))).toEqual([]);
+    expect(await refreshes(website.id)).toContainEqual({ payload: expect.objectContaining({ reason: "document_deleted" }) });
+    // The pages its crawl read stay until they are deleted too.
+    expect(await getKnowledgeSourceForApi(context, b.caller, page!.id)).toMatchObject({ type: "page" });
+    await expectApiError(deleteKnowledgeSourceForApi(context, a.caller, page!.id), 404, "not_found");
+    await deleteKnowledgeSourceForApi(context, b.caller, page!.id);
+    await expectApiError(getKnowledgeSourceForApi(context, b.caller, page!.id), 404, "not_found");
+    expect(await admin!.db.select({ id: knowledgeChunks.id }).from(knowledgeChunks).where(eq(knowledgeChunks.documentId, page!.id))).toEqual([]);
+    expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, page!.id), eq(auditLogs.eventType, "api.knowledge_source.deleted")))).toHaveLength(1);
   });
 
   it("reads and updates the business type and reads the onboarding stage", async () => {

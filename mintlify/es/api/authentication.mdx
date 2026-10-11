@@ -67,7 +67,8 @@ Cada endpoint, salvo `GET /me`, requiere un permiso (scope). Una clave sin ese p
 | `appointments:read` | `GET /appointments`, `GET /appointments/{appointment_id}`, `GET /availability` |
 | `appointments:write` | `POST /appointments`, `POST /appointments/{appointment_id}/cancel`, `POST /appointments/{appointment_id}/reschedule` |
 | `messages:read` | `GET /messages` |
-| `knowledge:write` | `POST /knowledge` |
+| `knowledge:read` | `GET /knowledge`, `GET /knowledge/{entry_id}`, `GET /knowledge/sources`, `GET /knowledge/sources/{source_id}` |
+| `knowledge:write` | `POST /knowledge`, `PATCH` y `DELETE` en `/knowledge/{entry_id}`, `POST /knowledge/sources`, `PATCH` y `DELETE` en `/knowledge/sources/{source_id}`, `POST /knowledge/sources/{source_id}/expand`, `/retry` y `/cancel`, `POST /knowledge/uploads` y `POST /knowledge/uploads/{upload_id}/complete` |
 | `webhooks:manage` | `GET`, `POST`, `PATCH` y `DELETE` en `/webhooks`, y `POST /webhooks/{webhook_id}/test` |
 
 Para suscribir un endpoint a un evento o cambiar su URL, su clave también necesita el permiso de lectura de ese evento. Por ejemplo, `call.completed` requiere `calls:read`, y la tabla de eventos de la página [Webhooks](/es/api/webhooks) indica los demás.

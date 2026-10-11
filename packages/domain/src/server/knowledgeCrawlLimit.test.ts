@@ -35,7 +35,7 @@ function recordingBuilder(rows: Record<string, unknown>[]): unknown {
 
 import { businesses } from "@lobbystack/db";
 
-import { cancelKnowledgeDocument, createKnowledgeDocument, createKnowledgeDocumentInTransaction, expandWebsiteCrawl, FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocument } from "./knowledge";
+import { cancelKnowledgeDocument, createKnowledgeDocument, createKnowledgeDocumentInTransaction, deleteKnowledgeDocument, deleteKnowledgeSnippet, expandWebsiteCrawl, FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocument, setKnowledgeDocumentActive, updateKnowledgeSnippet } from "./knowledge";
 
 const context = { db: {} as never };
 
@@ -200,5 +200,26 @@ describe("dashboard knowledge actions", () => {
     mocks.withBusinessTransaction.mockImplementation(async (_db: unknown, _input: unknown, work: (tx: unknown) => Promise<unknown>) => await work(tx));
     await expect(run()).rejects.toMatchObject({ status: 403 });
     expect(mocks.requireBusinessAdmin).toHaveBeenCalledWith(tx, expect.objectContaining({ userId: "user_1", businessId: "biz_1" }));
+  });
+});
+
+describe("dashboard knowledge edits", () => {
+  // Every statement finds nothing, as when the document or snippet is gone.
+  const nothing = { select: () => builder([]), insert: () => builder([]), update: () => builder([]), delete: () => builder([]), execute: () => builder([]) };
+
+  it.each([
+    ["turns a document off", () => setKnowledgeDocumentActive(context, { userId: "user_1", businessId: "biz_1", documentId: "doc_1", active: false }), { message: "Knowledge document not found.", status: 404 }],
+    ["deletes a document", () => deleteKnowledgeDocument(context, { userId: "user_1", businessId: "biz_1", documentId: "doc_1" }), { message: "Knowledge document not found." }],
+    ["edits a snippet", () => updateKnowledgeSnippet(context, { userId: "user_1", businessId: "biz_1", snippetId: "snippet_1", title: "Parking" }), { message: "Knowledge snippet not found." }],
+    ["deletes a snippet", () => deleteKnowledgeSnippet(context, { userId: "user_1", businessId: "biz_1", snippetId: "snippet_1" }), { message: "Knowledge snippet not found." }],
+  ] as const)("checks the person is an owner or admin, and keeps its error, when it %s that isn't there", async (_action, run, expected) => {
+    mocks.requireBusinessAdmin.mockReset();
+    mocks.withBusinessTransaction.mockImplementation(async (_db: unknown, _input: unknown, work: (tx: unknown) => Promise<unknown>) => await work(nothing));
+    const error = await run().then(() => null, (value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject(expected);
+    // Only turning a document off answers 404; the others stay errors without a status, as before.
+    if (!("status" in expected)) expect(error).not.toHaveProperty("status");
+    expect(mocks.requireBusinessAdmin).toHaveBeenCalledWith(nothing, expect.objectContaining({ userId: "user_1", businessId: "biz_1" }));
   });
 });

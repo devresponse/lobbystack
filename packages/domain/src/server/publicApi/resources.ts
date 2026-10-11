@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
@@ -405,30 +405,84 @@ export async function listMessageResources(tx: DatabaseTransaction, businessId: 
 
 // Knowledge
 
-export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "createdAt">): ApiKnowledgeEntry {
-  return { id: row.id, type: row.tags.includes("faq") ? "faq" : "text", title: row.title, content: row.content, created_at: iso(row.createdAt) };
+/** An FAQ is a snippet with this tag; the API shows it as the entry's type, not as a label. */
+export const FAQ_TAG = "faq";
+
+export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "priority" | "active" | "createdAt" | "updatedAt">): ApiKnowledgeEntry {
+  return { id: row.id, type: row.tags.includes(FAQ_TAG) ? "faq" : "text", title: row.title, content: row.content, tags: row.tags.filter((tag) => tag !== FAQ_TAG), priority: row.priority, active: row.active, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
-type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { pageLimit: number | null };
+function isFaq(): SQL {
+  return sql`${knowledgeSnippets.tags} @> ${JSON.stringify([FAQ_TAG])}::jsonb`;
+}
+
+export async function listKnowledgeEntryResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { type?: "text" | "faq" | undefined }): Promise<Page<ApiKnowledgeEntry>> {
+  const limit = pageSize(request.limit);
+  const rows = await tx.select().from(knowledgeSnippets).where(and(
+    eq(knowledgeSnippets.businessId, businessId),
+    request.type === "faq" ? isFaq() : request.type === "text" ? not(isFaq()) : undefined,
+    afterCursor(knowledgeSnippets.createdAt, knowledgeSnippets.id, decodeCursor(request.cursor)),
+  )).orderBy(...newestFirst(knowledgeSnippets.createdAt, knowledgeSnippets.id)).limit(limit + 1);
+  return toPage(rows, limit, serializeKnowledgeEntry, (row) => ({ at: row.createdAt, id: row.id }));
+}
+
+export async function loadKnowledgeEntryResource(tx: DatabaseTransaction, businessId: string, entryId: string): Promise<ApiKnowledgeEntry | null> {
+  const [row] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.id, entryId))).limit(1);
+  return row ? serializeKnowledgeEntry(row) : null;
+}
+
+type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
 
 const knowledgeSourceStatuses = ["pending", "processing", "indexed", "error", "cancelled"] as const;
 
-export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
-  const website = row.sourceType === "website";
-  // A status this API does not know yet reads as still processing.
-  const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
-  return { id: row.id, type: website ? "website" : "file", title: row.title, url: website ? row.sourceUrl : null, status, error: status === "error" ? row.error : null, active: row.active, page_limit: website ? row.pageLimit : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+/** A website added as a source has a crawl job; a page its crawl read has none. Anything else is a file. */
+export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" | "jobId">): ApiKnowledgeSource["type"] {
+  if (row.sourceType !== "website") return "file";
+  return row.jobId ? "website" : "page";
 }
 
-/** A website or uploaded file, with its crawl's page limit when it is a website. */
-export async function loadKnowledgeSourceResource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<ApiKnowledgeSource | null> {
-  const [row] = await tx
-    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, pageLimit: websiteIngestionJobs.pageLimit })
+export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
+  const type = knowledgeSourceType(row);
+  // A status this API does not know yet reads as still processing.
+  const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
+  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status, error: status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+function selectKnowledgeSourceRows(tx: DatabaseTransaction, businessId: string) {
+  return tx
+    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
     .from(knowledgeDocuments)
-    .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)))
-    .where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId)))
-    .limit(1);
+    .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)));
+}
+
+export async function loadKnowledgeSourceResource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<ApiKnowledgeSource | null> {
+  const [row] = await selectKnowledgeSourceRows(tx, businessId).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId))).limit(1);
   return row ? serializeKnowledgeSource(row) : null;
+}
+
+function knowledgeSourceTypeCondition(type: ApiKnowledgeSource["type"] | undefined): SQL | undefined {
+  if (type === "file") return ne(knowledgeDocuments.sourceType, "website");
+  if (type === "website") return and(eq(knowledgeDocuments.sourceType, "website"), isNotNull(websiteIngestionJobs.id));
+  if (type === "page") return and(eq(knowledgeDocuments.sourceType, "website"), isNull(websiteIngestionJobs.id));
+  return undefined;
+}
+
+// Matches serializeKnowledgeSource: a status the API doesn't know reads as processing.
+function knowledgeSourceStatusCondition(status: ApiKnowledgeSource["status"] | undefined): SQL | undefined {
+  if (!status) return undefined;
+  if (status === "processing") return or(eq(knowledgeDocuments.status, "processing"), notInArray(knowledgeDocuments.status, [...knowledgeSourceStatuses]));
+  return eq(knowledgeDocuments.status, status);
+}
+
+export async function listKnowledgeSourceResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { type?: ApiKnowledgeSource["type"] | undefined; status?: ApiKnowledgeSource["status"] | undefined }): Promise<Page<ApiKnowledgeSource>> {
+  const limit = pageSize(request.limit);
+  const rows = await selectKnowledgeSourceRows(tx, businessId).where(and(
+    eq(knowledgeDocuments.businessId, businessId),
+    knowledgeSourceTypeCondition(request.type),
+    knowledgeSourceStatusCondition(request.status),
+    afterCursor(knowledgeDocuments.createdAt, knowledgeDocuments.id, decodeCursor(request.cursor)),
+  )).orderBy(...newestFirst(knowledgeDocuments.createdAt, knowledgeDocuments.id)).limit(limit + 1);
+  return toPage(rows, limit, serializeKnowledgeSource, (row) => ({ at: row.createdAt, id: row.id }));
 }
 
 // Webhook endpoints

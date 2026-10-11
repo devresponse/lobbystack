@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   isApiKeyScope,
@@ -23,8 +23,10 @@ import {
   type ApiContactUpdate,
   type ApiKnowledgeEntry,
   type ApiKnowledgeEntryCreate,
+  type ApiKnowledgeEntryUpdate,
   type ApiKnowledgeSource,
   type ApiKnowledgeSourceCreate,
+  type ApiKnowledgeSourceUpdate,
   type ApiKnowledgeUpload,
   type ApiKnowledgeUploadComplete,
   type ApiKnowledgeUploadCreate,
@@ -38,7 +40,7 @@ import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { replaceBusinessHoursInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
-import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction } from "../knowledge";
+import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
@@ -49,9 +51,13 @@ import type { ResolvedPlatformKey } from "./platformKeys";
 import {
   clockToMinutes,
   decodeCursor,
+  FAQ_TAG,
+  knowledgeSourceType,
   listAppointmentResources,
   listCallResources,
   listContactResources,
+  listKnowledgeEntryResources,
+  listKnowledgeSourceResources,
   listMessageResources,
   listServiceResources,
   listStaffResources,
@@ -59,6 +65,7 @@ import {
   loadBusinessResource,
   loadCallDetailResource,
   loadContactResource,
+  loadKnowledgeEntryResource,
   loadKnowledgeSourceResource,
   pageSize,
   serializeContact,
@@ -547,14 +554,58 @@ export async function listMessagesForApi(context: DomainContext, caller: ApiCall
 export async function createKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeEntryCreate): Promise<ApiKnowledgeEntry> {
   return await inBusiness(context, caller, async (tx) => {
     const snippet = await createKnowledgeSnippetInTransaction(tx, input.type === "faq"
-      ? { businessId: caller.businessId, title: input.question, content: input.answer, tags: ["faq"] }
+      ? { businessId: caller.businessId, title: input.question, content: input.answer, tags: [FAQ_TAG] }
       : { businessId: caller.businessId, title: input.title, content: input.content });
     await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type } });
     return serializeKnowledgeEntry(snippet);
   });
 }
 
-// Knowledge sources: websites now, uploaded files later.
+export async function listKnowledgeEntriesForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { type?: "text" | "faq" | undefined }): Promise<Page<ApiKnowledgeEntry>> {
+  return await inBusiness(context, caller, async (tx) => await listKnowledgeEntryResources(tx, caller.businessId, request));
+}
+
+export async function getKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string): Promise<ApiKnowledgeEntry> {
+  return await inBusiness(context, caller, async (tx) => {
+    const entry = await loadKnowledgeEntryResource(tx, caller.businessId, entryId);
+    if (!entry) throw notFound("Knowledge entry");
+    return entry;
+  });
+}
+
+/**
+ * Changes the fields sent. Values the entry already has change nothing, so an
+ * unchanged entry isn't written, audited or refreshed. The labels sent replace
+ * the entry's own, and an FAQ keeps the tag that makes it an FAQ.
+ */
+export async function updateKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string, input: ApiKnowledgeEntryUpdate): Promise<ApiKnowledgeEntry> {
+  return await inBusiness(context, caller, async (tx) => {
+    const [current] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, caller.businessId), eq(knowledgeSnippets.id, entryId))).limit(1).for("update");
+    if (!current) throw notFound("Knowledge entry");
+    const tags = input.tags === undefined ? undefined : [...new Set([...(current.tags.includes(FAQ_TAG) ? [FAQ_TAG] : []), ...input.tags.filter((tag) => tag !== FAQ_TAG)])];
+    const changes = {
+      ...(input.title !== undefined && input.title !== current.title ? { title: input.title } : {}),
+      ...(input.content !== undefined && input.content !== current.content ? { content: input.content } : {}),
+      ...(tags !== undefined && JSON.stringify(tags) !== JSON.stringify(current.tags) ? { tags } : {}),
+      ...(input.priority !== undefined && input.priority !== current.priority ? { priority: input.priority } : {}),
+      ...(input.active !== undefined && input.active !== current.active ? { active: input.active } : {}),
+    };
+    if (!Object.keys(changes).length) return serializeKnowledgeEntry(current);
+    const snippet = await updateKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: entryId, ...changes });
+    if (!snippet) throw notFound("Knowledge entry");
+    await audit(tx, caller, { eventType: "api.knowledge.updated", entityType: "knowledge_snippet", entityId: entryId, payload: { fields: Object.keys(changes) } });
+    return serializeKnowledgeEntry(snippet);
+  });
+}
+
+export async function deleteKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteKnowledgeSnippetInTransaction(tx, { businessId: caller.businessId, snippetId: entryId })) throw notFound("Knowledge entry");
+    await audit(tx, caller, { eventType: "api.knowledge.deleted", entityType: "knowledge_snippet", entityId: entryId });
+  });
+}
+
+// Knowledge sources: websites, the pages their crawls read, and uploaded files.
 
 /**
  * Gives a domain error that carries an HTTP status its v1 code. The
@@ -582,14 +633,14 @@ function selectKnowledgeSource(tx: DatabaseTransaction, businessId: string) {
 }
 
 /**
- * A source is a website the API or dashboard added (the root of its crawl) or
- * an uploaded file. The pages a crawl reads are documents too, but acting on
- * one would start a second crawl that fights its site's, so they are refused.
+ * A source that can be read again: a website the API or dashboard added (the
+ * root of its crawl) or an uploaded file. A page a crawl read is a source too,
+ * but crawling one on its own would fight its website's crawl, so it is refused.
  */
 async function requireKnowledgeSource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<KnowledgeSourceState> {
   const [source] = await selectKnowledgeSource(tx, businessId).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId))).limit(1);
   if (!source) throw notFound("Knowledge source");
-  if (source.sourceType === "website" && !source.jobId) throw invalidRequest("This is a page a website crawl read, not a source. Act on the website it came from.");
+  if (knowledgeSourceType(source) === "page") throw invalidRequest("This page has no crawl of its own. Act on the website that read it, or delete the page and add its address as a website.");
   return source;
 }
 
@@ -622,7 +673,7 @@ export async function createKnowledgeSourceForApi(context: DomainContext, caller
       throw apiErrorFromDomain(error, "Knowledge source");
     }
     const [existing] = await selectKnowledgeSource(tx, caller.businessId).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.sourceUrl, url))).limit(1);
-    if (existing && !existing.jobId) throw conflict("This address is already a page of another website source.");
+    if (existing && !existing.jobId) throw conflict(`This address is already source ${existing.id}, a page with no crawl of its own. Delete that source, then add the address again.`);
     let documentId: string;
     if (existing) {
       documentId = existing.id;
@@ -657,6 +708,41 @@ export async function retryKnowledgeSourceForApi(context: DomainContext, caller:
 
 export async function cancelKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
   return await changeKnowledgeSource(context, caller, documentId, { eventType: "api.knowledge_source.cancelled", run: async (tx) => await cancelKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId }) });
+}
+
+export async function listKnowledgeSourcesForApi(context: DomainContext, caller: ApiCaller, request: PageRequest & { type?: ApiKnowledgeSource["type"] | undefined; status?: ApiKnowledgeSource["status"] | undefined }): Promise<Page<ApiKnowledgeSource>> {
+  return await inBusiness(context, caller, async (tx) => await listKnowledgeSourceResources(tx, caller.businessId, request));
+}
+
+export async function getKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
+  return await inBusiness(context, caller, async (tx) => {
+    const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
+    if (!source) throw notFound("Knowledge source");
+    return source;
+  });
+}
+
+/** Turns a website, page or file off or back on. Sending its current state changes nothing. */
+export async function updateKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string, input: ApiKnowledgeSourceUpdate): Promise<ApiKnowledgeSource> {
+  return await inBusiness(context, caller, async (tx) => {
+    const [current] = await tx.select({ active: knowledgeDocuments.active }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.id, documentId))).limit(1).for("update");
+    if (!current) throw notFound("Knowledge source");
+    if (current.active !== input.active) {
+      await setKnowledgeDocumentActiveInTransaction(tx, { businessId: caller.businessId, documentId, active: input.active });
+      await audit(tx, caller, { eventType: "api.knowledge_source.updated", entityType: "knowledge_document", entityId: documentId, payload: { active: input.active } });
+    }
+    const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
+    if (!source) throw notFound("Knowledge source");
+    return source;
+  });
+}
+
+/** Deletes a website, page or file and its indexed text. A website's crawl stops; the pages it read stay. */
+export async function deleteKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId })) throw notFound("Knowledge source");
+    await audit(tx, caller, { eventType: "api.knowledge_source.deleted", entityType: "knowledge_document", entityId: documentId });
+  });
 }
 
 // File uploads: reserve, PUT the bytes to storage, then complete.

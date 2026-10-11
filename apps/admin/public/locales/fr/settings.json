@@ -896,7 +896,8 @@
       "appointments_read": "Lire les rendez-vous et les plages libres",
       "appointments_write": "Réserver, annuler et déplacer des rendez-vous",
       "messages_read": "Lire les messages pris par la réceptionniste",
-      "knowledge_write": "Ajouter des entrées de connaissances, des FAQ et des sites web à lire",
+      "knowledge_read": "Lire les entrées de connaissances, les FAQ, les sites web et les fichiers",
+      "knowledge_write": "Ajouter, modifier et supprimer des entrées de connaissances, des FAQ, des sites web et des fichiers",
       "webhooks_manage": "Créer et supprimer des points de terminaison webhook"
     }
   },

@@ -245,9 +245,21 @@ export const apiMessageSchema = z.object({
 export const apiKnowledgeEntrySchema = z.object({
   id,
   type: z.enum(["text", "faq"]),
-  title: z.string(),
-  content: z.string(),
+  title: z.string().describe("The entry's title, or an FAQ's question."),
+  content: z.string().describe("The entry's text, or an FAQ's answer."),
+  tags: z.array(z.string()).describe("Your own labels for the entry."),
+  priority: z.number().int().describe("Entries with higher numbers come first when the receptionist picks the entries it keeps ready on every call. Defaults to 0."),
+  active: z.boolean().describe("Whether the receptionist answers from it."),
   created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A text entry or FAQ the receptionist answers from.");
+
+export const apiKnowledgeEntryUpdateSchema = z.strictObject({
+  title: z.string().trim().min(1).max(300).optional().describe("The entry's title, or an FAQ's question."),
+  content: z.string().trim().min(1).max(20_000).optional().describe("The entry's text, or an FAQ's answer."),
+  tags: z.array(z.string().trim().min(1).max(255)).max(100).optional().describe("Replaces the entry's labels. faq is reserved, because it marks an FAQ, so it is ignored here: an entry keeps its type."),
+  priority: z.number().int().min(-100).max(100).optional(),
+  active: z.boolean().optional().describe("false stops the receptionist answering from the entry without deleting it."),
 });
 
 // Zod 4 reports an unknown type as "Invalid discriminator value. ..."; keep the v1 detail message "Invalid input".
@@ -258,16 +270,20 @@ export const apiKnowledgeEntryCreateSchema = z.discriminatedUnion("type", [
 
 export const apiKnowledgeSourceSchema = z.object({
   id,
-  type: z.enum(["website", "file"]).describe("website: a site the receptionist reads. file: an uploaded document."),
+  type: z.enum(["website", "page", "file"]).describe("website: a site added as a source, whose crawl reads its pages. page: one page a crawl read, or a site that has no crawl of its own. file: an uploaded document."),
   title: z.string(),
-  url: z.string().nullable().describe("The website address. Null for a file."),
+  url: z.string().nullable().describe("The website's or page's address. Null for a file."),
   status: z.enum(["pending", "processing", "indexed", "error", "cancelled"]).describe("pending: a file waits its turn. processing: it is being read. indexed: the receptionist can use it. error or cancelled: reading stopped."),
   error: z.string().nullable().describe("Why reading failed, when status is error."),
   active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
-  page_limit: z.number().int().nullable().describe("How many pages the crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a file."),
+  page_limit: z.number().int().nullable().describe("How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."),
   created_at: timestamp,
   updated_at: timestamp,
-}).describe("A website or file the receptionist learns from.");
+}).describe("A website, page or file the receptionist learns from.");
+
+export const apiKnowledgeSourceUpdateSchema = z.strictObject({
+  active: z.boolean().describe("false stops the receptionist answering from the source without deleting it."),
+});
 
 export const apiKnowledgeSourceCreateSchema = z.strictObject({
   type: z.literal("website"),
@@ -384,8 +400,10 @@ export type ApiAvailabilitySlot = z.infer<typeof apiAvailabilitySlotSchema>;
 export type ApiMessage = z.infer<typeof apiMessageSchema>;
 export type ApiKnowledgeEntry = z.infer<typeof apiKnowledgeEntrySchema>;
 export type ApiKnowledgeEntryCreate = z.infer<typeof apiKnowledgeEntryCreateSchema>;
+export type ApiKnowledgeEntryUpdate = z.infer<typeof apiKnowledgeEntryUpdateSchema>;
 export type ApiKnowledgeSource = z.infer<typeof apiKnowledgeSourceSchema>;
 export type ApiKnowledgeSourceCreate = z.infer<typeof apiKnowledgeSourceCreateSchema>;
+export type ApiKnowledgeSourceUpdate = z.infer<typeof apiKnowledgeSourceUpdateSchema>;
 export type ApiKnowledgeUpload = z.infer<typeof apiKnowledgeUploadSchema>;
 export type ApiKnowledgeUploadCreate = z.infer<typeof apiKnowledgeUploadCreateSchema>;
 export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadCompleteSchema>;

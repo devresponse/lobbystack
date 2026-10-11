@@ -200,11 +200,17 @@ export async function expandWebsiteCrawlInTransaction(tx: DatabaseTransaction, i
 export async function setKnowledgeDocumentActive(context: DomainContext, input: { userId: string; businessId: string; documentId: string; active: boolean }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async tx => {
     await requireBusinessAdmin(tx, input);
-    const [document] = await tx.update(knowledgeDocuments).set({ active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
-    if (!document) throw Object.assign(new Error("Knowledge document not found."), { status: 404 });
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: input.documentId, dedupeKey: `knowledge:${input.documentId}:active:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_activity_changed" } });
-    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_activity_changed" });
+    if (!await setKnowledgeDocumentActiveInTransaction(tx, input)) throw Object.assign(new Error("Knowledge document not found."), { status: 404 });
   });
+}
+
+/** Turns a document on or off for the receptionist. False when the business has no such document. Callers authorize first. */
+export async function setKnowledgeDocumentActiveInTransaction(tx: DatabaseTransaction, input: { businessId: string; documentId: string; active: boolean }): Promise<boolean> {
+  const [document] = await tx.update(knowledgeDocuments).set({ active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
+  if (!document) return false;
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: input.documentId, dedupeKey: `knowledge:${input.documentId}:active:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_activity_changed" } });
+  await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_activity_changed" });
+  return true;
 }
 
 export async function cancelKnowledgeDocument(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
@@ -233,12 +239,18 @@ export async function getKnowledgeDocumentContent(context: DomainContext, input:
 export async function deleteKnowledgeDocument(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.documentId, input.documentId), eq(knowledgeChunks.businessId, input.businessId)));
-    const [document] = await tx.delete(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
-    if (!document) throw new Error("Knowledge document not found.");
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: document.id, dedupeKey: `knowledge:${document.id}:deleted:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_deleted" } });
-    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_deleted" });
+    if (!await deleteKnowledgeDocumentInTransaction(tx, input)) throw new Error("Knowledge document not found.");
   });
+}
+
+/** Deletes a document and its indexed text. False when the business has no such document. Callers authorize first. */
+export async function deleteKnowledgeDocumentInTransaction(tx: DatabaseTransaction, input: { businessId: string; documentId: string }): Promise<boolean> {
+  await tx.delete(knowledgeChunks).where(and(eq(knowledgeChunks.documentId, input.documentId), eq(knowledgeChunks.businessId, input.businessId)));
+  const [document] = await tx.delete(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).returning({ id: knowledgeDocuments.id });
+  if (!document) return false;
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_document", aggregateId: document.id, dedupeKey: `knowledge:${document.id}:deleted:${Date.now()}`, payload: { businessId: input.businessId, reason: "document_deleted" } });
+  await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "document_deleted" });
+  return true;
 }
 
 export async function createKnowledgeSnippet(
@@ -269,21 +281,36 @@ export async function updateKnowledgeSnippet(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [snippet] = await tx.update(knowledgeSnippets).set({ ...(input.title !== undefined ? { title: input.title.trim() } : {}), ...(input.content !== undefined ? { content: input.content.trim() } : {}), tags: input.tags, priority: input.priority, active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
-    if (!snippet) throw new Error("Knowledge snippet not found.");
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_updated" } });
-    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_updated" });
+    if (!await updateKnowledgeSnippetInTransaction(tx, input)) throw new Error("Knowledge snippet not found.");
   });
+}
+
+/** Changes the fields given and refreshes the receptionist snapshot. Null when the business has no such snippet. Callers authorize first. */
+export async function updateKnowledgeSnippetInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; snippetId: string; title?: string | undefined; content?: string | undefined; tags?: string[] | undefined; priority?: number | undefined; active?: boolean | undefined },
+): Promise<typeof knowledgeSnippets.$inferSelect | null> {
+  const [snippet] = await tx.update(knowledgeSnippets).set({ ...(input.title !== undefined ? { title: input.title.trim() } : {}), ...(input.content !== undefined ? { content: input.content.trim() } : {}), tags: input.tags, priority: input.priority, active: input.active, updatedAt: new Date() }).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning();
+  if (!snippet) return null;
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_updated" } });
+  await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_updated" });
+  return snippet;
 }
 
 export async function deleteKnowledgeSnippet(context: DomainContext, input: { userId: string; businessId: string; snippetId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [snippet] = await tx.delete(knowledgeSnippets).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
-    if (!snippet) throw new Error("Knowledge snippet not found.");
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_deleted" } });
-    await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_deleted" });
+    if (!await deleteKnowledgeSnippetInTransaction(tx, input)) throw new Error("Knowledge snippet not found.");
   });
+}
+
+/** Deletes a snippet and refreshes the receptionist snapshot. False when the business has no such snippet. Callers authorize first. */
+export async function deleteKnowledgeSnippetInTransaction(tx: DatabaseTransaction, input: { businessId: string; snippetId: string }): Promise<boolean> {
+  const [snippet] = await tx.delete(knowledgeSnippets).where(and(eq(knowledgeSnippets.id, input.snippetId), eq(knowledgeSnippets.businessId, input.businessId))).returning({ id: knowledgeSnippets.id });
+  if (!snippet) return false;
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "knowledge_snippet", aggregateId: snippet.id, dedupeKey: `knowledge-snippet:${snippet.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "snippet_deleted" } });
+  await enqueueKnowledgeDerivedRefresh(tx, { businessId: input.businessId, reason: "snippet_deleted" });
+  return true;
 }
 
 type IndexDocumentInput = { businessId: string; documentId: string; text: string; embeddings: number[][]; embeddingFingerprint?: string };

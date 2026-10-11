@@ -896,7 +896,8 @@
       "appointments_read": "Leer citas y horarios disponibles",
       "appointments_write": "Reservar, cancelar y reprogramar citas",
       "messages_read": "Leer los mensajes que tomó la recepcionista",
-      "knowledge_write": "Agregar entradas de conocimiento, preguntas frecuentes y sitios web para leer",
+      "knowledge_read": "Leer entradas de conocimiento, preguntas frecuentes, sitios web y archivos",
+      "knowledge_write": "Agregar, editar y eliminar entradas de conocimiento, preguntas frecuentes, sitios web y archivos",
       "webhooks_manage": "Crear y eliminar endpoints de webhook"
     }
   },

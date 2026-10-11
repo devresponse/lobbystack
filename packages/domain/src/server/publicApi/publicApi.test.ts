@@ -1,13 +1,13 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeSourceSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { KnowledgeStorageLimitError } from "../knowledge";
 import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiKey, normalizeScopes } from "./apiKeys";
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
 import { apiErrorFromDomain } from "./operations";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeSource, serializeMessage, toPage } from "./resources";
+import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -53,15 +53,27 @@ describe("API keys", () => {
 
 describe("knowledge sources", () => {
   const at = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, status: "pending", error: null, active: true, createdAt: at, updatedAt: at, pageLimit: null };
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, status: "pending", error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
 
-  it("serializes files and websites to the published schema", () => {
+  it("serializes files, websites and the pages their crawls read to the published schema", () => {
     const file = serializeKnowledgeSource(row);
     expect(file).toMatchObject({ type: "file", url: null, status: "pending", page_limit: null });
     expect(apiKnowledgeSourceSchema.safeParse(file).success).toBe(true);
-    const website = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/", status: "error", error: "The site timed out.", pageLimit: 10 });
+    const website = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/", status: "error", error: "The site timed out.", jobId: "7a1c2e9d-3b4f-4d8a-9c6e-1f2a3b4c5d6e", pageLimit: 10 });
     expect(website).toMatchObject({ type: "website", url: "https://maple.example/", status: "error", error: "The site timed out.", page_limit: 10 });
     expect(apiKnowledgeSourceSchema.safeParse(website).success).toBe(true);
+    // A page has no crawl job of its own.
+    const page = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/about", status: "indexed" });
+    expect(page).toMatchObject({ type: "page", url: "https://maple.example/about", page_limit: null });
+    expect(apiKnowledgeSourceSchema.safeParse(page).success).toBe(true);
+  });
+
+  it("shows an FAQ's type instead of the tag that marks it", () => {
+    const snippet = { id: row.id, title: "Do you park?", content: "Behind the building.", tags: ["faq", "parking"], priority: 2, active: false, createdAt: at, updatedAt: at };
+    const faq = serializeKnowledgeEntry(snippet);
+    expect(faq).toEqual({ id: row.id, type: "faq", title: "Do you park?", content: "Behind the building.", tags: ["parking"], priority: 2, active: false, created_at: at.toISOString(), updated_at: at.toISOString() });
+    expect(apiKnowledgeEntrySchema.safeParse(faq).success).toBe(true);
+    expect(serializeKnowledgeEntry({ ...snippet, tags: [] }).type).toBe("text");
   });
 
   it("shows an error only for a failed source, and an unknown status as still processing", () => {

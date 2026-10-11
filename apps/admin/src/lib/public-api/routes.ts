@@ -9,11 +9,15 @@ import {
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
   createWebhookEndpoint,
+  deleteKnowledgeEntryForApi,
+  deleteKnowledgeSourceForApi,
   deleteWebhookEndpoint,
   expandKnowledgeSourceForApi,
   getAppointmentForApi,
   getAvailabilityForApi,
   getBusinessForApi,
+  getKnowledgeEntryForApi,
+  getKnowledgeSourceForApi,
   getMeForApi,
   getPlatformMeForApi,
   getCallForApi,
@@ -24,6 +28,8 @@ import {
   listBusinessesForApi,
   listCallsForApi,
   listContactsForApi,
+  listKnowledgeEntriesForApi,
+  listKnowledgeSourcesForApi,
   listMessagesForApi,
   listServicesForApi,
   listStaffForApi,
@@ -34,6 +40,8 @@ import {
   sendWebhookTestEvent,
   updateBusinessForApi,
   updateContactForApi,
+  updateKnowledgeEntryForApi,
+  updateKnowledgeSourceForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
   type WebhookManager,
@@ -46,7 +54,9 @@ import {
   apiContactCreateSchema,
   apiContactUpdateSchema,
   apiKnowledgeEntryCreateSchema,
+  apiKnowledgeEntryUpdateSchema,
   apiKnowledgeSourceCreateSchema,
+  apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
   apiWebhookEndpointCreateSchema,
@@ -147,8 +157,30 @@ export const v1 = {
   }),
 
   listMessages: (request: Request) => handleApiRequest(request, "listMessages", async ({ context, caller }) => ({ body: await listMessagesForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["open", "done"] as const) }) })),
+  listKnowledgeEntries: (request: Request) => handleApiRequest(request, "listKnowledgeEntries", async ({ context, caller }) => ({ body: await listKnowledgeEntriesForApi(context, caller, { ...pageQuery(request), type: enumParam(request, "type", ["text", "faq"] as const) }) })),
   createKnowledgeEntry: (request: Request) => handleApiRequest(request, "createKnowledgeEntry", async ({ context, caller }) => ({ body: data(await createKnowledgeEntryForApi(context, caller, await readApiBody(request, apiKnowledgeEntryCreateSchema))) })),
+  getKnowledgeEntry: (request: Request, { params }: Params<"entry_id">) => handleApiRequest(request, "getKnowledgeEntry", async ({ context, caller }) => ({ body: data(await getKnowledgeEntryForApi(context, caller, uuidParam((await params).entry_id, "entry_id"))) })),
+  updateKnowledgeEntry: (request: Request, { params }: Params<"entry_id">) => handleApiRequest(request, "updateKnowledgeEntry", async ({ context, caller }) => {
+    const entryId = uuidParam((await params).entry_id, "entry_id");
+    return { body: data(await updateKnowledgeEntryForApi(context, caller, entryId, await readApiBody(request, apiKnowledgeEntryUpdateSchema))) };
+  }),
+  deleteKnowledgeEntry: (request: Request, { params }: Params<"entry_id">) => handleApiRequest(request, "deleteKnowledgeEntry", async ({ context, caller }) => {
+    const entryId = uuidParam((await params).entry_id, "entry_id");
+    await deleteKnowledgeEntryForApi(context, caller, entryId);
+    return { body: data({ id: entryId, deleted: true }) };
+  }),
+  listKnowledgeSources: (request: Request) => handleApiRequest(request, "listKnowledgeSources", async ({ context, caller }) => ({ body: await listKnowledgeSourcesForApi(context, caller, { ...pageQuery(request), type: enumParam(request, "type", ["website", "page", "file"] as const), status: enumParam(request, "status", ["pending", "processing", "indexed", "error", "cancelled"] as const) }) })),
   createKnowledgeSource: (request: Request) => handleApiRequest(request, "createKnowledgeSource", async ({ context, caller }) => ({ body: data(await createKnowledgeSourceForApi(context, caller, await readApiBody(request, apiKnowledgeSourceCreateSchema))) })),
+  getKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "getKnowledgeSource", async ({ context, caller }) => ({ body: data(await getKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
+  updateKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "updateKnowledgeSource", async ({ context, caller }) => {
+    const sourceId = uuidParam((await params).source_id, "source_id");
+    return { body: data(await updateKnowledgeSourceForApi(context, caller, sourceId, await readApiBody(request, apiKnowledgeSourceUpdateSchema))) };
+  }),
+  deleteKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "deleteKnowledgeSource", async ({ context, caller }) => {
+    const sourceId = uuidParam((await params).source_id, "source_id");
+    await deleteKnowledgeSourceForApi(context, caller, sourceId);
+    return { body: data({ id: sourceId, deleted: true }) };
+  }),
   expandKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "expandKnowledgeSource", async ({ context, caller }) => ({ body: data(await expandKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
   retryKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "retryKnowledgeSource", async ({ context, caller }) => ({ body: data(await retryKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
   createKnowledgeUpload: (request: Request) => handleApiRequest(request, "createKnowledgeUpload", async ({ context, caller }) => ({ body: data(await createKnowledgeUploadForApi(context, caller, await readApiBody(request, apiKnowledgeUploadCreateSchema), getStorageProvider())) })),

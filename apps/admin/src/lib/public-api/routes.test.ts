@@ -30,6 +30,14 @@ const domain = vi.hoisted(() => ({
   cancelKnowledgeSourceForApi: vi.fn(),
   createKnowledgeUploadForApi: vi.fn(),
   completeKnowledgeUploadForApi: vi.fn(),
+  listKnowledgeSourcesForApi: vi.fn(),
+  getKnowledgeSourceForApi: vi.fn(),
+  updateKnowledgeSourceForApi: vi.fn(),
+  deleteKnowledgeSourceForApi: vi.fn(async () => undefined),
+  listKnowledgeEntriesForApi: vi.fn(),
+  getKnowledgeEntryForApi: vi.fn(),
+  updateKnowledgeEntryForApi: vi.fn(),
+  deleteKnowledgeEntryForApi: vi.fn(async () => undefined),
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
@@ -251,6 +259,90 @@ describe("knowledge sources", () => {
     const response = await v1.expandKnowledgeSource(call(`/knowledge/sources/${sourceId}/expand`, { method: "POST" }), { params: Promise.resolve({ source_id: sourceId }) });
     expect(response.status).toBe(403);
     expect(domain.expandKnowledgeSourceForApi).not.toHaveBeenCalled();
+  });
+
+  it("lists sources by type and status, and refuses values it doesn't know", async () => {
+    domain.listKnowledgeSourcesForApi.mockResolvedValue({ data: [source], next_cursor: null, has_more: false });
+    const response = await v1.listKnowledgeSources(call("/knowledge/sources?type=page&status=indexed"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [source], next_cursor: null, has_more: false });
+    expect(domain.listKnowledgeSourcesForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ type: "page", status: "indexed" }));
+    expect((await v1.listKnowledgeSources(call("/knowledge/sources?type=video"))).status).toBe(400);
+    expect((await v1.listKnowledgeSources(call("/knowledge/sources?status=done"))).status).toBe(400);
+    expect(domain.listKnowledgeSourcesForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads, turns off and deletes a source by its id", async () => {
+    const params = { params: Promise.resolve({ source_id: sourceId }) };
+    domain.getKnowledgeSourceForApi.mockResolvedValue(source);
+    expect(await (await v1.getKnowledgeSource(call(`/knowledge/sources/${sourceId}`), params)).json()).toEqual({ data: source });
+    domain.updateKnowledgeSourceForApi.mockResolvedValue({ ...source, active: false });
+    const updated = await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), { params: Promise.resolve({ source_id: sourceId }) });
+    expect(updated.status).toBe(200);
+    expect(domain.updateKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId, { active: false });
+    // Only active can change on a source.
+    for (const bad of [{ title: "Prices" }, {}]) {
+      expect((await v1.updateKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "PATCH", body: JSON.stringify(bad) }), { params: Promise.resolve({ source_id: sourceId }) })).status).toBe(400);
+    }
+    const deleted = await v1.deleteKnowledgeSource(call(`/knowledge/sources/${sourceId}`, { method: "DELETE" }), { params: Promise.resolve({ source_id: sourceId }) });
+    expect(deleted.status).toBe(200);
+    expect(await deleted.json()).toEqual({ data: { id: sourceId, deleted: true } });
+    expect(domain.deleteKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId);
+  });
+});
+
+describe("knowledge entries", () => {
+  const entryId = "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f";
+  const entry = { id: entryId, type: "faq", title: "Do you park?", content: "Behind the building.", tags: [], priority: 0, active: true, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const params = () => ({ params: Promise.resolve({ entry_id: entryId }) });
+
+  it("lists entries by type", async () => {
+    domain.listKnowledgeEntriesForApi.mockResolvedValue({ data: [entry], next_cursor: null, has_more: false });
+    const response = await v1.listKnowledgeEntries(call("/knowledge?type=faq"));
+    expect(response.status).toBe(200);
+    expect(domain.listKnowledgeEntriesForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.objectContaining({ type: "faq" }));
+    expect((await v1.listKnowledgeEntries(call("/knowledge?type=website"))).status).toBe(400);
+  });
+
+  it("edits the fields sent and checks them first", async () => {
+    domain.updateKnowledgeEntryForApi.mockResolvedValue({ ...entry, title: "Is there parking?", priority: 5 });
+    const response = await v1.updateKnowledgeEntry(call(`/knowledge/${entryId}`, { method: "PATCH", body: JSON.stringify({ title: " Is there parking? ", priority: 5, tags: ["parking"] }) }), params());
+    expect(response.status).toBe(200);
+    expect(domain.updateKnowledgeEntryForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), entryId, { title: "Is there parking?", priority: 5, tags: ["parking"] });
+    for (const bad of [{ title: "" }, { priority: 101 }, { priority: 1.5 }, { type: "text" }, { question: "Parking?" }]) {
+      expect((await v1.updateKnowledgeEntry(call(`/knowledge/${entryId}`, { method: "PATCH", body: JSON.stringify(bad) }), params())).status).toBe(400);
+    }
+    expect(domain.updateKnowledgeEntryForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads and deletes an entry by its id", async () => {
+    domain.getKnowledgeEntryForApi.mockResolvedValue(entry);
+    expect(await (await v1.getKnowledgeEntry(call(`/knowledge/${entryId}`), params())).json()).toEqual({ data: entry });
+    const deleted = await v1.deleteKnowledgeEntry(call(`/knowledge/${entryId}`, { method: "DELETE" }), params());
+    expect(await deleted.json()).toEqual({ data: { id: entryId, deleted: true } });
+    expect((await v1.getKnowledgeEntry(call("/knowledge/sources"), { params: Promise.resolve({ entry_id: "sources" }) })).status).toBe(400);
+  });
+
+  it("refuses a malformed id before it reaches the domain", async () => {
+    const entry = () => ({ params: Promise.resolve({ entry_id: "x" }) });
+    const source = () => ({ params: Promise.resolve({ source_id: "x" }) });
+    expect((await v1.updateKnowledgeEntry(call("/knowledge/x", { method: "PATCH", body: JSON.stringify({ active: true }) }), entry())).status).toBe(400);
+    expect((await v1.deleteKnowledgeEntry(call("/knowledge/x", { method: "DELETE" }), entry())).status).toBe(400);
+    expect((await v1.getKnowledgeSource(call("/knowledge/sources/x"), source())).status).toBe(400);
+    expect((await v1.updateKnowledgeSource(call("/knowledge/sources/x", { method: "PATCH", body: JSON.stringify({ active: true }) }), source())).status).toBe(400);
+    expect((await v1.deleteKnowledgeSource(call("/knowledge/sources/x", { method: "DELETE" }), source())).status).toBe(400);
+    for (const operation of [domain.updateKnowledgeEntryForApi, domain.deleteKnowledgeEntryForApi, domain.getKnowledgeSourceForApi, domain.updateKnowledgeSourceForApi, domain.deleteKnowledgeSourceForApi]) expect(operation).not.toHaveBeenCalled();
+  });
+
+  it("needs knowledge:read to read and knowledge:write to change", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["knowledge:write"] });
+    expect((await v1.listKnowledgeEntries(call("/knowledge"))).status).toBe(403);
+    expect((await v1.getKnowledgeSource(call(`/knowledge/sources/${entryId}`), { params: Promise.resolve({ source_id: entryId }) })).status).toBe(403);
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["knowledge:read"] });
+    expect((await v1.deleteKnowledgeEntry(call(`/knowledge/${entryId}`, { method: "DELETE" }), params())).status).toBe(403);
+    expect(domain.listKnowledgeEntriesForApi).not.toHaveBeenCalled();
+    expect(domain.getKnowledgeSourceForApi).not.toHaveBeenCalled();
+    expect(domain.deleteKnowledgeEntryForApi).not.toHaveBeenCalled();
   });
 });
 

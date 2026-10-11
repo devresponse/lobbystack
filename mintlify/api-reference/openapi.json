@@ -2680,6 +2680,154 @@
       }
     },
     "/knowledge": {
+      "get": {
+        "operationId": "listKnowledgeEntries",
+        "summary": "List knowledge entries",
+        "description": "Text entries and FAQs, newest first. Websites, their pages and files are listed by GET /knowledge/sources.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "text or faq.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "text",
+                "faq"
+              ]
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/KnowledgeEntry"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
       "post": {
         "operationId": "createKnowledgeEntry",
         "summary": "Add a knowledge entry",
@@ -2823,7 +2971,540 @@
         }
       }
     },
+    "/knowledge/{entry_id}": {
+      "get": {
+        "operationId": "getKnowledgeEntry",
+        "summary": "Get a knowledge entry",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge entry id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeEntry"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateKnowledgeEntry",
+        "summary": "Update a knowledge entry",
+        "description": "Changes an entry's text, labels or priority, or turns it off or back on. An FAQ stays an FAQ: its title is the question and its content the answer.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge entry id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeEntryUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeEntry"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteKnowledgeEntry",
+        "summary": "Delete a knowledge entry",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge entry id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Deleted"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/knowledge/sources": {
+      "get": {
+        "operationId": "listKnowledgeSources",
+        "summary": "List knowledge sources",
+        "description": "Websites, the pages their crawls read, and uploaded files, newest first.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "description": "website, page or file.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "website",
+                "page",
+                "file"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "pending, processing, indexed, error or cancelled.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "processing",
+                "indexed",
+                "error",
+                "cancelled"
+              ]
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/KnowledgeSource"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
       "post": {
         "operationId": "createKnowledgeSource",
         "summary": "Add a website",
@@ -2948,11 +3629,381 @@
         }
       }
     },
+    "/knowledge/sources/{source_id}": {
+      "get": {
+        "operationId": "getKnowledgeSource",
+        "summary": "Get a knowledge source",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge source id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeSource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateKnowledgeSource",
+        "summary": "Turn a knowledge source off or on",
+        "description": "Turning a website off leaves the pages its crawl read as they are: each page is its own source.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge source id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSourceUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeSource"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteKnowledgeSource",
+        "summary": "Delete a knowledge source",
+        "description": "Removes a website, page or file from the receptionist's knowledge, with the text read from it. Deleting a website stops its crawl, and the pages it already read stay until you delete them.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:write",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "description": "The knowledge source id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Deleted"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/knowledge/sources/{source_id}/expand": {
       "post": {
         "operationId": "expandKnowledgeSource",
         "summary": "Read the rest of a website",
-        "description": "Crawls the whole site, up to the full page limit, and replaces the sample the first crawl read. A file is a 400.",
+        "description": "Crawls the whole site, up to the full page limit, and replaces the sample the first crawl read. A page or a file is a 400.",
         "tags": [
           "Knowledge"
         ],
@@ -3077,7 +4128,7 @@
       "post": {
         "operationId": "retryKnowledgeSource",
         "summary": "Read a source again",
-        "description": "Crawls a website or reads a file again, at the page limit it last used, for example after it failed or the site changed. A source that is still being read is a 409.",
+        "description": "Crawls a website or reads a file again, at the page limit it last used, for example after it failed or the site changed. A source that is still being read is a 409, and a page is a 400: retry its website.",
         "tags": [
           "Knowledge"
         ],
@@ -3462,7 +4513,7 @@
       "post": {
         "operationId": "cancelKnowledgeSource",
         "summary": "Stop reading a source",
-        "description": "Stops a crawl or read that is still processing. Anything else is a 409.",
+        "description": "Stops a crawl or read that is still processing. A page is a 400: cancel its website. Anything else is a 409.",
         "tags": [
           "Knowledge"
         ],
@@ -4677,7 +5728,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key from Settings > API keys (lsk_...), which acts on its own business, or a platform key from the PLATFORM_API_KEYS setting (lsp_...), which onboards and manages businesses. Scopes: business:read, business:write, calls:read, contacts:read, contacts:write, appointments:read, appointments:write, messages:read, knowledge:write, webhooks:manage, knowledge:read, billing:manage, phone_numbers:manage, team:manage, businesses:create, users:create. Only platform keys can hold businesses:create and users:create."
+        "description": "An API key from Settings > API keys (lsk_...), which acts on its own business, or a platform key from the PLATFORM_API_KEYS setting (lsp_...), which onboards and manages businesses. Scopes: business:read, business:write, calls:read, contacts:read, contacts:write, appointments:read, appointments:write, messages:read, knowledge:read, knowledge:write, webhooks:manage, billing:manage, phone_numbers:manage, team:manage, businesses:create, users:create. Only platform keys can hold businesses:create and users:create."
       }
     },
     "schemas": {
@@ -4776,9 +5827,9 @@
                     "appointments:read",
                     "appointments:write",
                     "messages:read",
+                    "knowledge:read",
                     "knowledge:write",
                     "webhooks:manage",
-                    "knowledge:read",
                     "billing:manage",
                     "phone_numbers:manage",
                     "team:manage",
@@ -5989,12 +7040,36 @@
             ]
           },
           "title": {
-            "type": "string"
+            "type": "string",
+            "description": "The entry's title, or an FAQ's question."
           },
           "content": {
-            "type": "string"
+            "type": "string",
+            "description": "The entry's text, or an FAQ's answer."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Your own labels for the entry."
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Entries with higher numbers come first when the receptionist picks the entries it keeps ready on every call. Defaults to 0."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the receptionist answers from it."
           },
           "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "updated_at": {
             "type": "string",
             "format": "date-time",
             "description": "ISO 8601 timestamp in UTC."
@@ -6005,9 +7080,14 @@
           "type",
           "title",
           "content",
-          "created_at"
+          "tags",
+          "priority",
+          "active",
+          "created_at",
+          "updated_at"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "description": "A text entry or FAQ the receptionist answers from."
       },
       "KnowledgeEntryCreate": {
         "oneOf": [
@@ -6063,6 +7143,43 @@
           }
         ]
       },
+      "KnowledgeEntryUpdate": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "description": "The entry's title, or an FAQ's question.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "content": {
+            "description": "The entry's text, or an FAQ's answer.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 20000
+          },
+          "tags": {
+            "description": "Replaces the entry's labels. faq is reserved, because it marks an FAQ, so it is ignored here: an entry keeps its type.",
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 255
+            }
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": -100,
+            "maximum": 100
+          },
+          "active": {
+            "description": "false stops the receptionist answering from the entry without deleting it.",
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "KnowledgeSource": {
         "type": "object",
         "properties": {
@@ -6075,15 +7192,16 @@
             "type": "string",
             "enum": [
               "website",
+              "page",
               "file"
             ],
-            "description": "website: a site the receptionist reads. file: an uploaded document."
+            "description": "website: a site added as a source, whose crawl reads its pages. page: one page a crawl read, or a site that has no crawl of its own. file: an uploaded document."
           },
           "title": {
             "type": "string"
           },
           "url": {
-            "description": "The website address. Null for a file.",
+            "description": "The website's or page's address. Null for a file.",
             "type": [
               "string",
               "null"
@@ -6122,7 +7240,7 @@
                 "type": "null"
               }
             ],
-            "description": "How many pages the crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a file."
+            "description": "How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."
           },
           "created_at": {
             "type": "string",
@@ -6148,7 +7266,7 @@
           "updated_at"
         ],
         "additionalProperties": false,
-        "description": "A website or file the receptionist learns from."
+        "description": "A website, page or file the receptionist learns from."
       },
       "KnowledgeSourceCreate": {
         "type": "object",
@@ -6167,6 +7285,19 @@
         "required": [
           "type",
           "url"
+        ],
+        "additionalProperties": false
+      },
+      "KnowledgeSourceUpdate": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "false stops the receptionist answering from the source without deleting it."
+          }
+        },
+        "required": [
+          "active"
         ],
         "additionalProperties": false
       },

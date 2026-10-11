@@ -194,7 +194,7 @@ export async function getBusinessForApi(context: DomainContext, caller: ApiCalle
 
 export async function updateBusinessForApi(context: DomainContext, caller: ApiCaller, input: ApiBusinessUpdate): Promise<ApiBusiness> {
   if (input.timezone !== undefined) assertTimeZone(input.timezone, "timezone");
-  const fields = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.timezone !== undefined ? { timezone: input.timezone } : {}), ...(input.locale !== undefined ? { defaultLocale: input.locale } : {}), ...(input.website_url !== undefined ? { websiteUrl: input.website_url } : {}) };
+  const fields = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.timezone !== undefined ? { timezone: input.timezone } : {}), ...(input.locale !== undefined ? { defaultLocale: input.locale } : {}), ...(input.website_url !== undefined ? { websiteUrl: input.website_url } : {}), ...(input.business_type !== undefined ? { businessType: input.business_type } : {}) };
   if (!Object.keys(fields).length && input.hours === undefined) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });

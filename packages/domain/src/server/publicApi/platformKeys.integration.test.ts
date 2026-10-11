@@ -172,7 +172,7 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
       const result = await create(idempotencyKey, { name: " Acme Plumbing ", timezone: "america/toronto", locale: "fr", website_url: "https://acme.example" });
       createdBusinessIds.push(result.business.id);
       expect(result.replayed).toBe(false);
-      expect(result.business).toMatchObject({ id: platformBusinessId(entry.id, idempotencyKey), name: "Acme Plumbing", timezone: "America/Toronto", locale: "fr", website_url: "https://acme.example" });
+      expect(result.business).toMatchObject({ id: platformBusinessId(entry.id, idempotencyKey), name: "Acme Plumbing", timezone: "America/Toronto", locale: "fr", website_url: "https://acme.example", business_type: "service_company", onboarding_stage: "website" });
       const businessId = result.business.id;
       expect(await admin!.db.select({ userId: businessMemberships.userId, role: businessMemberships.role }).from(businessMemberships).where(eq(businessMemberships.businessId, businessId))).toEqual([{ userId: ownerId, role: "business_owner" }]);
       expect(await admin!.db.select({ partnerId: platformPartnerBusinesses.partnerId, createdBy: platformPartnerBusinesses.createdByPlatformKeyId }).from(platformPartnerBusinesses).where(eq(platformPartnerBusinesses.businessId, businessId))).toEqual([{ partnerId: "acme", createdBy: entry.id }]);

@@ -78,6 +78,8 @@ export const apiBusinessSchema = z.object({
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
+  business_type: z.string().describe("What kind of business it is. The dashboard uses service_company."),
+  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
   booking_mode: z.enum(["instant", "request", "off"]).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
   created_at: timestamp,
@@ -89,6 +91,7 @@ export const apiBusinessUpdateSchema = z.strictObject({
   timezone: z.string().trim().min(1).max(80).optional(),
   locale: locale.optional(),
   website_url: z.url().max(2_000).nullable().optional(),
+  business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
 });
 

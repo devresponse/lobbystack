@@ -22,6 +22,7 @@ const domain = vi.hoisted(() => ({
   getPlatformMeForApi: vi.fn(),
   createBusinessForApi: vi.fn(),
   listBusinessesForApi: vi.fn(),
+  updateBusinessForApi: vi.fn(),
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
@@ -183,6 +184,21 @@ describe("GET /staff", () => {
   });
 });
 
+describe("PATCH /business", () => {
+  it("passes the business type through with the other fields", async () => {
+    domain.updateBusinessForApi.mockResolvedValue({});
+    const response = await v1.updateBusiness(call("/business", { method: "PATCH", body: JSON.stringify({ business_type: " dental_clinic ", locale: "fr" }) }));
+    expect(response.status).toBe(200);
+    expect(domain.updateBusinessForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { business_type: "dental_clinic", locale: "fr" });
+  });
+
+  it("refuses an empty business type", async () => {
+    const response = await v1.updateBusiness(call("/business", { method: "PATCH", body: JSON.stringify({ business_type: "  " }) }));
+    expect(response.status).toBe(400);
+    expect(domain.updateBusinessForApi).not.toHaveBeenCalled();
+  });
+});
+
 describe("GET /me", () => {
   const me = { api_key: { id: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", name: "Zapier", prefix: "lsk_1a2b3c4d", scopes: ["knowledge:write"], created_at: "2026-09-27T12:00:00.000Z" }, business: { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Maple Salon" } };
 
@@ -312,7 +328,7 @@ describe("platform keys on v1 routes", () => {
   });
 
   describe("POST /businesses", () => {
-    const business = { id: "3f2a9c1e-5b7d-8e8a-9c21-7d4e5f6a8b90", name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: null, booking_mode: "request", hours: [], created_at: "2026-10-11T21:00:00.000Z", updated_at: "2026-10-11T21:00:00.000Z" };
+    const business = { id: "3f2a9c1e-5b7d-8e8a-9c21-7d4e5f6a8b90", name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: null, business_type: "service_company", onboarding_stage: "website", booking_mode: "request", hours: [], created_at: "2026-10-11T21:00:00.000Z", updated_at: "2026-10-11T21:00:00.000Z" };
     const post = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": "onboard-acme" }) => v1.createBusiness(platformCall("/businesses", { method: "POST", headers, body: JSON.stringify(body) }));
 
     it("creates the business as the key's owner, keyed by the Idempotency-Key", async () => {

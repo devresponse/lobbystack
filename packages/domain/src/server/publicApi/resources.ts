@@ -107,6 +107,8 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
     timezone: business.timezone,
     locale: business.defaultLocale,
     website_url: business.websiteUrl,
+    business_type: business.businessType,
+    onboarding_stage: business.onboardingStage,
     booking_mode: normalizeBookingMode(profile?.bookingMode),
     hours: hours.flatMap((row): ApiHoursWindow[] => {
       const day = weekdays[row.dayOfWeek];

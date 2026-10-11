@@ -54,6 +54,12 @@ describe("v1 contract", () => {
     }
   });
 
+  it("publishes the business type and onboarding stage on the Business object", () => {
+    const document = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" }) as { components: { schemas: Record<string, { required?: string[]; properties: Record<string, unknown> }> } };
+    expect(document.components.schemas.Business?.required).toEqual(expect.arrayContaining(["business_type", "onboarding_stage"]));
+    expect(document.components.schemas.BusinessUpdate?.properties).toHaveProperty("business_type");
+  });
+
   it("requires an Idempotency-Key on POST /businesses and documents it", () => {
     expect(apiOperations.createBusiness).toMatchObject({ idempotent: "required", business: "none", scope: "businesses:create" });
     const document = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" }) as { paths: Record<string, Record<string, { parameters?: Array<{ name: string; required?: boolean }> }>> };

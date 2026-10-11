@@ -70,7 +70,7 @@ function keyWith(scopes: ApiKeyScope[]): string {
   return secret;
 }
 
-const business = { id: businessA, name: "Maple Dental", timezone: "America/Toronto", locale: "en", website_url: null, booking_mode: "instant", hours: [{ day: "monday", open: "09:00", close: "17:00" }], created_at: at, updated_at: at };
+const business = { id: businessA, name: "Maple Dental", timezone: "America/Toronto", locale: "en", website_url: null, business_type: "service_company", onboarding_stage: "complete", booking_mode: "instant", hours: [{ day: "monday", open: "09:00", close: "17:00" }], created_at: at, updated_at: at };
 const service = { id, name: "Cleaning", description: null, duration_minutes: 30, created_at: at, updated_at: at };
 const staffMember = { id, name: "Sam", active: true, timezone: "America/Toronto", service_ids: [id], created_at: at, updated_at: at };
 const call = { id, channel: "phone", status: "completed", outcome: "message_taken", summary: "Wants a callback.", end_reason: "completed", contact_id: id, caller_name: "Ana", caller_phone: "+14165550134", duration_seconds: 42, recording_available: false, started_at: at, ended_at: later, created_at: at };

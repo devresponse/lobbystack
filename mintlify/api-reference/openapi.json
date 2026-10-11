@@ -4123,6 +4123,14 @@
               "null"
             ]
           },
+          "business_type": {
+            "type": "string",
+            "description": "What kind of business it is. The dashboard uses service_company."
+          },
+          "onboarding_stage": {
+            "type": "string",
+            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+          },
           "booking_mode": {
             "type": "string",
             "enum": [
@@ -4186,6 +4194,8 @@
           "timezone",
           "locale",
           "website_url",
+          "business_type",
+          "onboarding_stage",
           "booking_mode",
           "hours",
           "created_at",
@@ -4224,6 +4234,12 @@
                 "type": "null"
               }
             ]
+          },
+          "business_type": {
+            "description": "What kind of business it is.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
           },
           "hours": {
             "description": "Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap.",

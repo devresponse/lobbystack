@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
-import { apiAppointmentSchema, apiCallSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { createVoiceFollowUpTask } from "../voice";
@@ -367,6 +367,12 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(business).toMatchObject({ name: "API a renamed", hours: [{ day: "monday", open: "09:00", close: "17:30" }] });
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { hours: [{ day: "monday", open: "10:00", close: "09:00" }] }), 400, "invalid_request");
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { timezone: "Mars/Olympus" }), 400, "invalid_request");
+  });
+
+  it("reads and updates the business type and reads the onboarding stage", async () => {
+    const business = await updateBusinessForApi({ db: worker!.db }, a.caller, { business_type: "dental_clinic" });
+    expect(business).toMatchObject({ business_type: "dental_clinic", onboarding_stage: "create_business" });
+    expect(apiBusinessSchema.safeParse(business).success).toBe(true);
   });
 
   it("prunes old webhook events and API idempotency keys, keeping events that are still being retried", async () => {

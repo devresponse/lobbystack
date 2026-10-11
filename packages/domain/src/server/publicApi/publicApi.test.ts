@@ -1,11 +1,12 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeSourceSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiKey, normalizeScopes } from "./apiKeys";
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeMessage, toPage } from "./resources";
+import { apiErrorFromDomain } from "./operations";
+import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeSource, serializeMessage, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -46,6 +47,34 @@ describe("API keys", () => {
     expect(() => normalizeScopes(["business:read", "businesses:create"])).toThrow(/Only platform keys can hold businesses:create/);
     expect(() => normalizeScopes(["users:create"])).toThrow(/Only platform keys/);
     expect(normalizeScopes(["phone_numbers:manage", "knowledge:read"])).toEqual(["knowledge:read", "phone_numbers:manage"]);
+  });
+});
+
+describe("knowledge sources", () => {
+  const at = new Date("2026-10-11T12:00:00.000Z");
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, status: "pending", error: null, active: true, createdAt: at, updatedAt: at, pageLimit: null };
+
+  it("serializes files and websites to the published schema", () => {
+    const file = serializeKnowledgeSource(row);
+    expect(file).toMatchObject({ type: "file", url: null, status: "pending", page_limit: null });
+    expect(apiKnowledgeSourceSchema.safeParse(file).success).toBe(true);
+    const website = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/", status: "error", error: "The site timed out.", pageLimit: 10 });
+    expect(website).toMatchObject({ type: "website", url: "https://maple.example/", status: "error", error: "The site timed out.", page_limit: 10 });
+    expect(apiKnowledgeSourceSchema.safeParse(website).success).toBe(true);
+  });
+
+  it("shows an error only for a failed source, and an unknown status as still processing", () => {
+    expect(serializeKnowledgeSource({ ...row, status: "cancelled", error: "Cancelled by operator." }).error).toBeNull();
+    expect(serializeKnowledgeSource({ ...row, status: "queued" }).status).toBe("processing");
+  });
+
+  it("gives the domain's status-carrying errors their v1 codes", () => {
+    expect(apiErrorFromDomain(Object.assign(new Error("Website URL must use a public hostname."), { status: 422, code: "website_url_invalid" }), "Knowledge source")).toMatchObject({ status: 400, code: "invalid_request", details: [{ path: "url" }] });
+    expect(apiErrorFromDomain(Object.assign(new Error("Knowledge document not found."), { status: 404 }), "Knowledge source")).toMatchObject({ status: 404, code: "not_found", message: "Knowledge source not found." });
+    expect(apiErrorFromDomain(Object.assign(new Error("Only a processing knowledge document can be cancelled."), { status: 409 }), "Knowledge source")).toMatchObject({ status: 409, code: "conflict" });
+    expect(apiErrorFromDomain(Object.assign(new Error("Only a website import can be read further."), { status: 400 }), "Knowledge source")).toMatchObject({ status: 400, code: "invalid_request" });
+    const crash = new Error("connection refused");
+    expect(apiErrorFromDomain(crash, "Knowledge source")).toBe(crash);
   });
 });
 

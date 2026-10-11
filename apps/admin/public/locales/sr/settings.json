@@ -896,7 +896,7 @@
       "appointments_read": "Čitanje zakazanih i slobodnih termina",
       "appointments_write": "Zakazivanje, otkazivanje i pomeranje termina",
       "messages_read": "Čitanje poruka koje je primio recepcioner",
-      "knowledge_write": "Dodavanje unosa u znanje i čestih pitanja",
+      "knowledge_write": "Dodavanje unosa u znanje, čestih pitanja i veb-sajtova za čitanje",
       "webhooks_manage": "Kreiranje i brisanje webhook endpointa"
     }
   },

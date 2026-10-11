@@ -1,11 +1,14 @@
 import {
   cancelAppointmentForApi,
+  cancelKnowledgeSourceForApi,
   createAppointmentForApi,
   createBusinessForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
+  createKnowledgeSourceForApi,
   createWebhookEndpoint,
   deleteWebhookEndpoint,
+  expandKnowledgeSourceForApi,
   getAppointmentForApi,
   getAvailabilityForApi,
   getBusinessForApi,
@@ -25,6 +28,7 @@ import {
   listWebhookEndpoints,
   PublicApiError,
   rescheduleAppointmentForApi,
+  retryKnowledgeSourceForApi,
   sendWebhookTestEvent,
   updateBusinessForApi,
   updateContactForApi,
@@ -40,6 +44,7 @@ import {
   apiContactCreateSchema,
   apiContactUpdateSchema,
   apiKnowledgeEntryCreateSchema,
+  apiKnowledgeSourceCreateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
   webhookEventScope,
@@ -138,6 +143,10 @@ export const v1 = {
 
   listMessages: (request: Request) => handleApiRequest(request, "listMessages", async ({ context, caller }) => ({ body: await listMessagesForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["open", "done"] as const) }) })),
   createKnowledgeEntry: (request: Request) => handleApiRequest(request, "createKnowledgeEntry", async ({ context, caller }) => ({ body: data(await createKnowledgeEntryForApi(context, caller, await readApiBody(request, apiKnowledgeEntryCreateSchema))) })),
+  createKnowledgeSource: (request: Request) => handleApiRequest(request, "createKnowledgeSource", async ({ context, caller }) => ({ body: data(await createKnowledgeSourceForApi(context, caller, await readApiBody(request, apiKnowledgeSourceCreateSchema))) })),
+  expandKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "expandKnowledgeSource", async ({ context, caller }) => ({ body: data(await expandKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
+  retryKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "retryKnowledgeSource", async ({ context, caller }) => ({ body: data(await retryKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
+  cancelKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "cancelKnowledgeSource", async ({ context, caller }) => ({ body: data(await cancelKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
 
   listWebhooks: (request: Request) => handleApiRequest(request, "listWebhooks", async ({ context, caller }) => ({ body: { data: (await listWebhookEndpoints(context, { businessId: caller.businessId, manager: webhookManager(caller) })).map(toApiEndpoint), next_cursor: null, has_more: false } })),
   createWebhook: (request: Request) => handleApiRequest(request, "createWebhook", async ({ context, caller, credential }) => {

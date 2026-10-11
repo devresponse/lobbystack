@@ -12,7 +12,7 @@ import type { DomainContext } from "./context";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { getMeter } from "@lobbystack/telemetry/node";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
-import { advanceOnboardingStageInTransaction } from "./onboarding";
+import { moveOnboardingStageInTransaction } from "./onboarding";
 import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
 import { resolveBusinessBillingPlan } from "./contentRetentionPolicy";
@@ -79,58 +79,72 @@ export async function createKnowledgeDocument(
 ): Promise<string> {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const isWebsite = input.sourceType === "website";
-    if (isWebsite && !input.sourceUrl) {
-      throw new Error("A website source URL is required.");
-    }
-    if (!isWebsite && !input.storageObjectId) {
-      throw new Error("A storage object is required for uploaded knowledge.");
-    }
-    const sourceUrl = isWebsite ? normalizeWebsiteSourceUrl(input.sourceUrl!) : input.sourceUrl;
-    // Serialize website submissions so retries/revisited forms reuse the same import.
-    const business = isWebsite
-      ? (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0]
-      : undefined;
-    if (isWebsite && (input.onboarding || business?.onboardingStage === "website")) {
-      await tx.update(businesses).set({ websiteUrl: sourceUrl!, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
-      if (business?.onboardingStage === "website") {
-        await advanceOnboardingStageInTransaction(tx, { userId: input.userId, businessId: input.businessId, from: "website", to: "knowledge" });
-      }
-    }
-    if (isWebsite) {
-      const existing = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.sourceUrl, sourceUrl!))).limit(1).for("update"))[0];
-      if (existing) {
-        // A retry of an onboarding submission is still onboarding: without the
-        // limit it would fall back to the full crawl this sampling exists to defer.
-        if (["cancelled", "error"].includes(existing.status)) await queueKnowledgeDocumentRetry(tx, { businessId: input.businessId, documentId: existing.id, crawlLimit: input.onboarding ? ONBOARDING_CRAWL_PAGE_LIMIT : FULL_CRAWL_PAGE_LIMIT }, existing);
-        return existing.id;
-      }
-    }
-    const [document] = await tx.insert(knowledgeDocuments).values({
-      businessId: input.businessId,
-      title: input.title.trim(),
-      sourceType: input.sourceType,
-      sourceUrl,
-      storageObjectId: input.storageObjectId,
-      status: isWebsite ? "processing" : "pending",
-    }).returning({ id: knowledgeDocuments.id });
-    if (!document) {
-      throw new Error("Knowledge document could not be created.");
-    }
-    const crawlLimit = input.onboarding ? ONBOARDING_CRAWL_PAGE_LIMIT : FULL_CRAWL_PAGE_LIMIT;
-    const ingestion = isWebsite ? (await tx.insert(websiteIngestionJobs).values({ businessId: input.businessId, rootDocumentId: document.id, websiteUrl: sourceUrl!, provider: "firecrawl", status: "queued", pageLimit: crawlLimit }).returning({ id: websiteIngestionJobs.id }))[0] : undefined;
-    await enqueueOutbox(tx, {
-      topic: isWebsite ? "knowledge.crawlWebsite" : "knowledge.extractDocument",
-      businessId: input.businessId,
-      aggregateType: "knowledge_document",
-      aggregateId: document.id,
-      dedupeKey: isWebsite ? `knowledge:${document.id}:crawl` : `knowledge:${document.id}:extract`,
-      payload: isWebsite
-        ? { url: sourceUrl, documentId: document.id, revision: 0, websiteIngestionJobId: ingestion!.id, limit: crawlLimit }
-        : { documentId: document.id, revision: 0 },
-    });
-    return document.id;
+    return await createKnowledgeDocumentInTransaction(tx, input);
   });
+}
+
+/**
+ * Adds a website or an uploaded file as a knowledge source and queues its
+ * crawl or extraction. The caller checks who may do that. onboarding (or a
+ * business still on its website step) also saves the URL as the business's
+ * website; onboarding or sample limit the crawl to a sample of the site.
+ * Submitting a website that is already a source returns that source.
+ */
+export async function createKnowledgeDocumentInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; title: string; sourceType: string; sourceUrl?: string | undefined; storageObjectId?: string | undefined; onboarding?: boolean | undefined; sample?: boolean | undefined },
+): Promise<string> {
+  const isWebsite = input.sourceType === "website";
+  if (isWebsite && !input.sourceUrl) {
+    throw new Error("A website source URL is required.");
+  }
+  if (!isWebsite && !input.storageObjectId) {
+    throw new Error("A storage object is required for uploaded knowledge.");
+  }
+  const sourceUrl = isWebsite ? normalizeWebsiteSourceUrl(input.sourceUrl!) : input.sourceUrl;
+  const crawlLimit = input.onboarding || input.sample ? ONBOARDING_CRAWL_PAGE_LIMIT : FULL_CRAWL_PAGE_LIMIT;
+  // Serialize website submissions so retries/revisited forms reuse the same import.
+  const business = isWebsite
+    ? (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0]
+    : undefined;
+  if (isWebsite && (input.onboarding || business?.onboardingStage === "website")) {
+    await tx.update(businesses).set({ websiteUrl: sourceUrl!, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
+    if (business?.onboardingStage === "website") {
+      await moveOnboardingStageInTransaction(tx, { businessId: input.businessId, from: "website", to: "knowledge" });
+    }
+  }
+  if (isWebsite) {
+    const existing = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.sourceUrl, sourceUrl!))).limit(1).for("update"))[0];
+    if (existing) {
+      // A retry of an onboarding submission is still onboarding: without the
+      // limit it would fall back to the full crawl this sampling exists to defer.
+      if (["cancelled", "error"].includes(existing.status)) await queueKnowledgeDocumentRetry(tx, { businessId: input.businessId, documentId: existing.id, crawlLimit }, existing);
+      return existing.id;
+    }
+  }
+  const [document] = await tx.insert(knowledgeDocuments).values({
+    businessId: input.businessId,
+    title: input.title.trim(),
+    sourceType: input.sourceType,
+    sourceUrl,
+    storageObjectId: input.storageObjectId,
+    status: isWebsite ? "processing" : "pending",
+  }).returning({ id: knowledgeDocuments.id });
+  if (!document) {
+    throw new Error("Knowledge document could not be created.");
+  }
+  const ingestion = isWebsite ? (await tx.insert(websiteIngestionJobs).values({ businessId: input.businessId, rootDocumentId: document.id, websiteUrl: sourceUrl!, provider: "firecrawl", status: "queued", pageLimit: crawlLimit }).returning({ id: websiteIngestionJobs.id }))[0] : undefined;
+  await enqueueOutbox(tx, {
+    topic: isWebsite ? "knowledge.crawlWebsite" : "knowledge.extractDocument",
+    businessId: input.businessId,
+    aggregateType: "knowledge_document",
+    aggregateId: document.id,
+    dedupeKey: isWebsite ? `knowledge:${document.id}:crawl` : `knowledge:${document.id}:extract`,
+    payload: isWebsite
+      ? { url: sourceUrl, documentId: document.id, revision: 0, websiteIngestionJobId: ingestion!.id, limit: crawlLimit }
+      : { documentId: document.id, revision: 0 },
+  });
+  return document.id;
 }
 
 export async function listKnowledgeSnippets(context: DomainContext, input: { userId: string; businessId: string }) {
@@ -140,7 +154,7 @@ export async function listKnowledgeSnippets(context: DomainContext, input: { use
   });
 }
 
-async function queueKnowledgeDocumentRetry(tx: DatabaseTransaction, input: { businessId: string; documentId: string; crawlLimit?: number }, document: Pick<typeof knowledgeDocuments.$inferSelect, "id" | "sourceType" | "sourceUrl" | "revision">): Promise<void> {
+async function queueKnowledgeDocumentRetry(tx: DatabaseTransaction, input: { businessId: string; documentId: string; crawlLimit?: number | undefined }, document: Pick<typeof knowledgeDocuments.$inferSelect, "id" | "sourceType" | "sourceUrl" | "revision">): Promise<void> {
     await tx.update(knowledgeDocuments).set({ status: document.sourceType === "website" ? "processing" : "pending", processingProgress: 0, error: null, revision: sql`${knowledgeDocuments.revision} + 1`, updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId)));
     const retryLimit = input.crawlLimit ?? FULL_CRAWL_PAGE_LIMIT;
     const ingestion = document.sourceType === "website" && document.sourceUrl ? (await tx.insert(websiteIngestionJobs).values({ businessId: input.businessId, rootDocumentId: input.documentId, websiteUrl: document.sourceUrl, provider: "firecrawl", status: "queued", pageLimit: retryLimit }).onConflictDoUpdate({ target: websiteIngestionJobs.rootDocumentId, set: { status: "queued", importedCount: 0, indexedCount: 0, errorCount: 0, lastError: null, pageLimit: retryLimit, updatedAt: new Date() } }).returning({ id: websiteIngestionJobs.id }))[0] : undefined;
@@ -150,10 +164,19 @@ async function queueKnowledgeDocumentRetry(tx: DatabaseTransaction, input: { bus
 export async function retryKnowledgeDocument(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const document = (await tx.select({ id: knowledgeDocuments.id, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, revision: knowledgeDocuments.revision }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
-    if (!document) throw new Error("Knowledge document not found.");
-    await queueKnowledgeDocumentRetry(tx, input, document);
+    if (!(await retryKnowledgeDocumentInTransaction(tx, input))) throw new Error("Knowledge document not found.");
   });
+}
+
+/**
+ * Queues a source's crawl or extraction again, crawling up to crawlLimit pages
+ * (the full limit by default). False when the business has no such document.
+ */
+export async function retryKnowledgeDocumentInTransaction(tx: DatabaseTransaction, input: { businessId: string; documentId: string; crawlLimit?: number | undefined }): Promise<boolean> {
+  const document = (await tx.select({ id: knowledgeDocuments.id, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, revision: knowledgeDocuments.revision }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
+  if (!document) return false;
+  await queueKnowledgeDocumentRetry(tx, input, document);
+  return true;
 }
 
 /**
@@ -163,11 +186,15 @@ export async function retryKnowledgeDocument(context: DomainContext, input: { us
 export async function expandWebsiteCrawl(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const document = (await tx.select({ id: knowledgeDocuments.id, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, revision: knowledgeDocuments.revision }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
-    if (!document) throw Object.assign(new Error("Knowledge document not found."), { status: 404 });
-    if (document.sourceType !== "website" || !document.sourceUrl) throw Object.assign(new Error("Only a website import can be read further."), { status: 400 });
-    await queueKnowledgeDocumentRetry(tx, { ...input, crawlLimit: FULL_CRAWL_PAGE_LIMIT }, document);
+    await expandWebsiteCrawlInTransaction(tx, input);
   });
+}
+
+export async function expandWebsiteCrawlInTransaction(tx: DatabaseTransaction, input: { businessId: string; documentId: string }): Promise<void> {
+  const document = (await tx.select({ id: knowledgeDocuments.id, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, revision: knowledgeDocuments.revision }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId))).limit(1).for("update"))[0];
+  if (!document) throw Object.assign(new Error("Knowledge document not found."), { status: 404 });
+  if (document.sourceType !== "website" || !document.sourceUrl) throw Object.assign(new Error("Only a website import can be read further."), { status: 400 });
+  await queueKnowledgeDocumentRetry(tx, { ...input, crawlLimit: FULL_CRAWL_PAGE_LIMIT }, document);
 }
 
 export async function setKnowledgeDocumentActive(context: DomainContext, input: { userId: string; businessId: string; documentId: string; active: boolean }): Promise<void> {
@@ -183,10 +210,14 @@ export async function setKnowledgeDocumentActive(context: DomainContext, input: 
 export async function cancelKnowledgeDocument(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [document] = await tx.update(knowledgeDocuments).set({ status: "cancelled", revision: sql`${knowledgeDocuments.revision} + 1`, error: "Cancelled by operator.", updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.status, "processing"))).returning({ id: knowledgeDocuments.id });
-    if (!document) throw Object.assign(new Error("Only a processing knowledge document can be cancelled."), { status: 409 });
-    await tx.update(websiteIngestionJobs).set({ status: "cancelled", updatedAt: new Date() }).where(and(eq(websiteIngestionJobs.businessId, input.businessId), eq(websiteIngestionJobs.rootDocumentId, input.documentId)));
+    await cancelKnowledgeDocumentInTransaction(tx, input);
   });
+}
+
+export async function cancelKnowledgeDocumentInTransaction(tx: DatabaseTransaction, input: { businessId: string; documentId: string }): Promise<void> {
+  const [document] = await tx.update(knowledgeDocuments).set({ status: "cancelled", revision: sql`${knowledgeDocuments.revision} + 1`, error: "Cancelled by operator.", updatedAt: new Date() }).where(and(eq(knowledgeDocuments.id, input.documentId), eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.status, "processing"))).returning({ id: knowledgeDocuments.id });
+  if (!document) throw Object.assign(new Error("Only a processing knowledge document can be cancelled."), { status: 409 });
+  await tx.update(websiteIngestionJobs).set({ status: "cancelled", updatedAt: new Date() }).where(and(eq(websiteIngestionJobs.businessId, input.businessId), eq(websiteIngestionJobs.rootDocumentId, input.documentId)));
 }
 
 export async function getKnowledgeDocumentContent(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<{ document: Record<string, unknown>; content: string } | null> {

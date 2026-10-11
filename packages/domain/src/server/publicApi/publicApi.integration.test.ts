@@ -4,14 +4,15 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeDocuments, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeSourceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
+import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, createAppointmentForApi, createContactForApi, getAvailabilityForApi, getContactForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listStaffForApi, rescheduleAppointmentForApi, updateBusinessForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, createAppointmentForApi, createContactForApi, createKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -367,6 +368,57 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(business).toMatchObject({ name: "API a renamed", hours: [{ day: "monday", open: "09:00", close: "17:30" }] });
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { hours: [{ day: "monday", open: "10:00", close: "09:00" }] }), 400, "invalid_request");
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { timezone: "Mars/Olympus" }), 400, "invalid_request");
+  });
+
+  it("adds a website as a sample crawl and returns the same source for a repeat", async () => {
+    const context = { db: worker!.db };
+    const source = await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "maple-api.example" });
+    expect(source).toMatchObject({ type: "website", url: "https://maple-api.example/", status: "processing", page_limit: ONBOARDING_CRAWL_PAGE_LIMIT });
+    expect(apiKnowledgeSourceSchema.safeParse(source).success).toBe(true);
+    const [crawl] = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.businessId, a.businessId), eq(outboxMessages.topic, "knowledge.crawlWebsite"), eq(outboxMessages.aggregateId, source.id)));
+    expect(crawl?.payload).toMatchObject({ documentId: source.id, limit: ONBOARDING_CRAWL_PAGE_LIMIT });
+    expect((await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "https://maple-api.example/" })).id).toBe(source.id);
+    // Business a is not on its website step, so its website stays as it was.
+    const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, a.businessId));
+    expect(business?.websiteUrl).not.toBe("https://maple-api.example/");
+  });
+
+  it("refuses a website address the crawler can't read", async () => {
+    const error = await createKnowledgeSourceForApi({ db: worker!.db }, a.caller, { type: "website", url: "localhost" }).then(() => null, (value: unknown) => value);
+    expect(error).toMatchObject({ status: 400, code: "invalid_request", details: [{ path: "url", message: expect.any(String) }] });
+  });
+
+  it("expands, cancels and retries a website source, inside its own business only", async () => {
+    const context = { db: worker!.db };
+    const source = await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "https://oak-api.example" });
+    // A source still being read can't be retried; cancel it first.
+    await expectApiError(retryKnowledgeSourceForApi(context, a.caller, source.id), 409, "conflict");
+    await cancelKnowledgeSourceForApi(context, a.caller, source.id);
+    // A retry keeps the sample's page limit instead of quietly reading the whole site.
+    expect(await retryKnowledgeSourceForApi(context, a.caller, source.id)).toMatchObject({ status: "processing", page_limit: ONBOARDING_CRAWL_PAGE_LIMIT });
+    expect(await expandKnowledgeSourceForApi(context, a.caller, source.id)).toMatchObject({ status: "processing", page_limit: FULL_CRAWL_PAGE_LIMIT });
+    expect(await cancelKnowledgeSourceForApi(context, a.caller, source.id)).toMatchObject({ status: "cancelled" });
+    await expectApiError(cancelKnowledgeSourceForApi(context, a.caller, source.id), 409, "conflict");
+    // Sending the cancelled site again reads it at its full limit, not back at a sample.
+    expect(await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "https://oak-api.example" })).toMatchObject({ id: source.id, status: "processing", page_limit: FULL_CRAWL_PAGE_LIMIT });
+    await expectApiError(expandKnowledgeSourceForApi(context, b.caller, source.id), 404, "not_found");
+    await expectApiError(retryKnowledgeSourceForApi(context, b.caller, source.id), 404, "not_found");
+    await expectApiError(cancelKnowledgeSourceForApi(context, a.caller, randomUUID()), 404, "not_found");
+  });
+
+  it("treats a page a crawl read as part of its website, not as a source", async () => {
+    const context = { db: worker!.db };
+    const [page] = await admin!.db.insert(knowledgeDocuments).values({ businessId: a.businessId, sourceType: "website", title: "About", sourceUrl: "https://elm-api.example/about", status: "indexed" }).returning({ id: knowledgeDocuments.id });
+    await expectApiError(createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "elm-api.example/about" }), 409, "conflict");
+    await expectApiError(expandKnowledgeSourceForApi(context, a.caller, page!.id), 400, "invalid_request");
+    await expectApiError(retryKnowledgeSourceForApi(context, a.caller, page!.id), 400, "invalid_request");
+  });
+
+  it("takes the first website as the business's website while onboarding", async () => {
+    await admin!.db.update(businesses).set({ onboardingStage: "website" }).where(eq(businesses.id, b.businessId));
+    await createKnowledgeSourceForApi({ db: worker!.db }, b.caller, { type: "website", url: "https://birch-api.example" });
+    const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, b.businessId));
+    expect(business).toEqual({ websiteUrl: "https://birch-api.example/", stage: "knowledge" });
   });
 
   it("reads and updates the business type and reads the onboarding stage", async () => {

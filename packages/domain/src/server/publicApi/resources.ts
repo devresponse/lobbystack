@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, lt, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, type DatabaseTransaction } from "@lobbystack/db";
+import { appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -16,6 +16,7 @@ import {
   type ApiContact,
   type ApiHoursWindow,
   type ApiKnowledgeEntry,
+  type ApiKnowledgeSource,
   type ApiMessage,
   type ApiService,
   type ApiStaff,
@@ -406,6 +407,28 @@ export async function listMessageResources(tx: DatabaseTransaction, businessId: 
 
 export function serializeKnowledgeEntry(row: Pick<typeof knowledgeSnippets.$inferSelect, "id" | "title" | "content" | "tags" | "createdAt">): ApiKnowledgeEntry {
   return { id: row.id, type: row.tags.includes("faq") ? "faq" : "text", title: row.title, content: row.content, created_at: iso(row.createdAt) };
+}
+
+type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { pageLimit: number | null };
+
+const knowledgeSourceStatuses = ["pending", "processing", "indexed", "error", "cancelled"] as const;
+
+export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
+  const website = row.sourceType === "website";
+  // A status this API does not know yet reads as still processing.
+  const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
+  return { id: row.id, type: website ? "website" : "file", title: row.title, url: website ? row.sourceUrl : null, status, error: status === "error" ? row.error : null, active: row.active, page_limit: website ? row.pageLimit : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+/** A website or uploaded file, with its crawl's page limit when it is a website. */
+export async function loadKnowledgeSourceResource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<ApiKnowledgeSource | null> {
+  const [row] = await tx
+    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, pageLimit: websiteIngestionJobs.pageLimit })
+    .from(knowledgeDocuments)
+    .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)))
+    .where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId)))
+    .limit(1);
+  return row ? serializeKnowledgeSource(row) : null;
 }
 
 // Webhook endpoints

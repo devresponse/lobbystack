@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, platformPartnerBusinesses, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, platformPartnerBusinesses, receptionistProfiles, services, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   isApiKeyScope,
@@ -23,6 +23,8 @@ import {
   type ApiContactUpdate,
   type ApiKnowledgeEntry,
   type ApiKnowledgeEntryCreate,
+  type ApiKnowledgeSource,
+  type ApiKnowledgeSourceCreate,
   type ApiMe,
   type ApiMessage,
   type ApiService,
@@ -33,7 +35,8 @@ import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { replaceBusinessHoursInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
-import { createKnowledgeSnippetInTransaction } from "../knowledge";
+import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction } from "../knowledge";
+import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
@@ -52,6 +55,7 @@ import {
   loadBusinessResource,
   loadCallDetailResource,
   loadContactResource,
+  loadKnowledgeSourceResource,
   pageSize,
   serializeContact,
   serializeKnowledgeEntry,
@@ -544,4 +548,108 @@ export async function createKnowledgeEntryForApi(context: DomainContext, caller:
     await audit(tx, caller, { eventType: "api.knowledge.created", entityType: "knowledge_snippet", entityId: snippet.id, payload: { type: input.type } });
     return serializeKnowledgeEntry(snippet);
   });
+}
+
+// Knowledge sources: websites now, uploaded files later.
+
+/**
+ * Gives a domain error that carries an HTTP status its v1 code. The
+ * dashboard's domain functions throw these; the API answers with them.
+ */
+export function apiErrorFromDomain(error: unknown, what: string): unknown {
+  if (error instanceof PublicApiError || typeof error !== "object" || error === null) return error;
+  const { status, code } = error as { status?: unknown; code?: unknown };
+  const message = error instanceof Error ? error.message : "The request is invalid.";
+  if (code === "website_url_invalid") return invalidRequest(message, [{ path: "url", message }]);
+  if (status === 404) return notFound(what);
+  if (status === 409) return conflict(message);
+  if (status === 400 || status === 422) return invalidRequest(message);
+  return error;
+}
+
+type KnowledgeSourceState = { id: string; sourceType: string; status: string; jobId: string | null; pageLimit: number | null };
+
+function selectKnowledgeSource(tx: DatabaseTransaction, businessId: string) {
+  return tx
+    .select({ id: knowledgeDocuments.id, sourceType: knowledgeDocuments.sourceType, status: knowledgeDocuments.status, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
+    .from(knowledgeDocuments)
+    .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)));
+}
+
+/**
+ * A source is a website the API or dashboard added (the root of its crawl) or
+ * an uploaded file. The pages a crawl reads are documents too, but acting on
+ * one would start a second crawl that fights its site's, so they are refused.
+ */
+async function requireKnowledgeSource(tx: DatabaseTransaction, businessId: string, documentId: string): Promise<KnowledgeSourceState> {
+  const [source] = await selectKnowledgeSource(tx, businessId).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.id, documentId))).limit(1);
+  if (!source) throw notFound("Knowledge source");
+  if (source.sourceType === "website" && !source.jobId) throw invalidRequest("This is a page a website crawl read, not a source. Act on the website it came from.");
+  return source;
+}
+
+async function changeKnowledgeSource(context: DomainContext, caller: ApiCaller, documentId: string, change: { eventType: string; run: (tx: DatabaseTransaction, source: KnowledgeSourceState) => Promise<unknown> }): Promise<ApiKnowledgeSource> {
+  return await inBusiness(context, caller, async (tx) => {
+    const source = await requireKnowledgeSource(tx, caller.businessId, documentId);
+    try {
+      await change.run(tx, source);
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Knowledge source");
+    }
+    await audit(tx, caller, { eventType: change.eventType, entityType: "knowledge_document", entityId: documentId });
+    const loaded = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
+    if (!loaded) throw notFound("Knowledge source");
+    return loaded;
+  });
+}
+
+/**
+ * Starts reading a website with a sample crawl. A site that is already a source
+ * returns that source, read again at its own page limit if its last crawl failed
+ * or was cancelled. A page an earlier crawl read is not a new source.
+ */
+export async function createKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, input: ApiKnowledgeSourceCreate): Promise<ApiKnowledgeSource> {
+  return await inBusiness(context, caller, async (tx) => {
+    let url: string;
+    try {
+      url = normalizeWebsiteSourceUrl(input.url);
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Knowledge source");
+    }
+    const [existing] = await selectKnowledgeSource(tx, caller.businessId).where(and(eq(knowledgeDocuments.businessId, caller.businessId), eq(knowledgeDocuments.sourceUrl, url))).limit(1);
+    if (existing && !existing.jobId) throw conflict("This address is already a page of another website source.");
+    let documentId: string;
+    if (existing) {
+      documentId = existing.id;
+      if (["cancelled", "error"].includes(existing.status)) {
+        await retryKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId, crawlLimit: existing.pageLimit ?? ONBOARDING_CRAWL_PAGE_LIMIT });
+        await audit(tx, caller, { eventType: "api.knowledge_source.retried", entityType: "knowledge_document", entityId: documentId });
+      }
+    } else {
+      documentId = await createKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, title: url, sourceType: "website", sourceUrl: url, sample: true });
+      await audit(tx, caller, { eventType: "api.knowledge_source.created", entityType: "knowledge_document", entityId: documentId, payload: { type: "website" } });
+    }
+    const source = await loadKnowledgeSourceResource(tx, caller.businessId, documentId);
+    if (!source) throw new Error("The knowledge source could not be read back.");
+    return source;
+  });
+}
+
+export async function expandKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
+  return await changeKnowledgeSource(context, caller, documentId, { eventType: "api.knowledge_source.expanded", run: async (tx) => await expandWebsiteCrawlInTransaction(tx, { businessId: caller.businessId, documentId }) });
+}
+
+/** Reads a source again at the page limit it last crawled with, so a sample stays a sample. Refused while it is still being read. */
+export async function retryKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
+  return await changeKnowledgeSource(context, caller, documentId, {
+    eventType: "api.knowledge_source.retried",
+    run: async (tx, source) => {
+      if (source.status === "processing") throw conflict("This source is still being read. Cancel it first, or wait for it to finish.");
+      await retryKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId, crawlLimit: source.pageLimit ?? undefined });
+    },
+  });
+}
+
+export async function cancelKnowledgeSourceForApi(context: DomainContext, caller: ApiCaller, documentId: string): Promise<ApiKnowledgeSource> {
+  return await changeKnowledgeSource(context, caller, documentId, { eventType: "api.knowledge_source.cancelled", run: async (tx) => await cancelKnowledgeDocumentInTransaction(tx, { businessId: caller.businessId, documentId }) });
 }

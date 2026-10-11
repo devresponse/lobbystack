@@ -140,6 +140,14 @@ export async function advanceOnboardingStageInTransaction(
   input: { userId: string; businessId: string; from: OnboardingStage; to: OnboardingStage },
 ): Promise<void> {
   await requireBusinessAdmin(tx, input);
+  await moveOnboardingStageInTransaction(tx, input);
+}
+
+/** Moves a business to the next onboarding stage. The caller has already checked who may do that. */
+export async function moveOnboardingStageInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; from: OnboardingStage; to: OnboardingStage },
+): Promise<void> {
   if (!isValidOnboardingTransition(input.from, input.to)) {
     throw new Error(`Invalid onboarding transition from ${input.from} to ${input.to}.`);
   }

@@ -23,6 +23,10 @@ const domain = vi.hoisted(() => ({
   createBusinessForApi: vi.fn(),
   listBusinessesForApi: vi.fn(),
   updateBusinessForApi: vi.fn(),
+  createKnowledgeSourceForApi: vi.fn(),
+  expandKnowledgeSourceForApi: vi.fn(),
+  retryKnowledgeSourceForApi: vi.fn(),
+  cancelKnowledgeSourceForApi: vi.fn(),
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
@@ -181,6 +185,45 @@ describe("GET /staff", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ error: { code: "invalid_request", message: "staff_id must be a UUID." } });
     expect(domain.getAvailabilityForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("knowledge sources", () => {
+  const sourceId = "06d9c0dc-f18a-4cc6-a987-ac4963c87113";
+  const source = { id: sourceId, type: "website", title: "https://maple.example/", url: "https://maple.example/", status: "processing", error: null, active: true, page_limit: 10, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+
+  it("starts reading a website and answers 202 with the source", async () => {
+    domain.createKnowledgeSourceForApi.mockResolvedValue(source);
+    const response = await v1.createKnowledgeSource(call("/knowledge/sources", { method: "POST", body: JSON.stringify({ type: "website", url: " maple.example " }) }));
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ data: source });
+    expect(domain.createKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { type: "website", url: "maple.example" });
+  });
+
+  it("takes only websites for now", async () => {
+    const response = await v1.createKnowledgeSource(call("/knowledge/sources", { method: "POST", body: JSON.stringify({ type: "file", url: "https://maple.example" }) }));
+    expect(response.status).toBe(400);
+    expect(domain.createKnowledgeSourceForApi).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["expand", () => v1.expandKnowledgeSource, () => domain.expandKnowledgeSourceForApi, 202],
+    ["retry", () => v1.retryKnowledgeSource, () => domain.retryKnowledgeSourceForApi, 202],
+    ["cancel", () => v1.cancelKnowledgeSource, () => domain.cancelKnowledgeSourceForApi, 200],
+  ] as const)("%s passes the source id to the domain", async (action, route, operation, status) => {
+    operation().mockResolvedValue(source);
+    const response = await route()(call(`/knowledge/sources/${sourceId}/${action}`, { method: "POST" }), { params: Promise.resolve({ source_id: sourceId }) });
+    expect(response.status).toBe(status);
+    expect(operation()).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), sourceId);
+    const malformed = await route()(call("/knowledge/sources/x/expand", { method: "POST" }), { params: Promise.resolve({ source_id: "x" }) });
+    expect(malformed.status).toBe(400);
+  });
+
+  it("needs knowledge:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    const response = await v1.expandKnowledgeSource(call(`/knowledge/sources/${sourceId}/expand`, { method: "POST" }), { params: Promise.resolve({ source_id: sourceId }) });
+    expect(response.status).toBe(403);
+    expect(domain.expandKnowledgeSourceForApi).not.toHaveBeenCalled();
   });
 });
 

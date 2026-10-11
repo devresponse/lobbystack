@@ -255,6 +255,24 @@ export const apiKnowledgeEntryCreateSchema = z.discriminatedUnion("type", [
   z.strictObject({ type: z.literal("faq"), question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000) }),
 ], { error: (issue) => (issue.code === "invalid_union" ? "Invalid input" : undefined) });
 
+export const apiKnowledgeSourceSchema = z.object({
+  id,
+  type: z.enum(["website", "file"]).describe("website: a site the receptionist reads. file: an uploaded document."),
+  title: z.string(),
+  url: z.string().nullable().describe("The website address. Null for a file."),
+  status: z.enum(["pending", "processing", "indexed", "error", "cancelled"]).describe("pending: a file waits its turn. processing: it is being read. indexed: the receptionist can use it. error or cancelled: reading stopped."),
+  error: z.string().nullable().describe("Why reading failed, when status is error."),
+  active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
+  page_limit: z.number().int().nullable().describe("How many pages the crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a file."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A website or file the receptionist learns from.");
+
+export const apiKnowledgeSourceCreateSchema = z.strictObject({
+  type: z.literal("website"),
+  url: z.string().trim().min(1).max(2_000).describe("The site to read, such as https://example.com. A site that is already a source returns that source."),
+});
+
 export const apiWebhookEventTypeSchema = z.enum(webhookEventTypes);
 
 export const apiWebhookEndpointSchema = z.object({
@@ -335,6 +353,8 @@ export type ApiAvailabilitySlot = z.infer<typeof apiAvailabilitySlotSchema>;
 export type ApiMessage = z.infer<typeof apiMessageSchema>;
 export type ApiKnowledgeEntry = z.infer<typeof apiKnowledgeEntrySchema>;
 export type ApiKnowledgeEntryCreate = z.infer<typeof apiKnowledgeEntryCreateSchema>;
+export type ApiKnowledgeSource = z.infer<typeof apiKnowledgeSourceSchema>;
+export type ApiKnowledgeSourceCreate = z.infer<typeof apiKnowledgeSourceCreateSchema>;
 export type ApiWebhookEndpoint = z.infer<typeof apiWebhookEndpointSchema>;
 export type ApiWebhookEndpointCreate = z.infer<typeof apiWebhookEndpointCreateSchema>;
 export type ApiWebhookEndpointUpdate = z.infer<typeof apiWebhookEndpointUpdateSchema>;

@@ -896,7 +896,7 @@
       "appointments_read": "Read appointments and open times",
       "appointments_write": "Book, cancel and reschedule appointments",
       "messages_read": "Read messages the receptionist took",
-      "knowledge_write": "Add knowledge entries and FAQs",
+      "knowledge_write": "Add knowledge entries, FAQs and websites to read",
       "webhooks_manage": "Create and delete webhook endpoints"
     }
   },

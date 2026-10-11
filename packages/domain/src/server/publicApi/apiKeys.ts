@@ -3,7 +3,7 @@ import { createHmac, randomBytes } from "node:crypto";
 import { and, desc, eq, isNull, lt, or, sql } from "drizzle-orm";
 
 import { apiKeys, auditLogs, users, withBusinessTransaction } from "@lobbystack/db";
-import { API_KEY_PREFIX, apiKeyScopes, isApiKeyScope, type ApiKeyScope } from "@lobbystack/shared";
+import { API_KEY_PREFIX, businessApiKeyScopes, isApiKeyScope, isBusinessApiKeyScope, isPlatformOnlyScope, type ApiKeyScope, type BusinessApiKeyScope } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../../authz";
 import type { DomainContext } from "../context";
@@ -58,12 +58,14 @@ export function bearerToken(header: string | null | undefined): string | null {
 }
 
 
-export function normalizeScopes(value: unknown): ApiKeyScope[] {
+export function normalizeScopes(value: unknown): BusinessApiKeyScope[] {
   if (!Array.isArray(value) || value.length === 0) throw invalidRequest("Choose at least one scope.");
   const unknown = value.filter((scope) => !isApiKeyScope(scope));
   if (unknown.length) throw invalidRequest(`Unknown scopes: ${unknown.map(String).join(", ")}.`);
+  const platformOnly = value.filter(isPlatformOnlyScope);
+  if (platformOnly.length) throw invalidRequest(`Only platform keys can hold ${platformOnly.join(", ")}.`);
   // Keep the canonical order so stored keys compare cleanly.
-  return apiKeyScopes.filter((scope) => value.includes(scope));
+  return businessApiKeyScopes.filter((scope) => value.includes(scope));
 }
 
 export type ApiKeyRecord = {
@@ -82,7 +84,7 @@ function serializeApiKey(row: { id: string; name: string; prefix: string; scopes
     id: row.id,
     name: row.name,
     prefix: row.prefix,
-    scopes: row.scopes.filter(isApiKeyScope),
+    scopes: row.scopes.filter(isBusinessApiKeyScope),
     createdAt: row.createdAt.toISOString(),
     createdBy: row.createdByUserId ? { userId: row.createdByUserId, name: row.createdByName, email: row.createdByEmail } : null,
     lastUsedAt: row.lastUsedAt?.toISOString() ?? null,
@@ -156,7 +158,8 @@ export async function resolveApiKey(context: DomainContext, key: string): Promis
   const result = await context.db.execute<{ business_id: string; api_key_id: string; scopes: unknown }>(sql`select business_id, api_key_id, scopes from app.resolve_api_key(${hashApiKey(key)})`);
   const row = result.rows[0];
   if (!row) return null;
-  return { businessId: row.business_id, apiKeyId: row.api_key_id, scopes: Array.isArray(row.scopes) ? row.scopes.filter(isApiKeyScope) : [] };
+  // A per-business key never acts with a platform-only scope, even if a row holds one.
+  return { businessId: row.business_id, apiKeyId: row.api_key_id, scopes: Array.isArray(row.scopes) ? row.scopes.filter(isBusinessApiKeyScope) : [] };
 }
 
 /** Records use at most once a minute per key so busy integrations do not write on every request. */

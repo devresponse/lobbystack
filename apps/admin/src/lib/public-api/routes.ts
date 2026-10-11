@@ -9,6 +9,7 @@ import {
   getAvailabilityForApi,
   getBusinessForApi,
   getMeForApi,
+  getPlatformMeForApi,
   getCallForApi,
   getContactForApi,
   getWebhookEndpoint,
@@ -25,8 +26,8 @@ import {
   updateBusinessForApi,
   updateContactForApi,
   updateWebhookEndpoint,
-  type ResolvedApiKey,
   type WebhookEndpointDetail,
+  type WebhookManager,
 } from "@lobbystack/domain";
 import {
   apiAppointmentCreateSchema,
@@ -42,7 +43,7 @@ import {
   type WebhookEventType,
 } from "@lobbystack/shared";
 
-import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam } from "./http";
+import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam, type ApiCredential, type RestApiCaller } from "./http";
 
 // One function per v1 operation. The route files under app/api/v1 only bind
 // these to HTTP methods, so tests can call the same functions.
@@ -54,9 +55,14 @@ function toApiEndpoint(endpoint: WebhookEndpointDetail): ApiWebhookEndpoint {
 }
 
 // An event carries the same data as the matching read endpoint, so subscribing to it needs that read scope.
-function requireEventScopes(key: ResolvedApiKey, events: readonly WebhookEventType[]): void {
-  const missing = [...new Set(events.map((event) => webhookEventScope[event]))].filter((scope) => !key.scopes.includes(scope));
+function requireEventScopes(credential: ApiCredential, events: readonly WebhookEventType[]): void {
+  const missing = [...new Set(events.map((event) => webhookEventScope[event]))].filter((scope) => !credential.scopes.includes(scope));
   if (missing.length) throw new PublicApiError(403, "insufficient_scope", `This API key needs ${missing.join(", ")} to subscribe to these events.`);
+}
+
+function webhookManager(caller: RestApiCaller): WebhookManager {
+  if (caller.platformKeyId !== undefined) return { kind: "platform_key", platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: caller.actingUserId };
+  return { kind: "api_key", apiKeyId: caller.apiKeyId };
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -82,7 +88,11 @@ function enumParam<T extends string>(request: Request, name: string, values: rea
 }
 
 export const v1 = {
-  getMe: (request: Request) => handleApiRequest(request, "getMe", async ({ context, caller }) => ({ body: data(await getMeForApi(context, caller)) })),
+  getMe: (request: Request) => handleApiRequest(request, "getMe", async ({ context, caller, credential }) => {
+    if (credential.kind === "platform_key") return { body: data(await getPlatformMeForApi(context, credential, caller?.platformKeyId !== undefined ? caller : null)) };
+    if (caller?.apiKeyId === undefined) throw new Error("A per-business key always has its business.");
+    return { body: data(await getMeForApi(context, caller)) };
+  }),
   getBusiness: (request: Request) => handleApiRequest(request, "getBusiness", async ({ context, caller }) => ({ body: data(await getBusinessForApi(context, caller)) })),
   updateBusiness: (request: Request) => handleApiRequest(request, "updateBusiness", async ({ context, caller }) => ({ body: data(await updateBusinessForApi(context, caller, await readApiBody(request, apiBusinessUpdateSchema))) })),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller), next_cursor: null, has_more: false } })),
@@ -118,25 +128,25 @@ export const v1 = {
   listMessages: (request: Request) => handleApiRequest(request, "listMessages", async ({ context, caller }) => ({ body: await listMessagesForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["open", "done"] as const) }) })),
   createKnowledgeEntry: (request: Request) => handleApiRequest(request, "createKnowledgeEntry", async ({ context, caller }) => ({ body: data(await createKnowledgeEntryForApi(context, caller, await readApiBody(request, apiKnowledgeEntryCreateSchema))) })),
 
-  listWebhooks: (request: Request) => handleApiRequest(request, "listWebhooks", async ({ context, caller }) => ({ body: { data: (await listWebhookEndpoints(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId } })).map(toApiEndpoint), next_cursor: null, has_more: false } })),
-  createWebhook: (request: Request) => handleApiRequest(request, "createWebhook", async ({ context, caller, key }) => {
+  listWebhooks: (request: Request) => handleApiRequest(request, "listWebhooks", async ({ context, caller }) => ({ body: { data: (await listWebhookEndpoints(context, { businessId: caller.businessId, manager: webhookManager(caller) })).map(toApiEndpoint), next_cursor: null, has_more: false } })),
+  createWebhook: (request: Request) => handleApiRequest(request, "createWebhook", async ({ context, caller, credential }) => {
     const body = await readApiBody(request, apiWebhookEndpointCreateSchema);
-    requireEventScopes(key, body.events);
-    const created = await createWebhookEndpoint(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, url: body.url, events: body.events, description: body.description });
+    requireEventScopes(credential, body.events);
+    const created = await createWebhookEndpoint(context, { businessId: caller.businessId, manager: webhookManager(caller), url: body.url, events: body.events, description: body.description });
     return { body: data({ ...toApiEndpoint(created.endpoint), secret: created.secret }) };
   }),
-  getWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "getWebhook", async ({ context, caller }) => ({ body: data(toApiEndpoint(await getWebhookEndpoint(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, endpointId: uuidParam((await params).webhook_id, "webhook_id") }))) })),
-  updateWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "updateWebhook", async ({ context, caller, key }) => {
+  getWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "getWebhook", async ({ context, caller }) => ({ body: data(toApiEndpoint(await getWebhookEndpoint(context, { businessId: caller.businessId, manager: webhookManager(caller), endpointId: uuidParam((await params).webhook_id, "webhook_id") }))) })),
+  updateWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "updateWebhook", async ({ context, caller, credential }) => {
     const endpointId = uuidParam((await params).webhook_id, "webhook_id");
     const body = await readApiBody(request, apiWebhookEndpointUpdateSchema);
     // A new url redirects the endpoint's existing events, so check those too.
-    if (body.events !== undefined || body.url !== undefined) requireEventScopes(key, body.events ?? (await getWebhookEndpoint(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, endpointId })).events);
-    return { body: data(toApiEndpoint(await updateWebhookEndpoint(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, endpointId, url: body.url, events: body.events, description: body.description, status: body.status }))) };
+    if (body.events !== undefined || body.url !== undefined) requireEventScopes(credential, body.events ?? (await getWebhookEndpoint(context, { businessId: caller.businessId, manager: webhookManager(caller), endpointId })).events);
+    return { body: data(toApiEndpoint(await updateWebhookEndpoint(context, { businessId: caller.businessId, manager: webhookManager(caller), endpointId, url: body.url, events: body.events, description: body.description, status: body.status }))) };
   }),
   deleteWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "deleteWebhook", async ({ context, caller }) => {
     const endpointId = uuidParam((await params).webhook_id, "webhook_id");
-    await deleteWebhookEndpoint(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, endpointId });
+    await deleteWebhookEndpoint(context, { businessId: caller.businessId, manager: webhookManager(caller), endpointId });
     return { body: data({ id: endpointId, deleted: true }) };
   }),
-  testWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "testWebhook", async ({ context, caller }) => ({ body: data(await sendWebhookTestEvent(context, { businessId: caller.businessId, manager: { kind: "api_key", apiKeyId: caller.apiKeyId }, endpointId: uuidParam((await params).webhook_id, "webhook_id") })) })),
+  testWebhook: (request: Request, { params }: Params<"webhook_id">) => handleApiRequest(request, "testWebhook", async ({ context, caller }) => ({ body: data(await sendWebhookTestEvent(context, { businessId: caller.businessId, manager: webhookManager(caller), endpointId: uuidParam((await params).webhook_id, "webhook_id") })) })),
 };

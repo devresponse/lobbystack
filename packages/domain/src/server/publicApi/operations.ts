@@ -25,6 +25,7 @@ import {
   type ApiStaff,
 } from "@lobbystack/shared";
 
+import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { replaceBusinessHoursInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
@@ -33,6 +34,7 @@ import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { ianaTimeZone, updateBusinessInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
+import type { ResolvedPlatformKey } from "./platformKeys";
 import {
   clockToMinutes,
   listAppointmentResources,
@@ -63,24 +65,66 @@ import { emitWebhookEventInTransaction } from "./webhooks";
  */
 export type ApiActor = "api_key" | "mcp";
 /** A request authenticated with an API key, through REST or MCP. */
-export type ApiKeyCaller = { businessId: string; apiKeyId: string; grantId?: undefined; userId?: undefined; actor?: ApiActor | undefined };
+export type ApiKeyCaller = { businessId: string; apiKeyId: string; grantId?: undefined; userId?: undefined; platformKeyId?: undefined; actor?: ApiActor | undefined };
 /** An MCP request authenticated with an OAuth access token: the grant is the owner's consent for one client and business. */
-export type OAuthGrantCaller = { businessId: string; grantId: string; userId: string; apiKeyId?: undefined; actor: "mcp" };
-export type ApiCaller = ApiKeyCaller | OAuthGrantCaller;
+export type OAuthGrantCaller = { businessId: string; grantId: string; userId: string; apiKeyId?: undefined; platformKeyId?: undefined; actor: "mcp" };
+/**
+ * A REST request authenticated with a platform key from PLATFORM_API_KEYS. It
+ * acts on the business in the LobbyStack-Business header, as the account the
+ * key's owner_email names. The partner travels with it for attribution.
+ */
+export type PlatformKeyCaller = { businessId: string; platformKeyId: string; partnerId: string; actingUserId: string; apiKeyId?: undefined; grantId?: undefined; userId?: undefined; actor: "platform_key" };
+export type ApiCaller = ApiKeyCaller | OAuthGrantCaller | PlatformKeyCaller;
 
 /**
  * The id that owns rate limits and idempotency records for a caller. API keys
  * keep their bare id, so REST and MCP requests with one key share them; OAuth
- * grants are prefixed so they can never collide with a key id.
+ * grants and platform keys are prefixed so they can never collide with a key id.
  */
 export function callerPrincipalId(caller: ApiCaller): string {
-  return caller.grantId !== undefined ? `grant:${caller.grantId}` : caller.apiKeyId;
+  if (caller.grantId !== undefined) return `grant:${caller.grantId}`;
+  if (caller.platformKeyId !== undefined) return `platform:${caller.platformKeyId}`;
+  return caller.apiKeyId;
 }
 
-/** Audit fields for a change made by a caller. The key or grant id is recorded, never a secret. */
+/**
+ * Audit fields for a change made by a caller. The key or grant id is recorded,
+ * never a secret. A platform key also records its partner and the account it
+ * acts as, so every change traces back to who made it.
+ */
 export function callerAudit(caller: ApiCaller): ApiAudit {
   if (caller.grantId !== undefined) return { actorUserId: caller.userId, payload: { actor: "mcp", grantId: caller.grantId } };
+  if (caller.platformKeyId !== undefined) return { actorUserId: null, payload: { actor: "platform_key", platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: caller.actingUserId } };
   return { actorUserId: null, payload: { actor: caller.actor ?? "api_key", apiKeyId: caller.apiKeyId } };
+}
+
+/**
+ * The person an API call acts for, for operations that need one, such as
+ * uploads, number claims, checkout and invites. A platform key acts as its
+ * owner and an OAuth grant as the user who granted it. A per-business key acts
+ * as the person who created it, but only while they are still an owner or
+ * admin of the business; otherwise the call is refused with key_owner_inactive.
+ */
+export async function resolveActingUserId(context: DomainContext, caller: ApiCaller): Promise<string> {
+  if (caller.grantId !== undefined) return caller.userId;
+  if (caller.platformKeyId !== undefined) return caller.actingUserId;
+  const { apiKeyId } = caller;
+  return await inBusiness(context, caller, async (tx) => {
+    const [key] = await tx.select({ createdByUserId: apiKeys.createdByUserId }).from(apiKeys).where(and(eq(apiKeys.id, apiKeyId), eq(apiKeys.businessId, caller.businessId))).limit(1);
+    const userId = key?.createdByUserId;
+    if (!userId) throw keyOwnerInactive();
+    try {
+      await requireBusinessAdmin(tx, { userId, businessId: caller.businessId });
+    } catch (error) {
+      if (error instanceof AuthorizationError) throw keyOwnerInactive();
+      throw error;
+    }
+    return userId;
+  });
+}
+
+function keyOwnerInactive(): PublicApiError {
+  return new PublicApiError(403, "key_owner_inactive", "This API key's creator is no longer an owner or admin of the business, so the key can't do this. Create a new key.");
 }
 
 async function inBusiness<T>(context: DomainContext, caller: ApiCaller, callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
@@ -115,6 +159,22 @@ export async function getMeForApi(context: DomainContext, caller: ApiKeyCaller):
     if (!row) throw notFound("API key");
     return { api_key: { id: row.id, name: row.name, prefix: row.prefix, scopes: row.scopes.filter(isApiKeyScope), created_at: row.createdAt.toISOString() }, business: { id: caller.businessId, name: row.businessName } };
   });
+}
+
+/** GET /me for a platform key: the key, its partner and access, and the business in the header, if any. */
+export async function getPlatformMeForApi(context: DomainContext, key: ResolvedPlatformKey, caller: PlatformKeyCaller | null): Promise<ApiMe> {
+  let business: ApiMe["business"] = null;
+  if (caller) {
+    const { businessId } = caller;
+    const [row] = await inBusiness(context, caller, async (tx) => await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, businessId)).limit(1));
+    if (!row) throw notFound("Business");
+    business = { id: businessId, name: row.name };
+  }
+  return {
+    api_key: { id: key.platformKeyId, name: key.name, prefix: key.prefix, scopes: key.scopes, created_at: key.createdAt },
+    business,
+    platform: { partner: key.partnerId, access: key.access },
+  };
 }
 
 export async function getBusinessForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBusiness> {

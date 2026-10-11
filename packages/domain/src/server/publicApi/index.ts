@@ -2,6 +2,7 @@ export * from "./apiKeys";
 export * from "./errors";
 export * from "./idempotency";
 export * from "./operations";
+export * from "./platformKeys";
 export * from "./resources";
 export * from "./webhookNetwork";
 export * from "./webhookTransport";

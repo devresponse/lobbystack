@@ -32,8 +32,11 @@ const emitFailures = meter.createCounter("lobbystack.webhooks.emit_failures", { 
 const deliveryAttempts = meter.createCounter("lobbystack.webhooks.delivery_attempts", { unit: "{attempt}" });
 const endpointsDisabled = meter.createCounter("lobbystack.webhooks.endpoints_disabled", { unit: "{endpoint}" });
 
-/** Who is managing an endpoint: a signed-in owner or admin, or an API key with webhooks:manage. */
-export type WebhookManager = { kind: "operator"; userId: string } | { kind: "api_key"; apiKeyId: string };
+/** Who is managing an endpoint: a signed-in owner or admin, or an API key or platform key with webhooks:manage. */
+export type WebhookManager =
+  | { kind: "operator"; userId: string }
+  | { kind: "api_key"; apiKeyId: string }
+  | { kind: "platform_key"; platformKeyId: string; partnerId: string; actingUserId: string };
 
 async function asManager<T>(context: DomainContext, businessId: string, manager: WebhookManager, callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
   if (manager.kind === "operator") {
@@ -46,7 +49,9 @@ async function asManager<T>(context: DomainContext, businessId: string, manager:
 }
 
 function auditActor(manager: WebhookManager) {
-  return manager.kind === "operator" ? { actorUserId: manager.userId, payload: { actor: "operator" } } : { actorUserId: null, payload: { actor: "api_key", apiKeyId: manager.apiKeyId } };
+  if (manager.kind === "operator") return { actorUserId: manager.userId, payload: { actor: "operator" } };
+  if (manager.kind === "platform_key") return { actorUserId: null, payload: { actor: "platform_key", platformKeyId: manager.platformKeyId, partnerId: manager.partnerId, actingUserId: manager.actingUserId } };
+  return { actorUserId: null, payload: { actor: "api_key", apiKeyId: manager.apiKeyId } };
 }
 
 function normalizeEvents(events: readonly string[]): WebhookEventType[] {
@@ -96,7 +101,8 @@ export async function createWebhookEndpoint(
       events,
       encryptedSecret: encryptWebhookSecret(secret),
       ...(input.description?.trim() ? { description: input.description.trim().slice(0, 200) } : {}),
-      ...(input.manager.kind === "operator" ? { createdByUserId: input.manager.userId } : { createdByApiKeyId: input.manager.apiKeyId }),
+      // A platform key has no api_keys row; the audit row records which key created the endpoint.
+      ...(input.manager.kind === "operator" ? { createdByUserId: input.manager.userId } : input.manager.kind === "api_key" ? { createdByApiKeyId: input.manager.apiKeyId } : {}),
     }).returning();
     if (!row) throw new Error("The webhook endpoint could not be created.");
     const actor = auditActor(input.manager);

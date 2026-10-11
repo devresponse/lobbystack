@@ -2,7 +2,7 @@ import { readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { apiOperations } from "@lobbystack/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const domain = vi.hoisted(() => ({
   resolveApiKey: vi.fn(),
@@ -19,7 +19,10 @@ const domain = vi.hoisted(() => ({
   listContactsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   listStaffForApi: vi.fn(),
   getMeForApi: vi.fn(),
+  getPlatformMeForApi: vi.fn(),
   listAppointmentsForApi: vi.fn(),
+  resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
+  requirePlatformBusinessAccess: vi.fn(async () => undefined),
 }));
 
 vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
@@ -27,9 +30,12 @@ vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/errors")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
+  ...(await import("../../../../../packages/domain/src/server/publicApi/platformKeys")),
   bearerToken: (await import("../../../../../packages/domain/src/server/publicApi/apiKeys")).bearerToken,
   ...domain,
 }));
+
+import { generatePlatformKey } from "@lobbystack/domain";
 
 import { v1 } from "./routes";
 
@@ -248,5 +254,58 @@ describe("webhook event scopes", () => {
     const response = await patch({ description: "Renamed" });
     expect(response.status).toBe(200);
     expect(domain.getWebhookEndpoint).not.toHaveBeenCalled();
+  });
+});
+
+describe("platform keys on v1 routes", () => {
+  const businessId = "9e8d7c6b-5a49-4382-a716-1f2e3d4c5b6a";
+  const ownerId = "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6";
+  const { key, entry } = generatePlatformKey({ name: "AlloPlace CLI", partner: "alloplace", ownerEmail: "ops@alloplace.example", access: "all" });
+  const platformCall = (path: string, init: RequestInit = {}) => new Request(`https://app.example.com/api/v1${path}`, { ...init, headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) } });
+
+  beforeEach(() => { vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([entry])); });
+  afterEach(() => { vi.unstubAllEnvs(); });
+
+  it("answers GET /me without a business, showing the key's partner and access", async () => {
+    const me = { api_key: { id: entry.id, name: "AlloPlace CLI", prefix: entry.prefix, scopes: [], created_at: entry.created_at }, business: null, platform: { partner: "alloplace", access: "all" } };
+    domain.getPlatformMeForApi.mockResolvedValue(me);
+    const response = await v1.getMe(platformCall("/me"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: me });
+    expect(domain.getPlatformMeForApi).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ kind: "platform_key", platformKeyId: entry.id, partnerId: "alloplace", access: "all" }), null);
+    expect(domain.resolveApiKey).not.toHaveBeenCalled();
+    expect(domain.requirePlatformBusinessAccess).not.toHaveBeenCalled();
+  });
+
+  it("passes the header's business to GET /me", async () => {
+    domain.getPlatformMeForApi.mockResolvedValue({});
+    const response = await v1.getMe(platformCall("/me", { headers: { "LobbyStack-Business": businessId } }));
+    expect(response.status).toBe(200);
+    expect(domain.requirePlatformBusinessAccess).toHaveBeenCalledWith(expect.anything(), { businessId, partnerId: "alloplace", access: "all" });
+    expect(domain.getPlatformMeForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { businessId, platformKeyId: entry.id, partnerId: "alloplace", actingUserId: ownerId, actor: "platform_key" });
+  });
+
+  it("acts on the header's business on every other route", async () => {
+    const response = await v1.listStaff(platformCall("/staff", { headers: { "LobbyStack-Business": businessId } }));
+    expect(response.status).toBe(200);
+    expect(domain.listStaffForApi).toHaveBeenCalledWith(expect.anything(), { businessId, platformKeyId: entry.id, partnerId: "alloplace", actingUserId: ownerId, actor: "platform_key" });
+    const missing = await v1.listStaff(platformCall("/staff"));
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ error: { code: "business_required" } });
+  });
+
+  it("manages webhooks as the platform key, not as an api_keys row", async () => {
+    const endpoint = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", url: "https://hooks.example.com/a", description: null, events: ["call.completed"], status: "enabled", disabled_reason: null, created_at: "2026-09-27T12:00:00.000Z", updated_at: "2026-09-27T12:00:00.000Z" };
+    domain.createWebhookEndpoint.mockResolvedValue({ endpoint, secret: "whsec_x" });
+    const response = await v1.createWebhook(platformCall("/webhooks", { method: "POST", headers: { "LobbyStack-Business": businessId }, body: JSON.stringify({ url: "https://vendor.example.com/h", events: ["call.completed"] }) }));
+    expect(response.status).toBe(201);
+    expect(domain.createWebhookEndpoint).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId, manager: { kind: "platform_key", platformKeyId: entry.id, partnerId: "alloplace", actingUserId: ownerId } }));
+  });
+
+  it("refuses a platform key that is not configured", async () => {
+    vi.stubEnv("PLATFORM_API_KEYS", "");
+    const response = await v1.getMe(platformCall("/me"));
+    expect(response.status).toBe(401);
+    expect(domain.getPlatformMeForApi).not.toHaveBeenCalled();
   });
 });

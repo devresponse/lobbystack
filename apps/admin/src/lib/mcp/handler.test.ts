@@ -171,6 +171,22 @@ describe("MCP authentication", () => {
     expect(response.headers.get("www-authenticate")).toContain('error="invalid_token"');
   });
 
+  it("refuses platform keys, which have no MCP access", async () => {
+    const { generatePlatformKey } = await import("../../../../../packages/domain/src/server/publicApi/platformKeys");
+    const { resolveApiKey } = await import("../../../../../packages/domain/src/server/publicApi/apiKeys");
+    const { key, entry } = generatePlatformKey({ name: "AlloPlace CLI", partner: "alloplace", ownerEmail: "ops@alloplace.example", access: "all" });
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([entry]));
+    try {
+      // The real resolver: a platform key never matches the per-business key format, so no database lookup happens.
+      const realHandler = createLobbyStackMcpHttpHandler({ resolveKey: async (value) => await resolveApiKey({ db: {} } as never, value), touchKey: async () => undefined, rateLimit, operations });
+      const response = await realHandler(post({ authorization: `Bearer ${key}` }));
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toContain('error="invalid_token"');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("rejects a key whose scopes cover no tool", async () => {
     const response = await handler(post({ authorization: `Bearer ${keyWith(["webhooks:manage"])}` }));
     expect(response.status).toBe(403);

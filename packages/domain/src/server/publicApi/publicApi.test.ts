@@ -41,6 +41,12 @@ describe("API keys", () => {
     expect(() => normalizeScopes([])).toThrow(/at least one/);
     expect(() => normalizeScopes(["calls:write"])).toThrow(/Unknown scopes/);
   });
+
+  it("keeps platform-only scopes off per-business keys", () => {
+    expect(() => normalizeScopes(["business:read", "businesses:create"])).toThrow(/Only platform keys can hold businesses:create/);
+    expect(() => normalizeScopes(["users:create"])).toThrow(/Only platform keys/);
+    expect(normalizeScopes(["phone_numbers:manage", "knowledge:read"])).toEqual(["knowledge:read", "phone_numbers:manage"]);
+  });
 });
 
 describe("cursor pagination", () => {

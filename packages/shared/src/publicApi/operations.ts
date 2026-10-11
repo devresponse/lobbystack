@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, type ApiKeyScope } from "./constants";
+import { BUSINESS_HEADER, PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, businessApiKeyScopes, webhookEventTypes, type ApiKeyScope, type BusinessApiKeyScope } from "./constants";
 import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
@@ -40,6 +40,12 @@ export type ApiOperation = {
   tag: string;
   /** null: any valid key may call it. */
   scope: ApiKeyScope | null;
+  /**
+   * Every operation acts on one business: a per-business key's own, or the one
+   * a platform key names in the LobbyStack-Business header. optional: a
+   * platform key may leave the header out.
+   */
+  business?: "optional";
   params?: Param[];
   list?: boolean;
   idempotent?: boolean;
@@ -59,7 +65,7 @@ const pageParams: Param[] = [
  * scope the docs list is the scope the server enforces.
  */
 export const apiOperations = {
-  getMe: { method: "GET", path: "/me", tag: "Business", summary: "Check an API key", description: "Returns the key and its business. Any valid key can call it, whatever its scopes, so integrations use it to test a connection.", scope: null, response: "Me", status: 200 },
+  getMe: { method: "GET", path: "/me", tag: "Business", summary: "Check an API key", description: "Returns the key and its business. Any valid key can call it, whatever its scopes, so integrations use it to test a connection. A platform key can call it without the LobbyStack-Business header.", scope: null, business: "optional", response: "Me", status: 200 },
   getBusiness: { method: "GET", path: "/business", tag: "Business", summary: "Get the business", scope: "business:read", response: "Business", status: 200 },
   updateBusiness: { method: "PATCH", path: "/business", tag: "Business", summary: "Update the business", description: "Updates basic fields and opening hours. Sending hours replaces the whole week.", scope: "business:write", request: "BusinessUpdate", response: "Business", status: 200 },
   listServices: { method: "GET", path: "/services", tag: "Business", summary: "List services", description: "Lists the active services customers can book.", scope: "business:read", list: true, response: "Service", status: 200 },
@@ -88,6 +94,15 @@ export const apiOperations = {
 } as const satisfies Record<string, ApiOperation>;
 
 export type ApiOperationId = keyof typeof apiOperations;
+
+/** Scopes at least one v1 operation requires. */
+export const apiScopesInUse: readonly ApiKeyScope[] = apiKeyScopes.filter((scope) => (Object.values(apiOperations) as ApiOperation[]).some((operation) => operation.scope === scope));
+
+/**
+ * The scopes Settings > API keys offers: per-business scopes that at least
+ * one endpoint uses, so a new scope shows up there with its first endpoint.
+ */
+export const offeredApiKeyScopes: readonly BusinessApiKeyScope[] = businessApiKeyScopes.filter((scope) => apiScopesInUse.includes(scope));
 
 const componentSchemas: Record<string, z.ZodType> = {
   Error: apiErrorSchema,
@@ -153,7 +168,15 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     const body = operation.list
       ? { type: "object", required: ["data", "next_cursor", "has_more"], properties: { data, next_cursor: { type: ["string", "null"], description: "Pass as cursor to get the next page. Null on the last page." }, has_more: { type: "boolean" } } }
       : { type: "object", required: ["data"], properties: { data } };
-    const params = [...(operation.params ?? []), ...(operation.idempotent ? [{ name: "Idempotency-Key", in: "header", description: "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.", schema: { type: "string", maxLength: 255 } } satisfies Param] : [])];
+    const businessParam: Param = {
+      name: BUSINESS_HEADER,
+      in: "header",
+      description: operation.business === "optional"
+        ? "The business a platform key acts on. Optional here: without it, business is null. A per-business key never needs it."
+        : "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+      schema: { type: "string", format: "uuid" },
+    };
+    const params = [...(operation.params ?? []), businessParam, ...(operation.idempotent ? [{ name: "Idempotency-Key", in: "header", description: "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.", schema: { type: "string", maxLength: 255 } } satisfies Param] : [])];
     paths[operation.path] ??= {};
     paths[operation.path]![operation.method.toLowerCase()] = {
       operationId,
@@ -166,10 +189,10 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
       ...(operation.request ? { requestBody: { required: true, content: { "application/json": { schema: ref(operation.request) } } } } : {}),
       responses: {
         [String(operation.status)]: { description: operation.status === 201 ? "Created" : operation.status === 202 ? "Accepted" : "OK", content: { "application/json": { schema: body } } },
-        400: errorResponse("The request is invalid (invalid_request)."),
+        400: errorResponse(operation.business === "optional" ? "The request is invalid (invalid_request)." : "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required)."),
         401: errorResponse("The API key is missing, invalid, or revoked (unauthorized)."),
-        ...(operation.scope ? { 403: errorResponse(`The API key lacks the ${operation.scope} scope (insufficient_scope).`) } : {}),
-        ...(operation.path.includes("{") ? { 404: errorResponse("Not found (not_found).") } : {}),
+        403: errorResponse(["Refused.", ...(operation.scope ? [`insufficient_scope: the key lacks the ${operation.scope} scope.`] : []), `forbidden: a per-business key named another business in ${BUSINESS_HEADER}.`, "key_owner_inactive: a platform key's owner_email has no verified LobbyStack account."].join(" ")),
+        404: errorResponse(operation.path.includes("{") ? "Not found (not_found), including a business a platform key cannot act on." : "A platform key named a business it cannot act on (not_found)."),
         ...(operation.method !== "GET" ? { 409: errorResponse("The request conflicts with the current state.") } : {}),
         429: { ...errorResponse("Too many requests (rate_limited). Wait for the Retry-After header's number of seconds."), headers: { "Retry-After": { schema: { type: "integer" }, description: "Seconds to wait." } } },
       },
@@ -193,7 +216,7 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     info: {
       title: "LobbyStack API",
       version: PUBLIC_API_VERSION,
-      description: `Read calls, contacts, appointments and messages, book appointments, and subscribe to webhooks. Authenticate with an API key in the Authorization header. Each key allows ${PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE} requests per minute by default.`,
+      description: `Read calls, contacts, appointments and messages, book appointments, and subscribe to webhooks. Authenticate with an API key in the Authorization header. A platform key also names the business it acts on in the ${BUSINESS_HEADER} header. Each key allows ${PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE} requests per minute by default.`,
     },
     servers: [{ url: input.serverUrl }],
     security: [{ bearerAuth: [] }],
@@ -201,7 +224,7 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     paths,
     webhooks,
     components: {
-      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", description: `An API key from Settings > API keys. Scopes: ${apiKeyScopes.join(", ")}.` } },
+      securitySchemes: { bearerAuth: { type: "http", scheme: "bearer", description: `An API key from Settings > API keys (lsk_...), which acts on its own business, or a platform key from the PLATFORM_API_KEYS setting (lsp_...), which onboards and manages businesses. Scopes: ${apiKeyScopes.join(", ")}. Only platform keys can hold businesses:create and users:create.` } },
       schemas,
     },
   };

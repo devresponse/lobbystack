@@ -3,7 +3,7 @@
   "info": {
     "title": "LobbyStack API",
     "version": "v1",
-    "description": "Read calls, contacts, appointments and messages, book appointments, and subscribe to webhooks. Authenticate with an API key in the Authorization header. Each key allows 120 requests per minute by default."
+    "description": "Read calls, contacts, appointments and messages, book appointments, and subscribe to webhooks. Authenticate with an API key in the Authorization header. A platform key also names the business it acts on in the LobbyStack-Business header. Each key allows 120 requests per minute by default."
   },
   "servers": [
     {
@@ -43,13 +43,24 @@
       "get": {
         "operationId": "getMe",
         "summary": "Check an API key",
-        "description": "Returns the key and its business. Any valid key can call it, whatever its scopes, so integrations use it to test a connection.",
+        "description": "Returns the key and its business. Any valid key can call it, whatever its scopes, so integrations use it to test a connection. A platform key can call it without the LobbyStack-Business header.",
         "tags": [
           "Business"
         ],
         "security": [
           {
             "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Optional here: without it, business is null. A per-business key never needs it.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -83,6 +94,26 @@
           },
           "401": {
             "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -125,6 +156,17 @@
           }
         ],
         "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -145,7 +187,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -165,7 +207,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the business:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -207,6 +259,17 @@
           }
         ],
         "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -237,7 +300,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -257,7 +320,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the business:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -311,6 +384,17 @@
           }
         ],
         "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -346,7 +430,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -366,7 +450,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the business:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -410,6 +504,17 @@
           }
         ],
         "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -445,7 +550,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -465,7 +570,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the business:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -545,6 +660,15 @@
               "type": "string",
               "format": "date-time"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -582,7 +706,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -602,7 +726,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the calls:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -656,6 +790,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -678,7 +821,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -698,7 +841,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the calls:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -708,7 +851,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -795,6 +938,15 @@
               "type": "string",
               "maxLength": 200
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -832,7 +984,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -852,7 +1004,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the contacts:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -896,6 +1058,15 @@
         "x-required-scope": "contacts:write",
         "parameters": [
           {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
@@ -935,7 +1106,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -955,7 +1126,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the contacts:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1018,6 +1199,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1040,7 +1230,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1060,7 +1250,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the contacts:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1070,7 +1260,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1121,6 +1311,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -1153,7 +1352,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1173,7 +1372,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the contacts:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1183,7 +1382,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1294,6 +1493,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1331,7 +1539,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1351,7 +1559,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1395,6 +1613,15 @@
         "x-required-scope": "appointments:write",
         "parameters": [
           {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
@@ -1434,7 +1661,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1454,7 +1681,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1546,6 +1783,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1583,7 +1829,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1603,7 +1849,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1656,6 +1912,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1678,7 +1943,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1698,7 +1963,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1708,7 +1973,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1762,6 +2027,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -1784,7 +2058,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1804,7 +2078,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1814,7 +2088,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1878,6 +2152,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -1910,7 +2193,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -1930,7 +2213,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the appointments:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1940,7 +2223,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2024,6 +2307,15 @@
                 "done"
               ]
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2061,7 +2353,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2081,7 +2373,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the messages:read scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the messages:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2127,6 +2429,15 @@
         "x-required-scope": "knowledge:write",
         "parameters": [
           {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
             "name": "Idempotency-Key",
             "in": "header",
             "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
@@ -2166,7 +2477,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2186,7 +2497,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the knowledge:write scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2239,6 +2560,17 @@
           }
         ],
         "x-required-scope": "webhooks:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "OK",
@@ -2274,7 +2606,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2294,7 +2626,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2336,6 +2678,17 @@
           }
         ],
         "x-required-scope": "webhooks:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2366,7 +2719,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2386,7 +2739,17 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2449,6 +2812,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2471,7 +2843,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2491,7 +2863,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2501,7 +2873,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2553,6 +2925,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "requestBody": {
@@ -2585,7 +2966,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2605,7 +2986,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2615,7 +2996,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2676,6 +3057,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2698,7 +3088,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2718,7 +3108,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2728,7 +3118,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2792,6 +3182,15 @@
               "type": "string",
               "format": "uuid"
             }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         ],
         "responses": {
@@ -2814,7 +3213,7 @@
             }
           },
           "400": {
-            "description": "The request is invalid (invalid_request).",
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2834,7 +3233,7 @@
             }
           },
           "403": {
-            "description": "The API key lacks the webhooks:manage scope (insufficient_scope).",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2844,7 +3243,7 @@
             }
           },
           "404": {
-            "description": "Not found (not_found).",
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3242,7 +3641,7 @@
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "An API key from Settings > API keys. Scopes: business:read, business:write, calls:read, contacts:read, contacts:write, appointments:read, appointments:write, messages:read, knowledge:write, webhooks:manage."
+        "description": "An API key from Settings > API keys (lsk_...), which acts on its own business, or a platform key from the PLATFORM_API_KEYS setting (lsp_...), which onboards and manages businesses. Scopes: business:read, business:write, calls:read, contacts:read, contacts:write, appointments:read, appointments:write, messages:read, knowledge:write, webhooks:manage, knowledge:read, billing:manage, phone_numbers:manage, team:manage, businesses:create, users:create. Only platform keys can hold businesses:create and users:create."
       }
     },
     "schemas": {
@@ -3269,7 +3668,9 @@
                   "rate_limited",
                   "rate_limit_unavailable",
                   "method_not_allowed",
-                  "internal_error"
+                  "internal_error",
+                  "business_required",
+                  "key_owner_inactive"
                 ]
               },
               "message": {
@@ -3323,7 +3724,7 @@
               },
               "prefix": {
                 "type": "string",
-                "description": "The visible start of the key, for example lsk_1a2b3c4d."
+                "description": "The visible start of the key, for example lsk_1a2b3c4d, or lsp_1a2b3c4d for a platform key."
               },
               "scopes": {
                 "type": "array",
@@ -3339,7 +3740,13 @@
                     "appointments:write",
                     "messages:read",
                     "knowledge:write",
-                    "webhooks:manage"
+                    "webhooks:manage",
+                    "knowledge:read",
+                    "billing:manage",
+                    "phone_numbers:manage",
+                    "team:manage",
+                    "businesses:create",
+                    "users:create"
                   ]
                 }
               },
@@ -3359,20 +3766,51 @@
             "additionalProperties": false
           },
           "business": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Stable identifier (UUID)."
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The business the key acts on. Always set for a per-business key. For a platform key, the business in the LobbyStack-Business header, or null when the request has none."
+          },
+          "platform": {
+            "description": "Present only for a platform key.",
             "type": "object",
             "properties": {
-              "id": {
+              "partner": {
                 "type": "string",
-                "format": "uuid",
-                "description": "Stable identifier (UUID)."
+                "description": "Who the platform key belongs to, as set in PLATFORM_API_KEYS."
               },
-              "name": {
-                "type": "string"
+              "access": {
+                "type": "string",
+                "enum": [
+                  "partner",
+                  "all"
+                ],
+                "description": "all: the key can act on every business. partner: only on businesses its partner onboarded."
               }
             },
             "required": [
-              "id",
-              "name"
+              "partner",
+              "access"
             ],
             "additionalProperties": false
           }
@@ -3382,7 +3820,7 @@
           "business"
         ],
         "additionalProperties": false,
-        "description": "The API key making the request and the business it belongs to."
+        "description": "The API key making the request and the business it acts on."
       },
       "Business": {
         "type": "object",

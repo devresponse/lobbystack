@@ -31,6 +31,7 @@
     "prospect-demo:set-prompts": "tsx --tsconfig scripts/tsconfig.json scripts/prospect-demo.ts set-prompts",
     "prospect-demo:publish": "tsx --tsconfig scripts/tsconfig.json scripts/prospect-demo.ts publish",
     "prospect-demo:revoke": "tsx --tsconfig scripts/tsconfig.json scripts/prospect-demo.ts revoke",
+    "platform-key:create": "tsx --tsconfig scripts/tsconfig.json scripts/platform-key.ts",
     "build": "pnpm -r build && pnpm admin:prerender-check && node scripts/copy-widget-embed.mjs",
     "admin:prerender-check": "tsx --tsconfig scripts/tsconfig.json scripts/verify-admin-prerender.ts",
     "typecheck": "pnpm -r typecheck && pnpm typecheck:scripts",

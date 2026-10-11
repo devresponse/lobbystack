@@ -38,6 +38,8 @@ export const apiErrorCodes = [
   "rate_limit_unavailable",
   "method_not_allowed",
   "internal_error",
+  "business_required",
+  "key_owner_inactive",
 ] as const;
 export type ApiErrorCode = (typeof apiErrorCodes)[number];
 
@@ -59,12 +61,16 @@ export const apiMeSchema = z.object({
   api_key: z.object({
     id,
     name: z.string(),
-    prefix: z.string().describe("The visible start of the key, for example lsk_1a2b3c4d."),
+    prefix: z.string().describe("The visible start of the key, for example lsk_1a2b3c4d, or lsp_1a2b3c4d for a platform key."),
     scopes: z.array(z.enum(apiKeyScopes)),
     created_at: timestamp,
   }),
-  business: z.object({ id, name: z.string() }),
-}).describe("The API key making the request and the business it belongs to.");
+  business: z.object({ id, name: z.string() }).nullable().describe("The business the key acts on. Always set for a per-business key. For a platform key, the business in the LobbyStack-Business header, or null when the request has none."),
+  platform: z.object({
+    partner: z.string().describe("Who the platform key belongs to, as set in PLATFORM_API_KEYS."),
+    access: z.enum(["partner", "all"]).describe("all: the key can act on every business. partner: only on businesses its partner onboarded."),
+  }).optional().describe("Present only for a platform key."),
+}).describe("The API key making the request and the business it acts on.");
 
 export const apiBusinessSchema = z.object({
   id,

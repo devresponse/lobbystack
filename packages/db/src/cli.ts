@@ -154,6 +154,10 @@ async function main(): Promise<void> {
             ('lobbystack_app', 'prospect_demos', 'SELECT'),
             ('lobbystack_worker', 'prospect_demos', 'SELECT'),
             ('lobbystack_readonly', 'prospect_demos', 'SELECT')
+            ,('lobbystack_worker', 'platform_partner_businesses', 'SELECT')
+            ,('lobbystack_worker', 'platform_partner_businesses', 'INSERT')
+            ,('lobbystack_worker', 'platform_partner_businesses', 'DELETE')
+            ,('lobbystack_app', 'platform_partner_businesses', 'SELECT')
             ,('lobbystack_finance_export', 'businesses', 'SELECT')
             ,('lobbystack_finance_export', 'billing_accounts', 'SELECT')
             ,('lobbystack_finance_export', 'calls', 'SELECT')
@@ -200,6 +204,7 @@ async function main(): Promise<void> {
             ('lobbystack_worker', 'app.resolve_business_by_widget_key(text)'),
             ('lobbystack_app', 'app.resolve_api_key(text)'),
             ('lobbystack_worker', 'app.resolve_api_key(text)'),
+            ('lobbystack_worker', 'app.resolve_platform_key_owner(text)'),
             ('lobbystack_worker', 'app.resolve_oauth_access_token(text)'),
             ('lobbystack_worker', 'app.touch_oauth_grant(text)'),
             ('lobbystack_app', 'app.list_oauth_grantors(uuid)'),

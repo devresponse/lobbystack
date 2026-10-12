@@ -464,6 +464,21 @@ export const apiBusinessSummarySchema = z.object({
   created_at: timestamp,
 }).describe("A business the platform key's partner onboarded.");
 
+export const apiUserCreateSchema = z.strictObject({
+  email: teamEmail.describe("The person's email. An address that already has a LobbyStack account is a 409."),
+  name: z.string().trim().min(1).max(200).optional(),
+  locale: z.enum(interfaceLocales).optional().describe("The language of the account's emails and dashboard: en, fr, es or sr. Defaults to en."),
+});
+
+export const apiUserSchema = z.object({
+  id,
+  email: z.string(),
+  name: z.string().nullable(),
+  locale: z.string().describe("The language of the account's emails and dashboard."),
+  email_verified: z.boolean().describe("false until the person sets a password with the code the setup email leads to, which proves the address is theirs. Only a verified account can claim a business."),
+  created_at: timestamp,
+}).describe("A LobbyStack account.");
+
 export const apiServiceSchema = z.object({
   id,
   name: z.string(),
@@ -759,6 +774,8 @@ export type ApiBusiness = z.infer<typeof apiBusinessSchema>;
 export type ApiBusinessUpdate = z.infer<typeof apiBusinessUpdateSchema>;
 export type ApiBusinessCreate = z.infer<typeof apiBusinessCreateSchema>;
 export type ApiBusinessSummary = z.infer<typeof apiBusinessSummarySchema>;
+export type ApiUserCreate = z.infer<typeof apiUserCreateSchema>;
+export type ApiUser = z.infer<typeof apiUserSchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
 export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;

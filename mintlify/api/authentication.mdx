@@ -85,7 +85,7 @@ Whoever runs the deployment makes platform keys; the dashboard has no page for t
 - The partner the key belongs to.
 - The verified LobbyStack account the key acts as (`owner_email`), which owns the businesses the key creates.
 - Whether the key reaches every business (`"access": "all"`, an operator's key; pass `--access all`) or, by default, only the ones its partner onboarded.
-- Its scopes. A new key gets every scope unless you name some. `POST /businesses` needs `businesses:create`, which only platform keys can hold, and `GET /businesses` needs `business:read`.
+- Its scopes. A new key gets every scope unless you name some. `POST /businesses` needs `businesses:create` and `POST /users` needs `users:create`, which only platform keys can hold, and `GET /businesses` needs `business:read`.
 
 `POST /businesses` creates a business, and `GET /businesses` lists the ones the partner onboarded. Every other request names its business in the `LobbyStack-Business` header:
 
@@ -98,6 +98,8 @@ curl https://app.lobbystack.com/api/v1/services \
 Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access.
 
 `POST /team/claim-link` hands a business to its owner. Once they accept, a partner's key no longer reaches it, and an operator's key still does. Either way, `GET /businesses` stops listing it.
+
+Only a verified LobbyStack account can accept a claim link. For an owner who has none, `POST /users` makes an account with their email and emails them a link to set a password, which also verifies the email. Then send the claim link.
 
 ## Revoke a key
 

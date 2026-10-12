@@ -7,3 +7,4 @@ export * from "./resources";
 export * from "./webhookNetwork";
 export * from "./webhookTransport";
 export * from "./webhooks";
+export * from "./users";

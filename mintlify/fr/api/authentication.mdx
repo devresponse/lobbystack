@@ -85,7 +85,7 @@ C'est l'exploitant du déploiement qui crée les clés de plateforme ; le tablea
 - Le partenaire à qui appartient la clé.
 - Le compte LobbyStack vérifié au nom duquel la clé agit (`owner_email`), qui possède les entreprises qu'elle crée.
 - Si la clé atteint toutes les entreprises (`"access": "all"`, la clé d'un exploitant ; passez `--access all`) ou, par défaut, seulement celles que son partenaire a intégrées.
-- Ses portées. Une nouvelle clé reçoit toutes les portées, sauf si vous en nommez certaines. `POST /businesses` nécessite `businesses:create`, que seules les clés de plateforme peuvent détenir, et `GET /businesses` nécessite `business:read`.
+- Ses portées. Une nouvelle clé reçoit toutes les portées, sauf si vous en nommez certaines. `POST /businesses` nécessite `businesses:create` et `POST /users` nécessite `users:create`, que seules les clés de plateforme peuvent détenir, et `GET /businesses` nécessite `business:read`.
 
 `POST /businesses` crée une entreprise, et `GET /businesses` liste celles que le partenaire a intégrées. Toutes les autres requêtes nomment leur entreprise dans l'en-tête `LobbyStack-Business` :
 
@@ -98,6 +98,8 @@ curl https://app.lobbystack.com/api/v1/services \
 Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé.
 
 `POST /team/claim-link` remet une entreprise à son propriétaire. Une fois qu'il l'accepte, la clé d'un partenaire n'atteint plus l'entreprise, alors que celle d'un exploitant l'atteint toujours. Dans les deux cas, `GET /businesses` ne la liste plus.
+
+Seul un compte LobbyStack vérifié peut accepter un lien de réclamation. Pour un propriétaire qui n'en a pas, `POST /users` crée un compte avec son adresse et lui envoie un lien pour choisir un mot de passe, ce qui vérifie aussi l'adresse. Envoyez ensuite le lien de réclamation.
 
 ## Révoquer une clé
 

@@ -85,7 +85,7 @@ Quien opera el despliegue crea las claves de plataforma; el panel no tiene una p
 - El socio al que pertenece la clave.
 - La cuenta verificada de LobbyStack en cuyo nombre actúa la clave (`owner_email`), que es la propietaria de los negocios que crea.
 - Si la clave llega a todos los negocios (`"access": "all"`, la clave de un operador; pase `--access all`) o, de forma predeterminada, solo a los que incorporó su socio.
-- Sus permisos. Una clave nueva recibe todos los permisos, salvo que usted indique algunos. `POST /businesses` necesita `businesses:create`, que solo pueden tener las claves de plataforma, y `GET /businesses` necesita `business:read`.
+- Sus permisos. Una clave nueva recibe todos los permisos, salvo que usted indique algunos. `POST /businesses` necesita `businesses:create` y `POST /users` necesita `users:create`, que solo pueden tener las claves de plataforma, y `GET /businesses` necesita `business:read`.
 
 `POST /businesses` crea un negocio, y `GET /businesses` lista los que incorporó el socio. Las demás solicitudes indican su negocio en el encabezado `LobbyStack-Business`:
 
@@ -98,6 +98,8 @@ curl https://app.lobbystack.com/api/v1/services \
 Sin ese encabezado, la solicitud devuelve `400` con el código `business_required`. Un negocio al que la clave no puede llegar devuelve `404`. `GET /me` funciona sin el encabezado y muestra el socio y el acceso de la clave.
 
 `POST /team/claim-link` entrega un negocio a su propietario. Cuando lo acepta, la clave de un socio ya no llega al negocio, mientras que la de un operador sigue llegando. En ambos casos, `GET /businesses` deja de listarlo.
+
+Solo una cuenta de LobbyStack verificada puede aceptar un enlace de reclamación. Para un propietario que no tiene una, `POST /users` crea una cuenta con su dirección y le envía un enlace para elegir una contraseña, lo que también verifica la dirección. Después, envíe el enlace de reclamación.
 
 ## Revoque una clave
 

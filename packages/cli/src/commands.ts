@@ -142,6 +142,9 @@ export const groups: Record<string, Group> = Object.fromEntries([
     update: { operation: "updateBusiness" },
     use: businessUse,
   }),
+  group("users", "Make LobbyStack accounts for owners who have none yet, with a platform key.", {
+    create: { operation: "createUser", args: ["email"] },
+  }),
   group("hours", "See and change the opening hours.", { get: hoursGet, set: hoursSet }),
   group("receptionist", "See and change how the receptionist greets, answers and books.", {
     get: { operation: "getReceptionist" },

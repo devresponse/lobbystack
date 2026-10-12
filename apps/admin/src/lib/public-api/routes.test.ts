@@ -22,6 +22,8 @@ const domain = vi.hoisted(() => ({
   getMeForApi: vi.fn(),
   getPlatformMeForApi: vi.fn(),
   createBusinessForApi: vi.fn(),
+  createUserForApi: vi.fn(),
+  enqueueAccountSetupEmail: vi.fn(async () => undefined),
   listBusinessesForApi: vi.fn(),
   updateBusinessForApi: vi.fn(),
   createKnowledgeSourceForApi: vi.fn(),
@@ -99,6 +101,8 @@ vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider
 vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: numbers.searchLimit }));
 const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => true) }));
 vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
+vi.mock("../auth", () => ({ getAuthDatabase: () => ({ db: "auth" }) }));
+vi.mock("../databases", () => ({ getDatabase: (role: string) => ({ db: role }) }));
 const invites = vi.hoisted(() => ({ limit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })) }));
 vi.mock("../fixed-window-limit", () => ({ enforceFixedWindow: invites.limit, fixedWindowLimit: (...args: unknown[]) => args }));
 vi.mock("@lobbystack/domain", async () => ({
@@ -1118,6 +1122,36 @@ describe("platform keys on v1 routes", () => {
     const response = await v1.getMe(platformCall("/me"));
     expect(response.status).toBe(401);
     expect(domain.getPlatformMeForApi).not.toHaveBeenCalled();
+  });
+
+  describe("POST /users", () => {
+    const user = { id: "5b1c6f0e-2a4d-8b3c-9d1e-2f3a4b5c6d7e", email: "owner@acmeplumbing.ca", name: "Ana Owner", locale: "fr", email_verified: false, created_at: "2026-10-12T09:00:00.000Z" };
+    const post = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": "owner-acme" }) => v1.createUser(platformCall("/users", { method: "POST", headers, body: JSON.stringify(body) }));
+
+    it("makes the account with the auth role and queues its setup email", async () => {
+      domain.createUserForApi.mockResolvedValue({ user, replayed: false });
+      const response = await post({ email: " owner@acmeplumbing.ca ", name: "Ana Owner", locale: "fr" });
+      expect(response.status).toBe(201);
+      expect(await response.json()).toEqual({ data: user });
+      expect(domain.createUserForApi).toHaveBeenCalledWith("auth", { key: expect.objectContaining({ kind: "platform_key", platformKeyId: entry.id }), idempotencyKey: "owner-acme", body: { email: "owner@acmeplumbing.ca", name: "Ana Owner", locale: "fr" } });
+      expect(domain.enqueueAccountSetupEmail).toHaveBeenCalledWith("lobbystack_app", { user, appBaseUrl: expect.any(String) });
+    });
+
+    it("marks a replay, and queues the email again only while the account is unverified", async () => {
+      domain.createUserForApi.mockResolvedValue({ user: { ...user, email_verified: true }, replayed: true });
+      const response = await post({ email: "owner@acmeplumbing.ca" });
+      expect(response.status).toBe(201);
+      expect(response.headers.get("idempotent-replayed")).toBe("true");
+      expect(domain.enqueueAccountSetupEmail).not.toHaveBeenCalled();
+    });
+
+    it("refuses a request without an Idempotency-Key, an unknown field, or a per-business key", async () => {
+      expect((await post({ email: "owner@acmeplumbing.ca" }, {})).status).toBe(400);
+      expect((await post({ email: "owner@acmeplumbing.ca", password: "secret" })).status).toBe(400);
+      const businessKey = await v1.createUser(call("/users", { method: "POST", headers: { "Idempotency-Key": "owner-acme" }, body: JSON.stringify({ email: "owner@acmeplumbing.ca" }) }));
+      expect(businessKey.status).toBe(403);
+      expect(domain.createUserForApi).not.toHaveBeenCalled();
+    });
   });
 
   describe("POST /businesses", () => {

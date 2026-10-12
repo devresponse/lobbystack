@@ -6,6 +6,8 @@ import {
   completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
+  createUserForApi,
+  enqueueAccountSetupEmail,
   createCalendarConnectLinkForApi,
   createCheckoutForApi,
   createClaimLinkForApi,
@@ -94,6 +96,7 @@ import {
   apiAppointmentRescheduleSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
+  apiUserCreateSchema,
   apiCalendarConnectionUpdateSchema,
   apiCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
@@ -130,6 +133,8 @@ import {
   type WebhookEventType,
 } from "@lobbystack/shared";
 
+import { getAuthDatabase } from "../auth";
+import { getDatabase } from "../databases";
 import { createDomainContext } from "../domain-context";
 import { enforceFixedWindow, fixedWindowLimit } from "../fixed-window-limit";
 import { calendarSigningConfigured, createCalendarConnectLink } from "../google-calendar-oauth";
@@ -256,6 +261,15 @@ export const v1 = {
     const body = await readApiBody(request, apiBusinessCreateSchema);
     const result = await createBusinessForApi(context, { key: credential, actingUserId, idempotencyKey, requestHash: idempotencyRequestHash(body), body });
     return { body: data(result.business), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
+  }),
+  createUser: (request: Request) => handleApiRequest(request, "createUser", async ({ credential, idempotencyKey }) => {
+    if (!idempotencyKey) throw new Error("POST /users requires an Idempotency-Key.");
+    const body = await readApiBody(request, apiUserCreateSchema);
+    // Only the auth role may write accounts.
+    const result = await createUserForApi(getAuthDatabase().db, { key: credential, idempotencyKey, body });
+    // A retry queues the setup email the first try may have missed; the account's dedupe key sends it once.
+    if (!result.user.email_verified) await enqueueAccountSetupEmail(getDatabase("lobbystack_app").db, { user: result.user, appBaseUrl: appOrigin(request) });
+    return { body: data(result.user), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
   }),
   listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
   getBilling: (request: Request) => handleApiRequest(request, "getBilling", async ({ context, caller }) => ({ body: data(await getBillingForApi(context, caller)) })),

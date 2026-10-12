@@ -94,6 +94,8 @@
       "revoke": "Révoquer",
       "revokeConfirm": "Révoquer cette clé de widget ? Les intégrations existantes cesseront de fonctionner.",
       "save": "Enregistrer",
+      "saved": "Enregistré",
+      "bubbleHint": "La bulle de discussion sur votre site prend sa couleur et sa position dans l'extrait d'intégration. Après les avoir modifiées ici, mettez à jour data-color et data-position dans l'extrait.",
       "lastUsed": "Dernière utilisation {{date}}"
     }
   },

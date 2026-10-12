@@ -13,13 +13,15 @@ describe("original settings route shell", () => {
     route.pathname = "/settings/usage";
     render(<SettingsShell><p>Settings content</p></SettingsShell>);
     expect(screen.getByRole("heading", { name: "header.title" })).toBeTruthy();
-    const paths = ["usage", "plan", "team", "phone-number", "appearance", "notifications", "api-keys", "connected-apps"];
+    const paths = ["usage", "plan", "team", "phone-number", "appearance", "notifications", "api-keys", "connected-apps", "widget"];
     expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(paths.map(path => `/settings/${path}`));
     expect(screen.getByRole("link", { name: "sections.usage" }).className).toContain("bg-muted");
   });
-  it("adds the widget navigation only inside the intentionally excluded widget view", () => {
+  it("highlights the widget tab inside the widget view", () => {
     route.pathname = "/settings/widget";
     render(<SettingsShell><p>Widget content</p></SettingsShell>);
-    expect(screen.getByRole("link", { name: "sections.widget" }).getAttribute("href")).toBe("/settings/widget");
+    const widget = screen.getByRole("link", { name: "sections.widget" });
+    expect(widget.getAttribute("href")).toBe("/settings/widget");
+    expect(widget.className).toContain("bg-muted");
   });
 });

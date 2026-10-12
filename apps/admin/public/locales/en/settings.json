@@ -94,6 +94,8 @@
       "revoke": "Revoke",
       "revokeConfirm": "Revoke this widget key? Existing embeds will stop working.",
       "save": "Save",
+      "saved": "Saved",
+      "bubbleHint": "The chat bubble on your site takes its color and position from the embed snippet. After changing them here, update data-color and data-position in the snippet.",
       "lastUsed": "Last used {{date}}"
     }
   },

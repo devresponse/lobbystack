@@ -22,6 +22,8 @@
     "voiceConnecting": "Connecting…",
     "voiceRequestingMic": "Allow microphone access to continue.",
     "voiceEnd": "End call",
+    "voiceTranscript": "Voice call",
+    "voiceLive": "Live",
     "leaveDetails": "Leave your details",
     "leadFormSubmitted": "Thanks! We'll reach out soon."
   },

@@ -111,6 +111,25 @@ it("retries the session request on a later open after a failure", async () => {
   expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "retry-session" }), "https://admin.example.test");
 });
 
+it("asks before the page unloads only while the chat has a voice call or its captions", async () => {
+  const { frame } = await start(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  const unload = () => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  const leaveWarning = (enabled: boolean, source: MessageEventSource | null = frame.contentWindow) => {
+    window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source, data: { type: "leave-warning", enabled } }));
+  };
+  expect(unload()).toBe(false);
+  leaveWarning(true, window);
+  expect(unload()).toBe(false);
+  leaveWarning(true);
+  expect(unload()).toBe(true);
+  leaveWarning(false);
+  expect(unload()).toBe(false);
+});
+
 it("labels the loader in the host page language", () => {
   expect(loaderLabels("es-MX").open).toBe("Abrir el chat");
   expect(loaderLabels("sr-Latn-RS").title).toBe("Pišite nam");

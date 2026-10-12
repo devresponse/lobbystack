@@ -22,6 +22,8 @@
     "voiceConnecting": "Conectando…",
     "voiceRequestingMic": "Permita el acceso al micrófono para continuar.",
     "voiceEnd": "Colgar",
+    "voiceTranscript": "Llamada de voz",
+    "voiceLive": "En vivo",
     "leaveDetails": "Déjenos sus datos",
     "leadFormSubmitted": "¡Gracias! Nos pondremos en contacto pronto."
   },

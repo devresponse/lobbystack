@@ -235,6 +235,24 @@ export function initWidget(): boolean {
 
   frame.addEventListener("load", onFrameReady);
 
+  // Leaving or reloading the page hangs up a voice call in the chat, and its
+  // captions aren't saved, so while the chat says it has one the browser asks
+  // first. Browsers word the prompt themselves. The listener only exists while
+  // it's needed, since a standing beforeunload listener can keep the page out
+  // of the browser's back/forward cache.
+  let warnOnLeave = false;
+  const confirmLeave = (event: BeforeUnloadEvent) => {
+    event.preventDefault();
+    // Chrome and Edge before 119 ignore preventDefault and need returnValue.
+    event.returnValue = true;
+  };
+  function setWarnOnLeave(next: boolean): void {
+    if (next === warnOnLeave) return;
+    warnOnLeave = next;
+    if (next) window.addEventListener("beforeunload", confirmLeave);
+    else window.removeEventListener("beforeunload", confirmLeave);
+  }
+
   // Issue the session on first open instead of at script load. This keeps the
   // widget dormant (and avoids an unauthenticated request) until a visitor
   // engages, while a failed request can retry on a later open.
@@ -248,6 +266,7 @@ export function initWidget(): boolean {
       holder.style.height = `${Math.max(0, Math.min(data.height, Math.floor(window.innerHeight - 120)))}px`;
     }
     if (data.type === "close") setOpen(false);
+    if (data.type === "leave-warning") setWarnOnLeave(data.enabled === true);
   });
 
   window.LobbyStack = {

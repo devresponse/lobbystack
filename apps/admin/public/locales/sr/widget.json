@@ -22,6 +22,8 @@
     "voiceConnecting": "Povezivanje…",
     "voiceRequestingMic": "Dozvolite pristup mikrofonu da biste nastavili.",
     "voiceEnd": "Završi poziv",
+    "voiceTranscript": "Glasovni poziv",
+    "voiceLive": "Uživo",
     "leaveDetails": "Ostavite svoje podatke",
     "leadFormSubmitted": "Hvala! Uskoro ćemo Vam se javiti."
   },

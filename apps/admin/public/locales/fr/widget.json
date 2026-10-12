@@ -22,6 +22,8 @@
     "voiceConnecting": "Connexion…",
     "voiceRequestingMic": "Autorisez l'accès au micro pour continuer.",
     "voiceEnd": "Terminer l'appel",
+    "voiceTranscript": "Appel vocal",
+    "voiceLive": "En direct",
     "leaveDetails": "Laissez vos coordonnées",
     "leadFormSubmitted": "Merci ! Nous vous contacterons bientôt."
   },

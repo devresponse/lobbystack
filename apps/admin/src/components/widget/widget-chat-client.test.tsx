@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string) => key }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
+import { useWebVoiceCall } from "@lobbystack/web-voice";
 import { WidgetChatClient } from "./widget-chat-client";
 
 const visitorId = "5ef3b4ef-720d-47a7-8320-e6f4707a64e2";
@@ -42,6 +43,36 @@ describe("widget chat after a team member takes over", () => {
       vi.advanceTimersByTime(45_000);
     });
     expect(await screen.findByText(teamReply.content)).toBeTruthy();
+    client.clear();
+  });
+});
+
+describe("widget voice captions", () => {
+  it("shows both sides of a live voice call in the chat thread", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({
+      status: "connected",
+      errorKey: null,
+      remoteAudioRef: { current: null },
+      transcript: [
+        { speaker: "assistant", text: "Hi, how can I help?" },
+        { speaker: "caller", text: " Are you open Sunday?" },
+      ],
+      startCall: vi.fn(),
+      endCall: vi.fn(),
+    } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
+    expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
+    expect(screen.getByText("chat.voiceLive")).toBeTruthy();
     client.clear();
   });
 });

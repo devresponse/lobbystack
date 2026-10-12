@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { renderSafeMarkdown } from "@/lib/widget-markdown";
-import { useWebVoiceCall } from "@lobbystack/web-voice";
+import { useWebVoiceCall, type WebVoiceTranscriptTurn } from "@lobbystack/web-voice";
 
 type WidgetConfigPayload = {
   key: string;
@@ -31,6 +31,9 @@ type WidgetConfigPayload = {
   businessSlug?: string;
   voiceEnabled?: boolean;
 };
+
+/** What the voice button shares with the chat: whether a call is live, and its captions. */
+type VoiceCaptions = { live: boolean; turns: WebVoiceTranscriptTurn[] };
 
 type WidgetMessageMetadata = { automationState?: "ai_active" | "human_handoff" };
 type WidgetMessage = UIMessage<WidgetMessageMetadata>;
@@ -89,6 +92,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   const [lead, setLead] = useState({ name: "", email: "", phone: "" });
   const [leadSubmitting, setLeadSubmitting] = useState(false);
   const [handoff, setHandoff] = useState(false);
+  const [voiceCaptions, setVoiceCaptions] = useState<VoiceCaptions>({ live: false, turns: [] });
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
@@ -234,7 +238,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
 
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
-  }, [messages, status]);
+  }, [messages, status, voiceCaptions]);
 
   useEffect(() => {
     const reportHeight = () => {
@@ -314,7 +318,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
           <p className="truncate text-sm font-semibold">{title}</p>
           {configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
         </div>
-        {voiceEnabled ? <VoiceButton className="ml-auto" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} /> : null}
+        {voiceEnabled ? <VoiceButton className="ml-auto" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
       </header>
 
       {handoff ? <div className="border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800">{t("chat.handoffBanner")}</div> : null}
@@ -337,6 +341,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
           </div>
         ))}
         {sending && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
+        {voiceCaptions.live || voiceCaptions.turns.length > 0 ? <VoiceTranscript captions={voiceCaptions} color={color} t={t} /> : null}
         {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
       </div>
 
@@ -364,11 +369,11 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   );
 }
 
-function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentOrigin, onStatusChange }: { className?: string; businessSlug: string; visitorId: string; sessionToken: string | null; parentOrigin: string | null; onStatusChange: (message: string | null) => void }) {
+function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentOrigin, onStatusChange, onCaptions }: { className?: string; businessSlug: string; visitorId: string; sessionToken: string | null; parentOrigin: string | null; onStatusChange: (message: string | null) => void; onCaptions: (captions: VoiceCaptions) => void }) {
   const { t } = useTranslation("widget");
   // The iframe runs on the app's own origin, so the call starts here with the
   // widget session token and the embedding page's origin as proof of access.
-  const { status, errorKey, remoteAudioRef, startCall, endCall } = useWebVoiceCall({
+  const { status, errorKey, remoteAudioRef, transcript, startCall, endCall } = useWebVoiceCall({
     businessSlug,
     widgetId: "lobbystack-widget",
     getStartPayload: async () => ({ visitorId }),
@@ -380,6 +385,10 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
     if (status === "error") onStatusChange(errorKey === "connectionDropped" ? "chat.voiceEnded" : "chat.voiceUnavailable");
   }, [errorKey, onStatusChange, status]);
 
+  useEffect(() => {
+    onCaptions({ live: status === "connected", turns: transcript });
+  }, [onCaptions, status, transcript]);
+
   const active = status === "requesting_microphone" || status === "connecting" || status === "connected";
   return (
     <>
@@ -390,6 +399,33 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
         <Button variant="outline" size="icon" className={cn("ml-auto", className)} aria-label={t("chat.voiceButton")} onClick={() => void startCall()} disabled={status === "ending"}><Phone /></Button>
       )}
     </>
+  );
+}
+
+// Live captions of a widget voice call, in the chat thread. They stay after the
+// call ends, until the next call starts, and aren't kept on reload.
+function VoiceTranscript({ captions, color, t }: { captions: VoiceCaptions; color: string; t: (key: string) => string }) {
+  const turns = captions.turns.filter((turn) => turn.text.trim());
+  return (
+    <section className="flex flex-col gap-3" aria-label={t("chat.voiceTranscript")}>
+      <p className="flex items-center justify-center gap-2 text-xs font-medium text-zinc-500">
+        {t("chat.voiceTranscript")}
+        {captions.live ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-red-600">
+            <span className="size-1.5 animate-pulse rounded-full bg-red-500" aria-hidden="true" />
+            {t("chat.voiceLive")}
+          </span>
+        ) : null}
+      </p>
+      {captions.live && turns.length === 0 ? <p className="text-center text-xs text-zinc-400">{t("chat.voiceConnected")}</p> : null}
+      {turns.map((turn, index) => (
+        <div key={index} className={cn("flex", turn.speaker === "caller" ? "justify-end" : "justify-start")}>
+          <p className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm text-white" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color } : undefined}>
+            {turn.text.trim()}
+          </p>
+        </div>
+      ))}
+    </section>
   );
 }
 

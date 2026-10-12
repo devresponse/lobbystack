@@ -7,6 +7,7 @@ import { useLayoutEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import {
+  AppWindow,
   Blocks,
   BookText,
   ChartColumnIncreasing,
@@ -59,6 +60,10 @@ type NavigationItem = {
   label: string;
   icon: LucideIcon;
 };
+
+function isWidgetSettingsPath(pathname: string): boolean {
+  return pathname === "/settings/widget" || pathname.startsWith("/settings/widget/");
+}
 
 function getSidebarDefaultOpen(): boolean {
   if (typeof document === "undefined") return true;
@@ -124,7 +129,7 @@ function ReplacementSidebar({ user }: Pick<DashboardShellProps, "user">) {
   const general: NavigationItem[] = [
     { label: t("nav:items.home"), href: "/", icon: House },
     { label: t("nav:items.calls"), href: "/calls", icon: Phone },
-    ...(["/messages", "/settings/widget"].some(route => pathname === route || pathname.startsWith(`${route}/`)) ? [{ label: t("nav:items.messages"), href: "/messages", icon: MessageSquareMore }] : []),
+    { label: t("nav:items.messages"), href: "/messages", icon: MessageSquareMore },
     { label: t("nav:items.contacts"), href: "/contacts", icon: Users },
   ];
   const receptionist: NavigationItem[] = [
@@ -136,8 +141,8 @@ function ReplacementSidebar({ user }: Pick<DashboardShellProps, "user">) {
   const other: NavigationItem[] = [
     { label: t("nav:items.analytics"), href: "/analytics", icon: ChartColumnIncreasing },
     { label: t("settings:sections.integrations"), href: "/integrations", icon: Blocks },
+    { label: t("settings:sections.widget"), href: "/settings/widget", icon: AppWindow },
     { label: t("nav:items.settings"), href: "/settings/usage", icon: Settings },
-    ...(["/messages", "/settings/widget"].some(route => pathname === route || pathname.startsWith(`${route}/`)) ? [{ label: t("settings:sections.widget"), href: "/settings/widget", icon: Settings }] : []),
   ];
 
   return (
@@ -170,8 +175,10 @@ function NavigationGroup({ items, pathname, title }: { items: NavigationItem[]; 
           const active = item.href === "/"
             ? pathname === "/"
             : item.href === "/settings/usage"
-              ? pathname.startsWith("/settings")
-              : pathname === item.href;
+              ? pathname.startsWith("/settings") && !isWidgetSettingsPath(pathname)
+              : item.href === "/settings/widget"
+                ? isWidgetSettingsPath(pathname)
+                : pathname === item.href;
           return (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton

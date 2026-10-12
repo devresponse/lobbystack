@@ -35,8 +35,22 @@ describe("original shared navigation", () => {
     setup();
     // The sidebar header carries the workspace switcher alone; no brand mark.
     expect(screen.queryByRole("img", { name: "LobbyStack" })).toBeNull();
-    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/contacts", "/agent", "/agent/knowledge", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/usage"]);
+    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/messages", "/contacts", "/agent", "/agent/knowledge", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/widget", "/settings/usage"]);
     expect(document.getElementById("dashboard-main-content")?.tabIndex).toBe(-1);
+  });
+  it("links the website widget and messages from every page", () => {
+    setup();
+    expect(screen.getByRole("link", { name: "settings:sections.widget" }).getAttribute("href")).toBe("/settings/widget");
+    expect(screen.getByRole("link", { name: "nav:items.messages" }).getAttribute("href")).toBe("/messages");
+  });
+  it("marks only the widget item active on the widget settings page", () => {
+    const view = setup();
+    view.navigate("/settings/widget");
+    expect(screen.getByRole("link", { name: "settings:sections.widget" }).hasAttribute("data-active")).toBe(true);
+    expect(screen.getByRole("link", { name: "nav:items.settings" }).hasAttribute("data-active")).toBe(false);
+    view.navigate("/settings/team");
+    expect(screen.getByRole("link", { name: "nav:items.settings" }).hasAttribute("data-active")).toBe(true);
+    expect(screen.getByRole("link", { name: "settings:sections.widget" }).hasAttribute("data-active")).toBe(false);
   });
   it("keeps integrations visible for viewers", () => {
     setup("viewer"); expect(screen.getByRole("link", { name: "settings:sections.integrations" })).toBeTruthy();

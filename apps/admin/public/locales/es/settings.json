@@ -94,6 +94,8 @@
       "revoke": "Revocar",
       "revokeConfirm": "¿Revocar esta clave de widget? Las inserciones existentes dejarán de funcionar.",
       "save": "Guardar",
+      "saved": "Guardado",
+      "bubbleHint": "La burbuja de chat de su sitio toma el color y la posición del fragmento de inserción. Después de cambiarlos aquí, actualice data-color y data-position en el fragmento.",
       "lastUsed": "Último uso: {{date}}"
     }
   },

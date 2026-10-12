@@ -94,6 +94,8 @@
       "revoke": "Opozovi",
       "revokeConfirm": "Opozvati ovaj ključ vidžeta? Postojeće ugradnje će prestati da rade.",
       "save": "Sačuvaj",
+      "saved": "Sačuvano",
+      "bubbleHint": "Balončić za čet na vašem sajtu uzima boju i položaj iz isečka za ugradnju. Kada ih ovde promenite, ažurirajte data-color i data-position u isečku.",
       "lastUsed": "Poslednja upotreba: {{date}}"
     }
   },

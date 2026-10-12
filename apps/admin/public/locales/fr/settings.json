@@ -899,6 +899,7 @@
       "knowledge_read": "Lire les entrées de connaissances, les FAQ, les sites web et les fichiers",
       "knowledge_write": "Ajouter, modifier et supprimer des entrées de connaissances, des FAQ, des sites web et des fichiers",
       "billing_manage": "Voir le forfait, fixer le plafond de dépenses et lancer des paiements",
+      "phone_numbers_manage": "Rechercher, acheter, remplacer et libérer des numéros de téléphone",
       "webhooks_manage": "Créer et supprimer des points de terminaison webhook"
     }
   },

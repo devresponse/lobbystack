@@ -203,6 +203,55 @@ export const apiManagedPlanCreateSchema = z.strictObject({
   plan: z.literal("enterprise"),
 });
 
+const phoneNumberCountries = ["US", "CA", "GB", "AU"] as const;
+const phoneNumberKinds = ["local", "toll_free"] as const;
+
+export const apiPhoneNumberSchema = z.object({
+  id,
+  phone_number: e164,
+  status: z.enum(["active", "releasing", "released"]).describe("active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: LobbyStack is giving the number back to the carrier. released: the business no longer has it."),
+  release_scheduled_at: nullableTimestamp.describe("When LobbyStack releases an active number: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A phone number the business has or had.");
+
+export const apiPhoneNumberSearchSchema = z.strictObject({
+  country: z.enum(phoneNumberCountries).optional().describe("Defaults to the country of the business's time zone, or US."),
+  kind: z.enum(phoneNumberKinds).optional().describe("Defaults to local."),
+  area_code: z.string().trim().regex(/^\d{1,6}$/, "Use digits only.").optional(),
+  city: z.string().trim().min(1).max(100).optional(),
+  region: z.string().trim().min(1).max(64).optional().describe("A state or province, such as ON or NY."),
+  postal_code: z.string().trim().min(1).max(16).optional(),
+  limit: z.number().int().min(1).max(20).optional().describe("How many offers to return. Defaults to 10."),
+  replaces: z.uuid().optional().describe("The id of an active number to replace. The offers are then replacements, which only POST /phone-numbers/{phone_number_id}/replace accepts."),
+});
+
+export const apiPhoneNumberOfferSchema = z.object({
+  phone_number: e164,
+  country: z.enum(phoneNumberCountries),
+  kind: z.enum(phoneNumberKinds),
+  locality: z.string().nullable().describe("The city or area the number belongs to, when the carrier says."),
+  region: z.string().nullable(),
+  capabilities: z.object({ voice: z.boolean(), sms: z.boolean() }),
+  offer_token: z.string().describe("Claim the number with this before expires_at. Only this business, and the account the key acts as, can use it."),
+  expires_at: timestamp,
+}).describe("A number the business can claim.");
+
+export const apiPhoneNumberClaimCreateSchema = z.strictObject({
+  offer_token: z.string().min(1).max(4_000).describe("An offer_token from POST /phone-numbers/search."),
+});
+
+export const apiPhoneNumberClaimSchema = z.object({
+  id,
+  status: z.enum(["pending", "provisioning", "claimed", "failed"]).describe("pending: waiting to be bought. provisioning: LobbyStack is buying the number and connecting it to the receptionist. claimed: the number is live and phone_number_id names it. failed: error says why; search again for another number."),
+  phone_number: e164.describe("The number being claimed."),
+  phone_number_id: z.uuid().nullable().describe("The number's id once the claim is claimed."),
+  replaces_phone_number_id: z.uuid().nullable().describe("For a replacement, the number it replaces. That number keeps working until 30 days after the new one goes live."),
+  error: z.string().nullable(),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A request to buy a phone number for the business.");
+
 export const apiBusinessCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
   timezone: z.string().trim().min(1).max(80).describe("IANA time zone, for example America/Toronto."),
@@ -528,6 +577,11 @@ export type ApiBilling = z.infer<typeof apiBillingSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiPhoneNumber = z.infer<typeof apiPhoneNumberSchema>;
+export type ApiPhoneNumberSearch = z.infer<typeof apiPhoneNumberSearchSchema>;
+export type ApiPhoneNumberOffer = z.infer<typeof apiPhoneNumberOfferSchema>;
+export type ApiPhoneNumberClaimCreate = z.infer<typeof apiPhoneNumberClaimCreateSchema>;
+export type ApiPhoneNumberClaim = z.infer<typeof apiPhoneNumberClaimSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
 export type ApiServiceCreate = z.infer<typeof apiServiceCreateSchema>;
 export type ApiServiceUpdate = z.infer<typeof apiServiceUpdateSchema>;

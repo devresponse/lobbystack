@@ -206,6 +206,7 @@ async function main(): Promise<void> {
             ('lobbystack_worker', 'app.resolve_api_key(text)'),
             ('lobbystack_worker', 'app.resolve_platform_key_owner(text)'),
             ('lobbystack_worker', 'app.list_platform_partner_businesses(text, timestamptz, uuid, integer)'),
+            ('lobbystack_worker', 'app.reserve_api_number_claim(uuid, uuid, text, uuid, text, jsonb, text, text, boolean)'),
             ('lobbystack_worker', 'app.resolve_oauth_access_token(text)'),
             ('lobbystack_worker', 'app.touch_oauth_grant(text)'),
             ('lobbystack_app', 'app.list_oauth_grantors(uuid)'),

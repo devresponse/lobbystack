@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
 vi.mock("../error-reporting", () => ({ reportServerError: vi.fn(async () => undefined) }));
+// The phone number routes' server-only modules, which these tests never reach.
+vi.mock("../twilio-provider", () => ({ getTwilioProvider: vi.fn(), getNumberClaimTokenSecret: vi.fn() }));
+vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: vi.fn() }));
 
 const idempotency = vi.hoisted(() => ({ store: new Map<string, { hash: string; response: { status: number; body: unknown } }>() }));
 // REST routes call these directly; the MCP tools get fakes through dependencies.

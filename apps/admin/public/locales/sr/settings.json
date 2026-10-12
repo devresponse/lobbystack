@@ -899,6 +899,7 @@
       "knowledge_read": "Čitanje unosa u znanje, čestih pitanja, veb-sajtova i fajlova",
       "knowledge_write": "Dodavanje, izmena i brisanje unosa u znanje, čestih pitanja, veb-sajtova i fajlova",
       "billing_manage": "Pregled plana, podešavanje limita potrošnje i pokretanje plaćanja",
+      "phone_numbers_manage": "Pretraga, kupovina, zamena i oslobađanje brojeva telefona",
       "webhooks_manage": "Kreiranje i brisanje webhook endpointa"
     }
   },

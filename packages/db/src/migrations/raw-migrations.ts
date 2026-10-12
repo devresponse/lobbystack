@@ -97,6 +97,7 @@ export const SCHEMA_MIGRATIONS = [
   "0091_calls_open_live_started_index.sql",
   "0092_platform_api_keys.sql",
   "0093_platform_business_listing.sql",
+  "0094_api_number_claims.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

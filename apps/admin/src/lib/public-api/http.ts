@@ -100,7 +100,7 @@ function rateLimitHeaders(decision: RateLimitDecision): Record<string, string> {
 }
 
 function errorResponse(error: unknown, operationId: string): NextResponse {
-  if (error instanceof PublicApiError) return apiError(error.status, error.code, error.message, error.details ? { details: error.details } : {});
+  if (error instanceof PublicApiError) return apiError(error.status, error.code, error.message, { ...(error.details ? { details: error.details } : {}), ...(error.headers ? { headers: error.headers } : {}) });
   const status = typeof error === "object" && error !== null && "status" in error && typeof error.status === "number" ? error.status : 500;
   if (status === 403) return apiError(403, "forbidden", "This API key cannot do that.");
   if (status === 404) return apiError(404, "not_found", error instanceof Error ? error.message : "Not found.");
@@ -225,8 +225,11 @@ export async function handleApiRequest<Id extends ApiOperationId>(request: Reque
       return NextResponse.json(result.body, { status, headers: { ...headers, ...result.headers } });
     }
 
-    // Hash the body so a reused key with a different request is rejected.
+    // Hash the body so a reused key with a different request is rejected. An
+    // operation on one resource, such as POST /phone-numbers/{phone_number_id}/replace,
+    // hashes its path too, so the same key sent to another resource is rejected.
     const raw = await request.clone().text();
+    const requestPath = operation.path.includes("{") ? new URL(request.url).pathname.toLowerCase() : undefined;
     // Records are unique per scope and key. A platform key acts on many
     // businesses, so its scope names the business too; otherwise one key's
     // Idempotency-Key on business A would block the same value on business B.
@@ -235,7 +238,7 @@ export async function handleApiRequest<Id extends ApiOperationId>(request: Reque
     const idempotentCaller = caller;
     // The handler runs on the same transaction that stores the key, so the
     // mutation and its stored response commit together or not at all.
-    const outcome = await (dependencies.runIdempotent ?? runIdempotent)(context, scope, idempotencyRequestHash(raw), async (transactional) => {
+    const outcome = await (dependencies.runIdempotent ?? runIdempotent)(context, scope, idempotencyRequestHash(raw, requestPath), async (transactional) => {
       const result = await run({ request, caller: idempotentCaller, context: transactional, credential });
       // Stored as JSON text so a replay matches the first response byte for byte.
       return { status: result.status ?? operation.status, body: JSON.stringify(result.body) };

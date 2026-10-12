@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { agentRules, appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -20,6 +20,8 @@ import {
   type ApiKnowledgeEntry,
   type ApiKnowledgeSource,
   type ApiMessage,
+  type ApiPhoneNumber,
+  type ApiPhoneNumberClaim,
   type ApiReceptionist,
   type ApiRule,
   type ApiService,
@@ -507,6 +509,50 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
     afterCursor(knowledgeDocuments.createdAt, knowledgeDocuments.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeDocuments.createdAt, knowledgeDocuments.id)).limit(limit + 1);
   return toPage(rows, limit, serializeKnowledgeSource, (row) => ({ at: row.createdAt, id: row.id }));
+}
+
+// Phone numbers. The API names the worker's reclaim steps for what they do:
+// releasing the number and having released it. Older rows say released.
+// Other statuses stay out.
+
+const phoneNumberStatuses: Record<string, ApiPhoneNumber["status"]> = { active: "active", reclaiming: "releasing", reclaimed: "released", released: "released" };
+const phoneNumberColumns = { id: phoneNumbers.id, e164: phoneNumbers.e164, status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt, createdAt: phoneNumbers.createdAt, updatedAt: phoneNumbers.updatedAt };
+type PhoneNumberRow = { id: string; e164: string; status: string; reclaimScheduledAt: Date | null; createdAt: Date; updatedAt: Date };
+
+export function serializePhoneNumber(row: PhoneNumberRow): ApiPhoneNumber {
+  return { id: row.id, phone_number: row.e164, status: phoneNumberStatuses[row.status] ?? "released", release_scheduled_at: isoOrNull(row.reclaimScheduledAt), created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+export async function listPhoneNumberResources(tx: DatabaseTransaction, businessId: string): Promise<ApiPhoneNumber[]> {
+  const rows = await tx.select(phoneNumberColumns).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), inArray(phoneNumbers.status, Object.keys(phoneNumberStatuses)))).orderBy(desc(phoneNumbers.createdAt), desc(phoneNumbers.id));
+  return rows.map(serializePhoneNumber);
+}
+
+export async function loadPhoneNumberResource(tx: DatabaseTransaction, businessId: string, phoneNumberId: string): Promise<ApiPhoneNumber | null> {
+  const [row] = await tx.select(phoneNumberColumns).from(phoneNumbers).where(and(eq(phoneNumbers.id, phoneNumberId), eq(phoneNumbers.businessId, businessId), inArray(phoneNumbers.status, Object.keys(phoneNumberStatuses)))).limit(1);
+  return row ? serializePhoneNumber(row) : null;
+}
+
+type PhoneNumberClaimRow = { id: string; status: string; requestedE164: string; phoneNumberId: string | null; replacingPhoneNumberId: string | null; lastError: string | null; createdAt: Date; updatedAt: Date };
+
+// A claim the worker gave up on, or that expired, reads as failed.
+export function serializePhoneNumberClaim(row: PhoneNumberClaimRow): ApiPhoneNumberClaim {
+  const status = row.status === "reserved" ? "pending" : row.status === "provisioning" || row.status === "claimed" ? row.status : "failed";
+  return {
+    id: row.id,
+    status,
+    phone_number: row.requestedE164,
+    phone_number_id: row.phoneNumberId,
+    replaces_phone_number_id: row.replacingPhoneNumberId,
+    error: status === "failed" ? row.lastError ?? "The number could not be claimed." : null,
+    created_at: iso(row.createdAt),
+    updated_at: iso(row.updatedAt),
+  };
+}
+
+export async function loadPhoneNumberClaimResource(tx: DatabaseTransaction, businessId: string, claimId: string): Promise<ApiPhoneNumberClaim | null> {
+  const [row] = await tx.select({ id: onboardingNumberClaimEvents.id, status: onboardingNumberClaimEvents.status, requestedE164: onboardingNumberClaimEvents.requestedE164, phoneNumberId: onboardingNumberClaimEvents.phoneNumberId, replacingPhoneNumberId: onboardingNumberClaimEvents.replacingPhoneNumberId, lastError: onboardingNumberClaimEvents.lastError, createdAt: onboardingNumberClaimEvents.createdAt, updatedAt: onboardingNumberClaimEvents.updatedAt }).from(onboardingNumberClaimEvents).where(and(eq(onboardingNumberClaimEvents.id, claimId), eq(onboardingNumberClaimEvents.businessId, businessId))).limit(1);
+  return row ? serializePhoneNumberClaim(row) : null;
 }
 
 // Receptionist

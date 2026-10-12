@@ -1,9 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   RULES_MAX,
@@ -38,6 +38,10 @@ import {
   type ApiKnowledgeUploadCreate,
   type ApiMe,
   type ApiMessage,
+  type ApiPhoneNumber,
+  type ApiPhoneNumberClaim,
+  type ApiPhoneNumberOffer,
+  type ApiPhoneNumberSearch,
   type ApiReceptionist,
   type ApiReceptionistUpdate,
   type ApiRule,
@@ -54,10 +58,12 @@ import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
+import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction } from "../compliance";
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
+import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
@@ -77,6 +83,7 @@ import {
   listKnowledgeEntryResources,
   listKnowledgeSourceResources,
   listMessageResources,
+  listPhoneNumberResources,
   listServiceResources,
   listStaffResources,
   loadAppointmentResource,
@@ -86,6 +93,8 @@ import {
   loadServiceResource,
   loadKnowledgeEntryResource,
   loadKnowledgeSourceResource,
+  loadPhoneNumberClaimResource,
+  loadPhoneNumberResource,
   pageSize,
   serializeContact,
   serializeKnowledgeEntry,
@@ -365,6 +374,163 @@ export async function endManagedPlanForApi(context: DomainContext, caller: ApiCa
     if (!await endManagedPlanInTransaction(tx, { businessId: caller.businessId })) throw notFound("Managed plan");
     await audit(tx, caller, { eventType: "api.billing.managed_plan_ended", entityType: "billing_account", entityId: caller.businessId });
     return await loadBilling(tx, caller.businessId);
+  });
+}
+
+// Phone numbers. A claim buys a real number, so the dashboard's plan,
+// replacement and quota rules apply; only the onboarding stage order doesn't.
+
+const numberSelectionRefusals: Record<NumberSelectionRefusal, (message: string) => PublicApiError> = {
+  stage: (message) => conflict(message),
+  replacement_used: () => conflict("This business already used its one number replacement."),
+  active_number_required: () => conflict("This business needs an active number before it can pick a replacement."),
+  paid_plan_required: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  unsupported_country: () => invalidRequest("Phone numbers are available in US, CA, GB and AU.", [{ path: "country", message: "Use US, CA, GB or AU." }]),
+};
+
+// What app.reserve_api_number_claim raises, as the API answers it.
+const numberClaimRefusals: Record<string, () => PublicApiError> = {
+  number_claim_in_progress: () => conflict("Another number claim for this business is still in progress. Wait for it to finish, then try again."),
+  business_number_exists: () => conflict("This business already has a phone number. Release it first, or replace it with POST /phone-numbers/{phone_number_id}/replace."),
+  dedicated_number_requires_paid_plan: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  // The database knows only that a window is full, so Retry-After is its length, at most a day.
+  number_claim_rate_limited: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed in the last hour. Try again later.", undefined, { "Retry-After": "3600" }),
+  daily_claim_quota_reached: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed today. Try again tomorrow.", undefined, { "Retry-After": "86400" }),
+  monthly_claim_quota_reached: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed in the last 30 days. Try again later.", undefined, { "Retry-After": "86400" }),
+  replacement_already_used: () => conflict("This business already used its one number replacement."),
+  replacement_already_reserved: () => conflict("A replacement for this business's number is already in progress."),
+  active_number_required: () => conflict("Only an active number that isn't scheduled for release can be replaced."),
+  replacement_number_must_differ: () => invalidRequest("Pick a number other than the one being replaced.", [{ path: "offer_token", message: "The same number as the one being replaced." }]),
+};
+
+// The carrier's errors never reach the caller as their own: its 401 or 403
+// would read as the caller's key. A filter it refuses, or a kind of number a
+// country doesn't have, is a 400; anything else is our failure.
+function numberSearchError(error: unknown): unknown {
+  const status = typeof error === "object" && error !== null && "status" in error ? (error as { status: unknown }).status : undefined;
+  if (status === 400) return invalidRequest("The carrier can't search with these filters. Check area_code, city, region and postal_code.");
+  if (status === 404) return invalidRequest("The carrier has no numbers of this kind in this country.", [{ path: "kind", message: "Not offered in this country." }]);
+  return new Error("The carrier's number search failed.", { cause: error });
+}
+
+function numberClaimError(error: unknown): unknown {
+  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
+  for (const value of [cause, error]) {
+    const message = typeof value === "object" && value !== null && "message" in value ? (value as { message: unknown }).message : undefined;
+    if (typeof message === "string" && Object.hasOwn(numberClaimRefusals, message)) return numberClaimRefusals[message]!();
+  }
+  return error;
+}
+
+/** Refuses a number id that isn't this business's, or a number that can't be replaced. */
+async function requireReplaceableNumber(tx: DatabaseTransaction, businessId: string, phoneNumberId: string): Promise<void> {
+  const [number] = await tx.select({ status: phoneNumbers.status, reclaimScheduledAt: phoneNumbers.reclaimScheduledAt }).from(phoneNumbers).where(and(eq(phoneNumbers.id, phoneNumberId), eq(phoneNumbers.businessId, businessId))).limit(1);
+  if (!number) throw notFound("Phone number");
+  if (number.status !== "active" || number.reclaimScheduledAt) throw conflict("Only an active number that isn't scheduled for release can be replaced.");
+}
+
+export async function listPhoneNumbersForApi(context: DomainContext, caller: ApiCaller): Promise<ApiPhoneNumber[]> {
+  return await inBusiness(context, caller, async (tx) => await listPhoneNumberResources(tx, caller.businessId));
+}
+
+/**
+ * Finds numbers the business can claim, as offers signed for the account the
+ * caller acts as. `replaces` asks for replacement offers instead.
+ * `beforeSearch` runs once the business may search, just before the carrier
+ * is asked, so a refused search uses up no search limit.
+ */
+export async function searchPhoneNumbersForApi(context: DomainContext, caller: ApiCaller, input: ApiPhoneNumberSearch, options: { userId: string; provider: NumberInventoryProvider; claimTokenSecret: string; beforeSearch?: (() => Promise<void>) | undefined }): Promise<ApiPhoneNumberOffer[]> {
+  const purpose = input.replaces ? "replacement" : "onboarding";
+  const selection: Partial<NumberSelection> = {
+    ...(input.country ? { countryCode: input.country } : {}),
+    ...(input.kind ? { kind: input.kind } : {}),
+    ...(input.area_code ? { areaCode: input.area_code } : {}),
+    ...(input.city ? { city: input.city } : {}),
+    ...(input.region ? { regionCode: input.region } : {}),
+    ...(input.postal_code ? { postalCode: input.postal_code } : {}),
+  };
+  const market = await inBusiness(context, caller, async (tx) => {
+    if (input.replaces) await requireReplaceableNumber(tx, caller.businessId, input.replaces);
+    try {
+      return await numberMarketInTransaction(tx, { businessId: caller.businessId, purpose, selection, enforceStage: false });
+    } catch (error) {
+      if (error instanceof NumberSelectionError) throw numberSelectionRefusals[error.reason](error.message);
+      throw error;
+    }
+  });
+  await options.beforeSearch?.();
+  let offers: Awaited<ReturnType<typeof offerBusinessNumbers>>;
+  try {
+    offers = await offerBusinessNumbers({ businessId: caller.businessId, userId: options.userId, purpose, market, selection, limit: input.limit, claimTokenSecret: options.claimTokenSecret }, options.provider);
+  } catch (error) {
+    throw numberSearchError(error);
+  }
+  return offers.map((offer) => ({
+    phone_number: offer.phoneE164,
+    country: offer.countryCode as ApiPhoneNumberOffer["country"],
+    kind: offer.kind,
+    locality: offer.locality ?? null,
+    region: offer.region ?? null,
+    capabilities: { voice: offer.capabilities.voice, sms: offer.capabilities.sms },
+    offer_token: offer.claimToken,
+    expires_at: offer.expiresAt.toISOString(),
+  }));
+}
+
+/**
+ * Claims an offer, or with `replaces` a replacement offer for that number, and
+ * queues its purchase. The offer must be for this business and the account
+ * the caller acts as.
+ */
+export async function claimPhoneNumberForApi(context: DomainContext, caller: ApiCaller, input: { offerToken: string; replaces?: string | undefined }, options: { userId: string; claimTokenSecret: string }): Promise<ApiPhoneNumberClaim> {
+  const purpose = input.replaces ? "replacement" : "onboarding";
+  let offer: NumberOffer;
+  try {
+    offer = readNumberOffer(input.offerToken, options.claimTokenSecret);
+  } catch {
+    throw invalidRequest("The offer is invalid or has expired. Search again.", [{ path: "offer_token", message: "Invalid or expired." }]);
+  }
+  if (offer.businessId !== caller.businessId || offer.userId !== options.userId) throw invalidRequest("This offer was made for another business or account. Search again with this key.", [{ path: "offer_token", message: "Made for another business or account." }]);
+  if (offer.purpose !== purpose) throw invalidRequest(purpose === "replacement" ? "This offer is for a new number. Claim it with POST /phone-numbers/claims." : "This offer is for a replacement. Claim it with POST /phone-numbers/{phone_number_id}/replace.", [{ path: "offer_token", message: "The wrong kind of offer." }]);
+  return await inBusiness(context, caller, async (tx) => {
+    if (input.replaces) await requireReplaceableNumber(tx, caller.businessId, input.replaces);
+    let claimId: string;
+    try {
+      claimId = await reserveApiNumberClaimInTransaction(tx, { businessId: caller.businessId, userId: options.userId, offer, claimToken: input.offerToken, replacingPhoneNumberId: input.replaces ?? null, quotaByBusiness: caller.platformKeyId !== undefined, requestKey: randomUUID() });
+    } catch (error) {
+      throw numberClaimError(error);
+    }
+    await audit(tx, caller, { eventType: "api.phone_number.claim_started", entityType: "number_claim", entityId: claimId, payload: { phoneNumber: offer.e164, ...(input.replaces ? { replacesPhoneNumberId: input.replaces } : {}) } });
+    const claim = await loadPhoneNumberClaimResource(tx, caller.businessId, claimId);
+    if (!claim) throw new Error("The number claim could not be read back.");
+    return claim;
+  });
+}
+
+export async function getPhoneNumberClaimForApi(context: DomainContext, caller: ApiCaller, claimId: string): Promise<ApiPhoneNumberClaim> {
+  const claim = await inBusiness(context, caller, async (tx) => {
+    await expireAbandonedNumberClaimsInTransaction(tx, caller.businessId);
+    return await loadPhoneNumberClaimResource(tx, caller.businessId, claimId);
+  });
+  if (!claim) throw notFound("Claim");
+  return claim;
+}
+
+/**
+ * Schedules the number's release now. A number already on its way out comes
+ * back as it is, and one whose replacement is still being bought is a 409.
+ */
+export async function releasePhoneNumberForApi(context: DomainContext, caller: ApiCaller, phoneNumberId: string): Promise<ApiPhoneNumber> {
+  return await inBusiness(context, caller, async (tx) => {
+    // Take the claims' lock before reading, so concurrent releases see each other.
+    await lockBusinessNumberClaims(tx, caller.businessId);
+    const number = await loadPhoneNumberResource(tx, caller.businessId, phoneNumberId);
+    if (!number) throw notFound("Phone number");
+    if (number.status !== "active" || (number.release_scheduled_at !== null && Date.parse(number.release_scheduled_at) <= Date.now())) return number;
+    const outcome = await schedulePhoneNumberReleaseInTransaction(tx, { businessId: caller.businessId, phoneNumberId });
+    if (outcome === "being_replaced") throw conflict(NUMBER_BEING_REPLACED_MESSAGE);
+    if (outcome === "scheduled") await audit(tx, caller, { eventType: "api.phone_number.release_scheduled", entityType: "phone_number", entityId: phoneNumberId, payload: { phoneNumber: number.phone_number } });
+    return (await loadPhoneNumberResource(tx, caller.businessId, phoneNumberId)) ?? number;
   });
 }
 

@@ -58,11 +58,25 @@ const domain = vi.hoisted(() => ({
   listAppointmentsForApi: vi.fn(),
   resolvePlatformKeyOwner: vi.fn(async () => "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6"),
   requirePlatformBusinessAccess: vi.fn(async () => undefined),
+  resolveActingUserId: vi.fn(async () => "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f"),
+  listPhoneNumbersForApi: vi.fn(async (): Promise<unknown[]> => []),
+  searchPhoneNumbersForApi: vi.fn(async (..._args: unknown[]): Promise<unknown[]> => []),
+  claimPhoneNumberForApi: vi.fn(),
+  getPhoneNumberClaimForApi: vi.fn(),
+  releasePhoneNumberForApi: vi.fn(),
+  // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
+  runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
+}));
+const numbers = vi.hoisted(() => ({
+  provider: { listAvailablePhoneNumbers: vi.fn() },
+  searchLimit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })),
 }));
 
 vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
 vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
+vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret" }));
+vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: numbers.searchLimit }));
 vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/errors")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
@@ -483,6 +497,100 @@ describe("billing", () => {
     expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }))).status).toBe(403);
     expect(domain.getBillingForApi).not.toHaveBeenCalled();
     expect(domain.createCheckoutForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("phone numbers", () => {
+  const actingUserId = "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f";
+  const numberId = "8c2b7f4e-1d3a-4e5b-9c6d-0e1f2a3b4c5d";
+  const claimId = "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8";
+  const offer = { phone_number: "+14165550123", country: "CA", kind: "local", locality: "Toronto", region: "ON", capabilities: { voice: true, sms: true }, offer_token: "signed-offer", expires_at: "2026-10-11T12:05:00.000Z" };
+  const claim = { id: claimId, status: "pending", phone_number: "+14165550123", phone_number_id: null, replaces_phone_number_id: null, error: null, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const search = (body: unknown) => v1.searchPhoneNumbers(call("/phone-numbers/search", { method: "POST", body: JSON.stringify(body) }));
+  const claimWith = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": "claim-1" }) => v1.createPhoneNumberClaim(call("/phone-numbers/claims", { method: "POST", headers, body: JSON.stringify(body) }));
+
+  it("searches as the account the key acts as, counting against that account's limit just before the carrier is asked", async () => {
+    // As the domain does: its checks first, then beforeSearch, then the carrier.
+    const asked = vi.fn();
+    domain.searchPhoneNumbersForApi.mockImplementation(async (...args: unknown[]) => {
+      await (args[3] as { beforeSearch?: () => Promise<void> }).beforeSearch?.();
+      asked();
+      return [offer];
+    });
+    const response = await search({ area_code: "416", limit: 5 });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: [offer], next_cursor: null, has_more: false });
+    expect(numbers.searchLimit).toHaveBeenCalledWith({ userId: actingUserId, initial: false });
+    expect(domain.searchPhoneNumbersForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { area_code: "416", limit: 5 }, { userId: actingUserId, provider: numbers.provider, claimTokenSecret: "number-claim-secret", beforeSearch: expect.any(Function) });
+
+    numbers.searchLimit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_user" });
+    const limited = await search({});
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({ error: { code: "rate_limited" } });
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect(Number(limited.headers.get("retry-after"))).toBeLessThanOrEqual(600);
+    numbers.searchLimit.mockResolvedValueOnce({ allowed: false, status: 503, reason: "rate_limit_unavailable" });
+    const unavailable = await search({});
+    expect(unavailable.status).toBe(503);
+    expect(unavailable.headers.get("retry-after")).toBe("5");
+    expect(asked).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the search before it counts against the limit", async () => {
+    for (const bad of [{ country: "FR" }, { kind: "mobile" }, { area_code: "41a" }, { limit: 0 }, { limit: 21 }, { replaces: "x" }, { areaCode: "416" }]) {
+      expect((await search(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(numbers.searchLimit).not.toHaveBeenCalled();
+    expect(domain.searchPhoneNumbersForApi).not.toHaveBeenCalled();
+  });
+
+  it("claims an offer only with an Idempotency-Key, as the account the key acts as", async () => {
+    domain.claimPhoneNumberForApi.mockResolvedValue(claim);
+    expect((await claimWith({ offer_token: "signed-offer" }, {})).status).toBe(400);
+    expect((await claimWith({ offer_token: "" })).status).toBe(400);
+    const response = await claimWith({ offer_token: "signed-offer" });
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ data: claim });
+    expect(domain.claimPhoneNumberForApi).toHaveBeenCalledTimes(1);
+    expect(domain.claimPhoneNumberForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { offerToken: "signed-offer" }, { userId: actingUserId, claimTokenSecret: "number-claim-secret" });
+  });
+
+  it("replaces a number with a replacement offer", async () => {
+    domain.claimPhoneNumberForApi.mockResolvedValue({ ...claim, replaces_phone_number_id: numberId });
+    const replace = (id: string, headers: Record<string, string> = { "Idempotency-Key": "replace-1" }) => v1.replacePhoneNumber(call(`/phone-numbers/${id}/replace`, { method: "POST", headers, body: JSON.stringify({ offer_token: "signed-offer" }) }), { params: Promise.resolve({ phone_number_id: id }) });
+    expect((await replace(numberId)).status).toBe(202);
+    expect(domain.claimPhoneNumberForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { offerToken: "signed-offer", replaces: numberId }, { userId: actingUserId, claimTokenSecret: "number-claim-secret" });
+    expect((await replace("x")).status).toBe(400);
+    expect((await replace(numberId, {})).status).toBe(400);
+    expect(domain.claimPhoneNumberForApi).toHaveBeenCalledTimes(1);
+    // The same key and body sent to another number is a different request, so it can't replay this one.
+    const otherId = "9d3c8a5f-2e4b-4f6c-8d7e-1f2a3b4c5d6e";
+    await replace(otherId);
+    const hashes = domain.runIdempotent.mock.calls.map(([, , hash]) => hash);
+    expect(hashes.at(-1)).not.toBe(hashes[0]);
+  });
+
+  it("lists numbers, reads claims and releases a number", async () => {
+    const number = { id: numberId, phone_number: "+14165550123", status: "active", release_scheduled_at: null, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+    domain.listPhoneNumbersForApi.mockResolvedValue([number]);
+    expect(await (await v1.listPhoneNumbers(call("/phone-numbers"))).json()).toEqual({ data: [number], next_cursor: null, has_more: false });
+    domain.getPhoneNumberClaimForApi.mockResolvedValue(claim);
+    expect((await v1.getPhoneNumberClaim(call(`/phone-numbers/claims/${claimId}`), { params: Promise.resolve({ claim_id: claimId }) })).status).toBe(200);
+    expect((await v1.getPhoneNumberClaim(call("/phone-numbers/claims/x"), { params: Promise.resolve({ claim_id: "x" }) })).status).toBe(400);
+    domain.releasePhoneNumberForApi.mockResolvedValue({ ...number, release_scheduled_at: "2026-10-11T12:01:00.000Z" });
+    const released = await v1.releasePhoneNumber(call(`/phone-numbers/${numberId}`, { method: "DELETE" }), { params: Promise.resolve({ phone_number_id: numberId }) });
+    expect(released.status).toBe(202);
+    expect(domain.releasePhoneNumberForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), numberId);
+  });
+
+  it("needs phone_numbers:manage", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write", "billing:manage"] });
+    expect((await search({})).status).toBe(403);
+    expect((await claimWith({ offer_token: "signed-offer" })).status).toBe(403);
+    expect((await v1.listPhoneNumbers(call("/phone-numbers"))).status).toBe(403);
+    expect(domain.searchPhoneNumbersForApi).not.toHaveBeenCalled();
+    expect(domain.claimPhoneNumberForApi).not.toHaveBeenCalled();
+    expect(domain.listPhoneNumbersForApi).not.toHaveBeenCalled();
   });
 });
 

@@ -1,13 +1,15 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { KnowledgeStorageLimitError } from "../knowledge";
+import { offerBusinessNumbers } from "../phoneNumbers";
 import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiKey, normalizeScopes } from "./apiKeys";
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
-import { apiErrorFromDomain } from "./operations";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, toPage } from "./resources";
+import { PublicApiError } from "./errors";
+import { apiErrorFromDomain, claimPhoneNumberForApi } from "./operations";
+import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -146,6 +148,50 @@ describe("v1 resource serializers match the published schemas", () => {
   });
 });
 
+describe("phone numbers", () => {
+  const now = new Date("2026-10-11T12:00:00.000Z");
+  const businessId = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f";
+  const userId = "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f";
+  const secret = "number-claim-test-secret";
+  const caller = { businessId, apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6" };
+  // These checks refuse before any query, so the database is never reached.
+  const context = { db: {} as never };
+  const provider = { listAvailablePhoneNumbers: async () => [{ phoneE164: "+14165550123", countryCode: "CA", capabilities: { sms: true, voice: true } }] };
+  const tokenFor = async (input: { businessId?: string; userId?: string; purpose?: "onboarding" | "replacement" } = {}) => (await offerBusinessNumbers({ businessId: input.businessId ?? businessId, userId: input.userId ?? userId, purpose: input.purpose ?? "onboarding", market: { countryCode: "CA", source: "selection" }, claimTokenSecret: secret }, provider))[0]!.claimToken;
+  async function refusal(offerToken: string, replaces?: string) {
+    const error = await claimPhoneNumberForApi(context, caller, { offerToken, replaces }, { userId, claimTokenSecret: secret }).then(() => null, (value: unknown) => value);
+    expect(error).toBeInstanceOf(PublicApiError);
+    return error as PublicApiError;
+  }
+
+  it("refuses an offer that is forged, for another business or account, or the wrong kind", async () => {
+    expect(await refusal("not-a-token")).toMatchObject({ status: 400, message: "The offer is invalid or has expired. Search again." });
+    expect(await refusal(await tokenFor({ businessId: "8c2b7f4e-1d3a-4e5b-9c6d-0e1f2a3b4c5d" }))).toMatchObject({ status: 400, message: expect.stringContaining("another business or account") });
+    expect(await refusal(await tokenFor({ userId: "8c2b7f4e-1d3a-4e5b-9c6d-0e1f2a3b4c5d" }))).toMatchObject({ status: 400, message: expect.stringContaining("another business or account") });
+    expect(await refusal(await tokenFor({ purpose: "replacement" }))).toMatchObject({ status: 400, message: expect.stringContaining("POST /phone-numbers/{phone_number_id}/replace") });
+    expect(await refusal(await tokenFor(), "8c2b7f4e-1d3a-4e5b-9c6d-0e1f2a3b4c5d")).toMatchObject({ status: 400, message: expect.stringContaining("POST /phone-numbers/claims") });
+  });
+
+  it("names the worker's reclaim steps for what they do", () => {
+    const row = { id: businessId, e164: "+14165550123", reclaimScheduledAt: null, createdAt: now, updatedAt: now };
+    const active = serializePhoneNumber({ ...row, status: "active" });
+    expect(apiPhoneNumberSchema.parse(active)).toEqual(active);
+    expect(serializePhoneNumber({ ...row, status: "reclaiming", reclaimScheduledAt: now })).toMatchObject({ status: "releasing", release_scheduled_at: now.toISOString() });
+    expect(serializePhoneNumber({ ...row, status: "reclaimed" }).status).toBe("released");
+  });
+
+  it("shows a claim's progress, and any claim that ended without a number as failed", () => {
+    const row = { id: businessId, requestedE164: "+14165550123", phoneNumberId: null, replacingPhoneNumberId: null, lastError: null, createdAt: now, updatedAt: now };
+    const pending = serializePhoneNumberClaim({ ...row, status: "reserved" });
+    expect(apiPhoneNumberClaimSchema.parse(pending)).toEqual(pending);
+    expect(pending).toMatchObject({ status: "pending", error: null });
+    expect(serializePhoneNumberClaim({ ...row, status: "provisioning" }).status).toBe("provisioning");
+    expect(serializePhoneNumberClaim({ ...row, status: "claimed", phoneNumberId: userId })).toMatchObject({ status: "claimed", phone_number_id: userId });
+    expect(serializePhoneNumberClaim({ ...row, status: "unavailable", lastError: "The selected number is no longer available." })).toMatchObject({ status: "failed", error: "The selected number is no longer available." });
+    expect(serializePhoneNumberClaim({ ...row, status: "failed" })).toMatchObject({ status: "failed", error: "The number could not be claimed." });
+  });
+});
+
 describe("webhook retries", () => {
   it("retries with growing delays over about a day", () => {
     const delays = Array.from({ length: WEBHOOK_MAX_ATTEMPTS }, (_, index) => webhookRetryDelaySeconds(index + 1));
@@ -156,6 +202,15 @@ describe("webhook retries", () => {
     const total = scheduled.reduce((sum, value) => sum + value, 0);
     expect(total).toBeGreaterThan(20 * 3600);
     expect(total).toBeLessThan(26 * 3600);
+  });
+});
+
+describe("idempotency request hashes", () => {
+  it("adds the path only for an operation on one resource", () => {
+    const body = "{\"offer_token\":\"signed\"}";
+    expect(idempotencyRequestHash(body, undefined)).toBe(idempotencyRequestHash(body));
+    expect(idempotencyRequestHash(body, "/api/v1/phone-numbers/a/replace")).not.toBe(idempotencyRequestHash(body, "/api/v1/phone-numbers/b/replace"));
+    expect(idempotencyRequestHash(" { \"offer_token\": \"signed\" } ", "/api/v1/phone-numbers/a/replace")).toBe(idempotencyRequestHash(body, "/api/v1/phone-numbers/a/replace"));
   });
 });
 

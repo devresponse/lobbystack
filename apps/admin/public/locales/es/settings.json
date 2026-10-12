@@ -899,6 +899,7 @@
       "knowledge_read": "Leer entradas de conocimiento, preguntas frecuentes, sitios web y archivos",
       "knowledge_write": "Agregar, editar y eliminar entradas de conocimiento, preguntas frecuentes, sitios web y archivos",
       "billing_manage": "Ver el plan, fijar el límite de gasto e iniciar pagos",
+      "phone_numbers_manage": "Buscar, comprar, reemplazar y liberar números de teléfono",
       "webhooks_manage": "Crear y eliminar endpoints de webhook"
     }
   },

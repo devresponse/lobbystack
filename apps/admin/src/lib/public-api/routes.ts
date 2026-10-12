@@ -1,6 +1,7 @@
 import {
   cancelAppointmentForApi,
   cancelKnowledgeSourceForApi,
+  claimPhoneNumberForApi,
   completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
@@ -30,6 +31,7 @@ import {
   getReceptionistForApi,
   getCallForApi,
   getCheckoutForApi,
+  getPhoneNumberClaimForApi,
   getContactForApi,
   getWebhookEndpoint,
   idempotencyRequestHash,
@@ -40,14 +42,18 @@ import {
   listKnowledgeEntriesForApi,
   listKnowledgeSourcesForApi,
   listMessagesForApi,
+  listPhoneNumbersForApi,
   listRulesForApi,
   listServicesForApi,
   listStaffForApi,
   listWebhookEndpoints,
   PublicApiError,
+  releasePhoneNumberForApi,
   reorderRulesForApi,
   rescheduleAppointmentForApi,
+  resolveActingUserId,
   retryKnowledgeSourceForApi,
+  searchPhoneNumbersForApi,
   sendWebhookTestEvent,
   setManagedPlanForApi,
   updateBillingForApi,
@@ -69,6 +75,8 @@ import {
   apiBusinessCreateSchema,
   apiCheckoutCreateSchema,
   apiManagedPlanCreateSchema,
+  apiPhoneNumberClaimCreateSchema,
+  apiPhoneNumberSearchSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
   apiContactUpdateSchema,
@@ -91,7 +99,9 @@ import {
   type WebhookEventType,
 } from "@lobbystack/shared";
 
+import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { getStorageProvider } from "../storage";
+import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
 import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam, type ApiCredential, type RestApiCaller } from "./http";
 
 // One function per v1 operation. The route files under app/api/v1 only bind
@@ -122,6 +132,16 @@ function checkoutAvailable(plan: "starter" | "pro", interval: "monthly" | "annua
 /** A managed plan bypasses Polar, so only the operator's own platform keys, with access to every business, may set one. */
 function requireOperatorKey(credential: ApiCredential): void {
   if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", "Only an operator's platform key, one with access to every business, can manage a plan outside Polar.");
+}
+
+/** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
+async function requireNumberSearchAllowed(userId: string): Promise<void> {
+  const result = await checkPhoneNumberSearchLimit({ userId, initial: false });
+  if (result.allowed) return;
+  if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Number search is unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
+  // The limit counts in fixed 10-minute windows.
+  const retryAfter = 600 - (Math.floor(Date.now() / 1_000) % 600);
+  throw new PublicApiError(429, "rate_limited", `Too many number searches. The account this key acts as can search 20 times in 10 minutes. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -183,6 +203,25 @@ export const v1 = {
   endManagedPlan: (request: Request) => handleApiRequest(request, "endManagedPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential);
     return { body: data(await endManagedPlanForApi(context, caller)) };
+  }),
+  listPhoneNumbers: (request: Request) => handleApiRequest(request, "listPhoneNumbers", async ({ context, caller }) => ({ body: { data: await listPhoneNumbersForApi(context, caller), next_cursor: null, has_more: false } })),
+  searchPhoneNumbers: (request: Request) => handleApiRequest(request, "searchPhoneNumbers", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiPhoneNumberSearchSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: { data: await searchPhoneNumbersForApi(context, caller, body, { userId, provider: getTwilioProvider(), claimTokenSecret: getNumberClaimTokenSecret(), beforeSearch: () => requireNumberSearchAllowed(userId) }), next_cursor: null, has_more: false } };
+  }),
+  createPhoneNumberClaim: (request: Request) => handleApiRequest(request, "createPhoneNumberClaim", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiPhoneNumberClaimCreateSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await claimPhoneNumberForApi(context, caller, { offerToken: body.offer_token }, { userId, claimTokenSecret: getNumberClaimTokenSecret() })) };
+  }),
+  getPhoneNumberClaim: (request: Request, { params }: Params<"claim_id">) => handleApiRequest(request, "getPhoneNumberClaim", async ({ context, caller }) => ({ body: data(await getPhoneNumberClaimForApi(context, caller, uuidParam((await params).claim_id, "claim_id"))) })),
+  releasePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "releasePhoneNumber", async ({ context, caller }) => ({ body: data(await releasePhoneNumberForApi(context, caller, uuidParam((await params).phone_number_id, "phone_number_id"))) })),
+  replacePhoneNumber: (request: Request, { params }: Params<"phone_number_id">) => handleApiRequest(request, "replacePhoneNumber", async ({ context, caller }) => {
+    const phoneNumberId = uuidParam((await params).phone_number_id, "phone_number_id");
+    const body = await readApiBody(request, apiPhoneNumberClaimCreateSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await claimPhoneNumberForApi(context, caller, { offerToken: body.offer_token, replaces: phoneNumberId }, { userId, claimTokenSecret: getNumberClaimTokenSecret() })) };
   }),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),

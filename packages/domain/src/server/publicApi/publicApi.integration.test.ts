@@ -2,17 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBillingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
+import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listRulesForApi, listServicesForApi, listStaffForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getPhoneNumberClaimForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -58,6 +59,16 @@ async function createFixture(label: string): Promise<Fixture> {
 
 function tomorrowAt(hour: number): string {
   return DateTime.utc().plus({ days: 2 }).set({ hour, minute: 0, second: 0, millisecond: 0 }).toISO()!;
+}
+
+const numberClaimSecret = "number-claim-test-secret";
+
+/** A random Toronto number for one test, so tests running at once never share one. */
+function testNumber(not?: string): string {
+  for (;;) {
+    const candidate = `+1416${String(Math.floor(Math.random() * 10_000_000)).padStart(7, "0")}`;
+    if (candidate !== not) return candidate;
+  }
 }
 
 async function expectApiError(promise: Promise<unknown>, status: number, code: string) {
@@ -857,6 +868,173 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
       await admin!.db.delete(users).where(eq(users.id, customerId));
+    }
+  });
+
+  it("searches, claims, replaces and releases a number, whatever the onboarding stage", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-numbers-${businessId}`, name: "Numbers test", timezone: "America/Toronto", businessType: "test" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const generated = generateApiKey();
+    const [key] = await admin!.db.insert(apiKeys).values({ businessId, name: "numbers", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["phone_numbers:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+    const firstNumber = testNumber();
+    const secondNumber = testNumber(firstNumber);
+    let available = firstNumber;
+    const inventory = { listAvailablePhoneNumbers: async () => [{ phoneE164: available, locality: "Toronto", region: "ON", countryCode: "CA", capabilities: { sms: true, voice: true } }] };
+    const search = async (input: Parameters<typeof searchPhoneNumbersForApi>[2] = {}) => await searchPhoneNumbersForApi(context, caller, input, { userId: ownerId, provider: inventory, claimTokenSecret: numberClaimSecret });
+    const claim = async (offerToken: string, options: { replaces?: string; userId?: string; as?: ApiCaller } = {}) => await claimPhoneNumberForApi(context, options.as ?? caller, { offerToken, replaces: options.replaces }, { userId: options.userId ?? ownerId, claimTokenSecret: numberClaimSecret });
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    const queued = async (topic: string, aggregateId: string) => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, topic), eq(outboxMessages.aggregateId, aggregateId)))).length;
+    try {
+      // A number needs a paid plan.
+      await expectApiError(search(), 409, "conflict");
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "pro", subscriptionState: "active", billingInterval: "monthly" });
+      // The API ignores the onboarding stage order: this business hasn't finished its first step.
+      const offers = await search({ area_code: "416" });
+      expect(offers).toEqual([expect.objectContaining({ phone_number: firstNumber, country: "CA", kind: "local", locality: "Toronto", region: "ON", capabilities: { voice: true, sms: true } })]);
+      expect(apiPhoneNumberOfferSchema.safeParse(offers[0]).success).toBe(true);
+      const token = offers[0]!.offer_token;
+
+      // An offer works only for its business and account, before it expires, and as what it was searched for.
+      await expectApiError(claim(token, { userId: randomUUID() }), 400, "invalid_request");
+      await expectApiError(claim(token, { as: a.caller }), 400, "invalid_request");
+      await expectApiError(claim(`${token}x`), 400, "invalid_request");
+      const later = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 6 * 60_000);
+      try {
+        await expectApiError(claim(token), 400, "invalid_request");
+      } finally {
+        later.mockRestore();
+      }
+      await expectApiError(claim(token, { replaces: randomUUID() }), 400, "invalid_request");
+
+      // A retry with the same Idempotency-Key gets the same claim back and buys nothing more.
+      const scope = { businessId, apiKeyId: key!.id, operation: "createPhoneNumberClaim", key: `claim-${randomUUID()}` };
+      const claimOnce = async (transactional: typeof context) => ({ status: 202, body: JSON.stringify({ data: await claimPhoneNumberForApi(transactional, caller, { offerToken: token }, { userId: ownerId, claimTokenSecret: numberClaimSecret }) }) });
+      const first = await runIdempotent(context, scope, "claim-hash", claimOnce);
+      expect(await runIdempotent(context, scope, "claim-hash", claimOnce)).toEqual({ replayed: true, response: first.response });
+      expect(await admin!.db.select({ id: onboardingNumberClaimEvents.id }).from(onboardingNumberClaimEvents).where(eq(onboardingNumberClaimEvents.businessId, businessId))).toHaveLength(1);
+      const claimed = (JSON.parse(String(first.response.body)) as { data: Awaited<ReturnType<typeof claimPhoneNumberForApi>> }).data;
+      expect(claimed).toMatchObject({ status: "pending", phone_number: firstNumber, phone_number_id: null, replaces_phone_number_id: null, error: null });
+      expect(apiPhoneNumberClaimSchema.safeParse(claimed).success).toBe(true);
+      expect(await getPhoneNumberClaimForApi(context, caller, claimed.id)).toEqual(claimed);
+      await expectApiError(getPhoneNumberClaimForApi(context, a.caller, claimed.id), 404, "not_found");
+      expect(await queued("phoneNumber.provision", claimed.id)).toBe(1);
+      expect((await admin!.db.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)))[0]?.stage).toBe("phone_number_claiming");
+      // One claim at a time.
+      await expectApiError(claim((await search())[0]!.offer_token), 409, "conflict");
+
+      // The worker buys the number.
+      expect(await claimNumberProvisioning(context, { businessId, claimId: claimed.id })).toMatchObject({ e164: firstNumber });
+      expect(await getPhoneNumberClaimForApi(context, caller, claimed.id)).toMatchObject({ status: "provisioning" });
+      const numberId = await completeNumberProvisioning(context, { businessId, claimId: claimed.id, e164: firstNumber, providerPhoneId: `PN${randomUUID().replaceAll("-", "")}`, voiceUrl: "sip-trunk:TK0", smsUrl: "https://app.example.com/api/webhooks/twilio/sms" });
+      expect(await getPhoneNumberClaimForApi(context, caller, claimed.id)).toMatchObject({ status: "claimed", phone_number_id: numberId });
+      const listed = await listPhoneNumbersForApi(context, caller);
+      expect(listed).toEqual([expect.objectContaining({ id: numberId, phone_number: firstNumber, status: "active", release_scheduled_at: null })]);
+      expect(apiPhoneNumberSchema.safeParse(listed[0]).success).toBe(true);
+      expect(await listPhoneNumbersForApi(context, a.caller)).not.toContainEqual(expect.objectContaining({ id: numberId }));
+      // A business keeps one number.
+      await expectApiError(claim((await search())[0]!.offer_token), 409, "conflict");
+
+      // A replacement offer is for a different number, and only /replace takes it.
+      await expectApiError(search({ replaces: randomUUID() }), 404, "not_found");
+      available = secondNumber;
+      const replacement = (await search({ replaces: numberId }))[0]!.offer_token;
+      await expectApiError(claim(replacement), 400, "invalid_request");
+      const replacing = await claim(replacement, { replaces: numberId });
+      expect(replacing).toMatchObject({ status: "pending", phone_number: secondNumber, replaces_phone_number_id: numberId });
+      await expectApiError(claim((await search({ replaces: numberId }))[0]!.offer_token, { replaces: numberId }), 409, "conflict");
+      expect(await audited("api.phone_number.claim_started")).toBe(2);
+      // Releasing the old number now would make the replacement fail and leave the business with no number.
+      await expectApiError(releasePhoneNumberForApi(context, caller, numberId), 409, "conflict");
+
+      // Once the new number is live, the old one keeps working for 30 days.
+      await claimNumberProvisioning(context, { businessId, claimId: replacing.id });
+      const newNumberId = await completeNumberProvisioning(context, { businessId, claimId: replacing.id, e164: secondNumber, providerPhoneId: `PN${randomUUID().replaceAll("-", "")}`, voiceUrl: "sip-trunk:TK0", smsUrl: "https://app.example.com/api/webhooks/twilio/sms" });
+      const both = await listPhoneNumbersForApi(context, caller);
+      expect(both).toEqual(expect.arrayContaining([expect.objectContaining({ id: newNumberId, status: "active", release_scheduled_at: null }), expect.objectContaining({ id: numberId, status: "active", release_scheduled_at: expect.any(String) })]));
+      expect(Date.parse(both.find((number) => number.id === numberId)!.release_scheduled_at!)).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60_000);
+      // A business replaces its number once.
+      await expectApiError(search({ replaces: newNumberId }), 409, "conflict");
+
+      // Releasing the old number now does it at once, and only once.
+      const released = await releasePhoneNumberForApi(context, caller, numberId);
+      expect(released).toMatchObject({ id: numberId, status: "active" });
+      expect(Date.parse(released.release_scheduled_at!)).toBeLessThanOrEqual(Date.now());
+      expect(await releasePhoneNumberForApi(context, caller, numberId)).toEqual(released);
+      expect(await audited("api.phone_number.release_scheduled")).toBe(1);
+      expect(await queued("phoneNumber.reclaim", numberId)).toBe(1);
+      await expectApiError(releasePhoneNumberForApi(context, caller, randomUUID()), 404, "not_found");
+      await expectApiError(releasePhoneNumberForApi(context, a.caller, numberId), 404, "not_found");
+    } finally {
+      // Deleting the business deletes its numbers, claims, keys and memberships; outbox rows only lose their business.
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("fails claims no worker will finish, so polling ends and a late worker buys nothing", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    // An account of its own, so these claims never count against another test's limits.
+    const userId = randomUUID();
+    const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000);
+    const replacementReservedAt = minutesAgo(16);
+    await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-stale-claims-${businessId}`, name: "Stale claims", timezone: "America/Toronto", businessType: "test", onboardingStage: "phone_number_claiming", phoneNumberReplacementReservedAt: replacementReservedAt });
+    const [number] = await admin!.db.insert(phoneNumbers).values({ businessId, e164: testNumber() }).returning({ id: phoneNumbers.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const insertClaim = async (values: { status: string; reservedAt?: Date; updatedAt?: Date; purpose?: string; replacingPhoneNumberId?: string }) => (await admin!.db.insert(onboardingNumberClaimEvents).values({ businessId, userId, requestedE164: testNumber(), selectionContext: {}, claimTokenHash: "test", idempotencyKey: randomUUID(), ...values }).returning({ id: onboardingNumberClaimEvents.id }))[0]!.id;
+    const business = async () => (await admin!.db.select({ stage: businesses.onboardingStage, replacementReservedAt: businesses.phoneNumberReplacementReservedAt }).from(businesses).where(eq(businesses.id, businessId)))[0];
+    try {
+      const unclaimed = await insertClaim({ status: "reserved", reservedAt: minutesAgo(20) });
+      const stalled = await insertClaim({ status: "provisioning", reservedAt: minutesAgo(40), updatedAt: minutesAgo(31) });
+      const replacement = await insertClaim({ status: "reserved", purpose: "replacement", replacingPhoneNumberId: number!.id, reservedAt: replacementReservedAt });
+      const fresh = await insertClaim({ status: "provisioning", reservedAt: minutesAgo(5), updatedAt: minutesAgo(1) });
+      // Releasing the number fails its abandoned replacement first, so a worker that takes it up late buys nothing.
+      expect(await releasePhoneNumberForApi(context, caller, number!.id)).toMatchObject({ id: number!.id, status: "active", release_scheduled_at: expect.any(String) });
+      expect(await claimNumberProvisioning(context, { businessId, claimId: replacement })).toBeNull();
+      expect(await claimNumberProvisioning(context, { businessId, claimId: unclaimed })).toBeNull();
+      expect(await getPhoneNumberClaimForApi(context, caller, replacement)).toMatchObject({ status: "failed", error: "Number replacement reservation expired." });
+      expect(await getPhoneNumberClaimForApi(context, caller, unclaimed)).toMatchObject({ status: "failed", error: "Number claim reservation expired." });
+      expect(await getPhoneNumberClaimForApi(context, caller, stalled)).toMatchObject({ status: "failed", error: "Number provisioning stalled." });
+      expect(await getPhoneNumberClaimForApi(context, caller, fresh)).toMatchObject({ status: "provisioning", error: null });
+      // As after a failed purchase, the business picks a number again and its replacement reservation is freed.
+      expect(await business()).toEqual({ stage: "phone_number", replacementReservedAt: null });
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await admin!.db.delete(users).where(eq(users.id, userId));
+    }
+  });
+
+  it("counts a platform key's number claims per business, and other keys' per account", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    const userId = randomUUID();
+    await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-number-limits-${businessId}`, name: "Number limits", timezone: "America/Toronto", businessType: "test" });
+    await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "managed", plan: "enterprise", subscriptionState: "active" });
+    const keyCaller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const platform: PlatformKeyCaller = { businessId, platformKeyId: randomUUID(), partnerId: "lobbystack", actingUserId: userId, actor: "platform_key" };
+    const phoneNumber = testNumber();
+    const inventory = { listAvailablePhoneNumbers: async () => [{ phoneE164: phoneNumber, countryCode: "CA", capabilities: { sms: true, voice: true } }] };
+    const claimAs = async (caller: ApiCaller) => {
+      const [offer] = await searchPhoneNumbersForApi(context, caller, {}, { userId, provider: inventory, claimTokenSecret: numberClaimSecret });
+      return await claimPhoneNumberForApi(context, caller, { offerToken: offer!.offer_token }, { userId, claimTokenSecret: numberClaimSecret });
+    };
+    try {
+      // The account already reserved 3 numbers this hour, for another business.
+      await admin!.db.insert(onboardingNumberClaimEvents).values(Array.from({ length: 3 }, (_, index) => ({ businessId: a.businessId, userId, requestedE164: `+141655599${index}0`, selectionContext: {}, claimTokenHash: "earlier", idempotencyKey: randomUUID(), status: "failed" })));
+      await expectApiError(claimAs(keyCaller), 429, "rate_limited");
+      // A platform key acts for many businesses as one account, so only this business's claims count.
+      expect(await claimAs(platform)).toMatchObject({ status: "pending", phone_number: phoneNumber });
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      // Deleting the account also deletes its claims for business a.
+      await admin!.db.delete(users).where(eq(users.id, userId));
     }
   });
 

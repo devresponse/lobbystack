@@ -191,8 +191,10 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
       createdBusinessIds.push(first.business.id);
       const again = await create(idempotencyKey, { name: "Retry Dental", timezone: "UTC" });
       expect(again).toEqual({ business: first.business, replayed: true });
-      await expectApiError(create(idempotencyKey, { name: "Someone Else", timezone: "UTC" }, "a-different-hash"), 422, "idempotency_key_reused");
-      expect(await admin!.db.select({ id: businesses.id }).from(businesses).where(eq(businesses.name, "Someone Else"))).toEqual([]);
+      // A name no fixture uses, so the check sees only what the refused retry might have made.
+      const otherName = `Refused Retry ${randomUUID()}`;
+      await expectApiError(create(idempotencyKey, { name: otherName, timezone: "UTC" }, "a-different-hash"), 422, "idempotency_key_reused");
+      expect(await admin!.db.select({ id: businesses.id }).from(businesses).where(eq(businesses.name, otherName))).toEqual([]);
     });
 
     it("creates one business when two retries run at once", async () => {

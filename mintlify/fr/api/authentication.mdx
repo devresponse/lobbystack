@@ -5,7 +5,7 @@ sidebarTitle: "Authentification"
 contentType: "How-to"
 ---
 
-Chaque requête nécessite une clé API liée à une entreprise. Les propriétaires et les administrateurs créent et révoquent les clés dans le tableau de bord. Les mêmes clés connectent les assistants IA par le [serveur MCP](/fr/ai/mcp).
+Chaque requête nécessite une clé. Une clé API du tableau de bord agit sur une seule entreprise, et une [clé de plateforme](#clés-de-plateforme) sur plusieurs. Les propriétaires et les administrateurs créent et révoquent les clés API dans le tableau de bord. Les clés API, mais pas les clés de plateforme, connectent aussi les assistants IA par le [serveur MCP](/fr/ai/mcp).
 
 ## Créer une clé
 
@@ -75,6 +75,29 @@ Chaque point de terminaison, sauf `GET /me`, exige une portée. Une clé qui ne 
 | `webhooks:manage` | `GET`, `POST`, `PATCH` et `DELETE` sur `/webhooks`, et `POST /webhooks/{webhook_id}/test` |
 
 Pour abonner un point de terminaison à un événement ou changer son URL, votre clé a aussi besoin de la portée de lecture de cet événement. Par exemple, `call.completed` exige `calls:read`, et le tableau des événements de la page [Webhooks](/fr/api/webhooks) donne les autres.
+
+## Clés de plateforme
+
+Une clé de plateforme (`lsp_...`) intègre et gère de nombreuses entreprises, alors qu'une clé API agit sur une seule. Les partenaires s'en servent pour configurer les entreprises de leurs clients, par exemple avec [`lobbystack onboard`](/fr/api/cli).
+
+C'est l'exploitant du déploiement qui crée les clés de plateforme ; le tableau de bord n'a pas de page pour elles. Sur un déploiement auto-hébergé, `pnpm platform-key:create` écrit une nouvelle clé dans `.platform-keys/<prefix>.json` et affiche son entrée pour [`PLATFORM_API_KEYS`](/fr/self-hosting/environment-variables). Chaque entrée définit :
+
+- Le partenaire à qui appartient la clé.
+- Le compte LobbyStack vérifié au nom duquel la clé agit (`owner_email`), qui possède les entreprises qu'elle crée.
+- Si la clé atteint toutes les entreprises (`"access": "all"`, la clé d'un exploitant ; passez `--access all`) ou, par défaut, seulement celles que son partenaire a intégrées.
+- Ses portées. Une nouvelle clé reçoit toutes les portées, sauf si vous en nommez certaines. `POST /businesses` nécessite `businesses:create`, que seules les clés de plateforme peuvent détenir, et `GET /businesses` nécessite `business:read`.
+
+`POST /businesses` crée une entreprise, et `GET /businesses` liste celles que le partenaire a intégrées. Toutes les autres requêtes nomment leur entreprise dans l'en-tête `LobbyStack-Business` :
+
+```bash
+curl https://app.lobbystack.com/api/v1/services \
+  -H "Authorization: Bearer $LOBBYSTACK_PLATFORM_KEY" \
+  -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
+```
+
+Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé.
+
+`POST /team/claim-link` remet une entreprise à son propriétaire. Une fois qu'il l'accepte, la clé d'un partenaire n'atteint plus l'entreprise, alors que celle d'un exploitant l'atteint toujours. Dans les deux cas, `GET /businesses` ne la liste plus.
 
 ## Révoquer une clé
 

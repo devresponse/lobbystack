@@ -5,7 +5,7 @@ sidebarTitle: "Authentication"
 contentType: "How-to"
 ---
 
-Every request needs an API key for one business. Owners and admins create and revoke keys in the dashboard. The same keys connect AI assistants through the [MCP server](/ai/mcp).
+Every request needs a key. An API key from the dashboard works on one business, and a [platform key](#platform-keys) works on many. Owners and admins create and revoke API keys in the dashboard. API keys, but not platform keys, also connect AI assistants through the [MCP server](/ai/mcp).
 
 ## Create a key
 
@@ -75,6 +75,29 @@ Each endpoint except `GET /me` requires one scope. A key without it gets `403` w
 | `webhooks:manage` | `GET`, `POST`, `PATCH` and `DELETE` on `/webhooks`, and `POST /webhooks/{webhook_id}/test` |
 
 To subscribe an endpoint to an event or change its URL, your key also needs the event's read scope. For example, `call.completed` needs `calls:read`, and the [events table](/api/webhooks#events) lists the rest.
+
+## Platform keys
+
+A platform key (`lsp_...`) onboards and manages many businesses, where an API key works on one. Partners use platform keys to set up businesses for their customers, for example with [`lobbystack onboard`](/api/cli).
+
+Whoever runs the deployment makes platform keys; the dashboard has no page for them. On a self-hosted deployment, `pnpm platform-key:create` writes a new key to `.platform-keys/<prefix>.json` and prints its entry for [`PLATFORM_API_KEYS`](/self-hosting/environment-variables). Each entry sets:
+
+- The partner the key belongs to.
+- The verified LobbyStack account the key acts as (`owner_email`), which owns the businesses the key creates.
+- Whether the key reaches every business (`"access": "all"`, an operator's key; pass `--access all`) or, by default, only the ones its partner onboarded.
+- Its scopes. A new key gets every scope unless you name some. `POST /businesses` needs `businesses:create`, which only platform keys can hold, and `GET /businesses` needs `business:read`.
+
+`POST /businesses` creates a business, and `GET /businesses` lists the ones the partner onboarded. Every other request names its business in the `LobbyStack-Business` header:
+
+```bash
+curl https://app.lobbystack.com/api/v1/services \
+  -H "Authorization: Bearer $LOBBYSTACK_PLATFORM_KEY" \
+  -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
+```
+
+Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access.
+
+`POST /team/claim-link` hands a business to its owner. Once they accept, a partner's key no longer reaches it, and an operator's key still does. Either way, `GET /businesses` stops listing it.
 
 ## Revoke a key
 

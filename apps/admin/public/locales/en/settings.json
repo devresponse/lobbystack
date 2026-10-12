@@ -898,6 +898,7 @@
       "messages_read": "Read messages the receptionist took",
       "knowledge_read": "Read knowledge entries, FAQs, websites and files",
       "knowledge_write": "Add, edit and delete knowledge entries, FAQs, websites and files",
+      "billing_manage": "See the plan, set the spending cap and start checkouts",
       "webhooks_manage": "Create and delete webhook endpoints"
     }
   },

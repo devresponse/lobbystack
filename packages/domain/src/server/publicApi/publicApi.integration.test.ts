@@ -4,15 +4,15 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBillingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listRulesForApi, listServicesForApi, listStaffForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listRulesForApi, listServicesForApi, listStaffForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -777,6 +777,87 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const business = await updateBusinessForApi({ db: worker!.db }, a.caller, { business_type: "dental_clinic" });
     expect(business).toMatchObject({ business_type: "dental_clinic", onboarding_stage: "create_business" });
     expect(apiBusinessSchema.safeParse(business).success).toBe(true);
+  });
+
+  it("reads billing, keeps a managed plan apart from Polar, and makes checkouts out to the business's own owner", async () => {
+    const context = { db: worker!.db };
+    // A business of its own, owned at first by the operator, as a platform key's businesses start out.
+    const businessId = randomUUID();
+    const customerId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-billing-${businessId}`, name: "Billing test", timezone: "UTC", businessType: "test" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const generated = generateApiKey();
+    const [key] = await admin!.db.insert(apiKeys).values({ businessId, name: "billing", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["billing:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+    // An operator's platform key acts as its owner.
+    const operator: PlatformKeyCaller = { businessId, platformKeyId: randomUUID(), partnerId: "lobbystack", actingUserId: ownerId, actor: "platform_key" };
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    const account = async () => (await admin!.db.select({ source: billingAccounts.source, plan: billingAccounts.plan, subscriptionState: billingAccounts.subscriptionState, cap: billingAccounts.overageSpendingCapCents }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0];
+    const payer = async (checkoutId: string) => (await admin!.db.select({ userId: billingCheckoutRequests.requestedByUserId }).from(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, checkoutId)))[0]?.userId;
+    try {
+      // No billing account yet: the free plan, which has no cap.
+      expect(await getBillingForApi(context, caller)).toMatchObject({ plan: "free_cloud", managed: false, spending_cap_cents: null, overage_spend_cents: 0, spending_cap_reached: false });
+      await expectApiError(updateBillingForApi(context, caller, { spending_cap_cents: 1_000 }), 409, "conflict");
+
+      // A Starter plan that lapsed left a cap behind. The managed plan clears it, or calls would have nothing to reserve.
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "canceled", billingInterval: "monthly", overageSpendingCapCents: 500 });
+      expect(await getBillingForApi(context, caller)).toMatchObject({ plan: "free_cloud", billing_interval: null, spending_cap_cents: null });
+      // A checkout queued before the managed plan stops, so Polar never sells a plan the operator bills.
+      const queued = await createCheckoutForApi(context, caller, { plan: "starter", interval: "monthly" }, { available: true });
+      const managed = await setManagedPlanForApi(context, operator);
+      expect(managed).toMatchObject({ plan: "enterprise", managed: true, subscription_state: "active", billing_interval: null, current_period_end: null, spending_cap_cents: null });
+      expect(apiBillingSchema.safeParse(managed).success).toBe(true);
+      expect(await account()).toEqual({ source: "managed", plan: "enterprise", subscriptionState: "active", cap: null });
+      expect(await getCheckoutForApi(context, caller, queued.id)).toMatchObject({ status: "error", error: "The business moved to a managed plan." });
+      // Setting it again changes nothing.
+      await setManagedPlanForApi(context, operator);
+      expect(await audited("api.billing.managed_plan_set")).toBe(1);
+      // LobbyStack bills a managed plan, so it can't be bought through Polar.
+      await expectApiError(createCheckoutForApi(context, caller, { plan: "pro", interval: "monthly" }, { available: true }), 409, "conflict");
+
+      // Ending it puts the business on the free plan. The account keeps its managed source for the finance export.
+      expect(await endManagedPlanForApi(context, operator)).toMatchObject({ plan: "free_cloud", managed: false });
+      expect(await account()).toMatchObject({ source: "managed", plan: "enterprise", subscriptionState: "canceled" });
+      await expectApiError(endManagedPlanForApi(context, operator), 404, "not_found");
+      expect(await audited("api.billing.managed_plan_ended")).toBe(1);
+
+      // While the operator is the only owner, a platform key has no customer to make a checkout out to.
+      await expectApiError(createCheckoutForApi(context, operator, { plan: "pro", interval: "monthly" }, { available: true }), 409, "conflict");
+      // Once the customer owns it too, the platform key's checkout is made out to them.
+      await admin!.db.insert(users).values({ id: customerId, email: `${customerId}@example.invalid`, normalizedEmail: `${customerId}@example.invalid` });
+      await admin!.db.insert(businessMemberships).values({ businessId, userId: customerId, role: "business_owner" });
+      const checkout = await createCheckoutForApi(context, operator, { plan: "pro", interval: "monthly" }, { available: true });
+      expect(checkout).toMatchObject({ plan: "pro", interval: "monthly", status: "pending", checkout_url: null, error: null, paid: false });
+      expect(apiCheckoutSchema.safeParse(checkout).success).toBe(true);
+      expect(await payer(checkout.id)).toBe(customerId);
+      expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "billing.createCheckout"), eq(outboxMessages.aggregateId, checkout.id)))).toHaveLength(1);
+      // A per-business key makes it out to the key's creator.
+      expect(await payer((await createCheckoutForApi(context, caller, { plan: "starter", interval: "annual" }, { available: true })).id)).toBe(ownerId);
+      await expectApiError(createCheckoutForApi(context, caller, { plan: "starter", interval: "annual" }, { available: false }), 409, "conflict");
+      expect(await getCheckoutForApi(context, caller, checkout.id)).toMatchObject({ id: checkout.id, status: "pending" });
+      await expectApiError(getCheckoutForApi(context, a.caller, checkout.id), 404, "not_found");
+
+      // Once Polar's page exists and the business is on the plan, the checkout reads as paid.
+      await admin!.db.update(billingCheckoutRequests).set({ status: "ready", checkoutUrl: "https://polar.example/checkout/1" }).where(eq(billingCheckoutRequests.id, checkout.id));
+      await admin!.db.update(billingAccounts).set({ source: "polar", plan: "pro", subscriptionState: "active", billingInterval: "monthly" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getCheckoutForApi(context, caller, checkout.id)).toMatchObject({ status: "ready", checkout_url: "https://polar.example/checkout/1", paid: true });
+
+      // A business paying through Polar can't also get a managed plan, and changes its paid plan in Polar's portal.
+      await expectApiError(setManagedPlanForApi(context, operator), 409, "conflict");
+      await expectApiError(createCheckoutForApi(context, caller, { plan: "starter", interval: "monthly" }, { available: true }), 409, "conflict");
+      // Its spending cap can be set, and sending the same cap again changes nothing.
+      expect(await updateBillingForApi(context, caller, { spending_cap_cents: 2_500 })).toMatchObject({ plan: "pro", managed: false, billing_interval: "monthly", spending_cap_cents: 2_500 });
+      await updateBillingForApi(context, caller, { spending_cap_cents: 2_500 });
+      expect(await audited("api.billing.updated")).toBe(1);
+      // A Starter business can still move up to Pro.
+      await admin!.db.update(billingAccounts).set({ plan: "starter" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true })).toMatchObject({ plan: "pro", status: "pending" });
+    } finally {
+      // Deleting the business deletes its billing rows, keys and memberships; outbox rows only lose their business.
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await admin!.db.delete(users).where(eq(users.id, customerId));
+    }
   });
 
   it("prunes old webhook events and API idempotency keys, keeping events that are still being retried", async () => {

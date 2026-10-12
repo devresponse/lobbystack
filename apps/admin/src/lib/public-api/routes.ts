@@ -4,6 +4,7 @@ import {
   completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
+  createCheckoutForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
@@ -16,9 +17,11 @@ import {
   deleteRuleForApi,
   deleteServiceForApi,
   deleteWebhookEndpoint,
+  endManagedPlanForApi,
   expandKnowledgeSourceForApi,
   getAppointmentForApi,
   getAvailabilityForApi,
+  getBillingForApi,
   getBusinessForApi,
   getKnowledgeEntryForApi,
   getKnowledgeSourceForApi,
@@ -26,6 +29,7 @@ import {
   getPlatformMeForApi,
   getReceptionistForApi,
   getCallForApi,
+  getCheckoutForApi,
   getContactForApi,
   getWebhookEndpoint,
   idempotencyRequestHash,
@@ -45,6 +49,8 @@ import {
   rescheduleAppointmentForApi,
   retryKnowledgeSourceForApi,
   sendWebhookTestEvent,
+  setManagedPlanForApi,
+  updateBillingForApi,
   updateBusinessForApi,
   updateContactForApi,
   updateKnowledgeEntryForApi,
@@ -59,7 +65,10 @@ import {
 import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
+  apiBillingUpdateSchema,
   apiBusinessCreateSchema,
+  apiCheckoutCreateSchema,
+  apiManagedPlanCreateSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
   apiContactUpdateSchema,
@@ -103,6 +112,16 @@ function requireEventScopes(credential: ApiCredential, events: readonly WebhookE
 function webhookManager(caller: RestApiCaller): WebhookManager {
   if (caller.platformKeyId !== undefined) return { kind: "platform_key", platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: caller.actingUserId };
   return { kind: "api_key", apiKeyId: caller.apiKeyId };
+}
+
+/** Whether this deployment can sell a plan and interval through Polar, as the dashboard decides. */
+function checkoutAvailable(plan: "starter" | "pro", interval: "monthly" | "annual"): boolean {
+  return Boolean(process.env.POLAR_ACCESS_TOKEN && process.env.POLAR_ORGANIZATION_ID && process.env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]);
+}
+
+/** A managed plan bypasses Polar, so only the operator's own platform keys, with access to every business, may set one. */
+function requireOperatorKey(credential: ApiCredential): void {
+  if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", "Only an operator's platform key, one with access to every business, can manage a plan outside Polar.");
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -149,6 +168,22 @@ export const v1 = {
     return { body: data(result.business), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
   }),
   listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
+  getBilling: (request: Request) => handleApiRequest(request, "getBilling", async ({ context, caller }) => ({ body: data(await getBillingForApi(context, caller)) })),
+  updateBilling: (request: Request) => handleApiRequest(request, "updateBilling", async ({ context, caller }) => ({ body: data(await updateBillingForApi(context, caller, await readApiBody(request, apiBillingUpdateSchema))) })),
+  createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiCheckoutCreateSchema);
+    return { body: data(await createCheckoutForApi(context, caller, body, { available: checkoutAvailable(body.plan, body.interval) })) };
+  }),
+  getCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getCheckout", async ({ context, caller }) => ({ body: data(await getCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
+  setManagedPlan: (request: Request) => handleApiRequest(request, "setManagedPlan", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential);
+    await readApiBody(request, apiManagedPlanCreateSchema);
+    return { body: data(await setManagedPlanForApi(context, caller)) };
+  }),
+  endManagedPlan: (request: Request) => handleApiRequest(request, "endManagedPlan", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential);
+    return { body: data(await endManagedPlanForApi(context, caller)) };
+  }),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),
   updateRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "updateRule", async ({ context, caller }) => {

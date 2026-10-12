@@ -355,6 +355,10 @@
     },
     "continue": "Nastavi",
     "continuing": "Nastavljanje...",
-    "continueFailed": "Trenutno ne možemo da nastavimo. Pokušajte ponovo."
+    "continueFailed": "Trenutno ne možemo da nastavimo. Pokušajte ponovo.",
+    "current": {
+      "title": "Ova firma već ima paket {{plan}}.",
+      "description": "Paket je već podešen, pa možete da pređete na broj telefona."
+    }
   }
 }

@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   RULES_MAX,
@@ -14,12 +14,16 @@ import {
   type ApiAppointment,
   type ApiAppointmentCreate,
   type ApiAvailabilitySlot,
+  type ApiBilling,
+  type ApiBillingUpdate,
   type ApiBusiness,
   type ApiBusinessCreate,
   type ApiBusinessSummary,
   type ApiBusinessUpdate,
   type ApiCall,
   type ApiCallDetail,
+  type ApiCheckout,
+  type ApiCheckoutCreate,
   type ApiContact,
   type ApiContactCreate,
   type ApiContactUpdate,
@@ -47,6 +51,7 @@ import {
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin } from "../../authz";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
@@ -55,6 +60,7 @@ import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
+import { loadBillingContext } from "../usage";
 import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
@@ -240,6 +246,125 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
     const business = await loadBusinessResource(tx, caller.businessId);
     if (!business) throw notFound("Business");
     return business;
+  });
+}
+
+// Billing
+
+/** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
+async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
+  const { plan, capCents } = await loadBillingContext(tx, businessId);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const periodKey = new Date().toISOString().slice(0, 7);
+  const [month] = await tx.select({ overageSpendCents: billingUsageMonths.overageSpendCents }).from(billingUsageMonths).where(and(eq(billingUsageMonths.businessId, businessId), eq(billingUsageMonths.periodKey, periodKey))).limit(1);
+  const spend = month?.overageSpendCents ?? 0;
+  // Interval, period and cap belong to a Starter or Pro subscription; an older one's values don't carry over.
+  const paid = plan === "starter" || plan === "pro";
+  const cap = paid ? capCents : null;
+  return {
+    plan,
+    managed: isManagedBillingAccount(account),
+    subscription_state: account?.subscriptionState ?? null,
+    billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
+    current_period_end: paid && account?.currentPeriodEnd ? account.currentPeriodEnd.toISOString() : null,
+    spending_cap_cents: cap,
+    overage_spend_cents: spend,
+    spending_cap_reached: cap !== null && spend > 0 && spend >= cap,
+  };
+}
+
+export async function getBillingForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
+  return await inBusiness(context, caller, async (tx) => await loadBilling(tx, caller.businessId));
+}
+
+/** Sets or removes the overage cap. Only Starter and Pro plans have one; sending the cap it already has changes nothing. */
+export async function updateBillingForApi(context: DomainContext, caller: ApiCaller, input: ApiBillingUpdate): Promise<ApiBilling> {
+  return await inBusiness(context, caller, async (tx) => {
+    const { plan, capCents } = await loadBillingContext(tx, caller.businessId);
+    if (plan !== "starter" && plan !== "pro") throw conflict("Spending caps are available on Starter and Pro plans.");
+    if (input.spending_cap_cents !== capCents) {
+      await setOverageSpendingCapInTransaction(tx, { businessId: caller.businessId, capCents: input.spending_cap_cents });
+      await audit(tx, caller, { eventType: "api.billing.updated", entityType: "billing_account", entityId: caller.businessId, payload: { spendingCapCents: input.spending_cap_cents } });
+    }
+    return await loadBilling(tx, caller.businessId);
+  });
+}
+
+async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiCheckout> {
+  const [row] = await tx.select().from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.id, checkoutId))).limit(1);
+  if (!row || (row.target !== "starter" && row.target !== "pro") || (row.billingInterval !== "monthly" && row.billingInterval !== "annual")) throw notFound("Checkout");
+  const [account] = await tx.select({ plan: billingAccounts.plan, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // A checkout canceled because the business moved to a managed plan reads as failed.
+  const status = row.status === "canceled" ? "error" : (["pending", "processing", "ready", "error"] as const).find((value) => value === row.status) ?? "pending";
+  return {
+    id: row.id,
+    plan: row.target,
+    interval: row.billingInterval,
+    status,
+    checkout_url: status === "ready" ? row.checkoutUrl : null,
+    error: status === "error" ? row.error : null,
+    // The dashboard counts a checkout as paid the same way, once Polar's webhook has moved the business onto the plan.
+    paid: status === "ready" && account?.plan === row.target && account.billingInterval === row.billingInterval && ["active", "trialing"].includes(account.subscriptionState ?? ""),
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+/**
+ * The person a checkout is made out to, whose email Polar fills in and sends
+ * receipts to. A per-business key acts for its creator, who must still be an
+ * owner or admin. A platform key acts for an owner of the business other than
+ * the key's own account, and is refused while there is none: every business the
+ * key onboards would otherwise carry one email in Polar, which can tie their
+ * payments together.
+ */
+async function checkoutPayerId(context: DomainContext, caller: ApiCaller): Promise<string> {
+  if (caller.platformKeyId === undefined) return await resolveActingUserId(context, caller);
+  const [owner] = await inBusiness(context, caller, async (tx) => await tx.select({ userId: businessMemberships.userId }).from(businessMemberships).where(and(eq(businessMemberships.businessId, caller.businessId), eq(businessMemberships.role, "business_owner"), eq(businessMemberships.status, "active"), ne(businessMemberships.userId, caller.actingUserId))).orderBy(asc(businessMemberships.createdAt)).limit(1));
+  if (!owner) throw conflict("Only the business's own owner can pay for a plan, and this business hasn't been claimed yet. Send the claim link first, or give it a managed plan.");
+  return owner.userId;
+}
+
+/**
+ * Asks Polar for a page where the customer pays. Like the dashboard, it sells
+ * any plan to a free business and Pro to a Starter one; other changes to a
+ * paid plan happen in Polar's billing portal. Callers say whether this
+ * deployment sells the plan and interval.
+ */
+export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean }): Promise<ApiCheckout> {
+  if (!options.available) throw conflict("This deployment doesn't sell that plan and interval.");
+  const userId = await checkoutPayerId(context, caller);
+  return await inBusiness(context, caller, async (tx) => {
+    const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
+    if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, so LobbyStack bills it directly.");
+    const { plan: current } = await loadBillingContext(tx, caller.businessId);
+    if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
+    const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
+    await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
+    return await loadCheckout(tx, caller.businessId, checkoutId);
+  });
+}
+
+export async function getCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiCheckout> {
+  return await inBusiness(context, caller, async (tx) => await loadCheckout(tx, caller.businessId, checkoutId));
+}
+
+/** Puts the business on the managed enterprise plan. Callers check that an operator's platform key asked. */
+export async function setManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
+  return await inBusiness(context, caller, async (tx) => {
+    const outcome = await setManagedPlanInTransaction(tx, { businessId: caller.businessId });
+    if (outcome === "paid_through_polar") throw conflict("This business pays through Polar. Cancel that subscription before giving it a managed plan.");
+    if (outcome === "set") await audit(tx, caller, { eventType: "api.billing.managed_plan_set", entityType: "billing_account", entityId: caller.businessId, payload: { plan: "enterprise" } });
+    return await loadBilling(tx, caller.businessId);
+  });
+}
+
+/** Moves the business off its managed plan, back to the free plan. Callers check that an operator's platform key asked. */
+export async function endManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
+  return await inBusiness(context, caller, async (tx) => {
+    if (!await endManagedPlanInTransaction(tx, { businessId: caller.businessId })) throw notFound("Managed plan");
+    await audit(tx, caller, { eventType: "api.billing.managed_plan_ended", entityType: "billing_account", entityId: caller.businessId });
+    return await loadBilling(tx, caller.businessId);
   });
 }
 

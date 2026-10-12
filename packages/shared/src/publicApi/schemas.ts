@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { billingPlanSlugs } from "../billing";
 import { interfaceLocales } from "../locales";
 import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -161,6 +162,45 @@ export const apiRuleUpdateSchema = z.strictObject({
 
 export const apiRuleReorderSchema = z.strictObject({
   rule_ids: z.array(id).min(1).max(RULES_MAX).describe("Every rule id once, in the order the receptionist should read them."),
+});
+
+const checkoutPlans = ["starter", "pro"] as const;
+const billingIntervals = ["monthly", "annual"] as const;
+
+export const apiBillingSchema = z.object({
+  plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."),
+  managed: z.boolean().describe("true when the LobbyStack operator runs the plan outside Polar and bills the business directly."),
+  subscription_state: z.string().nullable().describe("The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription."),
+  billing_interval: z.enum(billingIntervals).nullable().describe("Null unless the plan is Starter or Pro."),
+  current_period_end: nullableTimestamp.describe("When the paid period ends. Null unless the plan is Starter or Pro."),
+  spending_cap_cents: z.number().int().nullable().describe("The most a Starter or Pro plan spends on usage over its allowance each month. Null means no cap, and is always null on other plans."),
+  overage_spend_cents: z.number().int().describe("Usage over the allowance this month."),
+  spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),
+}).describe("The business's plan and what it spends.");
+
+export const apiBillingUpdateSchema = z.strictObject({
+  spending_cap_cents: z.number().int().min(0).nullable().describe("Cents. null removes the cap. Only Starter and Pro plans have one."),
+});
+
+export const apiCheckoutCreateSchema = z.strictObject({
+  plan: z.enum(checkoutPlans),
+  interval: z.enum(billingIntervals),
+});
+
+export const apiCheckoutSchema = z.object({
+  id,
+  plan: z.enum(checkoutPlans),
+  interval: z.enum(billingIntervals),
+  status: z.enum(["pending", "processing", "ready", "error"]).describe("pending or processing: Polar is making the page. ready: checkout_url is set. error: making the page failed; start another checkout."),
+  checkout_url: z.string().nullable().describe("The Polar page where the customer pays. Send it to them."),
+  error: z.string().nullable(),
+  paid: z.boolean().describe("true once the business is on the plan bought here."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A Polar checkout for a plan.");
+
+export const apiManagedPlanCreateSchema = z.strictObject({
+  plan: z.literal("enterprise"),
 });
 
 export const apiBusinessCreateSchema = z.strictObject({
@@ -484,6 +524,10 @@ export type ApiRule = z.infer<typeof apiRuleSchema>;
 export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;
 export type ApiRuleUpdate = z.infer<typeof apiRuleUpdateSchema>;
 export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
+export type ApiBilling = z.infer<typeof apiBillingSchema>;
+export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
+export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
+export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
 export type ApiServiceCreate = z.infer<typeof apiServiceCreateSchema>;
 export type ApiServiceUpdate = z.infer<typeof apiServiceUpdateSchema>;

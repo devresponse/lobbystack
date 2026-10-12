@@ -898,6 +898,7 @@
       "messages_read": "Čitanje poruka koje je primio recepcioner",
       "knowledge_read": "Čitanje unosa u znanje, čestih pitanja, veb-sajtova i fajlova",
       "knowledge_write": "Dodavanje, izmena i brisanje unosa u znanje, čestih pitanja, veb-sajtova i fajlova",
+      "billing_manage": "Pregled plana, podešavanje limita potrošnje i pokretanje plaćanja",
       "webhooks_manage": "Kreiranje i brisanje webhook endpointa"
     }
   },

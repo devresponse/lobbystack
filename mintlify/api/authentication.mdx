@@ -69,6 +69,7 @@ Each endpoint except `GET /me` requires one scope. A key without it gets `403` w
 | `messages:read` | `GET /messages` |
 | `knowledge:read` | `GET /knowledge`, `GET /knowledge/{entry_id}`, `GET /knowledge/sources`, `GET /knowledge/sources/{source_id}` |
 | `knowledge:write` | `POST /knowledge`, `PATCH` and `DELETE` on `/knowledge/{entry_id}`, `POST /knowledge/sources`, `PATCH` and `DELETE` on `/knowledge/sources/{source_id}`, `POST /knowledge/sources/{source_id}/expand`, `/retry` and `/cancel`, `POST /knowledge/uploads` and `POST /knowledge/uploads/{upload_id}/complete` |
+| `billing:manage` | `GET` and `PATCH /billing`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` and, with an operator's platform key, `POST` and `DELETE /billing/managed-plan` |
 | `webhooks:manage` | `GET`, `POST`, `PATCH` and `DELETE` on `/webhooks`, and `POST /webhooks/{webhook_id}/test` |
 
 To subscribe an endpoint to an event or change its URL, your key also needs the event's read scope. For example, `call.completed` needs `calls:read`, and the [events table](/api/webhooks#events) lists the rest.

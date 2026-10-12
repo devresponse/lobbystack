@@ -26,10 +26,10 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(synced: boolean | "error" = false, monthlyOnly = false) {
+function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  client.setQueryData(["billing", "business"], { checkoutAvailable: true, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] } });
+  client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] } });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
     if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "new-checkout" });
@@ -108,6 +108,19 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     setup();
     await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
     telemetryRef.current!.expectEvent("web.onboarding.plan_selected", { businessId: "business", plan: "free_cloud" });
+  });
+  it("lets a business that already has a plan, such as a managed one, go on to its number", async () => {
+    const fetchMock = setup(false, false, "enterprise");
+    expect(screen.queryByRole("button", { name: "plan.tiers.free_cloud.cta" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "plan.continue" }));
+    await waitFor(() => expect(route.router.push).toHaveBeenCalledWith("/onboarding/number"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "phone_number" }) }));
+    expect(fetchMock.mock.calls.some(([url]) => url === "/api/billing/checkout")).toBe(false);
+  });
+  it.each(["free_cloud", "self_host"])("shows the plans to a business whose plan is %s", async effectivePlan => {
+    setup(false, false, effectivePlan);
+    expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "plan.continue" })).toBeNull();
   });
   it("selects the only configured interval and disables unavailable plans", async () => {
     setup(false, true);

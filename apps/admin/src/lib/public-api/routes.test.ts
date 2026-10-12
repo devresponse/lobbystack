@@ -38,6 +38,12 @@ const domain = vi.hoisted(() => ({
   createServiceForApi: vi.fn(),
   updateServiceForApi: vi.fn(),
   deleteServiceForApi: vi.fn(async () => undefined),
+  getBillingForApi: vi.fn(),
+  updateBillingForApi: vi.fn(),
+  createCheckoutForApi: vi.fn(),
+  getCheckoutForApi: vi.fn(),
+  setManagedPlanForApi: vi.fn(),
+  endManagedPlanForApi: vi.fn(),
   listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   createRuleForApi: vi.fn(),
   updateRuleForApi: vi.fn(),
@@ -407,6 +413,76 @@ describe("services", () => {
     expect(domain.updateServiceForApi).not.toHaveBeenCalled();
     expect(domain.createServiceForApi).not.toHaveBeenCalled();
     expect(domain.deleteServiceForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("billing", () => {
+  const billing = { plan: "free_cloud", managed: false, subscription_state: null, billing_interval: null, current_period_end: null, spending_cap_cents: null, overage_spend_cents: 0, spending_cap_reached: false };
+  const checkoutId = "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f";
+  const platformKey = () => generatePlatformKey({ name: "Operator", partner: "lobbystack", ownerEmail: "ops@example.com", access: "all" });
+
+  it("reads the plan and sets the spending cap", async () => {
+    domain.getBillingForApi.mockResolvedValue(billing);
+    expect(await (await v1.getBilling(call("/billing"))).json()).toEqual({ data: billing });
+    domain.updateBillingForApi.mockResolvedValue({ ...billing, spending_cap_cents: 5_000 });
+    expect((await v1.updateBilling(call("/billing", { method: "PATCH", body: JSON.stringify({ spending_cap_cents: 5_000 }) }))).status).toBe(200);
+    expect(domain.updateBillingForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { spending_cap_cents: 5_000 });
+    for (const bad of [{}, { spending_cap_cents: -1 }, { spending_cap_cents: 1.5 }, { plan: "pro" }]) {
+      expect((await v1.updateBilling(call("/billing", { method: "PATCH", body: JSON.stringify(bad) }))).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.updateBillingForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a checkout only for a plan and interval this deployment sells", async () => {
+    vi.stubEnv("POLAR_ACCESS_TOKEN", "polar-token");
+    vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
+    vi.stubEnv("POLAR_PRO_MONTHLY_PRODUCT_ID", "prod_pro_monthly");
+    try {
+      domain.createCheckoutForApi.mockResolvedValue({ id: checkoutId, plan: "pro", interval: "monthly", status: "pending", checkout_url: null, error: null, paid: false, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" });
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }))).status).toBe(202);
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: true });
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false });
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "enterprise", interval: "monthly" }) }))).status).toBe(400);
+      domain.getCheckoutForApi.mockResolvedValue({ id: checkoutId });
+      expect((await v1.getCheckout(call(`/billing/checkout/${checkoutId}`), { params: Promise.resolve({ checkout_id: checkoutId }) })).status).toBe(200);
+      expect((await v1.getCheckout(call("/billing/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("lets only an operator's platform key manage a plan outside Polar", async () => {
+    // A per-business key, even with billing:manage, is refused.
+    expect((await v1.setManagedPlan(call("/billing/managed-plan", { method: "POST", body: JSON.stringify({ plan: "enterprise" }) }))).status).toBe(403);
+    expect((await v1.endManagedPlan(call("/billing/managed-plan", { method: "DELETE" }))).status).toBe(403);
+    // So is a partner's platform key.
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry]));
+    try {
+      const asKey = (key: string, init: RequestInit = {}) => new Request("https://app.example.com/api/v1/billing/managed-plan", { ...init, headers: { authorization: `Bearer ${key}`, "LobbyStack-Business": "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" } });
+      expect((await v1.setManagedPlan(asKey(partner.key, { method: "POST", body: JSON.stringify({ plan: "enterprise" }) }))).status).toBe(403);
+      domain.setManagedPlanForApi.mockResolvedValue({ ...billing, plan: "enterprise", managed: true });
+      const set = await v1.setManagedPlan(asKey(operator.key, { method: "POST", body: JSON.stringify({ plan: "enterprise" }) }));
+      expect(set.status).toBe(200);
+      expect(await set.json()).toMatchObject({ data: { plan: "enterprise", managed: true } });
+      expect((await v1.setManagedPlan(asKey(operator.key, { method: "POST", body: JSON.stringify({ plan: "pro" }) }))).status).toBe(400);
+      domain.endManagedPlanForApi.mockResolvedValue(billing);
+      expect((await v1.endManagedPlan(asKey(operator.key, { method: "DELETE" }))).status).toBe(200);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(domain.setManagedPlanForApi).toHaveBeenCalledTimes(1);
+    expect(domain.endManagedPlanForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs billing:manage", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write"] });
+    expect((await v1.getBilling(call("/billing"))).status).toBe(403);
+    expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }))).status).toBe(403);
+    expect(domain.getBillingForApi).not.toHaveBeenCalled();
+    expect(domain.createCheckoutForApi).not.toHaveBeenCalled();
   });
 });
 

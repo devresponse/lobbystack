@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { interfaceLocales } from "../locales";
-import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, transferModes } from "../receptionist";
+import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
@@ -137,6 +137,31 @@ export const apiReceptionistUpdateSchema = z.strictObject({
   booking_mode: z.enum(bookingModes).optional(),
   appointment_change_policy: z.strictObject(appointmentChangePolicyFields).optional().describe("Send all four fields."),
 }).refine((value) => value.summary === undefined || value.regenerate_summary === undefined, { message: "Send summary or regenerate_summary, not both.", path: ["regenerate_summary"] });
+
+export const apiRuleSchema = z.object({
+  id,
+  title: z.string(),
+  content: z.string().describe("What the receptionist must or must not do. Calls read the first 4,000 characters; a rule written in the dashboard can be longer."),
+  active: z.boolean().describe("Whether the receptionist follows it."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("An instruction the receptionist follows on calls and in chats.");
+
+export const apiRuleCreateSchema = z.strictObject({
+  title: z.string().trim().min(1).max(RULE_TITLE_MAX_LENGTH),
+  content: z.string().trim().min(1).max(RULE_CONTENT_CALL_MAX_LENGTH).describe("Up to 4,000 characters, all of which calls use."),
+  active: z.boolean().optional().describe("Defaults to true."),
+});
+
+export const apiRuleUpdateSchema = z.strictObject({
+  title: z.string().trim().min(1).max(RULE_TITLE_MAX_LENGTH).optional(),
+  content: z.string().trim().min(1).max(RULE_CONTENT_CALL_MAX_LENGTH).optional().describe("Up to 4,000 characters, all of which calls use."),
+  active: z.boolean().optional().describe("false stops the receptionist following it without deleting it."),
+});
+
+export const apiRuleReorderSchema = z.strictObject({
+  rule_ids: z.array(id).min(1).max(RULES_MAX).describe("Every rule id once, in the order the receptionist should read them."),
+});
 
 export const apiBusinessCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -455,6 +480,10 @@ export type ApiBusinessSummary = z.infer<typeof apiBusinessSummarySchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
 export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;
+export type ApiRule = z.infer<typeof apiRuleSchema>;
+export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;
+export type ApiRuleUpdate = z.infer<typeof apiRuleUpdateSchema>;
+export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
 export type ApiServiceCreate = z.infer<typeof apiServiceCreateSchema>;
 export type ApiServiceUpdate = z.infer<typeof apiServiceUpdateSchema>;

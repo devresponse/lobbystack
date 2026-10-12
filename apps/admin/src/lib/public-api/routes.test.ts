@@ -38,6 +38,11 @@ const domain = vi.hoisted(() => ({
   createServiceForApi: vi.fn(),
   updateServiceForApi: vi.fn(),
   deleteServiceForApi: vi.fn(async () => undefined),
+  listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
+  createRuleForApi: vi.fn(),
+  updateRuleForApi: vi.fn(),
+  deleteRuleForApi: vi.fn(async () => undefined),
+  reorderRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   getReceptionistForApi: vi.fn(),
   updateReceptionistForApi: vi.fn(),
   listKnowledgeEntriesForApi: vi.fn(),
@@ -402,6 +407,60 @@ describe("services", () => {
     expect(domain.updateServiceForApi).not.toHaveBeenCalled();
     expect(domain.createServiceForApi).not.toHaveBeenCalled();
     expect(domain.deleteServiceForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("rules", () => {
+  const ruleId = "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f";
+  const otherId = "06d9c0dc-f18a-4cc6-a987-ac4963c87113";
+  const rule = { id: ruleId, title: "No prices", content: "Never quote prices.", active: true, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const params = (id = ruleId) => ({ params: Promise.resolve({ rule_id: id }) });
+
+  it("lists the rules and adds one with checked fields", async () => {
+    domain.listRulesForApi.mockResolvedValue([rule]);
+    expect(await (await v1.listRules(call("/rules"))).json()).toEqual({ data: [rule], next_cursor: null, has_more: false });
+    domain.createRuleForApi.mockResolvedValue(rule);
+    const created = await v1.createRule(call("/rules", { method: "POST", body: JSON.stringify({ title: " No prices ", content: "Never quote prices." }) }));
+    expect(created.status).toBe(201);
+    expect(domain.createRuleForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { title: "No prices", content: "Never quote prices." });
+    for (const bad of [{ title: "No prices" }, { title: "", content: "x" }, { title: "x".repeat(161), content: "x" }, { title: "x", content: "x".repeat(10_001) }, { title: "x", content: "x", order: 1 }]) {
+      expect((await v1.createRule(call("/rules", { method: "POST", body: JSON.stringify(bad) }))).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.createRuleForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes, deletes and reorders rules by id", async () => {
+    domain.updateRuleForApi.mockResolvedValue({ ...rule, active: false });
+    expect((await v1.updateRule(call(`/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), params())).status).toBe(200);
+    expect(domain.updateRuleForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), ruleId, { active: false });
+    expect(await (await v1.deleteRule(call(`/rules/${ruleId}`, { method: "DELETE" }), params())).json()).toEqual({ data: { id: ruleId, deleted: true } });
+    domain.reorderRulesForApi.mockResolvedValue([rule]);
+    const reordered = await v1.reorderRules(call("/rules/reorder", { method: "POST", body: JSON.stringify({ rule_ids: [otherId, ruleId] }) }));
+    expect(await reordered.json()).toEqual({ data: [rule], next_cursor: null, has_more: false });
+    expect(domain.reorderRulesForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { rule_ids: [otherId, ruleId] });
+    expect((await v1.reorderRules(call("/rules/reorder", { method: "POST", body: JSON.stringify({ rule_ids: [] }) }))).status).toBe(400);
+    expect((await v1.reorderRules(call("/rules/reorder", { method: "POST", body: JSON.stringify({ rule_ids: ["x"] }) }))).status).toBe(400);
+    expect((await v1.updateRule(call("/rules/x", { method: "PATCH", body: JSON.stringify({ active: true }) }), params("x"))).status).toBe(400);
+    // A rule takes only title, content and active, and calls read at most 4,000 characters of it.
+    expect((await v1.updateRule(call(`/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify({ position: 2 }) }), params())).status).toBe(400);
+    expect((await v1.updateRule(call(`/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify({ content: "x".repeat(4_001) }) }), params())).status).toBe(400);
+    expect(domain.updateRuleForApi).toHaveBeenCalledTimes(1);
+    expect(domain.reorderRulesForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs business:read to read and business:write to change", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.createRule(call("/rules", { method: "POST", body: JSON.stringify({ title: "x", content: "x" }) }))).status).toBe(403);
+    expect((await v1.reorderRules(call("/rules/reorder", { method: "POST", body: JSON.stringify({ rule_ids: [ruleId] }) }))).status).toBe(403);
+    expect((await v1.updateRule(call(`/rules/${ruleId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), params())).status).toBe(403);
+    expect((await v1.deleteRule(call(`/rules/${ruleId}`, { method: "DELETE" }), params())).status).toBe(403);
+    expect(domain.updateRuleForApi).not.toHaveBeenCalled();
+    expect(domain.deleteRuleForApi).not.toHaveBeenCalled();
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write"] });
+    expect((await v1.listRules(call("/rules"))).status).toBe(403);
+    expect(domain.createRuleForApi).not.toHaveBeenCalled();
+    expect(domain.reorderRulesForApi).not.toHaveBeenCalled();
+    expect(domain.listRulesForApi).not.toHaveBeenCalled();
   });
 });
 

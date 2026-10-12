@@ -888,8 +888,8 @@
       "failed": "No pudimos revocar la clave. Inténtelo de nuevo."
     },
     "scopes": {
-      "business_read": "Leer los datos, el horario, los servicios y la configuración de la recepcionista del negocio",
-      "business_write": "Actualizar los datos, el horario, los servicios y la configuración de la recepcionista del negocio, incluido el número al que se transfieren las llamadas",
+      "business_read": "Leer los datos, el horario, los servicios, y la configuración y las reglas de la recepcionista del negocio",
+      "business_write": "Actualizar los datos, el horario, los servicios, y la configuración y las reglas de la recepcionista del negocio, incluido el número al que se transfieren las llamadas",
       "calls_read": "Leer llamadas, resúmenes y transcripciones",
       "contacts_read": "Leer contactos",
       "contacts_write": "Crear y actualizar contactos",

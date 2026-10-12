@@ -8,10 +8,12 @@ import {
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
+  createRuleForApi,
   createServiceForApi,
   createWebhookEndpoint,
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
+  deleteRuleForApi,
   deleteServiceForApi,
   deleteWebhookEndpoint,
   expandKnowledgeSourceForApi,
@@ -34,10 +36,12 @@ import {
   listKnowledgeEntriesForApi,
   listKnowledgeSourcesForApi,
   listMessagesForApi,
+  listRulesForApi,
   listServicesForApi,
   listStaffForApi,
   listWebhookEndpoints,
   PublicApiError,
+  reorderRulesForApi,
   rescheduleAppointmentForApi,
   retryKnowledgeSourceForApi,
   sendWebhookTestEvent,
@@ -46,6 +50,7 @@ import {
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateReceptionistForApi,
+  updateRuleForApi,
   updateServiceForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
@@ -65,6 +70,9 @@ import {
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
   apiReceptionistUpdateSchema,
+  apiRuleCreateSchema,
+  apiRuleReorderSchema,
+  apiRuleUpdateSchema,
   apiServiceCreateSchema,
   apiServiceUpdateSchema,
   apiWebhookEndpointCreateSchema,
@@ -141,6 +149,18 @@ export const v1 = {
     return { body: data(result.business), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
   }),
   listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
+  listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
+  createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),
+  updateRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "updateRule", async ({ context, caller }) => {
+    const ruleId = uuidParam((await params).rule_id, "rule_id");
+    return { body: data(await updateRuleForApi(context, caller, ruleId, await readApiBody(request, apiRuleUpdateSchema))) };
+  }),
+  deleteRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "deleteRule", async ({ context, caller }) => {
+    const ruleId = uuidParam((await params).rule_id, "rule_id");
+    await deleteRuleForApi(context, caller, ruleId);
+    return { body: data({ id: ruleId, deleted: true }) };
+  }),
+  reorderRules: (request: Request) => handleApiRequest(request, "reorderRules", async ({ context, caller }) => ({ body: { data: await reorderRulesForApi(context, caller, await readApiBody(request, apiRuleReorderSchema)), next_cursor: null, has_more: false } })),
   getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
   updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller, { includeInactive: booleanParam(request, "include_inactive") }), next_cursor: null, has_more: false } })),

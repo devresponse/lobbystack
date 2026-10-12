@@ -7,7 +7,7 @@ contentType: "Reference"
 
 ## Paginación
 
-Los endpoints de lista devuelven hasta 25 elementos por página, del más reciente al más antiguo. Envíe `limit` para pedir entre 1 y 100 elementos.
+Los endpoints de lista devuelven hasta 25 elementos por página, del más reciente al más antiguo. Envíe `limit` para pedir entre 1 y 100 elementos. `GET /services`, `GET /staff` y `GET /rules` devuelven todo en una sola página, en su propio orden.
 
 ```json
 {
@@ -56,6 +56,7 @@ Un error de red puede dejarle sin saber si una solicitud funcionó. Envíe un en
 - `POST /appointments`
 - `POST /knowledge`
 - `POST /services`
+- `POST /rules`
 
 `POST /webhooks` ignora este encabezado para que LobbyStack nunca guarde una copia del secreto de firma. Si una creación falla por un error de red, consulte `GET /webhooks` antes de reintentar.
 

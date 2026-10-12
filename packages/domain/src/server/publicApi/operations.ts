@@ -3,9 +3,10 @@ import { createHash } from "node:crypto";
 import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
+  RULES_MAX,
   isApiKeyScope,
   normalizeAppointmentChangePolicy,
   normalizeBookingMode,
@@ -35,6 +36,10 @@ import {
   type ApiMessage,
   type ApiReceptionist,
   type ApiReceptionistUpdate,
+  type ApiRule,
+  type ApiRuleCreate,
+  type ApiRuleReorder,
+  type ApiRuleUpdate,
   type ApiService,
   type ApiServiceCreate,
   type ApiServiceUpdate,
@@ -51,6 +56,7 @@ import { completeUploadInTransaction, insertPendingUploadInTransaction, planUplo
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
+import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
@@ -78,6 +84,7 @@ import {
   serializeContact,
   serializeKnowledgeEntry,
   serializeReceptionist,
+  serializeRule,
   toPage,
   type Page,
   type PageRequest,
@@ -233,6 +240,79 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
     const business = await loadBusinessResource(tx, caller.businessId);
     if (!business) throw notFound("Business");
     return business;
+  });
+}
+
+// Rules the receptionist follows
+
+export async function listRulesForApi(context: DomainContext, caller: ApiCaller): Promise<ApiRule[]> {
+  return await inBusiness(context, caller, async (tx) => (await listAgentRulesInTransaction(tx, { businessId: caller.businessId })).map(serializeRule));
+}
+
+/** Adds a rule after the others. A business keeps up to RULES_MAX rules, so the API can always send them all in one reorder. */
+export async function createRuleForApi(context: DomainContext, caller: ApiCaller, input: ApiRuleCreate): Promise<ApiRule> {
+  return await inBusiness(context, caller, async (tx) => {
+    await lockAgentRulesInTransaction(tx, caller.businessId);
+    const [count] = await tx.select({ rules: sql<number>`count(*)::int` }).from(agentRules).where(eq(agentRules.businessId, caller.businessId));
+    if ((count?.rules ?? 0) >= RULES_MAX) throw conflict(`A business can have up to ${RULES_MAX} rules. Delete one first.`);
+    const rule = await insertAgentRuleInTransaction(tx, { businessId: caller.businessId, title: input.title, content: input.content, active: input.active });
+    await audit(tx, caller, { eventType: "api.rule.created", entityType: "agent_rule", entityId: rule.id });
+    return serializeRule(rule);
+  });
+}
+
+/** Changes the fields sent. Values the rule already has change nothing, so an unchanged rule isn't written, audited or refreshed. */
+export async function updateRuleForApi(context: DomainContext, caller: ApiCaller, ruleId: string, input: ApiRuleUpdate): Promise<ApiRule> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const [current] = await tx.select().from(agentRules).where(and(eq(agentRules.businessId, caller.businessId), eq(agentRules.id, ruleId))).limit(1).for("no key update");
+    if (!current) throw notFound("Rule");
+    const changes = {
+      ...(input.title !== undefined && input.title !== current.title ? { title: input.title } : {}),
+      ...(input.content !== undefined && input.content !== current.content ? { content: input.content } : {}),
+      ...(input.active !== undefined && input.active !== current.active ? { active: input.active } : {}),
+    };
+    if (!Object.keys(changes).length) return serializeRule(current);
+    const rule = await updateAgentRuleInTransaction(tx, { businessId: caller.businessId, ruleId, ...changes });
+    if (!rule) throw notFound("Rule");
+    await audit(tx, caller, { eventType: "api.rule.updated", entityType: "agent_rule", entityId: ruleId, payload: { fields: Object.keys(changes) } });
+    return serializeRule(rule);
+  });
+}
+
+export async function deleteRuleForApi(context: DomainContext, caller: ApiCaller, ruleId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteAgentRuleInTransaction(tx, { businessId: caller.businessId, ruleId })) throw notFound("Rule");
+    await audit(tx, caller, { eventType: "api.rule.deleted", entityType: "agent_rule", entityId: ruleId });
+  });
+}
+
+/**
+ * Puts every rule in the order sent. The list has to name each of the
+ * business's rules once, so no rule is left in an old position. The order the
+ * rules already have changes nothing.
+ */
+export async function reorderRulesForApi(context: DomainContext, caller: ApiCaller, input: ApiRuleReorder): Promise<ApiRule[]> {
+  return await inBusiness(context, caller, async (tx) => {
+    // Hold the order first, so a rule added meanwhile can't slip past the check below.
+    await lockAgentRulesInTransaction(tx, caller.businessId);
+    const current = await listAgentRulesInTransaction(tx, { businessId: caller.businessId });
+    const ruleIds = input.rule_ids.map((ruleId) => ruleId.toLowerCase());
+    const missing = current.filter((rule) => !ruleIds.includes(rule.id)).map((rule) => rule.id);
+    const unknown = ruleIds.filter((ruleId) => !current.some((rule) => rule.id === ruleId));
+    if (missing.length || unknown.length || new Set(ruleIds).size !== ruleIds.length) {
+      throw invalidRequest("Send every rule id once, in the new order.", [
+        ...(missing.length ? [{ path: "rule_ids", message: `Missing: ${missing.join(", ")}.` }] : []),
+        ...(unknown.length ? [{ path: "rule_ids", message: `Not this business's rules: ${unknown.join(", ")}.` }] : []),
+        ...(new Set(ruleIds).size !== ruleIds.length ? [{ path: "rule_ids", message: "An id is sent more than once." }] : []),
+      ]);
+    }
+    // The order the rules already have changes nothing, unless two rules share a position: then writing it settles the tie.
+    const distinctPositions = current.every((rule, index) => index === 0 || rule.sortOrder > current[index - 1]!.sortOrder);
+    if (distinctPositions && ruleIds.every((ruleId, index) => current[index]?.id === ruleId)) return current.map(serializeRule);
+    if (!await reorderAgentRulesInTransaction(tx, { businessId: caller.businessId, ruleIds })) throw invalidRequest("Send every rule id once, in the new order.");
+    await audit(tx, caller, { eventType: "api.rules.reordered", entityType: "agent_rule", payload: { ruleIds } });
+    return (await listAgentRulesInTransaction(tx, { businessId: caller.businessId })).map(serializeRule);
   });
 }
 

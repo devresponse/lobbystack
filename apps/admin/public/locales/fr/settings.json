@@ -888,8 +888,8 @@
       "failed": "Impossible de révoquer la clé. Réessayez."
     },
     "scopes": {
-      "business_read": "Lire les informations, les heures, les services et les réglages de la réceptionniste de l'entreprise",
-      "business_write": "Modifier les informations, les heures, les services et les réglages de la réceptionniste de l'entreprise, y compris le numéro de transfert des appels",
+      "business_read": "Lire les informations, les heures, les services, ainsi que les réglages et les règles de la réceptionniste de l'entreprise",
+      "business_write": "Modifier les informations, les heures, les services, ainsi que les réglages et les règles de la réceptionniste de l'entreprise, y compris le numéro de transfert des appels",
       "calls_read": "Lire les appels, les résumés et les transcriptions",
       "contacts_read": "Lire les contacts",
       "contacts_write": "Créer et modifier des contacts",

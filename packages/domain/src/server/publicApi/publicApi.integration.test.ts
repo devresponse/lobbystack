@@ -4,15 +4,15 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteServiceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listServicesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateServiceForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listRulesForApi, listServicesForApi, listStaffForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -551,6 +551,67 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(again).toMatchObject({ slug: "color-gloss" });
     expect(again.id).not.toBe(created.id);
     expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, created.id), eq(auditLogs.eventType, "api.service.deleted")))).toHaveLength(1);
+  });
+
+  it("adds, changes, orders and deletes rules, refreshing the snapshot only when something changes", async () => {
+    const context = { db: worker!.db };
+    const first = await createRuleForApi(context, a.caller, { title: "No prices", content: "Never quote prices on the phone." });
+    const second = await createRuleForApi(context, a.caller, { title: "Spanish", content: "Offer Spanish to callers who ask.", active: false });
+    expect(second).toMatchObject({ title: "Spanish", active: false });
+    expect(apiRuleSchema.safeParse(first).success).toBe(true);
+    expect((await listRulesForApi(context, a.caller)).map((rule) => rule.id)).toEqual([first.id, second.id]);
+    expect(await listRulesForApi(context, b.caller)).toEqual([]);
+
+    const refreshes = async () => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.businessId, a.businessId), eq(outboxMessages.aggregateType, "agent_rule")))).length;
+    const baseline = await refreshes();
+    expect(await updateRuleForApi(context, a.caller, second.id, { active: true, title: "Spanish" })).toMatchObject({ active: true });
+    expect(await refreshes()).toBe(baseline + 1);
+    const [audit] = await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, second.id), eq(auditLogs.eventType, "api.rule.updated")));
+    expect(audit?.payload).toMatchObject({ fields: ["active"] });
+    // Values the rule already has, or the order the rules already have, change nothing.
+    await updateRuleForApi(context, a.caller, second.id, { active: true });
+    expect(await reorderRulesForApi(context, a.caller, { rule_ids: [first.id, second.id] })).toMatchObject([{ id: first.id }, { id: second.id }]);
+    expect(await refreshes()).toBe(baseline + 1);
+    await expectApiError(updateRuleForApi(context, a.caller, second.id, {}), 400, "invalid_request");
+
+    expect((await reorderRulesForApi(context, a.caller, { rule_ids: [second.id.toUpperCase(), first.id] })).map((rule) => rule.id)).toEqual([second.id, first.id]);
+    expect(await refreshes()).toBe(baseline + 2);
+    // The order has to name every rule once, and only this business's rules.
+    await expectApiError(reorderRulesForApi(context, a.caller, { rule_ids: [second.id] }), 400, "invalid_request");
+    await expectApiError(reorderRulesForApi(context, a.caller, { rule_ids: [second.id, first.id, first.id] }), 400, "invalid_request");
+    await expectApiError(reorderRulesForApi(context, b.caller, { rule_ids: [second.id, first.id] }), 400, "invalid_request");
+    await expectApiError(updateRuleForApi(context, b.caller, first.id, { active: false }), 404, "not_found");
+    await expectApiError(deleteRuleForApi(context, b.caller, first.id), 404, "not_found");
+
+    await deleteRuleForApi(context, a.caller, first.id);
+    await expectApiError(deleteRuleForApi(context, a.caller, first.id), 404, "not_found");
+    expect((await listRulesForApi(context, a.caller)).map((rule) => rule.id)).toEqual([second.id]);
+    expect(await refreshes()).toBe(baseline + 3);
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, a.businessId), eq(auditLogs.eventType, eventType)))).length;
+    expect(await audited("api.rule.created")).toBe(2);
+    expect(await audited("api.rule.deleted")).toBe(1);
+    expect(await audited("api.rules.reordered")).toBe(1);
+    await deleteRuleForApi(context, a.caller, second.id);
+  });
+
+  it("keeps at most 100 rules, and settles rules that share a position when their order is sent", async () => {
+    const context = { db: worker!.db };
+    // Two rules saved at the same position, as a dashboard subset reorder or a race can leave them.
+    await admin!.db.insert(agentRules).values([0, 1].map((index) => ({ businessId: b.businessId, title: `Tied ${index}`, content: "Be kind.", sortOrder: 0 })));
+    try {
+      const listed = await listRulesForApi(context, b.caller);
+      expect(listed).toHaveLength(2);
+      const order = listed.map((rule) => rule.id);
+      // Sending the order they're listed in writes it, so each rule gets its own position.
+      await reorderRulesForApi(context, b.caller, { rule_ids: order });
+      const positions = await admin!.db.select({ id: agentRules.id, sortOrder: agentRules.sortOrder }).from(agentRules).where(eq(agentRules.businessId, b.businessId));
+      expect(order.map((id) => positions.find((row) => row.id === id)?.sortOrder)).toEqual([0, 1]);
+
+      await admin!.db.insert(agentRules).values(Array.from({ length: 98 }, (_, index) => ({ businessId: b.businessId, title: `Rule ${index}`, content: "Be kind.", sortOrder: index + 2 })));
+      await expectApiError(createRuleForApi(context, b.caller, { title: "One too many", content: "Be kind." }), 409, "conflict");
+    } finally {
+      await admin!.db.delete(agentRules).where(eq(agentRules.businessId, b.businessId));
+    }
   });
 
   it("reads and changes the receptionist, refreshing the snapshot only when something changes", async () => {

@@ -14,3 +14,18 @@ export const RECEPTIONIST_TEXT_MAX_LENGTH = 2_000;
 
 /** Longest voice, SMS or chat instructions. */
 export const RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH = 8_000;
+
+/** Longest rule title. */
+export const RULE_TITLE_MAX_LENGTH = 160;
+
+/** Longest rule text the dashboard saves. */
+export const RULE_CONTENT_MAX_LENGTH = 10_000;
+
+/** Most rules the API lets a business keep, and so the most ids one reorder sends. */
+export const RULES_MAX = 100;
+
+/** Rule text calls read. The dashboard keeps longer text, but calls use only this much of it. */
+export const RULE_CONTENT_CALL_MAX_LENGTH = 4_000;
+
+/** Active rules calls follow, in order. */
+export const RULES_CALL_MAX = 50;

@@ -888,8 +888,8 @@
       "failed": "Nismo uspeli da opozovemo ključ. Pokušajte ponovo."
     },
     "scopes": {
-      "business_read": "Čitanje podataka o firmi, radnog vremena, usluga i podešavanja recepcionera",
-      "business_write": "Izmena podataka o firmi, radnog vremena, usluga i podešavanja recepcionera, uključujući broj na koji se pozivi prebacuju",
+      "business_read": "Čitanje podataka o firmi, radnog vremena, usluga, kao i podešavanja i pravila recepcionera",
+      "business_write": "Izmena podataka o firmi, radnog vremena, usluga, kao i podešavanja i pravila recepcionera, uključujući broj na koji se pozivi prebacuju",
       "calls_read": "Čitanje poziva, rezimea i transkripata",
       "contacts_read": "Čitanje kontakata",
       "contacts_write": "Kreiranje i izmena kontakata",

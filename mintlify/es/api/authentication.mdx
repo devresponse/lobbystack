@@ -59,8 +59,8 @@ Cada endpoint, salvo `GET /me`, requiere un permiso (scope). Una clave sin ese p
 
 | Permiso | Permite |
 | --- | --- |
-| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist` |
-| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` y `DELETE` en `/services/{service_id}` |
+| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist`, `GET /rules` |
+| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` y `DELETE` en `/services/{service_id}`, `POST /rules`, `PATCH` y `DELETE` en `/rules/{rule_id}`, `POST /rules/reorder` |
 | `calls:read` | `GET /calls`, `GET /calls/{call_id}` |
 | `contacts:read` | `GET /contacts`, `GET /contacts/{contact_id}` |
 | `contacts:write` | `POST /contacts`, `PATCH /contacts/{contact_id}` |

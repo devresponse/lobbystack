@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -21,6 +21,7 @@ import {
   type ApiKnowledgeSource,
   type ApiMessage,
   type ApiReceptionist,
+  type ApiRule,
   type ApiService,
   type ApiStaff,
   type ApiWebhookEndpoint,
@@ -532,6 +533,12 @@ export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
     appointment_change_policy: { enabled: policy.enabled, allow_cancel: policy.allowCancel, allow_reschedule: policy.allowReschedule, verification_mode: policy.verificationMode },
     updated_at: iso(row.updatedAt),
   };
+}
+
+// Rules
+
+export function serializeRule(row: Pick<typeof agentRules.$inferSelect, "id" | "title" | "content" | "active" | "createdAt" | "updatedAt">): ApiRule {
+  return { id: row.id, title: row.title, content: row.content, active: row.active, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 // Webhook endpoints

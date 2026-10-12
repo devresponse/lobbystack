@@ -7,7 +7,7 @@ contentType: "Reference"
 
 ## Pagination
 
-Les points de terminaison de liste renvoient jusqu'à 25 éléments par page, du plus récent au plus ancien. Passez `limit` pour demander de 1 à 100 éléments.
+Les points de terminaison de liste renvoient jusqu'à 25 éléments par page, du plus récent au plus ancien. Passez `limit` pour demander de 1 à 100 éléments. `GET /services`, `GET /staff` et `GET /rules` renvoient tout en une seule page, dans leur propre ordre.
 
 ```json
 {
@@ -56,6 +56,7 @@ Une erreur réseau peut vous laisser dans le doute : la requête a-t-elle foncti
 - `POST /appointments`
 - `POST /knowledge`
 - `POST /services`
+- `POST /rules`
 
 `POST /webhooks` ignore cet en-tête, pour que LobbyStack ne garde jamais de copie du secret de signature. Si une création échoue à cause d'une erreur réseau, vérifiez `GET /webhooks` avant de relancer.
 

@@ -7,7 +7,7 @@ contentType: "Reference"
 
 ## Pagination
 
-List endpoints return up to 25 items per page, newest first. Pass `limit` to ask for 1 to 100 items.
+List endpoints return up to 25 items per page, newest first. Pass `limit` to ask for 1 to 100 items. `GET /services`, `GET /staff` and `GET /rules` return everything in one page, in their own order.
 
 ```json
 {
@@ -56,6 +56,7 @@ Network errors can leave you unsure whether a request worked. Send an `Idempoten
 - `POST /appointments`
 - `POST /knowledge`
 - `POST /services`
+- `POST /rules`
 
 `POST /webhooks` ignores the header, so LobbyStack never stores a copy of the signing secret. If a create request fails with a network error, check `GET /webhooks` before you retry.
 

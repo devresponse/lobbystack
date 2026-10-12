@@ -5,14 +5,14 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteServiceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listServicesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateServiceForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -493,6 +493,64 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     await createKnowledgeSourceForApi({ db: worker!.db }, b.caller, { type: "website", url: "https://birch-api.example" });
     const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, b.businessId));
     expect(business).toEqual({ websiteUrl: "https://birch-api.example/", stage: "knowledge" });
+  });
+
+  it("adds, changes and deletes services, and keeps slugs unique among live services", async () => {
+    const context = { db: worker!.db };
+    // The name gives the slug, and staff_ids limits who takes the service.
+    const created = await createServiceForApi(context, a.caller, { name: "Color & Gloss", duration_minutes: 90, staff_ids: [a.staffId] });
+    expect(created).toMatchObject({ name: "Color & Gloss", slug: "color-gloss", description: null, duration_minutes: 90, active: true, staff_ids: [a.staffId] });
+    expect(apiServiceSchema.safeParse(created).success).toBe(true);
+    await expectApiError(createServiceForApi(context, a.caller, { name: "Another", slug: "color-gloss", duration_minutes: 30 }), 409, "conflict");
+    // Staff of another business are refused, and nothing of the refused service stays.
+    await expectApiError(createServiceForApi(context, a.caller, { name: "Mystery", duration_minutes: 30, staff_ids: [b.staffId] }), 400, "invalid_request");
+    expect(await admin!.db.select({ id: services.id }).from(services).where(and(eq(services.businessId, a.businessId), eq(services.name, "Mystery")))).toEqual([]);
+    // A name with no Latin letters or digits needs a slug.
+    await expectApiError(createServiceForApi(context, a.caller, { name: "Стрижка", duration_minutes: 30 }), 400, "invalid_request");
+    // A slug made from the name is checked like one sent: the fixture's Cut already holds "cut".
+    await expectApiError(createServiceForApi(context, a.caller, { name: "Cut", duration_minutes: 30 }), 409, "conflict");
+    // Two requests racing for one slug: one wins and the other gets a 409.
+    const race = await Promise.allSettled([0, 1].map(async () => await createServiceForApi(context, a.caller, { name: "Beard Trim", duration_minutes: 20 })));
+    expect(race.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(race.find((result) => result.status === "rejected")).toMatchObject({ reason: { status: 409, code: "conflict" } });
+
+    const refreshes = async () => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateId, created.id)))).length;
+    const audits = async () => await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, created.id), eq(auditLogs.eventType, "api.service.updated")));
+    const baseline = await refreshes();
+    expect(await updateServiceForApi(context, a.caller, created.id, { duration_minutes: 60, description: "Full color.", staff_ids: [] })).toMatchObject({ duration_minutes: 60, description: "Full color.", staff_ids: [] });
+    // One refresh for the fields and one for the staff.
+    expect(await refreshes()).toBe(baseline + 2);
+    expect(await audits()).toEqual([{ payload: expect.objectContaining({ fields: ["description", "duration_minutes", "staff_ids"] }) }]);
+    // Values it already has change nothing.
+    await updateServiceForApi(context, a.caller, created.id, { duration_minutes: 60, staff_ids: [] });
+    expect(await refreshes()).toBe(baseline + 2);
+    expect(await audits()).toHaveLength(1);
+    await expectApiError(updateServiceForApi(context, a.caller, created.id, {}), 400, "invalid_request");
+    await expectApiError(updateServiceForApi(context, a.caller, created.id, { slug: "cut" }), 409, "conflict");
+    await expectApiError(updateServiceForApi(context, b.caller, created.id, { active: false }), 404, "not_found");
+    await expectApiError(deleteServiceForApi(context, b.caller, created.id), 404, "not_found");
+    // A refused staff list undoes the whole change.
+    await expectApiError(updateServiceForApi(context, a.caller, created.id, { duration_minutes: 45, staff_ids: [b.staffId] }), 400, "invalid_request");
+    const savedService = async () => (await admin!.db.select({ durationMinutes: services.durationMinutes, updatedAt: services.updatedAt }).from(services).where(eq(services.id, created.id)))[0]!;
+    expect((await savedService()).durationMinutes).toBe(60);
+    // Changing only the staff still moves updated_at, and ids may come in upper case.
+    const before = (await savedService()).updatedAt.getTime();
+    expect(await updateServiceForApi(context, a.caller, created.id, { staff_ids: [a.staffId.toUpperCase()] })).toMatchObject({ staff_ids: [a.staffId] });
+    expect((await savedService()).updatedAt.getTime()).toBeGreaterThan(before);
+
+    // A service turned off leaves the list unless the inactive ones are asked for.
+    await updateServiceForApi(context, a.caller, created.id, { active: false });
+    expect((await listServicesForApi(context, a.caller)).map((service) => service.id)).not.toContain(created.id);
+    expect((await listServicesForApi(context, a.caller, { includeInactive: true })).map((service) => service.id)).toContain(created.id);
+
+    // Deleting hides the service everywhere and frees its slug.
+    await deleteServiceForApi(context, a.caller, created.id);
+    await expectApiError(deleteServiceForApi(context, a.caller, created.id), 404, "not_found");
+    expect((await listServicesForApi(context, a.caller, { includeInactive: true })).map((service) => service.id)).not.toContain(created.id);
+    const again = await createServiceForApi(context, a.caller, { name: "Color & Gloss", duration_minutes: 90 });
+    expect(again).toMatchObject({ slug: "color-gloss" });
+    expect(again.id).not.toBe(created.id);
+    expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, created.id), eq(auditLogs.eventType, "api.service.deleted")))).toHaveLength(1);
   });
 
   it("reads and changes the receptionist, refreshing the snapshot only when something changes", async () => {

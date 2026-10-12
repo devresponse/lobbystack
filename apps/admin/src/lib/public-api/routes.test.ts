@@ -34,6 +34,10 @@ const domain = vi.hoisted(() => ({
   getKnowledgeSourceForApi: vi.fn(),
   updateKnowledgeSourceForApi: vi.fn(),
   deleteKnowledgeSourceForApi: vi.fn(async () => undefined),
+  listServicesForApi: vi.fn(async () => []),
+  createServiceForApi: vi.fn(),
+  updateServiceForApi: vi.fn(),
+  deleteServiceForApi: vi.fn(async () => undefined),
   getReceptionistForApi: vi.fn(),
   updateReceptionistForApi: vi.fn(),
   listKnowledgeEntriesForApi: vi.fn(),
@@ -345,6 +349,59 @@ describe("knowledge entries", () => {
     expect(domain.listKnowledgeEntriesForApi).not.toHaveBeenCalled();
     expect(domain.getKnowledgeSourceForApi).not.toHaveBeenCalled();
     expect(domain.deleteKnowledgeEntryForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("services", () => {
+  const serviceId = "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f";
+  const staffId = "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6";
+  const service = { id: serviceId, name: "Cut", slug: "cut", description: null, duration_minutes: 30, active: true, staff_ids: [], created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const params = (id = serviceId) => ({ params: Promise.resolve({ service_id: id }) });
+
+  it("lists turned-off services only when asked", async () => {
+    expect((await v1.listServices(call("/services"))).status).toBe(200);
+    expect(domain.listServicesForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { includeInactive: undefined });
+    await v1.listServices(call("/services?include_inactive=true"));
+    expect(domain.listServicesForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { includeInactive: true });
+    await v1.listServices(call("/services?include_inactive=false"));
+    expect(domain.listServicesForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { includeInactive: false });
+    expect((await v1.listServices(call("/services?include_inactive=yes"))).status).toBe(400);
+  });
+
+  it("adds a service with checked fields and answers 201", async () => {
+    domain.createServiceForApi.mockResolvedValue(service);
+    const response = await v1.createService(call("/services", { method: "POST", body: JSON.stringify({ name: " Cut ", slug: " Cut ", duration_minutes: 30, staff_ids: [staffId] }) }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ data: service });
+    expect(domain.createServiceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { name: "Cut", slug: "cut", duration_minutes: 30, staff_ids: [staffId] });
+    for (const bad of [{ name: "Cut" }, { name: "Cut", duration_minutes: 0 }, { name: "Cut", duration_minutes: 1_441 }, { name: "Cut", duration_minutes: 30.5 }, { name: "", duration_minutes: 30 }, { name: "Cut", duration_minutes: 30, slug: "cut here" }, { name: "Cut", duration_minutes: 30, staff_ids: ["x"] }, { name: "Cut", duration_minutes: 30, price: 10 }]) {
+      expect((await v1.createService(call("/services", { method: "POST", body: JSON.stringify(bad) }))).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.createServiceForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("changes and deletes a service by its id", async () => {
+    domain.updateServiceForApi.mockResolvedValue({ ...service, active: false });
+    const updated = await v1.updateService(call(`/services/${serviceId}`, { method: "PATCH", body: JSON.stringify({ active: false, description: null }) }), params());
+    expect(updated.status).toBe(200);
+    expect(domain.updateServiceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), serviceId, { active: false, description: null });
+    const deleted = await v1.deleteService(call(`/services/${serviceId}`, { method: "DELETE" }), params());
+    expect(await deleted.json()).toEqual({ data: { id: serviceId, deleted: true } });
+    expect(domain.deleteServiceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), serviceId);
+    expect((await v1.updateService(call("/services/x", { method: "PATCH", body: JSON.stringify({ active: true }) }), params("x"))).status).toBe(400);
+    expect((await v1.deleteService(call("/services/x", { method: "DELETE" }), params("x"))).status).toBe(400);
+    expect(domain.updateServiceForApi).toHaveBeenCalledTimes(1);
+    expect(domain.deleteServiceForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs business:write to change services", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.createService(call("/services", { method: "POST", body: JSON.stringify({ name: "Cut", duration_minutes: 30 }) }))).status).toBe(403);
+    expect((await v1.deleteService(call(`/services/${serviceId}`, { method: "DELETE" }), params())).status).toBe(403);
+    expect((await v1.updateService(call(`/services/${serviceId}`, { method: "PATCH", body: JSON.stringify({ active: false }) }), params())).status).toBe(403);
+    expect(domain.updateServiceForApi).not.toHaveBeenCalled();
+    expect(domain.createServiceForApi).not.toHaveBeenCalled();
+    expect(domain.deleteServiceForApi).not.toHaveBeenCalled();
   });
 });
 

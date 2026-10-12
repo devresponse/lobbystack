@@ -55,6 +55,7 @@ Network errors can leave you unsure whether a request worked. Send an `Idempoten
 - `POST /contacts`
 - `POST /appointments`
 - `POST /knowledge`
+- `POST /services`
 
 `POST /webhooks` ignores the header, so LobbyStack never stores a copy of the signing secret. If a create request fails with a network error, check `GET /webhooks` before you retry.
 
@@ -123,7 +124,7 @@ API keys act for the business, so the API skips the caller verification the rece
 
 ## Staff
 
-`GET /staff` lists everyone who takes appointments, with `active` and the `service_ids` each person can be booked for. A service with no staff assigned in the dashboard is open to every active staff member.
+`GET /staff` lists everyone who takes appointments, with `active` and the `service_ids` each person can be booked for. A service with no staff assigned, in the dashboard or with `staff_ids` on `POST /services` and `PATCH /services/{service_id}`, is open to every active staff member.
 
 A business that never set up staff still has one active staff member, named after the business. Bookings go to that person, so `GET /staff` returns it like any other staff member, and you can pass its `id` as `staff_id`.
 

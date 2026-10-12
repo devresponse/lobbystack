@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
 import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
@@ -36,12 +36,14 @@ import {
   type ApiReceptionist,
   type ApiReceptionistUpdate,
   type ApiService,
+  type ApiServiceCreate,
+  type ApiServiceUpdate,
   type ApiStaff,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin } from "../../authz";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
-import { replaceBusinessHoursInTransaction } from "../catalog";
+import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
@@ -69,6 +71,7 @@ import {
   loadBusinessResource,
   loadCallDetailResource,
   loadContactResource,
+  loadServiceResource,
   loadKnowledgeEntryResource,
   loadKnowledgeSourceResource,
   pageSize,
@@ -381,8 +384,99 @@ export async function listBusinessesForApi(context: DomainContext, input: { part
   }), (row) => ({ at: new Date(row.created_at), id: row.business_id }));
 }
 
-export async function listServicesForApi(context: DomainContext, caller: ApiCaller): Promise<ApiService[]> {
-  return await inBusiness(context, caller, async (tx) => await listServiceResources(tx, caller.businessId));
+export async function listServicesForApi(context: DomainContext, caller: ApiCaller, options: { includeInactive?: boolean | undefined } = {}): Promise<ApiService[]> {
+  return await inBusiness(context, caller, async (tx) => await listServiceResources(tx, caller.businessId, options));
+}
+
+/**
+ * A slug made from a service's name the way the dashboard makes one: its Latin
+ * letters and digits joined by hyphens, cut to the column's 120 characters.
+ * Empty for a name with no Latin letters or digits.
+ */
+function serviceSlugFrom(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 120).replace(/-+$/, "");
+}
+
+function serviceSlugTaken(slug: string): PublicApiError {
+  return conflict(`Another service already uses the slug ${slug}.`);
+}
+
+async function requireFreeServiceSlug(tx: DatabaseTransaction, businessId: string, slug: string, serviceId?: string): Promise<void> {
+  const [taken] = await tx.select({ id: services.id }).from(services).where(and(eq(services.businessId, businessId), eq(services.slug, slug), isNull(services.deletedAt), ...(serviceId ? [ne(services.id, serviceId)] : []))).limit(1);
+  if (taken) throw serviceSlugTaken(slug);
+}
+
+async function setServiceStaff(tx: DatabaseTransaction, businessId: string, serviceId: string, staffIds: string[]): Promise<boolean> {
+  const result = await replaceServiceStaffInTransaction(tx, { businessId, serviceId, staffIds });
+  if (result.unknownStaffIds.length) throw invalidRequest("staff_ids lists staff members this business doesn't have.", [{ path: "staff_ids", message: `Unknown staff: ${result.unknownStaffIds.join(", ")}.` }]);
+  return result.changed;
+}
+
+async function loadService(tx: DatabaseTransaction, businessId: string, serviceId: string): Promise<ApiService> {
+  const service = await loadServiceResource(tx, businessId, serviceId);
+  if (!service) throw notFound("Service");
+  return service;
+}
+
+export async function createServiceForApi(context: DomainContext, caller: ApiCaller, input: ApiServiceCreate): Promise<ApiService> {
+  const slug = input.slug ?? serviceSlugFrom(input.name);
+  if (!slug) throw invalidRequest("Send a slug: this name has no letters or digits to make one from.", [{ path: "slug", message: "Required for this name." }]);
+  return await inBusiness(context, caller, async (tx) => {
+    await requireFreeServiceSlug(tx, caller.businessId, slug);
+    let serviceId: string;
+    try {
+      serviceId = (await insertServiceInTransaction(tx, { businessId: caller.businessId, name: input.name, slug, durationMinutes: input.duration_minutes, description: input.description, active: input.active })).id;
+    } catch (error) {
+      // Another request took the slug after the check above.
+      if (isUniqueViolation(error)) throw serviceSlugTaken(slug);
+      throw error;
+    }
+    if (input.staff_ids?.length) await setServiceStaff(tx, caller.businessId, serviceId, input.staff_ids);
+    await audit(tx, caller, { eventType: "api.service.created", entityType: "service", entityId: serviceId });
+    return await loadService(tx, caller.businessId, serviceId);
+  });
+}
+
+/** Changes the fields sent. Values the service already has change nothing, so an unchanged service isn't written, audited or refreshed. */
+export async function updateServiceForApi(context: DomainContext, caller: ApiCaller, serviceId: string, input: ApiServiceUpdate): Promise<ApiService> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    // "no key update" still lets bookings that reference the service check their foreign key meanwhile.
+    const [current] = await tx.select().from(services).where(and(eq(services.businessId, caller.businessId), eq(services.id, serviceId), isNull(services.deletedAt))).limit(1).for("no key update");
+    if (!current) throw notFound("Service");
+    const changes = {
+      ...(input.name !== undefined && input.name !== current.name ? { name: input.name } : {}),
+      ...(input.slug !== undefined && input.slug !== current.slug ? { slug: input.slug } : {}),
+      ...(input.description !== undefined && input.description !== current.description ? { description: input.description } : {}),
+      ...(input.duration_minutes !== undefined && input.duration_minutes !== current.durationMinutes ? { durationMinutes: input.duration_minutes } : {}),
+      ...(input.active !== undefined && input.active !== current.active ? { active: input.active } : {}),
+    };
+    const fields: string[] = Object.keys(changes).map((field) => (field === "durationMinutes" ? "duration_minutes" : field));
+    if (changes.slug !== undefined) await requireFreeServiceSlug(tx, caller.businessId, changes.slug, serviceId);
+    if (fields.length) {
+      try {
+        await updateServiceInTransaction(tx, { businessId: caller.businessId, serviceId, ...changes });
+      } catch (error) {
+        if (isUniqueViolation(error) && changes.slug !== undefined) throw serviceSlugTaken(changes.slug);
+        throw error;
+      }
+    }
+    if (input.staff_ids !== undefined && await setServiceStaff(tx, caller.businessId, serviceId, input.staff_ids)) {
+      // A change of staff alone still moves updated_at, so clients that sync by it see it.
+      if (!fields.length) await tx.update(services).set({ updatedAt: new Date() }).where(and(eq(services.businessId, caller.businessId), eq(services.id, serviceId)));
+      fields.push("staff_ids");
+    }
+    if (fields.length) await audit(tx, caller, { eventType: "api.service.updated", entityType: "service", entityId: serviceId, payload: { fields } });
+    return await loadService(tx, caller.businessId, serviceId);
+  });
+}
+
+/** Removes a service from the catalog, as deleteService explains. */
+export async function deleteServiceForApi(context: DomainContext, caller: ApiCaller, serviceId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await deleteServiceInTransaction(tx, { businessId: caller.businessId, serviceId })) throw notFound("Service");
+    await audit(tx, caller, { eventType: "api.service.deleted", entityType: "service", entityId: serviceId });
+  });
 }
 
 export async function listStaffForApi(context: DomainContext, caller: ApiCaller): Promise<ApiStaff[]> {

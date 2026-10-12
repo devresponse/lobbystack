@@ -889,7 +889,7 @@
     },
     "scopes": {
       "business_read": "Read business details, hours, services and receptionist settings",
-      "business_write": "Update business details, hours and receptionist settings, including where calls are transferred",
+      "business_write": "Update business details, hours, services and receptionist settings, including where calls are transferred",
       "calls_read": "Read calls, summaries and transcripts",
       "contacts_read": "Read contacts",
       "contacts_write": "Create and update contacts",

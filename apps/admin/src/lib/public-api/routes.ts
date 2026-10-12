@@ -8,9 +8,11 @@ import {
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
+  createServiceForApi,
   createWebhookEndpoint,
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
+  deleteServiceForApi,
   deleteWebhookEndpoint,
   expandKnowledgeSourceForApi,
   getAppointmentForApi,
@@ -44,6 +46,7 @@ import {
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateReceptionistForApi,
+  updateServiceForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
   type WebhookManager,
@@ -62,6 +65,8 @@ import {
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
   apiReceptionistUpdateSchema,
+  apiServiceCreateSchema,
+  apiServiceUpdateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
   webhookEventScope,
@@ -107,6 +112,13 @@ function textParam(request: Request, name: string, maxLength: number): string | 
   return value;
 }
 
+function booleanParam(request: Request, name: string): boolean | undefined {
+  const value = queryParam(request, name);
+  if (value === undefined) return undefined;
+  if (value !== "true" && value !== "false") throw new PublicApiError(400, "invalid_request", `${name} must be true or false.`);
+  return value === "true";
+}
+
 function enumParam<T extends string>(request: Request, name: string, values: readonly T[]): T | undefined {
   const value = queryParam(request, name);
   if (value === undefined) return undefined;
@@ -131,7 +143,17 @@ export const v1 = {
   listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
   getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
   updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
-  listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller), next_cursor: null, has_more: false } })),
+  listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller, { includeInactive: booleanParam(request, "include_inactive") }), next_cursor: null, has_more: false } })),
+  createService: (request: Request) => handleApiRequest(request, "createService", async ({ context, caller }) => ({ body: data(await createServiceForApi(context, caller, await readApiBody(request, apiServiceCreateSchema))) })),
+  updateService: (request: Request, { params }: Params<"service_id">) => handleApiRequest(request, "updateService", async ({ context, caller }) => {
+    const serviceId = uuidParam((await params).service_id, "service_id");
+    return { body: data(await updateServiceForApi(context, caller, serviceId, await readApiBody(request, apiServiceUpdateSchema))) };
+  }),
+  deleteService: (request: Request, { params }: Params<"service_id">) => handleApiRequest(request, "deleteService", async ({ context, caller }) => {
+    const serviceId = uuidParam((await params).service_id, "service_id");
+    await deleteServiceForApi(context, caller, serviceId);
+    return { body: data({ id: serviceId, deleted: true }) };
+  }),
   listStaff: (request: Request) => handleApiRequest(request, "listStaff", async ({ context, caller }) => ({ body: { data: await listStaffForApi(context, caller), next_cursor: null, has_more: false } })),
 
   listCalls: (request: Request) => handleApiRequest(request, "listCalls", async ({ context, caller }) => ({ body: await listCallsForApi(context, caller, { ...pageQuery(request), startedAfter: dateParam(request, "started_after"), startedBefore: dateParam(request, "started_before") }) })),

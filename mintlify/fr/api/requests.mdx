@@ -55,6 +55,7 @@ Une erreur réseau peut vous laisser dans le doute : la requête a-t-elle foncti
 - `POST /contacts`
 - `POST /appointments`
 - `POST /knowledge`
+- `POST /services`
 
 `POST /webhooks` ignore cet en-tête, pour que LobbyStack ne garde jamais de copie du secret de signature. Si une création échoue à cause d'une erreur réseau, vérifiez `GET /webhooks` avant de relancer.
 
@@ -123,7 +124,7 @@ Les clés API agissent au nom de l'entreprise, donc l'API saute la vérification
 
 ## Personnel
 
-`GET /staff` liste toutes les personnes qui prennent des rendez-vous, avec `active` et les `service_ids` pour lesquels chaque personne peut être réservée. Un service sans personnel assigné dans le tableau de bord est ouvert à tous les membres actifs du personnel.
+`GET /staff` liste toutes les personnes qui prennent des rendez-vous, avec `active` et les `service_ids` pour lesquels chaque personne peut être réservée. Un service sans personnel assigné, dans le tableau de bord ou avec `staff_ids` sur `POST /services` et `PATCH /services/{service_id}`, est ouvert à tous les membres actifs du personnel.
 
 Une entreprise qui n'a jamais configuré de personnel a quand même un membre actif, qui porte le nom de l'entreprise. Les réservations vont à cette personne. `GET /staff` la renvoie donc comme n'importe quel autre membre du personnel, et vous pouvez passer son `id` comme `staff_id`.
 

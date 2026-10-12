@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
@@ -123,9 +123,29 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
   };
 }
 
-export async function listServiceResources(tx: DatabaseTransaction, businessId: string): Promise<ApiService[]> {
-  const rows = await tx.select().from(services).where(and(eq(services.businessId, businessId), eq(services.active, true))).orderBy(asc(services.name), asc(services.id));
-  return rows.map((row) => ({ id: row.id, name: row.name, description: row.description, duration_minutes: row.durationMinutes, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) }));
+export function serializeService(row: Pick<typeof services.$inferSelect, "id" | "name" | "slug" | "description" | "durationMinutes" | "active" | "createdAt" | "updatedAt">, staffIds: string[]): ApiService {
+  return { id: row.id, name: row.name, slug: row.slug, description: row.description, duration_minutes: row.durationMinutes, active: row.active, staff_ids: staffIds, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+async function serviceStaffIds(tx: DatabaseTransaction, businessId: string, serviceIds: string[]): Promise<Map<string, string[]>> {
+  const byService = new Map<string, string[]>();
+  if (!serviceIds.length) return byService;
+  const rows = await tx.select({ serviceId: staffServiceAssignments.serviceId, staffId: staffServiceAssignments.staffId }).from(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, businessId), inArray(staffServiceAssignments.serviceId, serviceIds))).orderBy(asc(staffServiceAssignments.staffId));
+  for (const row of rows) byService.set(row.serviceId, [...(byService.get(row.serviceId) ?? []), row.staffId]);
+  return byService;
+}
+
+/** Active services, or with includeInactive also those turned off. Deleted services never show. */
+export async function listServiceResources(tx: DatabaseTransaction, businessId: string, options: { includeInactive?: boolean | undefined } = {}): Promise<ApiService[]> {
+  const rows = await tx.select().from(services).where(and(eq(services.businessId, businessId), isNull(services.deletedAt), options.includeInactive ? undefined : eq(services.active, true))).orderBy(asc(services.name), asc(services.id));
+  const staffIds = await serviceStaffIds(tx, businessId, rows.map((row) => row.id));
+  return rows.map((row) => serializeService(row, staffIds.get(row.id) ?? []));
+}
+
+export async function loadServiceResource(tx: DatabaseTransaction, businessId: string, serviceId: string): Promise<ApiService | null> {
+  const [row] = await tx.select().from(services).where(and(eq(services.businessId, businessId), eq(services.id, serviceId), isNull(services.deletedAt))).limit(1);
+  if (!row) return null;
+  return serializeService(row, (await serviceStaffIds(tx, businessId, [row.id])).get(row.id) ?? []);
 }
 
 // Staff. Booking treats a service with no assignments as open to every

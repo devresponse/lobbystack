@@ -160,10 +160,34 @@ export const apiBusinessSummarySchema = z.object({
 export const apiServiceSchema = z.object({
   id,
   name: z.string(),
+  slug: z.string().describe("A short name no other service of the business uses."),
   description: z.string().nullable(),
   duration_minutes: z.number().int(),
+  active: z.boolean().describe("Only active services can be booked. GET /services lists the others only with include_inactive=true."),
+  staff_ids: z.array(id).describe("The staff members who take this service. Empty means every active staff member does."),
   created_at: timestamp,
   updated_at: timestamp,
+});
+
+const serviceSlug = z.string().trim().toLowerCase().min(1).max(120).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, digits and single hyphens, such as color-touch-up.");
+const serviceStaffIds = z.array(id).max(100);
+
+export const apiServiceCreateSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160),
+  slug: serviceSlug.optional().describe("Made from the name when left out, keeping only its Latin letters and digits, so a name without any needs a slug. One another service already uses is a 409."),
+  description: z.string().trim().min(1).max(2_000).optional(),
+  duration_minutes: z.number().int().min(1).max(1_440).describe("How long an appointment for it lasts, from 1 minute to 24 hours."),
+  active: z.boolean().optional().describe("Defaults to true."),
+  staff_ids: serviceStaffIds.optional().describe("The staff members who take it. Leave it out, or send [], to let every active staff member take it. Inactive staff don't take bookings, so a service whose staff are all inactive can't be booked."),
+});
+
+export const apiServiceUpdateSchema = z.strictObject({
+  name: z.string().trim().min(1).max(160).optional(),
+  slug: serviceSlug.optional().describe("One another service already uses is a 409."),
+  description: z.string().trim().min(1).max(2_000).nullable().optional().describe("null removes it."),
+  duration_minutes: z.number().int().min(1).max(1_440).optional(),
+  active: z.boolean().optional().describe("false stops new bookings for it without deleting it."),
+  staff_ids: serviceStaffIds.optional().describe("Replaces who takes it. [] lets every active staff member take it. Inactive staff don't take bookings, so a service whose staff are all inactive can't be booked."),
 });
 
 export const apiStaffSchema = z.object({
@@ -432,6 +456,8 @@ export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
 export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
 export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
+export type ApiServiceCreate = z.infer<typeof apiServiceCreateSchema>;
+export type ApiServiceUpdate = z.infer<typeof apiServiceUpdateSchema>;
 export type ApiStaff = z.infer<typeof apiStaffSchema>;
 export type ApiCall = z.infer<typeof apiCallSchema>;
 export type ApiCallDetail = z.infer<typeof apiCallDetailSchema>;

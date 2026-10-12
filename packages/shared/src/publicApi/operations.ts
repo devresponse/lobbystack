@@ -210,7 +210,11 @@ export const apiScopesInUse: readonly ApiKeyScope[] = apiKeyScopes.filter((scope
  */
 export const offeredApiKeyScopes: readonly BusinessApiKeyScope[] = businessApiKeyScopes.filter((scope) => apiScopesInUse.includes(scope));
 
-const componentSchemas: Record<string, z.ZodType> = {
+/**
+ * The schema behind each component name the operations use, each with its own
+ * type, so a typed client such as packages/cli sends and reads what the server checks.
+ */
+export const apiComponentSchemas = {
   Error: apiErrorSchema,
   Me: apiMeSchema,
   Business: apiBusinessSchema,
@@ -283,8 +287,25 @@ const componentSchemas: Record<string, z.ZodType> = {
   WebhookTestResult: apiWebhookTestResultSchema,
   Deleted: apiDeletedSchema,
   WebhookTestEvent: apiWebhookTestEventSchema,
+} as const;
+
+const componentSchemas: Record<string, z.ZodType> = {
+  ...apiComponentSchemas,
   ...Object.fromEntries(Object.entries(apiWebhookEventSchemas).map(([type, schema]) => [eventComponentName(type), schema])),
 };
+
+type ApiComponentName = keyof typeof apiComponentSchemas;
+type ApiOperationSpec<Id extends ApiOperationId> = (typeof apiOperations)[Id];
+
+/** The JSON body an operation takes, as a client sends it. */
+export type ApiRequestBody<Id extends ApiOperationId> = ApiOperationSpec<Id> extends { request: infer Name extends ApiComponentName } ? z.input<(typeof apiComponentSchemas)[Name]> : never;
+
+/** What an operation answers: { data } with the resource, or with a page of them. */
+export type ApiResponseBody<Id extends ApiOperationId> = ApiOperationSpec<Id> extends { response: infer Name extends ApiComponentName }
+  ? ApiOperationSpec<Id> extends { list: true }
+    ? { data: Array<z.output<(typeof apiComponentSchemas)[Name]>>; next_cursor: string | null; has_more: boolean }
+    : { data: z.output<(typeof apiComponentSchemas)[Name]> }
+  : never;
 
 function eventComponentName(type: string): string {
   return `${type.split(/[._]/).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join("")}Event`;

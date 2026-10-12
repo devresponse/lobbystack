@@ -36,6 +36,12 @@ jobs:
       - run: pnpm build
       - name: Verify the committed embed loader matches the build
         run: git diff --exit-code -- apps/admin/public/embed/embed.js
+      - name: Check the lobbystack CLI bundle runs with plain node
+        run: |
+          node packages/cli/dist/bin.js --help > /dev/null
+          status=0
+          XDG_CONFIG_HOME="$(mktemp -d)" node packages/cli/dist/bin.js whoami || status=$?
+          test "$status" -eq 3
       - run: pnpm test
       - run: pnpm replacement:telemetry
       - name: Validate Compose config

@@ -13,7 +13,7 @@ export type SmtpConfig = {
   replyTo?: string;
 };
 
-type TemplateName = "existing_account" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup";
+type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup";
 
 export class SmtpEmailProvider {
   private readonly transporter: Transporter;
@@ -75,6 +75,8 @@ function templateBody(template: TemplateName, variables: Record<string, string>)
   switch (template) {
     case "existing_account":
       return existingAccountBody(variables);
+    case "account_setup":
+      return accountSetupBody(variables);
     case "verify_email":
       return variables.code
         ? `Your LobbyStack email verification code is: ${variables.code}. It expires in 10 minutes.`
@@ -91,6 +93,22 @@ function templateBody(template: TemplateName, variables: Record<string, string>)
       return variables.body ?? "LobbyStack dashboard feedback";
     case "onboarding_followup":
       return onboardingFollowupBody(variables);
+  }
+}
+
+/** For an account a platform key made: the forgot-password page's code sets its first password and verifies the email. */
+function accountSetupBody(variables: Record<string, string>): string {
+  const url = variables.url;
+  const email = variables.email;
+  switch (variables.locale) {
+    case "fr":
+      return `Un compte LobbyStack a été créé pour vous avec l’adresse ${email}. Pour choisir votre mot de passe, ouvrez ${url}, saisissez cette adresse et entrez le code que nous vous enverrons. Si vous ne l’attendiez pas, ignorez cet e-mail.`;
+    case "es":
+      return `Se creó una cuenta de LobbyStack para usted con la dirección ${email}. Para elegir su contraseña, abra ${url}, escriba esta dirección e introduzca el código que le enviaremos. Si no lo esperaba, ignore este correo.`;
+    case "sr":
+      return `Za Vas je napravljen LobbyStack nalog sa adresom ${email}. Da biste izabrali lozinku, otvorite ${url}, upišite ovu adresu i unesite kod koji ćemo Vam poslati. Ako ovo niste očekivali, zanemarite ovaj imejl.`;
+    default:
+      return `A LobbyStack account was made for you with ${email}. To choose your password, open ${url}, enter this address, and type in the code we send you. If you weren't expecting this, ignore this email.`;
   }
 }
 

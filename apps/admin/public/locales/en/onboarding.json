@@ -355,6 +355,10 @@
     },
     "continue": "Continue",
     "continuing": "Continuing...",
-    "continueFailed": "We couldn't continue right now. Please try again."
+    "continueFailed": "We couldn't continue right now. Please try again.",
+    "current": {
+      "title": "This business is already on the {{plan}} plan.",
+      "description": "Its plan is already set up, so you can go on to its phone number."
+    }
   }
 }

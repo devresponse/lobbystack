@@ -10,6 +10,8 @@ vi.mock("@/lib/api-helpers", () => ({
 }));
 
 vi.mock("@lobbystack/db", () => ({ widgetKeys: {} }));
+// The route writes keys through the domain's widget key functions; load only those.
+vi.mock("@lobbystack/domain", async () => await import("../../../../../packages/domain/src/server/widgetKeys"));
 
 import { POST } from "./route";
 

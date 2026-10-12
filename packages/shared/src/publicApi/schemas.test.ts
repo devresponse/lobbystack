@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiKnowledgeEntryCreateSchema, parseApiInput } from "./schemas";
+import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
+import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
+import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -36,6 +38,35 @@ describe("parseApiInput", () => {
 
   it("says Invalid input for an unknown knowledge entry type", () => {
     expect(parseApiInput(apiKnowledgeEntryCreateSchema, { type: "video" })).toEqual({ ok: false, details: [{ path: "type", message: "Invalid input" }] });
+  });
+
+  it("checks receptionist changes with the dashboard's limits", () => {
+    expect(parseApiInput(apiReceptionistUpdateSchema, { summary: "Written by hand.", regenerate_summary: true })).toEqual({ ok: false, details: [{ path: "regenerate_summary", message: "Send summary or regenerate_summary, not both." }] });
+    expect(parseApiInput(apiReceptionistUpdateSchema, { greeting: "  Hello.  ", transfer_number: null, regenerate_summary: true })).toEqual({ ok: true, data: { greeting: "Hello.", transfer_number: null, regenerate_summary: true } });
+    expect(parseApiInput(apiReceptionistUpdateSchema, { voice_instructions: "x".repeat(RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH) }).ok).toBe(true);
+    for (const bad of [
+      { greeting: "x".repeat(RECEPTIONIST_TEXT_MAX_LENGTH + 1) },
+      { greeting: null },
+      { transfer_number: "416-555-0134" },
+      { transfer_mode: "sometimes" },
+      { appointment_change_policy: { enabled: true } },
+      { appointment_change_policy: { enabled: true, allow_cancel: true, allow_reschedule: true, verification_mode: "otp_required", extra: true } },
+      // To remove instructions, send null.
+      { voice_instructions: "" },
+      { regenerate_summary: false },
+      // The default caller language is locale on PATCH /business.
+      { locale: "fr" },
+    ]) expect(parseApiInput(apiReceptionistUpdateSchema, bad).ok, JSON.stringify(bad)).toBe(false);
+  });
+
+  it("takes upload file names that name a file, up to the shared size limit", () => {
+    const upload = { file_name: "prices.pdf", content_type: "application/pdf", length: KNOWLEDGE_UPLOAD_MAX_BYTES, checksum_sha256: `${"A".repeat(43)}=` };
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, upload).ok).toBe(true);
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, file_name: ".env" }).ok).toBe(true);
+    for (const fileName of [".", "..", " .. "]) {
+      expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, file_name: fileName })).toEqual({ ok: false, details: [{ path: "file_name", message: "Use the file's name, such as prices.pdf." }] });
+    }
+    expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, length: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 }).ok).toBe(false);
   });
 
   it("accepts start times with or without seconds", () => {

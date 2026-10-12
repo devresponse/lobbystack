@@ -27,6 +27,9 @@ const stateChangingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // origin check. /api/mcp refuses foreign browser origins itself.
 // "/api/widget/" keeps its slash so the cookie-authenticated /api/widget-keys admin route stays guarded.
 const csrfExemptPrefixes = ["/api/auth", "/api/webhooks", "/api/health", "/api/voice", "/api/widget/", "/api/v1/", "/api/mcp"];
+// /api/storage/local authorizes each upload with a signed token in its URL, never a cookie, and
+// API clients such as the CLI send no Origin header. It is matched exactly so routes added beside it stay guarded.
+const csrfExemptPaths = new Set(["/api/storage/local"]);
 
 function isWebhookPath(pathname: string): boolean {
   return pathname.startsWith("/api/webhooks/");
@@ -164,7 +167,7 @@ export function proxy(request: NextRequest) {
   const response = NextResponse.next({ request: { headers: requestHeaders } });
   applyResponsePolicy(response, request, headers, locale, cacheControlForRequest(pathname, request.nextUrl.searchParams));
 
-  if (stateChangingMethods.has(request.method) && pathname.startsWith("/api/") && !csrfExemptPrefixes.some((prefix) => pathname.startsWith(prefix)) && !hasValidCsrfOrigin(request)) {
+  if (stateChangingMethods.has(request.method) && pathname.startsWith("/api/") && !csrfExemptPaths.has(pathname) && !csrfExemptPrefixes.some((prefix) => pathname.startsWith(prefix)) && !hasValidCsrfOrigin(request)) {
     return applyResponsePolicy(
       NextResponse.json({ error: "CSRF origin validation failed." }, { status: 403 }),
       request,

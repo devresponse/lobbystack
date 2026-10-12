@@ -229,9 +229,11 @@ const DURATION_WRAP_UP_LEAD_MS = 30_000;
 // goodbye, and asks again this often after a failure until the goodbye starts.
 const TOP_UP_LEAD_MS = 60_000;
 const TOP_UP_RETRY_MS = 10_000;
-// An accepted REFER ends OpenAI's leg, so session.closed follows. A caller
-// still on the session this long after it means the transfer didn't happen.
-const TRANSFER_OUTCOME_MS = 30_000;
+// An accepted REFER ends OpenAI's leg, so session.closed follows. Twilio
+// closes it only 32 seconds after the destination answers, because OpenAI
+// doesn't hang up on Twilio's NOTIFY, and the destination may ring first.
+// A caller still on the session this long after it means the transfer didn't happen.
+const TRANSFER_OUTCOME_MS = 70_000;
 // Actions the next request sees, newest last.
 const MAX_REMEMBERED_ACTIONS = 10;
 

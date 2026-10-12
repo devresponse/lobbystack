@@ -355,6 +355,10 @@
     },
     "continue": "Continuar",
     "continuing": "Continuando...",
-    "continueFailed": "No pudimos continuar en este momento. Inténtelo de nuevo."
+    "continueFailed": "No pudimos continuar en este momento. Inténtelo de nuevo.",
+    "current": {
+      "title": "Este negocio ya tiene el plan {{plan}}.",
+      "description": "Su plan ya está listo, así que puede pasar a su número de teléfono."
+    }
   }
 }

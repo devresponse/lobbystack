@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { assertCertificationCalendar } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -207,25 +207,41 @@ export async function markCalendarConnectionSync(
   });
 }
 
+/**
+ * Forgets a connection's tokens and busy times. Returns its provider, or null
+ * when the business has no such connection or it was already disconnected.
+ */
+export async function disconnectCalendarInTransaction(tx: DatabaseTransaction, input: { businessId: string; connectionId: string }): Promise<{ provider: string } | null> {
+  const [disconnected] = await tx.update(calendarConnections).set({ status: "disconnected", encryptedAccessToken: null, encryptedRefreshToken: null, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected"))).returning({ provider: calendarConnections.provider });
+  await tx.delete(calendarBusyBlocks).where(and(eq(calendarBusyBlocks.connectionId, input.connectionId), eq(calendarBusyBlocks.businessId, input.businessId)));
+  return disconnected ?? null;
+}
+
 export async function disconnectCalendar(
   context: DomainContext,
   input: { userId: string; businessId: string; connectionId: string },
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const disconnected = await tx.update(calendarConnections).set({ status: "disconnected", encryptedAccessToken: null, encryptedRefreshToken: null, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected"))).returning({ id: calendarConnections.id, provider: calendarConnections.provider });
-    if (disconnected[0]) await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "calendar_connection.disconnected", entityType: "calendar_connection", entityId: disconnected[0].id, payload: { provider: disconnected[0].provider } });
-    await tx.delete(calendarBusyBlocks).where(and(eq(calendarBusyBlocks.connectionId, input.connectionId), eq(calendarBusyBlocks.businessId, input.businessId)));
+    const disconnected = await disconnectCalendarInTransaction(tx, input);
+    if (disconnected) await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "calendar_connection.disconnected", entityType: "calendar_connection", entityId: input.connectionId, payload: { provider: disconnected.provider } });
   });
+}
+
+export type CalendarConnectionRow = { id: string; provider: string; externalAccountId: string; staffId: string | null; selectedCalendarId: string | null; status: string; lastSyncError: string | null; lastSyncedAt: Date | null; createdAt: Date; updatedAt: Date };
+
+/** The business's calendar connections, oldest first, or just `connectionId`. Disconnected ones are left out. */
+export async function listCalendarConnectionsInTransaction(tx: DatabaseTransaction, input: { businessId: string; connectionId?: string }): Promise<CalendarConnectionRow[]> {
+  return await tx.select({ id: calendarConnections.id, provider: calendarConnections.provider, externalAccountId: calendarConnections.externalAccountId, staffId: calendarConnections.staffId, selectedCalendarId: calendarConnections.selectedCalendarId, status: calendarConnections.status, lastSyncError: calendarConnections.lastSyncError, lastSyncedAt: calendarConnections.lastSyncedAt, createdAt: calendarConnections.createdAt, updatedAt: calendarConnections.updatedAt }).from(calendarConnections).where(and(eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected"), input.connectionId === undefined ? undefined : eq(calendarConnections.id, input.connectionId))).orderBy(asc(calendarConnections.createdAt), asc(calendarConnections.id));
 }
 
 export async function listCalendarConnections(
   context: DomainContext,
   input: { userId: string; businessId: string },
-): Promise<Array<{ id: string; provider: string; externalAccountId: string; staffId: string | null; selectedCalendarId: string | null; status: string; lastSyncError: string | null; lastSyncedAt: Date | null; updatedAt: Date }>> {
+): Promise<CalendarConnectionRow[]> {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, input);
-    return await tx.select({ id: calendarConnections.id, provider: calendarConnections.provider, externalAccountId: calendarConnections.externalAccountId, staffId: calendarConnections.staffId, selectedCalendarId: calendarConnections.selectedCalendarId, status: calendarConnections.status, lastSyncError: calendarConnections.lastSyncError, lastSyncedAt: calendarConnections.lastSyncedAt, updatedAt: calendarConnections.updatedAt }).from(calendarConnections).where(and(eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected")));
+    return await listCalendarConnectionsInTransaction(tx, input);
   });
 }
 
@@ -239,20 +255,45 @@ export async function listCalendarStaff(
   });
 }
 
+/**
+ * Makes a connection a staff member's calendar, or with null the business's,
+ * and reads it again. A disconnected connection counts as not found.
+ */
+export async function assignCalendarStaffInTransaction(tx: DatabaseTransaction, input: { businessId: string; connectionId: string; staffId: string | null }): Promise<"assigned" | "staff_not_found" | "not_found"> {
+  if (input.staffId) {
+    const member = (await tx.select({ id: staff.id }).from(staff).where(and(eq(staff.id, input.staffId), eq(staff.businessId, input.businessId), eq(staff.active, true))).limit(1))[0];
+    if (!member) return "staff_not_found";
+  }
+  const changed = await tx.update(calendarConnections).set({ staffId: input.staffId, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected"))).returning({ id: calendarConnections.id });
+  if (!changed.length) return "not_found";
+  await enqueueOutbox(tx, { topic: "calendar.reconcileBusiness", businessId: input.businessId, aggregateType: "calendar_connection", aggregateId: input.connectionId, dedupeKey: `calendar:${input.connectionId}:staff:${Date.now()}`, payload: { connectionId: input.connectionId } });
+  return "assigned";
+}
+
 export async function assignCalendarStaff(
   context: DomainContext,
   input: { userId: string; businessId: string; connectionId: string; staffId: string | null },
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    if (input.staffId) {
-      const member = (await tx.select({ id: staff.id }).from(staff).where(and(eq(staff.id, input.staffId), eq(staff.businessId, input.businessId), eq(staff.active, true))).limit(1))[0];
-      if (!member) throw new Error("Staff member not found.");
-    }
-    const changed = await tx.update(calendarConnections).set({ staffId: input.staffId, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId))).returning({ id: calendarConnections.id });
-    if (!changed.length) throw new Error("Calendar connection not found.");
-    await enqueueOutbox(tx, { topic: "calendar.reconcileBusiness", businessId: input.businessId, aggregateType: "calendar_connection", aggregateId: input.connectionId, dedupeKey: `calendar:${input.connectionId}:staff:${Date.now()}`, payload: { connectionId: input.connectionId } });
+    const outcome = await assignCalendarStaffInTransaction(tx, input);
+    if (outcome === "staff_not_found") throw new Error("Staff member not found.");
+    if (outcome === "not_found") throw new Error("Calendar connection not found.");
   });
+}
+
+/**
+ * Points a connection at one of its account's calendars and reads it from
+ * scratch. Returns false when the business has no such connection, or it was
+ * disconnected, which a selection must not bring back.
+ */
+export async function selectCalendarInTransaction(tx: DatabaseTransaction, input: { businessId: string; connectionId: string; calendarId: string }): Promise<boolean> {
+  assertCertificationCalendar(input.calendarId);
+  if (!input.calendarId.trim() || input.calendarId.length > 255) throw new Error("A valid calendar selection is required.");
+  const changed = await tx.update(calendarConnections).set({ selectedCalendarId: input.calendarId.trim(), status: "syncing", lastSyncedAt: null, lastSyncError: null, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId), ne(calendarConnections.status, "disconnected"))).returning({ id: calendarConnections.id });
+  if (!changed.length) return false;
+  await enqueueOutbox(tx, { topic: "calendar.reconcileBusiness", businessId: input.businessId, aggregateType: "calendar_connection", aggregateId: input.connectionId, dedupeKey: `calendar:${input.connectionId}:select:${Date.now()}`, payload: { connectionId: input.connectionId } });
+  return true;
 }
 
 export async function selectCalendar(
@@ -261,11 +302,7 @@ export async function selectCalendar(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    assertCertificationCalendar(input.calendarId);
-    if (!input.calendarId.trim() || input.calendarId.length > 255) throw new Error("A valid calendar selection is required.");
-    const changed = await tx.update(calendarConnections).set({ selectedCalendarId: input.calendarId.trim(), status: "syncing", lastSyncedAt: null, lastSyncError: null, updatedAt: new Date() }).where(and(eq(calendarConnections.id, input.connectionId), eq(calendarConnections.businessId, input.businessId))).returning({ id: calendarConnections.id });
-    if (!changed.length) throw new Error("Calendar connection not found.");
-    await enqueueOutbox(tx, { topic: "calendar.reconcileBusiness", businessId: input.businessId, aggregateType: "calendar_connection", aggregateId: input.connectionId, dedupeKey: `calendar:${input.connectionId}:select:${Date.now()}`, payload: { connectionId: input.connectionId } });
+    if (!await selectCalendarInTransaction(tx, input)) throw new Error("Calendar connection not found.");
   });
 }
 

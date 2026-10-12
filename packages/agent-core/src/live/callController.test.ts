@@ -1160,7 +1160,7 @@ describe("LiveCallController transfer", () => {
     expect(transfers).toEqual([]);
   });
 
-  it("takes a REFER with no outcome after 30 seconds as failed, so another transfer can be tried", async () => {
+  it("takes a REFER with no outcome after 70 seconds as failed, so another transfer can be tried", async () => {
     fakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { socket, controller, refer, transfers } = setup();
@@ -1169,7 +1169,7 @@ describe("LiveCallController transfer", () => {
     await vi.advanceTimersByTimeAsync(4_200);
     expect(transfers).toEqual(["referring", "referred"]);
     // Neither session.closed nor a transport outcome: the caller is still on the session.
-    await vi.advanceTimersByTimeAsync(29_999);
+    await vi.advanceTimersByTimeAsync(69_999);
     expect(transfers).toEqual(["referring", "referred"]);
     await vi.advanceTimersByTimeAsync(1);
     expect(transfers).toEqual(["referring", "referred", "failed"]);
@@ -1185,6 +1185,18 @@ describe("LiveCallController transfer", () => {
     controller.transferAfterAnnouncement("tel:+14165550199");
     await vi.advanceTimersByTimeAsync(4_400);
     socket.emit("session.closed", { reason: "remote_hangup", usage: { seconds: 20 } });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(transfers).toEqual(["referring", "referred"]);
+  });
+
+  it("keeps a transfer that Twilio closes 32 seconds after a slow answer", async () => {
+    fakeTimers();
+    const { socket, controller, transfers } = setup();
+    controller.transferAfterAnnouncement("tel:+14165550199");
+    await vi.advanceTimersByTimeAsync(4_200);
+    // The destination rings for 30 seconds, then Twilio hangs up OpenAI's leg 32 seconds after the answer.
+    await vi.advanceTimersByTimeAsync(62_000);
+    socket.emit("session.closed", { reason: "remote_hangup", usage: { seconds: 70 } });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(transfers).toEqual(["referring", "referred"]);
   });

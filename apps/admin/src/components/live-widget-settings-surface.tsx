@@ -5,7 +5,7 @@ import type { TFunction } from "i18next";
 import { Check, Copy, Globe, Palette, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { isInterfaceLocale, type InterfaceLocale } from "@lobbystack/shared";
+import { isInterfaceLocale, widgetEmbedSnippet, type InterfaceLocale } from "@lobbystack/shared";
 
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
@@ -37,12 +37,6 @@ function originsFromText(value: string): string[] {
 // The origins field is a single-line input, which strips newlines, so join with commas.
 function originsToText(origins: string[]): string {
   return origins.join(", ");
-}
-
-function embedSnippet(origin: string, key: string, config: WidgetKeyRecord["config"]): string {
-  const position = config.position ?? "bottom-right";
-  const color = config.color ?? "#0f766e";
-  return `<script src="${origin}/embed.js" data-widget-key="${key}" data-position="${position}" data-color="${color}" defer></script>`;
 }
 
 export function LiveWidgetSettingsSurface() {
@@ -103,9 +97,9 @@ export function LiveWidgetSettingsSurface() {
             <div className="flex flex-wrap items-center gap-2">
               <code className="break-all rounded-lg bg-foreground px-3 py-2 text-sm text-primary-foreground">{createdKey.key}</code>
               <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(createdKey.key); setCopied(true); }}>{copied ? <Check className="size-4" /> : <Copy className="size-4" />}{copied ? t("widget.created.copied") : t("widget.created.copy")}</Button>
-              <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(embedSnippet(embedOrigin, createdKey.key, { color, position })); setCopied(true); }}>{t("widget.created.copySnippet")}</Button>
+              <Button size="sm" variant="outline" onClick={() => { void navigator.clipboard?.writeText(widgetEmbedSnippet(embedOrigin, createdKey.key, { color, position })); setCopied(true); }}>{t("widget.created.copySnippet")}</Button>
             </div>
-            <pre className="overflow-x-auto rounded-xl bg-foreground p-3 text-xs text-background" dir="ltr">{embedSnippet(embedOrigin, createdKey.key, { color, position })}</pre>
+            <pre className="overflow-x-auto rounded-xl bg-foreground p-3 text-xs text-background" dir="ltr">{widgetEmbedSnippet(embedOrigin, createdKey.key, { color, position })}</pre>
             <p className="text-sm text-foreground">{t("widget.created.hint")}</p>
             <Button variant="ghost" size="sm" onClick={() => setCreatedKey(null)}>{t("widget.created.done")}</Button>
           </CardContent>

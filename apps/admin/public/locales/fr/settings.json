@@ -580,7 +580,8 @@
       "joinedOn": "A rejoint le {{date}}",
       "invitedOn": "Invité le {{date}}",
       "status": {
-        "pending": "En attente"
+        "pending": "En attente",
+        "handover": "Cède l'entreprise"
       },
       "actions": {
         "moreOptions": "Plus d'options",
@@ -888,15 +889,19 @@
       "failed": "Impossible de révoquer la clé. Réessayez."
     },
     "scopes": {
-      "business_read": "Lire les informations, les heures et les services de l'entreprise",
-      "business_write": "Modifier les informations et les heures de l'entreprise",
+      "business_read": "Lire les informations, les heures, les services, ainsi que les réglages et les règles de la réceptionniste de l'entreprise",
+      "business_write": "Modifier les informations, les heures, les services, ainsi que les réglages et les règles de la réceptionniste de l'entreprise, y compris le numéro de transfert des appels",
       "calls_read": "Lire les appels, les résumés et les transcriptions",
       "contacts_read": "Lire les contacts",
       "contacts_write": "Créer et modifier des contacts",
       "appointments_read": "Lire les rendez-vous et les plages libres",
       "appointments_write": "Réserver, annuler et déplacer des rendez-vous",
       "messages_read": "Lire les messages pris par la réceptionniste",
-      "knowledge_write": "Ajouter des entrées de connaissances et des FAQ",
+      "knowledge_read": "Lire les entrées de connaissances, les FAQ, les sites web et les fichiers",
+      "knowledge_write": "Ajouter, modifier et supprimer des entrées de connaissances, des FAQ, des sites web et des fichiers",
+      "billing_manage": "Voir le forfait, fixer le plafond de dépenses et lancer des paiements",
+      "phone_numbers_manage": "Rechercher, acheter, remplacer et libérer des numéros de téléphone",
+      "team_manage": "Inviter et retirer des membres de l'équipe, changer les rôles et céder l'entreprise",
       "webhooks_manage": "Créer et supprimer des points de terminaison webhook"
     }
   },

@@ -141,7 +141,8 @@
               "api/overview",
               "api/authentication",
               "api/requests",
-              "api/webhooks"
+              "api/webhooks",
+              "api/cli"
             ]
           },
           {
@@ -265,7 +266,8 @@
               "fr/api/overview",
               "fr/api/authentication",
               "fr/api/requests",
-              "fr/api/webhooks"
+              "fr/api/webhooks",
+              "fr/api/cli"
             ]
           },
           {
@@ -392,7 +394,8 @@
               "es/api/overview",
               "es/api/authentication",
               "es/api/requests",
-              "es/api/webhooks"
+              "es/api/webhooks",
+              "es/api/cli"
             ]
           },
           {

@@ -18,7 +18,7 @@ import { cn } from "@/lib/utils";
 type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
 type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null };
-type BillingStatus = { checkoutAvailable: boolean; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] } };
+type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] } };
 
 const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
   { slug: "free_cloud", features: ["voiceMinutes", "bookingContacts", "support"] },
@@ -73,6 +73,11 @@ export function OnboardingPlanSurface() {
   const selectFree = useMutation({
     mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "attribution" }) }),
     onSuccess: () => navigate("/onboarding/attribution"),
+    meta: { inlineError: true },
+  });
+  const keepPlan = useMutation({
+    mutationFn: () => requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "phone_number" }) }),
+    onSuccess: () => navigate("/onboarding/number"),
     meta: { inlineError: true },
   });
   const startCheckout = useMutation({
@@ -139,6 +144,18 @@ export function OnboardingPlanSurface() {
       startCheckout.mutate(plan);
     }
     else window.location.assign(`mailto:hello@lobbystack.ai?subject=${encodeURIComponent(t("plan.enterpriseSubject"))}`);
+  }
+
+  // A business that already has a paid plan, such as one LobbyStack bills directly, has nothing to buy here.
+  const effectivePlan = billing.data?.effectivePlan;
+  const currentPlan = (effectivePlan === "starter" || effectivePlan === "pro" || effectivePlan === "enterprise") && !returnRequestId ? effectivePlan : null;
+  if (currentPlan) {
+    return <section className="mx-auto flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-border/60 bg-background p-8 text-center">
+      <h3 className="font-heading text-lg font-semibold tracking-tight">{t("plan.current.title", { plan: t(`plan.tiers.${currentPlan}.name`) })}</h3>
+      <p className="text-sm leading-relaxed text-muted-foreground">{t("plan.current.description")}</p>
+      <Button className="w-full rounded-full" disabled={!business || keepPlan.isPending || navigating} onClick={() => keepPlan.mutate()} type="button">{keepPlan.isPending || navigating ? <LoaderCircle className="size-4 animate-spin" /> : <>{t("plan.continue")}<ArrowRight className="ml-1 size-4" /></>}</Button>
+      {keepPlan.isError ? <FieldError>{keepPlan.error?.message ?? t("plan.continueFailed")}</FieldError> : null}
+    </section>;
   }
 
   return (

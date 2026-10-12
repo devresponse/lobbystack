@@ -21,7 +21,7 @@ export async function listCatalog(
       tx.select().from(closures).where(eq(closures.businessId, input.businessId)).orderBy(asc(closures.startsAt)),
       tx.select().from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"))).orderBy(asc(phoneNumbers.e164)),
       tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1),
-      tx.select().from(agentRules).where(eq(agentRules.businessId, input.businessId)).orderBy(asc(agentRules.sortOrder)),
+      tx.select().from(agentRules).where(eq(agentRules.businessId, input.businessId)).orderBy(asc(agentRules.sortOrder), asc(agentRules.createdAt), asc(agentRules.id)),
     ]);
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 100), 1), 100);
     const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
@@ -39,27 +39,35 @@ export async function createService(
 ): Promise<string> {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [service] = await tx.insert(services).values({
-      businessId: input.businessId,
-      name: input.name.trim(),
-      slug: input.slug.trim().toLowerCase(),
-      durationMinutes: input.durationMinutes,
-      description: input.description,
-      active: input.active ?? true,
-    }).returning({ id: services.id });
-    if (!service) {
-      throw new Error("Service could not be created.");
-    }
-    await enqueueOutbox(tx, {
-      topic: "snapshot.refresh",
-      businessId: input.businessId,
-      aggregateType: "service",
-      aggregateId: service.id,
-      dedupeKey: `service:${service.id}:snapshot:${Date.now()}`,
-      payload: { businessId: input.businessId, reason: "service_created" },
-    });
-    return service.id;
+    return (await insertServiceInTransaction(tx, input)).id;
   });
+}
+
+/** Adds a service and refreshes the receptionist snapshot. Callers authorize and check the fields first. */
+export async function insertServiceInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; name: string; slug: string; durationMinutes: number; description?: string | undefined; active?: boolean | undefined },
+): Promise<typeof services.$inferSelect> {
+  const [service] = await tx.insert(services).values({
+    businessId: input.businessId,
+    name: input.name.trim(),
+    slug: input.slug.trim().toLowerCase(),
+    durationMinutes: input.durationMinutes,
+    description: input.description,
+    active: input.active ?? true,
+  }).returning();
+  if (!service) {
+    throw new Error("Service could not be created.");
+  }
+  await enqueueOutbox(tx, {
+    topic: "snapshot.refresh",
+    businessId: input.businessId,
+    aggregateType: "service",
+    aggregateId: service.id,
+    dedupeKey: `service:${service.id}:snapshot:${Date.now()}`,
+    payload: { businessId: input.businessId, reason: "service_created" },
+  });
+  return service;
 }
 
 export async function updateService(
@@ -68,17 +76,26 @@ export async function updateService(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const [service] = await tx.update(services).set({
-      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
-      ...(input.slug !== undefined ? { slug: input.slug.trim().toLowerCase() } : {}),
-      durationMinutes: input.durationMinutes,
-      description: input.description,
-      active: input.active,
-      updatedAt: new Date(),
-    }).where(and(eq(services.id, input.serviceId), eq(services.businessId, input.businessId), isNull(services.deletedAt))).returning({ id: services.id });
-    if (!service) throw Object.assign(new Error("Service not found."), { status: 404 });
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "service", aggregateId: service.id, dedupeKey: `service:${service.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "service_updated" } });
+    if (!await updateServiceInTransaction(tx, input)) throw Object.assign(new Error("Service not found."), { status: 404 });
   });
+}
+
+/** Changes the fields given on a service that isn't deleted and refreshes the snapshot. Null when there is no such service. Callers authorize first. */
+export async function updateServiceInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; serviceId: string; name?: string | undefined; slug?: string | undefined; durationMinutes?: number | undefined; description?: string | null | undefined; active?: boolean | undefined },
+): Promise<typeof services.$inferSelect | null> {
+  const [service] = await tx.update(services).set({
+    ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+    ...(input.slug !== undefined ? { slug: input.slug.trim().toLowerCase() } : {}),
+    durationMinutes: input.durationMinutes,
+    description: input.description,
+    active: input.active,
+    updatedAt: new Date(),
+  }).where(and(eq(services.id, input.serviceId), eq(services.businessId, input.businessId), isNull(services.deletedAt))).returning();
+  if (!service) return null;
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "service", aggregateId: service.id, dedupeKey: `service:${service.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "service_updated" } });
+  return service;
 }
 
 /**
@@ -92,12 +109,40 @@ export async function deleteService(
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    const now = new Date();
-    const [service] = await tx.update(services).set({ active: false, deletedAt: now, updatedAt: now }).where(and(eq(services.id, input.serviceId), eq(services.businessId, input.businessId), isNull(services.deletedAt))).returning({ id: services.id });
-    if (!service) throw Object.assign(new Error("Service not found."), { status: 404 });
-    await tx.delete(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, input.businessId), eq(staffServiceAssignments.serviceId, service.id)));
-    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "service", aggregateId: service.id, dedupeKey: `service:${service.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "service_deleted" } });
+    if (!await deleteServiceInTransaction(tx, input)) throw Object.assign(new Error("Service not found."), { status: 404 });
   });
+}
+
+/** Marks a service deleted, as deleteService explains, and drops its staff. False when there is no such service. Callers authorize first. */
+export async function deleteServiceInTransaction(tx: DatabaseTransaction, input: { businessId: string; serviceId: string }): Promise<boolean> {
+  const now = new Date();
+  const [service] = await tx.update(services).set({ active: false, deletedAt: now, updatedAt: now }).where(and(eq(services.id, input.serviceId), eq(services.businessId, input.businessId), isNull(services.deletedAt))).returning({ id: services.id });
+  if (!service) return false;
+  await tx.delete(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, input.businessId), eq(staffServiceAssignments.serviceId, service.id)));
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "service", aggregateId: service.id, dedupeKey: `service:${service.id}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "service_deleted" } });
+  return true;
+}
+
+/**
+ * Makes these staff members the only ones who take the service; an empty list
+ * opens it to every active staff member again. Refreshes the snapshot when the
+ * assignments change. Callers authorize first and check the service exists.
+ * Lists the ids that aren't staff of this business, and changes nothing then.
+ */
+export async function replaceServiceStaffInTransaction(tx: DatabaseTransaction, input: { businessId: string; serviceId: string; staffIds: readonly string[] }): Promise<{ unknownStaffIds: string[]; changed: boolean }> {
+  // Ids come back from the database in lowercase, so compare them that way.
+  const wanted = [...new Set(input.staffIds.map((id) => id.toLowerCase()))];
+  const known = wanted.length ? (await tx.select({ id: staff.id }).from(staff).where(and(eq(staff.businessId, input.businessId), inArray(staff.id, wanted)))).map((row) => row.id) : [];
+  const unknownStaffIds = wanted.filter((id) => !known.includes(id));
+  if (unknownStaffIds.length) return { unknownStaffIds, changed: false };
+  const current = (await tx.select({ staffId: staffServiceAssignments.staffId }).from(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, input.businessId), eq(staffServiceAssignments.serviceId, input.serviceId)))).map((row) => row.staffId);
+  const removed = current.filter((id) => !wanted.includes(id));
+  const added = wanted.filter((id) => !current.includes(id));
+  if (!removed.length && !added.length) return { unknownStaffIds: [], changed: false };
+  if (removed.length) await tx.delete(staffServiceAssignments).where(and(eq(staffServiceAssignments.businessId, input.businessId), eq(staffServiceAssignments.serviceId, input.serviceId), inArray(staffServiceAssignments.staffId, removed)));
+  if (added.length) await tx.insert(staffServiceAssignments).values(added.map((staffId) => ({ businessId: input.businessId, serviceId: input.serviceId, staffId }))).onConflictDoNothing();
+  await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "service", aggregateId: input.serviceId, dedupeKey: `service:${input.serviceId}:staff:${Date.now()}`, payload: { businessId: input.businessId, reason: "assignment_updated" } });
+  return { unknownStaffIds: [], changed: true };
 }
 
 export async function assignStaffToService(

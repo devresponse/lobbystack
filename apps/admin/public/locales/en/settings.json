@@ -580,7 +580,8 @@
       "joinedOn": "Joined on {{date}}",
       "invitedOn": "Invited on {{date}}",
       "status": {
-        "pending": "Pending"
+        "pending": "Pending",
+        "handover": "Hands over the business"
       },
       "actions": {
         "moreOptions": "More options",
@@ -888,15 +889,19 @@
       "failed": "We couldn't revoke the key. Try again."
     },
     "scopes": {
-      "business_read": "Read business details, hours and services",
-      "business_write": "Update business details and hours",
+      "business_read": "Read business details, hours, services, and receptionist settings and rules",
+      "business_write": "Update business details, hours, services, and receptionist settings and rules, including where calls are transferred",
       "calls_read": "Read calls, summaries and transcripts",
       "contacts_read": "Read contacts",
       "contacts_write": "Create and update contacts",
       "appointments_read": "Read appointments and open times",
       "appointments_write": "Book, cancel and reschedule appointments",
       "messages_read": "Read messages the receptionist took",
-      "knowledge_write": "Add knowledge entries and FAQs",
+      "knowledge_read": "Read knowledge entries, FAQs, websites and files",
+      "knowledge_write": "Add, edit and delete knowledge entries, FAQs, websites and files",
+      "billing_manage": "See the plan, set the spending cap and start checkouts",
+      "phone_numbers_manage": "Find, buy, replace and release phone numbers",
+      "team_manage": "Invite and remove team members, change roles and hand the business over",
       "webhooks_manage": "Create and delete webhook endpoints"
     }
   },

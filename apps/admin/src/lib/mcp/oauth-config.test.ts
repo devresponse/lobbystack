@@ -1,6 +1,8 @@
+import { oauthGrantableScopes } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { MCP_OAUTH_SCOPES, mcpBearerChallenge, mcpResourceUrl, oauthIssuer, protectedResourceMetadata, protectedResourceMetadataUrl, tokenAudienceMatches } from "./oauth-config";
+import { mcpTools } from "./tools";
 
 const env = { APP_BASE_URL: "https://app.example.com/" };
 
@@ -20,6 +22,10 @@ describe("MCP OAuth configuration", () => {
     });
     expect(MCP_OAUTH_SCOPES).not.toContain("webhooks:manage");
     expect(MCP_OAUTH_SCOPES).toContain("offline_access");
+  });
+
+  it("offers OAuth clients exactly the scopes the MCP tools use", () => {
+    expect(new Set(oauthGrantableScopes)).toEqual(new Set(mcpTools.map((tool) => tool.scope)));
   });
 
   it("points 401 challenges at the metadata", () => {

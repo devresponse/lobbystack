@@ -355,6 +355,10 @@
     },
     "continue": "Continuer",
     "continuing": "Continuer...",
-    "continueFailed": "Impossible de continuer maintenant. Réessayez."
+    "continueFailed": "Impossible de continuer maintenant. Réessayez.",
+    "current": {
+      "title": "Cette entreprise a déjà le forfait {{plan}}.",
+      "description": "Son forfait est déjà en place, vous pouvez donc passer à son numéro de téléphone."
+    }
   }
 }

@@ -24,6 +24,11 @@ describe("agent settings validation", () => {
     expect(fixture.insert).not.toHaveBeenCalled();
     expect(fixture.enqueue).not.toHaveBeenCalled();
   });
+  it("names the field that is wrong, with the same message as before the rules moved to the domain", async () => {
+    expect(await (await patch({ greeting: "" })).json()).toEqual({ error: "greeting is invalid." });
+    expect(await (await patch({ bookingMode: "later" })).json()).toEqual({ error: "bookingMode is invalid." });
+    expect(await (await patch({})).json()).toEqual({ error: "At least one profile field is required." });
+  });
   it("persists locale-only changes and refreshes the live-call snapshot", async () => {
     expect((await patch({ locale: "fr" })).status).toBe(200);
     expect(fixture.update).toHaveBeenCalledWith(expect.objectContaining({ defaultLocale: "fr" }));

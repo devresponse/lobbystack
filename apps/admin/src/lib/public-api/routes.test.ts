@@ -103,6 +103,8 @@ const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => tr
 vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
 vi.mock("../auth", () => ({ getAuthDatabase: () => ({ db: "auth" }) }));
 vi.mock("../databases", () => ({ getDatabase: (role: string) => ({ db: role }) }));
+// CI runs these tests with a real Redis, where every file's requests share one key's per-minute budget; the limiter has its own tests.
+vi.mock("./rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("./rate-limit")>()), enforceApiRateLimit: vi.fn(async () => ({ allowed: true, limit: 120, remaining: 119, resetAt: Math.ceil(Date.now() / 60_000) * 60 })) }));
 const invites = vi.hoisted(() => ({ limit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })) }));
 vi.mock("../fixed-window-limit", () => ({ enforceFixedWindow: invites.limit, fixedWindowLimit: (...args: unknown[]) => args }));
 vi.mock("@lobbystack/domain", async () => ({

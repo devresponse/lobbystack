@@ -17,6 +17,12 @@ export const deploymentModes = [
   "development",
 ] as const satisfies ReadonlyArray<DeploymentMode>;
 
+/** The deployment mode a DEPLOYMENT_MODE value names, or undefined when it names none. */
+export function parseDeploymentMode(value: string | undefined): DeploymentMode | undefined {
+  const trimmed = value?.trim();
+  return deploymentModes.find((mode) => mode === trimmed);
+}
+
 export const DEFAULT_WEB_CALL_MAX_DURATION_MS = 5 * 60 * 1000;
 export const MAX_WEB_CALL_MAX_DURATION_MS = 30 * 60 * 1000;
 /** The longest a GPT-Live phone call runs, and the most minutes one call reserves. */

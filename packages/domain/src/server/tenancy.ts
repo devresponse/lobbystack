@@ -4,7 +4,7 @@ import { and, eq, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, businessInvitations, businessMemberships, businesses, receptionistProfiles, staff, users } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, normalizeAuthEmail } from "@lobbystack/shared";
+import { defaultAppointmentChangePolicy, normalizeAuthEmail, parseDeploymentMode } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
@@ -103,7 +103,9 @@ export async function insertBusinessInTransaction(
       slug: attempt === 0 ? baseSlug : `${baseSlug}-${randomBytes(6).toString("hex")}`,
       timezone,
       businessType: input.businessType,
-      deploymentMode: input.deploymentMode ?? "cloud",
+      // A self-hosted server's businesses get its unlimited plan, not the cloud's free one. Any other mode, development included, keeps them cloud, as before:
+      // every mode but cloud skips billing and the paid-plan check on numbers.
+      deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
       onboardingStage: "website",
       ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),

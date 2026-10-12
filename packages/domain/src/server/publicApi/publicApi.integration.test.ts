@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
@@ -14,7 +14,7 @@ import { acceptInvitation } from "../tenancy";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createClaimLinkForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -1205,6 +1205,106 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(updateWidgetKeyForApi(context, caller, created.id, {}), 400, "invalid_request");
       await expectApiError(updateWidgetKeyForApi(context, a.caller, created.id, { label: "Theirs" }), 404, "not_found");
       expect(await audited("api.widget_key.updated")).toBe(3);
+    } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("lists, picks, moves and disconnects calendar connections as the integrations page does", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-calendar-${businessId}`, name: "Calendar test", timezone: "UTC", businessType: "test" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    const listCalendars = vi.fn(async (_input: { accessToken: string }) => [{ id: "main@example.com", summary: "Main", primary: true, accessRole: "owner" }, { id: "holidays", summary: "Holidays", primary: false, accessRole: "reader" }]);
+    const access = () => ({ decryptToken: (value: string) => value.replace(/^enc:/, ""), encryptToken: (value: string) => `enc:${value}`, refreshAccessToken: async () => ({ accessToken: "refreshed", expiresIn: 3600 }), listCalendars });
+    const noGoogle = () => { throw new Error("Google isn't needed for this change."); };
+    try {
+      const [member] = await admin!.db.insert(staff).values({ businessId, name: "Robin", timezone: "UTC" }).returning({ id: staff.id });
+      const [connection] = await admin!.db.insert(calendarConnections).values({ businessId, ownerUserId: ownerId, provider: "google", externalAccountId: "google-account-1", encryptedAccessToken: "enc:access", encryptedRefreshToken: "enc:refresh", tokenExpiresAt: new Date(Date.now() + 60 * 60_000) }).returning({ id: calendarConnections.id });
+      const connectionId = connection!.id;
+
+      const [listed] = await listCalendarConnectionsForApi(context, caller);
+      expect(apiCalendarConnectionSchema.parse(listed)).toEqual(listed);
+      expect(listed).toMatchObject({ id: connectionId, provider: "google", account_id: "google-account-1", calendar_id: null, staff_id: null, status: "connected" });
+      expect(await listAccountCalendarsForApi(context, caller, connectionId, access)).toEqual([{ id: "main@example.com", name: "Main", primary: true, writable: true, selected: false }, { id: "holidays", name: "Holidays", primary: false, writable: false, selected: false }]);
+      expect(listCalendars).toHaveBeenCalledWith({ accessToken: "access" });
+
+      await expectApiError(updateCalendarConnectionForApi(context, caller, connectionId, { calendar_id: "holidays" }, access), 400, "invalid_request");
+      await expectApiError(updateCalendarConnectionForApi(context, caller, connectionId, { calendar_id: "missing" }, access), 400, "invalid_request");
+      expect(await updateCalendarConnectionForApi(context, caller, connectionId, { calendar_id: "main@example.com" }, access)).toMatchObject({ calendar_id: "main@example.com", status: "syncing" });
+      // The worker reads the picked calendar, as after a pick in the dashboard.
+      expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "calendar.reconcileBusiness")))).toHaveLength(1);
+      // Values it already has change nothing and need no call to Google.
+      expect(await updateCalendarConnectionForApi(context, caller, connectionId, { calendar_id: "main@example.com", staff_id: null }, noGoogle)).toMatchObject({ calendar_id: "main@example.com", staff_id: null });
+      expect(await audited("api.calendar_connection.updated")).toBe(1);
+
+      expect(await updateCalendarConnectionForApi(context, caller, connectionId, { staff_id: member!.id }, noGoogle)).toMatchObject({ staff_id: member!.id });
+      await expectApiError(updateCalendarConnectionForApi(context, caller, connectionId, { staff_id: a.staffId }, noGoogle), 400, "invalid_request");
+      await expectApiError(updateCalendarConnectionForApi(context, caller, connectionId, {}, noGoogle), 400, "invalid_request");
+      await expectApiError(updateCalendarConnectionForApi(context, a.caller, connectionId, { staff_id: null }, noGoogle), 404, "not_found");
+      await expectApiError(listAccountCalendarsForApi(context, a.caller, connectionId, access), 404, "not_found");
+      expect(await audited("api.calendar_connection.updated")).toBe(2);
+
+      // Without tokens Google can't be asked, so the connection has to be made again.
+      await admin!.db.update(calendarConnections).set({ encryptedAccessToken: null, encryptedRefreshToken: null }).where(eq(calendarConnections.id, connectionId));
+      await expectApiError(listAccountCalendarsForApi(context, caller, connectionId, access), 409, "conflict");
+
+      await admin!.db.insert(calendarBusyBlocks).values({ businessId, connectionId, startsAt: new Date("2030-01-01T09:00:00Z"), endsAt: new Date("2030-01-01T10:00:00Z") });
+      await deleteCalendarConnectionForApi(context, caller, connectionId);
+      expect(await listCalendarConnectionsForApi(context, caller)).toEqual([]);
+      expect((await admin!.db.select().from(calendarConnections).where(eq(calendarConnections.id, connectionId)))[0]).toMatchObject({ status: "disconnected", encryptedAccessToken: null, encryptedRefreshToken: null });
+      expect(await admin!.db.select().from(calendarBusyBlocks).where(eq(calendarBusyBlocks.connectionId, connectionId))).toEqual([]);
+      await expectApiError(deleteCalendarConnectionForApi(context, caller, connectionId), 404, "not_found");
+      // A pick would bring a disconnected connection back, so it's gone for good.
+      await expectApiError(updateCalendarConnectionForApi(context, caller, connectionId, { staff_id: null }, noGoogle), 404, "not_found");
+      expect(await audited("api.calendar_connection.disconnected")).toBe(1);
+
+      const link = await createCalendarConnectLinkForApi(context, caller, { link: ({ businessId: linked }) => ({ url: `https://app.example.test/api/calendar/google/connect?businessId=${linked}`, expiresAt: new Date("2030-01-01T00:00:00.000Z") }) });
+      expect(link).toEqual({ url: `https://app.example.test/api/calendar/google/connect?businessId=${businessId}`, expires_at: "2030-01-01T00:00:00.000Z" });
+      expect(await audited("api.calendar.connect_link_created")).toBe(1);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("asks Google with a fresh token when the stored one is stale or revoked", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-calendar-token-${businessId}`, name: "Calendar token test", timezone: "UTC", businessType: "test" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const listCalendars = vi.fn(async (_input: { accessToken: string }) => [{ id: "main@example.com", summary: "Main", primary: true, accessRole: "owner" }]);
+    const refreshAccessToken = vi.fn(async (_input: { refreshToken: string }) => ({ accessToken: "fresh", expiresIn: 3600 }));
+    const access = () => ({ decryptToken: (value: string) => value.replace(/^enc:/, ""), encryptToken: (value: string) => `enc:${value}`, refreshAccessToken, listCalendars });
+    const googleRefusal = (status: number) => Object.assign(new Error(`Google Calendar discovery failed with status ${status}.`), { responseStatus: status });
+    try {
+      const [connection] = await admin!.db.insert(calendarConnections).values({ businessId, ownerUserId: ownerId, provider: "google", externalAccountId: "google-account-2", encryptedAccessToken: "enc:expired", encryptedRefreshToken: "enc:refresh", tokenExpiresAt: new Date(Date.now() - 60_000) }).returning({ id: calendarConnections.id });
+      const connectionId = connection!.id;
+      const storedToken = async () => (await admin!.db.select({ token: calendarConnections.encryptedAccessToken }).from(calendarConnections).where(eq(calendarConnections.id, connectionId)))[0]?.token;
+
+      // An expired token is refreshed first, and only its encrypted form is kept.
+      expect(await listAccountCalendarsForApi(context, caller, connectionId, access)).toHaveLength(1);
+      expect(refreshAccessToken).toHaveBeenCalledWith({ refreshToken: "refresh" });
+      expect(listCalendars).toHaveBeenLastCalledWith({ accessToken: "fresh" });
+      expect(await storedToken()).toBe("enc:fresh");
+
+      // A token revoked in the Google account still looks unexpired, so a 401 refreshes it once.
+      refreshAccessToken.mockClear();
+      listCalendars.mockRejectedValueOnce(googleRefusal(401));
+      expect(await listAccountCalendarsForApi(context, caller, connectionId, access)).toHaveLength(1);
+      expect(refreshAccessToken).toHaveBeenCalledTimes(1);
+
+      // When Google refuses the grant itself, only connecting again helps.
+      listCalendars.mockRejectedValueOnce(googleRefusal(401));
+      refreshAccessToken.mockRejectedValueOnce(Object.assign(new Error("Google refused the refresh token."), { reconnectRequired: true }));
+      await expectApiError(listAccountCalendarsForApi(context, caller, connectionId, access), 409, "conflict");
+
+      // Google's other failures are ours to report, never passed on as the caller's.
+      listCalendars.mockRejectedValueOnce(googleRefusal(503));
+      const outage = await listAccountCalendarsForApi(context, caller, connectionId, access).then(() => null, (error: unknown) => error);
+      expect(outage).not.toBeInstanceOf(PublicApiError);
+      expect(outage).toMatchObject({ message: "Google Calendar couldn't list the account's calendars." });
     } finally {
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
     }

@@ -76,6 +76,11 @@ const domain = vi.hoisted(() => ({
   listWidgetKeysForApi: vi.fn(async (): Promise<unknown[]> => []),
   createWidgetKeyForApi: vi.fn(),
   updateWidgetKeyForApi: vi.fn(),
+  createCalendarConnectLinkForApi: vi.fn(),
+  listCalendarConnectionsForApi: vi.fn(async (): Promise<unknown[]> => []),
+  listAccountCalendarsForApi: vi.fn(async (..._args: unknown[]): Promise<unknown[]> => []),
+  updateCalendarConnectionForApi: vi.fn(),
+  deleteCalendarConnectionForApi: vi.fn(async () => undefined),
   // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
@@ -102,6 +107,7 @@ vi.mock("@lobbystack/domain", async () => ({
 
 import { generatePlatformKey } from "@lobbystack/domain";
 
+import { verifyCalendarConnectLinkToken } from "../google-calendar-oauth";
 import { v1 } from "./routes";
 
 const apiRoot = fileURLToPath(new URL("../../../app/api/v1/", import.meta.url));
@@ -721,6 +727,86 @@ describe("team", () => {
     expect((await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }))).status).toBe(403);
     expect(domain.getTeamForApi).not.toHaveBeenCalled();
     expect(domain.createClaimLinkForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("calendars", () => {
+  const businessId = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f";
+  const connectionId = "8c9d0e1f-2a3b-4c4d-8e5f-6a7b8c9d0e1f";
+  const connection = { id: connectionId, provider: "google", account_id: "1234", calendar_id: null, staff_id: null, status: "connected", sync_error: null, last_synced_at: null, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const google = { GOOGLE_CLIENT_ID: "client", GOOGLE_CLIENT_SECRET: "secret", GOOGLE_REDIRECT_URI: "https://app.lobbystack.example/api/calendar/google/callback", ENCRYPTION_KEY: "calendar-test-key" };
+  const setGoogle = (configured: boolean) => { for (const [name, value] of Object.entries(google)) vi.stubEnv(name, configured ? value : ""); };
+  const params = (id = connectionId) => ({ params: Promise.resolve({ connection_id: id }) });
+  const connect = () => v1.createCalendarConnectLink(call("/calendars/google/connect", { method: "POST" }));
+  const update = (body: unknown, id = connectionId) => v1.updateCalendarConnection(call(`/calendars/${id}`, { method: "PATCH", body: JSON.stringify(body) }), params(id));
+  const remove = () => v1.deleteCalendarConnection(call(`/calendars/${connectionId}`, { method: "DELETE" }), params());
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("hands out a signed link to the dashboard's connect page where Google Calendar is set up", async () => {
+    setGoogle(false);
+    expect(await (await connect()).json()).toMatchObject({ error: { code: "forbidden" } });
+    expect(domain.createCalendarConnectLinkForApi).not.toHaveBeenCalled();
+    setGoogle(true);
+    // The link is signed with the dashboard's auth secret.
+    vi.stubEnv("BETTER_AUTH_SECRET", "");
+    expect(await (await connect()).json()).toMatchObject({ error: { code: "forbidden" } });
+    expect(domain.createCalendarConnectLinkForApi).not.toHaveBeenCalled();
+    vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.example/dashboard");
+    vi.stubEnv("BETTER_AUTH_SECRET", "link-test-secret");
+    domain.createCalendarConnectLinkForApi.mockImplementation(async (_context: unknown, _caller: unknown, options: { link: (input: { businessId: string }) => { url: string; expiresAt: Date } }) => {
+      const { url, expiresAt } = options.link({ businessId });
+      return { url, expires_at: expiresAt.toISOString() };
+    });
+    const response = await connect();
+    expect(response.status).toBe(201);
+    const url = new URL(((await response.json()) as { data: { url: string } }).data.url);
+    expect(`${url.origin}${url.pathname}`).toBe("https://app.lobbystack.example/api/calendar/google/connect");
+    expect(url.searchParams.get("businessId")).toBe(businessId);
+    expect(verifyCalendarConnectLinkToken(url.searchParams.get("token")!)).toMatchObject({ businessId });
+  });
+
+  it("lists connections and an account's calendars, and checks changes before the domain sees them", async () => {
+    domain.listCalendarConnectionsForApi.mockResolvedValue([connection]);
+    expect(await (await v1.listCalendarConnections(call("/calendars"))).json()).toEqual({ data: [connection], next_cursor: null, has_more: false });
+    const calendars = [{ id: "main@example.com", name: "Main", primary: true, writable: true, selected: false }];
+    domain.listAccountCalendarsForApi.mockResolvedValue(calendars);
+    expect(await (await v1.listAccountCalendars(call(`/calendars/${connectionId}/calendars`), params())).json()).toEqual({ data: calendars, next_cursor: null, has_more: false });
+    expect(domain.listAccountCalendarsForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), connectionId, expect.any(Function));
+    expect((await v1.listAccountCalendars(call("/calendars/x/calendars"), params("x"))).status).toBe(400);
+
+    domain.updateCalendarConnectionForApi.mockResolvedValue({ ...connection, calendar_id: "main@example.com" });
+    expect((await update({ calendar_id: " main@example.com ", staff_id: null })).status).toBe(200);
+    expect(domain.updateCalendarConnectionForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), connectionId, { calendar_id: "main@example.com", staff_id: null }, expect.any(Function));
+    for (const bad of [{ calendar_id: "" }, { calendar_id: "x".repeat(256) }, { staff_id: "robin" }, { selected_calendar_id: "main@example.com" }]) {
+      expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await update({ staff_id: null }, "x")).status).toBe(400);
+    expect(domain.updateCalendarConnectionForApi).toHaveBeenCalledTimes(1);
+
+    expect(await (await remove()).json()).toEqual({ data: { id: connectionId, deleted: true } });
+    expect(domain.deleteCalendarConnectionForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), connectionId);
+  });
+
+  it("reaches Google only where it is set up", async () => {
+    await v1.listAccountCalendars(call(`/calendars/${connectionId}/calendars`), params());
+    const access = domain.listAccountCalendarsForApi.mock.calls[0]![3] as () => unknown;
+    setGoogle(false);
+    const refused = (() => { try { access(); } catch (error) { return error; } })();
+    expect(refused).toMatchObject({ status: 403, code: "forbidden" });
+    setGoogle(true);
+    expect(access()).toEqual({ decryptToken: expect.any(Function), encryptToken: expect.any(Function), refreshAccessToken: expect.any(Function), listCalendars: expect.any(Function) });
+  });
+
+  it("reads with business:read and changes with business:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId, apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.listCalendarConnections(call("/calendars"))).status).toBe(200);
+    expect((await v1.listAccountCalendars(call(`/calendars/${connectionId}/calendars`), params())).status).toBe(200);
+    expect(await (await connect()).json()).toMatchObject({ error: { code: "insufficient_scope" } });
+    expect((await update({ staff_id: null })).status).toBe(403);
+    expect((await remove()).status).toBe(403);
+    expect(domain.createCalendarConnectLinkForApi).not.toHaveBeenCalled();
+    expect(domain.updateCalendarConnectionForApi).not.toHaveBeenCalled();
+    expect(domain.deleteCalendarConnectionForApi).not.toHaveBeenCalled();
   });
 });
 

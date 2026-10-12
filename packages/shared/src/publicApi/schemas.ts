@@ -299,6 +299,39 @@ export const apiWidgetKeyUpdateSchema = z.strictObject({
   status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
 });
 
+const calendarStatuses = ["connected", "syncing", "error"] as const;
+
+export const apiCalendarConnectionSchema = z.object({
+  id,
+  provider: z.string().describe("google: Google Calendar."),
+  account_id: z.string().describe("Google's id for the connected account."),
+  calendar_id: z.string().nullable().describe("The calendar LobbyStack reads busy times from and adds appointments to. null until one is picked with PATCH /calendars/{connection_id}; until then the connection changes nothing."),
+  staff_id: id.nullable().describe("The staff member whose calendar this is: its busy times block only them, and their appointments go to it. null: the business's calendar, whose busy times block everyone and which takes the appointments of staff without a calendar of their own."),
+  status: z.enum(calendarStatuses).describe("connected: the busy times are up to date. syncing: reading the calendar after a change. error: the last sync failed, and sync_error says why. While a picked calendar is syncing or failing, the staff it covers can't be booked."),
+  sync_error: z.string().nullable(),
+  last_synced_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A calendar account connected to the business.");
+
+export const apiCalendarConnectionUpdateSchema = z.strictObject({
+  calendar_id: z.string().trim().min(1).max(255).optional().describe("A writable calendar from GET /calendars/{connection_id}/calendars. Picking another one reads it again, so the staff it covers can't be booked until that finishes."),
+  staff_id: id.nullable().optional().describe("An active staff member from GET /staff, or null for the business's calendar."),
+});
+
+export const apiAccountCalendarSchema = z.object({
+  id: z.string().describe("Google's id for the calendar. Send it as calendar_id."),
+  name: z.string(),
+  primary: z.boolean().describe("true for the account's main calendar."),
+  writable: z.boolean().describe("true when LobbyStack can add appointments to it. Only a writable calendar can be picked."),
+  selected: z.boolean().describe("true for the calendar the connection uses."),
+}).describe("A calendar in a connected account.");
+
+export const apiCalendarConnectLinkSchema = z.object({
+  url: z.string().describe("The link to open in a browser. Whoever opens it signs in to LobbyStack as an owner or admin of the business, then agrees on Google's page."),
+  expires_at: timestamp.describe("The link works until then."),
+}).describe("A link that connects a Google Calendar to the business.");
+
 const memberRoles = ["business_owner", "business_admin", "scheduler", "viewer"] as const;
 const invitableRoles = ["business_admin", "scheduler", "viewer"] as const;
 const teamEmail = z.string().trim().min(3).max(320);
@@ -699,6 +732,10 @@ export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
 export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;
 export type ApiWidgetKeyCreate = z.infer<typeof apiWidgetKeyCreateSchema>;
 export type ApiWidgetKeyUpdate = z.infer<typeof apiWidgetKeyUpdateSchema>;
+export type ApiCalendarConnection = z.infer<typeof apiCalendarConnectionSchema>;
+export type ApiCalendarConnectionUpdate = z.infer<typeof apiCalendarConnectionUpdateSchema>;
+export type ApiAccountCalendar = z.infer<typeof apiAccountCalendarSchema>;
+export type ApiCalendarConnectLink = z.infer<typeof apiCalendarConnectLinkSchema>;
 export type ApiTeam = z.infer<typeof apiTeamSchema>;
 export type ApiTeamMember = z.infer<typeof apiTeamMemberSchema>;
 export type ApiTeamInvitation = z.infer<typeof apiTeamInvitationSchema>;

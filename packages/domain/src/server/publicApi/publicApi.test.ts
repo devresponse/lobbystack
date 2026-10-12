@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, apiWidgetKeySchema, normalizeWidgetOrigin, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS, widgetEmbedSnippet } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCalendarConnectionSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, apiWidgetKeySchema, normalizeWidgetOrigin, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS, widgetEmbedSnippet } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { KnowledgeStorageLimitError } from "../knowledge";
@@ -9,7 +9,7 @@ import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiK
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
 import { PublicApiError } from "./errors";
 import { apiErrorFromDomain, claimPhoneNumberForApi } from "./operations";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, serializeWidgetKey, toPage } from "./resources";
+import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCalendarConnection, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, serializeWidgetKey, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -189,6 +189,18 @@ describe("phone numbers", () => {
     expect(serializePhoneNumberClaim({ ...row, status: "claimed", phoneNumberId: userId })).toMatchObject({ status: "claimed", phone_number_id: userId });
     expect(serializePhoneNumberClaim({ ...row, status: "unavailable", lastError: "The selected number is no longer available." })).toMatchObject({ status: "failed", error: "The selected number is no longer available." });
     expect(serializePhoneNumberClaim({ ...row, status: "failed" })).toMatchObject({ status: "failed", error: "The number could not be claimed." });
+  });
+});
+
+describe("calendar connections", () => {
+  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", provider: "google", externalAccountId: "1234", staffId: null, selectedCalendarId: "main@example.com", status: "connected", lastSyncError: null, lastSyncedAt: new Date("2026-10-11T12:00:00.000Z"), createdAt: new Date("2026-10-10T12:00:00.000Z"), updatedAt: new Date("2026-10-11T12:30:00.000Z") };
+
+  it("shows a connection in snake_case, and any state the dashboard flags as error", () => {
+    const connection = serializeCalendarConnection(row);
+    expect(apiCalendarConnectionSchema.parse(connection)).toEqual(connection);
+    expect(connection).toEqual({ id: row.id, provider: "google", account_id: "1234", calendar_id: "main@example.com", staff_id: null, status: "connected", sync_error: null, last_synced_at: "2026-10-11T12:00:00.000Z", created_at: "2026-10-10T12:00:00.000Z", updated_at: "2026-10-11T12:30:00.000Z" });
+    expect(serializeCalendarConnection({ ...row, status: "syncing", lastSyncedAt: null })).toMatchObject({ status: "syncing", last_synced_at: null });
+    expect(serializeCalendarConnection({ ...row, status: "expired", lastSyncError: "Google Calendar authorization requires reconnection." })).toMatchObject({ status: "error", sync_error: "Google Calendar authorization requires reconnection." });
   });
 });
 

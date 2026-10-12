@@ -6,6 +6,7 @@ import {
   completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
+  createCalendarConnectLinkForApi,
   createCheckoutForApi,
   createClaimLinkForApi,
   createContactForApi,
@@ -17,6 +18,7 @@ import {
   createTeamInvitationForApi,
   createWidgetKeyForApi,
   createWebhookEndpoint,
+  deleteCalendarConnectionForApi,
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
   deleteRuleForApi,
@@ -41,8 +43,10 @@ import {
   getContactForApi,
   getWebhookEndpoint,
   idempotencyRequestHash,
+  listAccountCalendarsForApi,
   listAppointmentsForApi,
   listBusinessesForApi,
+  listCalendarConnectionsForApi,
   listCallsForApi,
   listContactsForApi,
   listKnowledgeEntriesForApi,
@@ -67,6 +71,7 @@ import {
   setManagedPlanForApi,
   updateBillingForApi,
   updateBusinessForApi,
+  updateCalendarConnectionForApi,
   updateContactForApi,
   updateOnboardingForApi,
   updateKnowledgeEntryForApi,
@@ -77,14 +82,17 @@ import {
   updateTeamMemberForApi,
   updateWidgetKeyForApi,
   updateWebhookEndpoint,
+  type CalendarAccess,
   type WebhookEndpointDetail,
   type WebhookManager,
 } from "@lobbystack/domain";
+import { SecretBox } from "@lobbystack/providers";
 import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
+  apiCalendarConnectionUpdateSchema,
   apiCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
@@ -121,6 +129,8 @@ import {
 
 import { createDomainContext } from "../domain-context";
 import { enforceFixedWindow, fixedWindowLimit } from "../fixed-window-limit";
+import { calendarSigningConfigured, createCalendarConnectLink } from "../google-calendar-oauth";
+import { googleCalendarProvider } from "../google-calendar-provider";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { getStorageProvider } from "../storage";
 import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
@@ -176,13 +186,28 @@ async function requireInvitationAllowed(userId: string): Promise<void> {
   throw new PublicApiError(429, "rate_limited", `Too many invitations. The account this key acts as can invite 20 people an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
-/** Where the widget's script is served: the dashboard's public address, or this request's origin without one. */
-function widgetAppOrigin(request: Request): string {
+/** The dashboard's public address, or this request's origin without one. The widget's script and the calendar link are served there. */
+function appOrigin(request: Request): string {
   try {
     return new URL(process.env.APP_BASE_URL ?? "").origin;
   } catch {
     return new URL(request.url).origin;
   }
+}
+
+const googleCalendarUnavailable = () => new PublicApiError(403, "forbidden", "Google Calendar isn't available on this deployment.");
+
+/** Refuses where Google Calendar isn't set up: the OAuth client, and ENCRYPTION_KEY for the tokens the callback stores. Returns that key. */
+function requireGoogleCalendar(): string {
+  const encryptionKey = process.env.ENCRYPTION_KEY;
+  if (!encryptionKey || !process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) throw googleCalendarUnavailable();
+  return encryptionKey;
+}
+
+function calendarAccess(): CalendarAccess {
+  const box = new SecretBox(requireGoogleCalendar());
+  const provider = googleCalendarProvider();
+  return { decryptToken: (value) => box.decrypt(value), encryptToken: (value) => box.encrypt(value), refreshAccessToken: (input) => provider.refreshAccessToken(input), listCalendars: (input) => provider.listCalendars(input) };
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -302,7 +327,7 @@ export const v1 = {
   listWidgetKeys: (request: Request) => handleApiRequest(request, "listWidgetKeys", async ({ context, caller }) => ({ body: { data: await listWidgetKeysForApi(context, caller), next_cursor: null, has_more: false } })),
   createWidgetKey: (request: Request) => handleApiRequest(request, "createWidgetKey", async ({ context, caller }) => {
     if (!isWidgetKeyIssuanceEnabled(process.env)) throw new PublicApiError(403, "forbidden", "Website chat widgets aren't available on this deployment yet.");
-    return { body: data(await createWidgetKeyForApi(context, caller, await readApiBody(request, apiWidgetKeyCreateSchema), { appOrigin: widgetAppOrigin(request) })) };
+    return { body: data(await createWidgetKeyForApi(context, caller, await readApiBody(request, apiWidgetKeyCreateSchema), { appOrigin: appOrigin(request) })) };
   }),
   updateWidgetKey: (request: Request, { params }: Params<"widget_key_id">) => handleApiRequest(request, "updateWidgetKey", async ({ context, caller }) => {
     const widgetKeyId = uuidParam((await params).widget_key_id, "widget_key_id");
@@ -322,6 +347,26 @@ export const v1 = {
   reorderRules: (request: Request) => handleApiRequest(request, "reorderRules", async ({ context, caller }) => ({ body: { data: await reorderRulesForApi(context, caller, await readApiBody(request, apiRuleReorderSchema)), next_cursor: null, has_more: false } })),
   getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
   updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
+  createCalendarConnectLink: (request: Request) => handleApiRequest(request, "createCalendarConnectLink", async ({ context, caller }) => {
+    requireGoogleCalendar();
+    if (!calendarSigningConfigured()) throw googleCalendarUnavailable();
+    const origin = appOrigin(request);
+    return { body: data(await createCalendarConnectLinkForApi(context, caller, { link: ({ businessId }) => createCalendarConnectLink({ origin, businessId }) })) };
+  }),
+  listCalendarConnections: (request: Request) => handleApiRequest(request, "listCalendarConnections", async ({ context, caller }) => ({ body: { data: await listCalendarConnectionsForApi(context, caller), next_cursor: null, has_more: false } })),
+  listAccountCalendars: (request: Request, { params }: Params<"connection_id">) => handleApiRequest(request, "listAccountCalendars", async ({ context, caller }) => {
+    const connectionId = uuidParam((await params).connection_id, "connection_id");
+    return { body: { data: await listAccountCalendarsForApi(context, caller, connectionId, calendarAccess), next_cursor: null, has_more: false } };
+  }),
+  updateCalendarConnection: (request: Request, { params }: Params<"connection_id">) => handleApiRequest(request, "updateCalendarConnection", async ({ context, caller }) => {
+    const connectionId = uuidParam((await params).connection_id, "connection_id");
+    return { body: data(await updateCalendarConnectionForApi(context, caller, connectionId, await readApiBody(request, apiCalendarConnectionUpdateSchema), calendarAccess)) };
+  }),
+  deleteCalendarConnection: (request: Request, { params }: Params<"connection_id">) => handleApiRequest(request, "deleteCalendarConnection", async ({ context, caller }) => {
+    const connectionId = uuidParam((await params).connection_id, "connection_id");
+    await deleteCalendarConnectionForApi(context, caller, connectionId);
+    return { body: data({ id: connectionId, deleted: true }) };
+  }),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller, { includeInactive: booleanParam(request, "include_inactive") }), next_cursor: null, has_more: false } })),
   createService: (request: Request) => handleApiRequest(request, "createService", async ({ context, caller }) => ({ body: data(await createServiceForApi(context, caller, await readApiBody(request, apiServiceCreateSchema))) })),
   updateService: (request: Request, { params }: Params<"service_id">) => handleApiRequest(request, "updateService", async ({ context, caller }) => {

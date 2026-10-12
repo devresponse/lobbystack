@@ -14,6 +14,7 @@ import {
   normalizeAppointmentChangePolicy,
   normalizeBookingMode,
   weekdays,
+  type ApiAccountCalendar,
   type ApiAppointment,
   type ApiAppointmentCreate,
   type ApiAvailabilitySlot,
@@ -23,6 +24,9 @@ import {
   type ApiBusinessCreate,
   type ApiBusinessSummary,
   type ApiBusinessUpdate,
+  type ApiCalendarConnection,
+  type ApiCalendarConnectionUpdate,
+  type ApiCalendarConnectLink,
   type ApiCall,
   type ApiCallDetail,
   type ApiCheckout,
@@ -78,6 +82,7 @@ import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, u
 import { attributeBusiness } from "../affiliates";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
+import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
 import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction } from "../compliance";
 import type { DomainContext } from "../context";
@@ -119,6 +124,7 @@ import {
   loadPhoneNumberClaimResource,
   loadPhoneNumberResource,
   pageSize,
+  serializeCalendarConnection,
   serializeContact,
   serializeKnowledgeEntry,
   serializeReceptionist,
@@ -837,6 +843,118 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
     if (!row) throw notFound("Widget key");
     await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
     return serializeWidgetKey(row);
+  });
+}
+
+// Calendars. Google asks the calendar's owner to agree in a browser, so the
+// API hands out a link that starts that flow in the dashboard, then manages
+// the connections it creates as the integrations page does.
+
+/** What the API needs from Google for a connection: its tokens, kept encrypted, and its calendars. */
+export type CalendarAccess = {
+  decryptToken: (value: string) => string;
+  encryptToken: (value: string) => string;
+  refreshAccessToken: (input: { refreshToken: string }) => Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }>;
+  listCalendars: (input: { accessToken: string }) => Promise<Array<{ id: string; summary: string; primary: boolean; accessRole?: string }>>;
+};
+
+type AccountCalendar = Awaited<ReturnType<CalendarAccess["listCalendars"]>>[number];
+
+/** LobbyStack adds appointments to the calendar it reads, so it needs one it may write to, as in the dashboard. */
+function isWritableCalendar(calendar: AccountCalendar): boolean {
+  return calendar.accessRole === "owner" || calendar.accessRole === "writer";
+}
+
+// Google refused the stored authorization, or none is stored, so only connecting again helps.
+function needsReconnect(error: unknown): boolean {
+  return error instanceof Error && (error.message === "Google Calendar authorization requires reconnection." || (error as { reconnectRequired?: unknown }).reconnectRequired === true);
+}
+
+/** The status Google answered a failed calendar request with, which the provider's error carries. */
+function googleStatus(error: unknown): unknown {
+  return typeof error === "object" && error !== null ? (error as { responseStatus?: unknown }).responseStatus : undefined;
+}
+
+/** The account's calendars, with a token refreshed under the connection's lock when it's about to expire. */
+async function accountCalendars(context: DomainContext, caller: ApiCaller, connectionId: string, access: CalendarAccess): Promise<AccountCalendar[]> {
+  const list = async (forceRefresh: boolean) => await access.listCalendars({ accessToken: await resolveCalendarAccessToken(context, { businessId: caller.businessId, connectionId, decryptToken: access.decryptToken, encryptToken: access.encryptToken, refreshAccessToken: access.refreshAccessToken, forceRefresh }) });
+  try {
+    return await list(false).catch(async (error: unknown) => {
+      // A token revoked in the Google account still looks unexpired here.
+      // Refreshing it once either works or shows that the grant is gone.
+      if (googleStatus(error) === 401) return await list(true);
+      throw error;
+    });
+  } catch (error) {
+    if (needsReconnect(error) || googleStatus(error) === 401) throw conflict("Google no longer accepts this connection. Connect the calendar again with POST /calendars/google/connect.");
+    // Disconnected since it was read.
+    if (error instanceof Error && error.message === "Calendar connection is unavailable.") throw notFound("Calendar connection");
+    // Google's own errors never reach the caller: its 401 would read as the caller's key.
+    throw new Error("Google Calendar couldn't list the account's calendars.", { cause: error });
+  }
+}
+
+async function loadCalendarConnection(tx: DatabaseTransaction, businessId: string, connectionId: string) {
+  return (await listCalendarConnectionsInTransaction(tx, { businessId, connectionId }))[0] ?? null;
+}
+
+/** Records the link and returns it. `link` signs it in the admin app, which serves the page it opens. */
+export async function createCalendarConnectLinkForApi(context: DomainContext, caller: ApiCaller, options: { link: (input: { businessId: string }) => { url: string; expiresAt: Date } }): Promise<ApiCalendarConnectLink> {
+  return await inBusiness(context, caller, async (tx) => {
+    const { url, expiresAt } = options.link({ businessId: caller.businessId });
+    await audit(tx, caller, { eventType: "api.calendar.connect_link_created", entityType: "business", entityId: caller.businessId, payload: { provider: "google", expiresAt: expiresAt.toISOString() } });
+    return { url, expires_at: expiresAt.toISOString() };
+  });
+}
+
+export async function listCalendarConnectionsForApi(context: DomainContext, caller: ApiCaller): Promise<ApiCalendarConnection[]> {
+  return await inBusiness(context, caller, async (tx) => (await listCalendarConnectionsInTransaction(tx, { businessId: caller.businessId })).map(serializeCalendarConnection));
+}
+
+export async function listAccountCalendarsForApi(context: DomainContext, caller: ApiCaller, connectionId: string, access: () => CalendarAccess): Promise<ApiAccountCalendar[]> {
+  const connection = await inBusiness(context, caller, async (tx) => await loadCalendarConnection(tx, caller.businessId, connectionId));
+  if (!connection) throw notFound("Calendar connection");
+  return (await accountCalendars(context, caller, connectionId, access())).map((calendar) => ({ id: calendar.id, name: calendar.summary, primary: calendar.primary, writable: isWritableCalendar(calendar), selected: calendar.id === connection.selectedCalendarId }));
+}
+
+/** Picks the calendar or the staff member. `access` is called only when a new calendar has to be checked with Google. */
+export async function updateCalendarConnectionForApi(context: DomainContext, caller: ApiCaller, connectionId: string, input: ApiCalendarConnectionUpdate, access: () => CalendarAccess): Promise<ApiCalendarConnection> {
+  if (Object.keys(input).length === 0) throw invalidRequest("Send at least one field to update.");
+  const current = await inBusiness(context, caller, async (tx) => await loadCalendarConnection(tx, caller.businessId, connectionId));
+  if (!current) throw notFound("Calendar connection");
+  const calendarId = input.calendar_id !== undefined && input.calendar_id !== current.selectedCalendarId ? input.calendar_id : undefined;
+  if (calendarId !== undefined) {
+    const picked = (await accountCalendars(context, caller, connectionId, access())).find((calendar) => calendar.id === calendarId);
+    if (!picked) throw invalidRequest("The connected account has no calendar with this id.", [{ path: "calendar_id", message: "Use an id from GET /calendars/{connection_id}/calendars." }]);
+    if (!isWritableCalendar(picked)) throw invalidRequest("LobbyStack can't add appointments to this calendar. Pick one the account can change.", [{ path: "calendar_id", message: "Not writable." }]);
+  }
+  return await inBusiness(context, caller, async (tx) => {
+    // Held to the end, so a disconnect can't land between the checks and the changes.
+    const [locked] = await tx.select({ staffId: calendarConnections.staffId, selectedCalendarId: calendarConnections.selectedCalendarId }).from(calendarConnections).where(and(eq(calendarConnections.id, connectionId), eq(calendarConnections.businessId, caller.businessId), ne(calendarConnections.status, "disconnected"))).limit(1).for("no key update");
+    if (!locked) throw notFound("Calendar connection");
+    const fields: string[] = [];
+    // A calendar_id not checked with Google above was the connection's own calendar
+    // when the request began. If someone picked another since, it goes back, as any later write would.
+    if (input.calendar_id !== undefined && input.calendar_id !== locked.selectedCalendarId) {
+      if (!await selectCalendarInTransaction(tx, { businessId: caller.businessId, connectionId, calendarId: input.calendar_id })) throw notFound("Calendar connection");
+      fields.push("calendar_id");
+    }
+    if (input.staff_id !== undefined && input.staff_id !== locked.staffId) {
+      const outcome = await assignCalendarStaffInTransaction(tx, { businessId: caller.businessId, connectionId, staffId: input.staff_id });
+      if (outcome === "staff_not_found") throw invalidRequest("staff_id isn't an active staff member of the business.", [{ path: "staff_id", message: "Use an active staff member's id from GET /staff." }]);
+      if (outcome === "not_found") throw notFound("Calendar connection");
+      fields.push("staff_id");
+    }
+    if (fields.length) await audit(tx, caller, { eventType: "api.calendar_connection.updated", entityType: "calendar_connection", entityId: connectionId, payload: { fields } });
+    return serializeCalendarConnection((await loadCalendarConnection(tx, caller.businessId, connectionId))!);
+  });
+}
+
+export async function deleteCalendarConnectionForApi(context: DomainContext, caller: ApiCaller, connectionId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    const disconnected = await disconnectCalendarInTransaction(tx, { businessId: caller.businessId, connectionId });
+    if (!disconnected) throw notFound("Calendar connection");
+    await audit(tx, caller, { eventType: "api.calendar_connection.disconnected", entityType: "calendar_connection", entityId: connectionId, payload: { provider: disconnected.provider } });
   });
 }
 

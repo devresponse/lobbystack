@@ -16,6 +16,7 @@ import {
   weekdays,
   type ApiAppointment,
   type ApiBusiness,
+  type ApiCalendarConnection,
   type ApiCall,
   type ApiCallDetail,
   type ApiContact,
@@ -582,6 +583,24 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
     },
     last_used_at: isoOrNull(row.lastUsedAt),
     created_at: iso(row.createdAt),
+  };
+}
+
+// Calendars
+
+export function serializeCalendarConnection(row: { id: string; provider: string; externalAccountId: string; staffId: string | null; selectedCalendarId: string | null; status: string; lastSyncError: string | null; lastSyncedAt: Date | null; createdAt: Date; updatedAt: Date }): ApiCalendarConnection {
+  return {
+    id: row.id,
+    provider: row.provider,
+    account_id: row.externalAccountId,
+    calendar_id: row.selectedCalendarId,
+    staff_id: row.staffId,
+    // The dashboard shows any other state as needing attention.
+    status: row.status === "connected" || row.status === "syncing" ? row.status : "error",
+    sync_error: row.lastSyncError,
+    last_synced_at: isoOrNull(row.lastSyncedAt),
+    created_at: iso(row.createdAt),
+    updated_at: iso(row.updatedAt),
   };
 }
 

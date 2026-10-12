@@ -240,6 +240,14 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
   }, [messages, status, voiceCaptions]);
 
+  // A live voice call or its captions are on screen. Typed messages come back
+  // from history after a reload; these don't, so the loader asks the visitor
+  // before the page reloads or closes.
+  const voiceTranscriptShown = voiceCaptions.live || voiceCaptions.turns.length > 0;
+  useEffect(() => {
+    window.parent?.postMessage({ type: "leave-warning", enabled: voiceTranscriptShown }, "*");
+  }, [voiceTranscriptShown]);
+
   useEffect(() => {
     const reportHeight = () => {
       window.parent?.postMessage({ type: "resize", height: document.documentElement.scrollHeight }, "*");
@@ -341,7 +349,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
           </div>
         ))}
         {sending && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
-        {voiceCaptions.live || voiceCaptions.turns.length > 0 ? <VoiceTranscript captions={voiceCaptions} color={color} t={t} /> : null}
+        {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} t={t} /> : null}
         {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
       </div>
 

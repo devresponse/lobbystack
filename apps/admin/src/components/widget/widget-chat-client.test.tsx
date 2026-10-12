@@ -48,8 +48,9 @@ describe("widget chat after a team member takes over", () => {
 });
 
 describe("widget voice captions", () => {
-  it("shows both sides of a live voice call in the chat thread", async () => {
+  it("shows both sides of a live voice call in the chat thread and asks the loader to warn before leaving", async () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const postMessage = vi.spyOn(window, "postMessage");
     Element.prototype.scrollTo = () => {};
     vi.mocked(useWebVoiceCall).mockReturnValue({
       status: "connected",
@@ -73,6 +74,8 @@ describe("widget voice captions", () => {
     expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
     expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
     expect(screen.getByText("chat.voiceLive")).toBeTruthy();
+    expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*");
+    postMessage.mockRestore();
     client.clear();
   });
 });

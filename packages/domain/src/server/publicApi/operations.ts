@@ -6,6 +6,7 @@ import { DateTime } from "luxon";
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
+  apiNotificationEvents,
   RULES_MAX,
   isApiKeyScope,
   normalizeAuthEmail,
@@ -47,6 +48,8 @@ import {
   type ApiKnowledgeUploadCreate,
   type ApiMe,
   type ApiMessage,
+  type ApiNotificationPreferences,
+  type ApiNotificationPreferencesUpdate,
   type ApiOnboarding,
   type ApiOnboardingComplete,
   type ApiOnboardingItem,
@@ -77,7 +80,7 @@ import {
   type ApiWidgetKeyUpdate,
 } from "@lobbystack/shared";
 
-import { AuthorizationError, requireBusinessAdmin } from "../../authz";
+import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } from "../../authz";
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
@@ -88,6 +91,7 @@ import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction 
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
+import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
 import { normalizeOnboardingStage, resolveOnboardingStageForPlan, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
@@ -119,6 +123,7 @@ import {
   loadCallDetailResource,
   loadContactResource,
   loadServiceResource,
+  notificationEventKeys,
   loadKnowledgeEntryResource,
   loadKnowledgeSourceResource,
   loadPhoneNumberClaimResource,
@@ -127,6 +132,7 @@ import {
   serializeCalendarConnection,
   serializeContact,
   serializeKnowledgeEntry,
+  serializeNotificationPreferences,
   serializeReceptionist,
   serializeRule,
   serializeWidgetKey,
@@ -955,6 +961,72 @@ export async function deleteCalendarConnectionForApi(context: DomainContext, cal
     const disconnected = await disconnectCalendarInTransaction(tx, { businessId: caller.businessId, connectionId });
     if (!disconnected) throw notFound("Calendar connection");
     await audit(tx, caller, { eventType: "api.calendar_connection.disconnected", entityType: "calendar_connection", entityId: connectionId, payload: { provider: disconnected.provider } });
+  });
+}
+
+// Alert settings. Each person on the team has their own, and RLS lets only
+// that person change them, so these run as the account the key acts as, with
+// the dashboard's database role: pass an app-role context, not the worker's.
+
+async function asTeamMember<T>(context: DomainContext, caller: ApiCaller, userId: string, run: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  return await withBusinessTransaction(context.db, { userId, businessId: caller.businessId, actorType: "operator" }, async (tx) => {
+    try {
+      await requireBusinessMembership(tx, { userId, businessId: caller.businessId });
+    } catch (error) {
+      if (error instanceof AuthorizationError) throw conflict("The account this key acts as isn't on the business's team, so it gets no alerts about it.");
+      throw error;
+    }
+    return await run(tx);
+  });
+}
+
+const textsUnavailable: Record<NonNullable<ApiNotificationPreferences["sms"]["unavailable_reason"]>, string> = {
+  sender_missing: "This deployment has no number to send alert texts from, so texts can't be turned on.",
+  phone_unverified: "The account this key acts as has no verified mobile number. Its owner adds one in the dashboard's notification settings, which also asks for consent to alert texts.",
+  consent_required: "The account this key acts as hasn't agreed to alert texts. Its owner turns texts on once in the dashboard's notification settings, which asks for that consent.",
+};
+
+/** `phoneVerified` comes from the account, which only the auth database can read. */
+export async function getNotificationPreferencesForApi(context: DomainContext, caller: ApiCaller, options: { userId: string; phoneVerified: boolean }): Promise<ApiNotificationPreferences> {
+  return await asTeamMember(context, caller, options.userId, async (tx) => serializeNotificationPreferences(await loadNotificationPreferencesInTransaction(tx, { userId: options.userId, businessId: caller.businessId, phoneVerified: options.phoneVerified })));
+}
+
+/**
+ * Changes the settings sent and keeps the rest as the person saved them, texts
+ * included while they can't be sent. A text can be turned on only while it can
+ * be sent: the person's consent comes from the dashboard alone.
+ */
+export async function updateNotificationPreferencesForApi(context: DomainContext, caller: ApiCaller, input: ApiNotificationPreferencesUpdate, options: { userId: string; phoneVerified: boolean }): Promise<ApiNotificationPreferences> {
+  if (Object.keys(input).length === 0) throw invalidRequest("Send at least one field to update.");
+  return await asTeamMember(context, caller, options.userId, async (tx) => {
+    const target = { userId: options.userId, businessId: caller.businessId, phoneVerified: options.phoneVerified };
+    const saved = await loadSavedNotificationPreferencesInTransaction(tx, target);
+    const before = serializeNotificationPreferences(await loadNotificationPreferencesInTransaction(tx, target));
+    if (before.sms.unavailable_reason && (input.sms_enabled === true || apiNotificationEvents.some((event) => input.events?.[event]?.sms === true))) throw conflict(textsUnavailable[before.sms.unavailable_reason]);
+    const eventPreferences = { ...saved.eventPreferences };
+    for (const event of apiNotificationEvents) {
+      const change = input.events?.[event];
+      const key = notificationEventKeys[event];
+      if (change) eventPreferences[key] = { email: change.email ?? eventPreferences[key].email, sms: change.sms ?? eventPreferences[key].sms };
+    }
+    const next = {
+      emailEnabled: input.email_enabled ?? saved.emailEnabled,
+      smsEnabled: input.sms_enabled ?? saved.smsEnabled,
+      eventPreferences,
+      dailySummaryEnabled: input.daily_summary?.enabled ?? saved.dailySummaryEnabled,
+      dailySummarySendTime: input.daily_summary?.send_time !== undefined ? input.daily_summary.send_time : saved.dailySummarySendTime,
+    };
+    if (next.dailySummaryEnabled && !next.dailySummarySendTime) throw invalidRequest("A daily summary that is on needs a send_time.", [{ path: "daily_summary.send_time", message: "Required while the summary is on." }]);
+    const fields = [
+      ...(next.emailEnabled !== saved.emailEnabled ? ["email_enabled"] : []),
+      ...(next.smsEnabled !== saved.smsEnabled ? ["sms_enabled"] : []),
+      ...(apiNotificationEvents.some((event) => { const key = notificationEventKeys[event]; return next.eventPreferences[key].email !== saved.eventPreferences[key].email || next.eventPreferences[key].sms !== saved.eventPreferences[key].sms; }) ? ["events"] : []),
+      ...(next.dailySummaryEnabled !== saved.dailySummaryEnabled || next.dailySummarySendTime !== saved.dailySummarySendTime ? ["daily_summary"] : []),
+    ];
+    if (fields.length === 0) return before;
+    await saveNotificationPreferencesInTransaction(tx, { userId: options.userId, businessId: caller.businessId, ...next });
+    await audit(tx, caller, { eventType: "api.notification_preferences.updated", entityType: "user", entityId: options.userId, payload: { fields } });
+    return serializeNotificationPreferences(await loadNotificationPreferencesInTransaction(tx, target));
   });
 }
 

@@ -33,6 +33,7 @@ import {
   getKnowledgeEntryForApi,
   getKnowledgeSourceForApi,
   getMeForApi,
+  getNotificationPreferencesForApi,
   getOnboardingForApi,
   getPlatformMeForApi,
   getReceptionistForApi,
@@ -76,6 +77,7 @@ import {
   updateOnboardingForApi,
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
+  updateNotificationPreferencesForApi,
   updateReceptionistForApi,
   updateRuleForApi,
   updateServiceForApi,
@@ -96,6 +98,7 @@ import {
   apiCheckoutCreateSchema,
   apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
+  apiNotificationPreferencesUpdateSchema,
   apiOnboardingCompleteSchema,
   apiOnboardingUpdateSchema,
   apiPhoneNumberClaimCreateSchema,
@@ -134,6 +137,7 @@ import { googleCalendarProvider } from "../google-calendar-provider";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { getStorageProvider } from "../storage";
 import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
+import { hasVerifiedPhone } from "../verified-phone";
 import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam, type ApiCredential, type RestApiCaller } from "./http";
 
 // One function per v1 operation. The route files under app/api/v1 only bind
@@ -366,6 +370,16 @@ export const v1 = {
     const connectionId = uuidParam((await params).connection_id, "connection_id");
     await deleteCalendarConnectionForApi(context, caller, connectionId);
     return { body: data({ id: connectionId, deleted: true }) };
+  }),
+  // Alerts belong to the account the key acts as, which RLS lets change only its own: they run with the dashboard's database role.
+  getNotificationPreferences: (request: Request) => handleApiRequest(request, "getNotificationPreferences", async ({ context, caller }) => {
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await getNotificationPreferencesForApi(createDomainContext(), caller, { userId, phoneVerified: await hasVerifiedPhone(userId) })) };
+  }),
+  updateNotificationPreferences: (request: Request) => handleApiRequest(request, "updateNotificationPreferences", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiNotificationPreferencesUpdateSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await updateNotificationPreferencesForApi(createDomainContext(), caller, body, { userId, phoneVerified: await hasVerifiedPhone(userId) })) };
   }),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller, { includeInactive: booleanParam(request, "include_inactive") }), next_cursor: null, has_more: false } })),
   createService: (request: Request) => handleApiRequest(request, "createService", async ({ context, caller }) => ({ body: data(await createServiceForApi(context, caller, await readApiBody(request, apiServiceCreateSchema))) })),

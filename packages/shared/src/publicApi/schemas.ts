@@ -332,6 +332,49 @@ export const apiCalendarConnectLinkSchema = z.object({
   expires_at: timestamp.describe("The link works until then."),
 }).describe("A link that connects a Google Calendar to the business.");
 
+// The alerts the dashboard's notification settings show, by their API names.
+const notificationEventDescriptions = {
+  voice_message: "A caller left a message during a call.",
+  text_message: "A customer texted the business number.",
+  customer_sms_failed: "A confirmation or reminder text to a customer failed or wasn't delivered.",
+  calendar_sync: "An appointment couldn't sync to the connected calendar.",
+  transfer_failed: "The receptionist tried to transfer a caller to a person, and the transfer didn't complete.",
+  website_chat: "A visitor wrote through the website chat widget. At most one alert per chat a day.",
+  webhook_disabled: "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day.",
+} as const;
+export type ApiNotificationEvent = keyof typeof notificationEventDescriptions;
+export const apiNotificationEvents = Object.keys(notificationEventDescriptions) as ApiNotificationEvent[];
+
+function notificationEventShape<T extends z.ZodType>(channels: T) {
+  return Object.fromEntries(apiNotificationEvents.map((event) => [event, channels.describe(notificationEventDescriptions[event])])) as Record<ApiNotificationEvent, T>;
+}
+
+const summaryTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Use 24-hour HH:MM.").describe("Local time in the business's time zone, as 24-hour HH:MM.");
+
+export const apiNotificationPreferencesSchema = z.object({
+  email_enabled: z.boolean().describe("false: no alert emails at all, whatever events says."),
+  sms_enabled: z.boolean().describe("false: no alert texts at all, whatever events says."),
+  events: z.object(notificationEventShape(z.object({ email: z.boolean(), sms: z.boolean() }))).describe("Which alerts go out by email and which by text."),
+  daily_summary: z.object({
+    enabled: z.boolean(),
+    send_time: summaryTime.nullable().describe("When the summary of the day before goes out."),
+  }).describe("A daily summary of the alerts."),
+  sms: z.object({
+    available: z.boolean().describe("true when texts can be turned on."),
+    unavailable_reason: z.enum(["sender_missing", "phone_unverified", "consent_required"]).nullable().describe("sender_missing: the deployment has no number to send alerts from. phone_unverified: the account has no verified mobile number. consent_required: the account hasn't agreed to alert texts. The account's owner fixes the last two in the dashboard's notification settings."),
+  }),
+}).describe("The alerts the account the key acts as gets about this business. Each person on the team has their own.");
+
+export const apiNotificationPreferencesUpdateSchema = z.strictObject({
+  email_enabled: z.boolean().optional(),
+  sms_enabled: z.boolean().optional().describe("Texts can be turned on only while sms.available is true."),
+  events: z.strictObject(notificationEventShape(z.strictObject({ email: z.boolean().optional(), sms: z.boolean().optional() }).optional())).optional().describe("Only the events and switches sent change."),
+  daily_summary: z.strictObject({
+    enabled: z.boolean().optional(),
+    send_time: summaryTime.nullable().optional(),
+  }).optional().describe("A summary that is on needs a send_time."),
+});
+
 const memberRoles = ["business_owner", "business_admin", "scheduler", "viewer"] as const;
 const invitableRoles = ["business_admin", "scheduler", "viewer"] as const;
 const teamEmail = z.string().trim().min(3).max(320);
@@ -736,6 +779,8 @@ export type ApiCalendarConnection = z.infer<typeof apiCalendarConnectionSchema>;
 export type ApiCalendarConnectionUpdate = z.infer<typeof apiCalendarConnectionUpdateSchema>;
 export type ApiAccountCalendar = z.infer<typeof apiAccountCalendarSchema>;
 export type ApiCalendarConnectLink = z.infer<typeof apiCalendarConnectLinkSchema>;
+export type ApiNotificationPreferences = z.infer<typeof apiNotificationPreferencesSchema>;
+export type ApiNotificationPreferencesUpdate = z.infer<typeof apiNotificationPreferencesUpdateSchema>;
 export type ApiTeam = z.infer<typeof apiTeamSchema>;
 export type ApiTeamMember = z.infer<typeof apiTeamMemberSchema>;
 export type ApiTeamInvitation = z.infer<typeof apiTeamInvitationSchema>;

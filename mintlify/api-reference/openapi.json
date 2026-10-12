@@ -41,6 +41,9 @@
       "name": "Calendars"
     },
     {
+      "name": "Notifications"
+    },
+    {
       "name": "Calls"
     },
     {
@@ -5159,6 +5162,234 @@
           },
           "404": {
             "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/notification-preferences": {
+      "get": {
+        "operationId": "getNotificationPreferences",
+        "summary": "Get alert settings",
+        "description": "The alerts the account the key acts as gets about this business, by email and by text. A platform key acts as its owner_email account, which has to be on the business's team, or it's a 409.",
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationPreferences"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateNotificationPreferences",
+        "summary": "Change alert settings",
+        "description": "Changes the fields sent and keeps the rest as saved, including texts the person can't get right now. Texts need a verified mobile number and the person's consent to alert texts, which only the dashboard's notification settings collect: while sms.available is false, turning a text on is a 409, and while it's true, texts can be turned on here. Turning texts off always works. Values the settings already have change nothing.",
+        "tags": [
+          "Notifications"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPreferencesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/NotificationPreferences"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
             "content": {
               "application/json": {
                 "schema": {
@@ -12794,6 +13025,353 @@
               "disabled",
               "revoked"
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "NotificationPreferences": {
+        "type": "object",
+        "properties": {
+          "email_enabled": {
+            "type": "boolean",
+            "description": "false: no alert emails at all, whatever events says."
+          },
+          "sms_enabled": {
+            "type": "boolean",
+            "description": "false: no alert texts at all, whatever events says."
+          },
+          "events": {
+            "type": "object",
+            "properties": {
+              "voice_message": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A caller left a message during a call."
+              },
+              "text_message": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A customer texted the business number."
+              },
+              "customer_sms_failed": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A confirmation or reminder text to a customer failed or wasn't delivered."
+              },
+              "calendar_sync": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "An appointment couldn't sync to the connected calendar."
+              },
+              "transfer_failed": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "The receptionist tried to transfer a caller to a person, and the transfer didn't complete."
+              },
+              "website_chat": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A visitor wrote through the website chat widget. At most one alert per chat a day."
+              },
+              "webhook_disabled": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day."
+              }
+            },
+            "required": [
+              "voice_message",
+              "text_message",
+              "customer_sms_failed",
+              "calendar_sync",
+              "transfer_failed",
+              "website_chat",
+              "webhook_disabled"
+            ],
+            "additionalProperties": false,
+            "description": "Which alerts go out by email and which by text."
+          },
+          "daily_summary": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "send_time": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "Local time in the business's time zone, as 24-hour HH:MM."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When the summary of the day before goes out."
+              }
+            },
+            "required": [
+              "enabled",
+              "send_time"
+            ],
+            "additionalProperties": false,
+            "description": "A daily summary of the alerts."
+          },
+          "sms": {
+            "type": "object",
+            "properties": {
+              "available": {
+                "type": "boolean",
+                "description": "true when texts can be turned on."
+              },
+              "unavailable_reason": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "sender_missing",
+                      "phone_unverified",
+                      "consent_required"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "sender_missing: the deployment has no number to send alerts from. phone_unverified: the account has no verified mobile number. consent_required: the account hasn't agreed to alert texts. The account's owner fixes the last two in the dashboard's notification settings."
+              }
+            },
+            "required": [
+              "available",
+              "unavailable_reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "email_enabled",
+          "sms_enabled",
+          "events",
+          "daily_summary",
+          "sms"
+        ],
+        "additionalProperties": false,
+        "description": "The alerts the account the key acts as gets about this business. Each person on the team has their own."
+      },
+      "NotificationPreferencesUpdate": {
+        "type": "object",
+        "properties": {
+          "email_enabled": {
+            "type": "boolean"
+          },
+          "sms_enabled": {
+            "description": "Texts can be turned on only while sms.available is true.",
+            "type": "boolean"
+          },
+          "events": {
+            "description": "Only the events and switches sent change.",
+            "type": "object",
+            "properties": {
+              "voice_message": {
+                "description": "A caller left a message during a call.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "text_message": {
+                "description": "A customer texted the business number.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "customer_sms_failed": {
+                "description": "A confirmation or reminder text to a customer failed or wasn't delivered.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "calendar_sync": {
+                "description": "An appointment couldn't sync to the connected calendar.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "transfer_failed": {
+                "description": "The receptionist tried to transfer a caller to a person, and the transfer didn't complete.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "website_chat": {
+                "description": "A visitor wrote through the website chat widget. At most one alert per chat a day.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "webhook_disabled": {
+                "description": "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "daily_summary": {
+            "description": "A summary that is on needs a send_time.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              },
+              "send_time": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(?:[01]\\d|2[0-3]):[0-5]\\d$",
+                    "description": "Local time in the business's time zone, as 24-hour HH:MM."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
           }
         },
         "additionalProperties": false

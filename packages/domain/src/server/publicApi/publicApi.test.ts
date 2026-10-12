@@ -1,15 +1,16 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCalendarConnectionSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, apiWidgetKeySchema, normalizeWidgetOrigin, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS, widgetEmbedSnippet } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCalendarConnectionSchema, apiCallSchema, apiNotificationEvents, apiNotificationPreferencesSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, apiWidgetKeySchema, normalizeWidgetOrigin, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS, widgetEmbedSnippet } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { KnowledgeStorageLimitError } from "../knowledge";
+import { defaultOperatorNotificationEventPreferences, operatorNotificationEventKeys, type NotificationPreferences } from "../notifications";
 import { offerBusinessNumbers } from "../phoneNumbers";
 import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiKey, normalizeScopes } from "./apiKeys";
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
 import { PublicApiError } from "./errors";
 import { apiErrorFromDomain, claimPhoneNumberForApi } from "./operations";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCalendarConnection, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, serializeWidgetKey, toPage } from "./resources";
+import { decodeCursor, encodeCursor, notificationEventKeys, pageSize, serializeAppointment, serializeCalendarConnection, serializeCall, serializeNotificationPreferences, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, serializeWidgetKey, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -189,6 +190,22 @@ describe("phone numbers", () => {
     expect(serializePhoneNumberClaim({ ...row, status: "claimed", phoneNumberId: userId })).toMatchObject({ status: "claimed", phone_number_id: userId });
     expect(serializePhoneNumberClaim({ ...row, status: "unavailable", lastError: "The selected number is no longer available." })).toMatchObject({ status: "failed", error: "The selected number is no longer available." });
     expect(serializePhoneNumberClaim({ ...row, status: "failed" })).toMatchObject({ status: "failed", error: "The number could not be claimed." });
+  });
+});
+
+describe("notification preferences", () => {
+  const preferences: NotificationPreferences = { emailEnabled: true, smsEnabled: false, smsConsent: false, eventPreferences: { ...defaultOperatorNotificationEventPreferences(), voiceMessage: { email: false, sms: false } }, dailySummaryEnabled: true, dailySummarySendTime: "08:30", canUseSms: true, smsUnavailableReason: null };
+
+  it("names each alert the dashboard shows, and says why texts are off", () => {
+    const settings = serializeNotificationPreferences(preferences);
+    expect(apiNotificationPreferencesSchema.parse(settings)).toEqual(settings);
+    expect(Object.keys(settings.events)).toEqual(apiNotificationEvents);
+    expect(settings).toMatchObject({ email_enabled: true, sms_enabled: false, events: { voice_message: { email: false, sms: false }, text_message: { email: true, sms: false } }, daily_summary: { enabled: true, send_time: "08:30" }, sms: { available: false, unavailable_reason: "consent_required" } });
+    expect(serializeNotificationPreferences({ ...preferences, smsConsent: true }).sms).toEqual({ available: true, unavailable_reason: null });
+    expect(serializeNotificationPreferences({ ...preferences, smsConsent: true, canUseSms: false, smsUnavailableReason: "sender_missing" }).sms).toEqual({ available: false, unavailable_reason: "sender_missing" });
+    // Each API name is one of the dashboard's events, and every event it shows has one.
+    expect(Object.values(notificationEventKeys).every((key) => (operatorNotificationEventKeys as readonly string[]).includes(key))).toBe(true);
+    expect(new Set(Object.values(notificationEventKeys))).toEqual(new Set(["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "widgetChat", "webhookDisabled"]));
   });
 });
 

@@ -81,6 +81,8 @@ const domain = vi.hoisted(() => ({
   listAccountCalendarsForApi: vi.fn(async (..._args: unknown[]): Promise<unknown[]> => []),
   updateCalendarConnectionForApi: vi.fn(),
   deleteCalendarConnectionForApi: vi.fn(async () => undefined),
+  getNotificationPreferencesForApi: vi.fn(),
+  updateNotificationPreferencesForApi: vi.fn(),
   // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
@@ -95,6 +97,8 @@ vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
 vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret" }));
 vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: numbers.searchLimit }));
+const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => true) }));
+vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
 const invites = vi.hoisted(() => ({ limit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })) }));
 vi.mock("../fixed-window-limit", () => ({ enforceFixedWindow: invites.limit, fixedWindowLimit: (...args: unknown[]) => args }));
 vi.mock("@lobbystack/domain", async () => ({
@@ -727,6 +731,36 @@ describe("team", () => {
     expect((await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }))).status).toBe(403);
     expect(domain.getTeamForApi).not.toHaveBeenCalled();
     expect(domain.createClaimLinkForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("notification preferences", () => {
+  const actingUserId = "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f";
+  const settings = { email_enabled: true, sms_enabled: false, events: { voice_message: { email: true, sms: false } }, daily_summary: { enabled: false, send_time: null }, sms: { available: false, unavailable_reason: "consent_required" } };
+  const update = (body: unknown) => v1.updateNotificationPreferences(call("/notification-preferences", { method: "PATCH", body: JSON.stringify(body) }));
+
+  it("reads and changes the alerts of the account the key acts as, with the dashboard's database role", async () => {
+    domain.getNotificationPreferencesForApi.mockResolvedValue(settings);
+    expect(await (await v1.getNotificationPreferences(call("/notification-preferences"))).json()).toEqual({ data: settings });
+    expect(domain.getNotificationPreferencesForApi).toHaveBeenCalledWith(appContext, expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), { userId: actingUserId, phoneVerified: true });
+    expect(phones.verified).toHaveBeenCalledWith(actingUserId);
+
+    domain.updateNotificationPreferencesForApi.mockResolvedValue(settings);
+    const change = { email_enabled: false, events: { voice_message: { email: false } }, daily_summary: { enabled: true, send_time: "08:30" } };
+    expect((await update(change)).status).toBe(200);
+    expect(domain.updateNotificationPreferencesForApi).toHaveBeenCalledWith(appContext, expect.anything(), change, { userId: actingUserId, phoneVerified: true });
+    for (const bad of [{ events: { ai_reply_failed: { email: false } } }, { events: { voice_message: { push: true } } }, { daily_summary: { send_time: "8:30" } }, { daily_summary: { send_time: "24:00" } }, { email_enabled: "no" }, { sms_consent: true }]) {
+      expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.updateNotificationPreferencesForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads with business:read and changes with business:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    domain.getNotificationPreferencesForApi.mockResolvedValue(settings);
+    expect((await v1.getNotificationPreferences(call("/notification-preferences"))).status).toBe(200);
+    expect((await update({ email_enabled: false })).status).toBe(403);
+    expect(domain.updateNotificationPreferencesForApi).not.toHaveBeenCalled();
   });
 });
 

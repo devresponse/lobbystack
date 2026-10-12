@@ -5,6 +5,7 @@ import { agentRules, appointments, businessHours, businesses, calls, contacts, c
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
+  apiNotificationEvents,
   defaultWidgetConfig,
   normalizeWidgetOrigin,
   widgetConfigSchema,
@@ -24,6 +25,8 @@ import {
   type ApiKnowledgeEntry,
   type ApiKnowledgeSource,
   type ApiMessage,
+  type ApiNotificationEvent,
+  type ApiNotificationPreferences,
   type ApiPhoneNumber,
   type ApiPhoneNumberClaim,
   type ApiReceptionist,
@@ -35,6 +38,7 @@ import {
 } from "@lobbystack/shared";
 
 import { resolveCallOutcome } from "../callOutcome";
+import type { NotificationPreferences, OperatorNotificationEventKey } from "../notifications";
 import { EXPIRED_FOLLOW_UP_TITLE } from "../followUpRetention";
 import { recordingState } from "../recordingState";
 import { invalidRequest } from "./errors";
@@ -583,6 +587,35 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
     },
     last_used_at: isoOrNull(row.lastUsedAt),
     created_at: iso(row.createdAt),
+  };
+}
+
+// Notification preferences
+
+/** The API's names for the alerts the dashboard's notification settings show. */
+export const notificationEventKeys = {
+  voice_message: "voiceMessage",
+  text_message: "pausedSms",
+  customer_sms_failed: "smsFailed",
+  calendar_sync: "calendarSync",
+  transfer_failed: "transferFailed",
+  website_chat: "widgetChat",
+  webhook_disabled: "webhookDisabled",
+} as const satisfies Record<ApiNotificationEvent, OperatorNotificationEventKey>;
+
+export function serializeNotificationPreferences(preferences: NotificationPreferences): ApiNotificationPreferences {
+  const events = Object.fromEntries(apiNotificationEvents.map((event) => {
+    const { email, sms } = preferences.eventPreferences[notificationEventKeys[event]];
+    return [event, { email, sms }];
+  })) as ApiNotificationPreferences["events"];
+  // Texts also need the person's consent, which the dashboard asks for once their phone is verified.
+  const unavailable = preferences.smsUnavailableReason ?? (preferences.smsConsent ? null : "consent_required");
+  return {
+    email_enabled: preferences.emailEnabled,
+    sms_enabled: preferences.smsEnabled,
+    events,
+    daily_summary: { enabled: preferences.dailySummaryEnabled, send_time: preferences.dailySummarySendTime },
+    sms: { available: unavailable === null, unavailable_reason: unavailable },
   };
 }
 

@@ -4,17 +4,18 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
+import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { acceptInvitation } from "../tenancy";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -1266,6 +1267,63 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("changes only the acting account's own alerts, keeps texts it can't send, and turns texts on only with consent", async () => {
+    // Only the person may change their own alerts, so these run with the dashboard's role.
+    const context = { db: app!.db };
+    const options = { userId: ownerId, phoneVerified: false };
+    const own = and(eq(operatorNotificationPreferences.businessId, a.businessId), eq(operatorNotificationPreferences.userId, ownerId));
+    const saved = async () => (await admin!.db.select().from(operatorNotificationPreferences).where(own))[0];
+    const audited = async () => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, a.businessId), eq(auditLogs.eventType, "api.notification_preferences.updated")))).length;
+    const refusal = async (promise: Promise<unknown>) => await promise.then(() => null, (error: unknown) => error);
+    // A cloud business texts from the shared sender.
+    vi.stubEnv("TWILIO_ALERT_SMS_FROM", "+14165550100");
+    try {
+      const before = await getNotificationPreferencesForApi(context, a.caller, options);
+      expect(apiNotificationPreferencesSchema.parse(before)).toEqual(before);
+      expect(before).toMatchObject({ email_enabled: true, sms_enabled: false, events: { voice_message: { email: true, sms: false } }, daily_summary: { enabled: false, send_time: null }, sms: { available: false, unavailable_reason: "phone_unverified" } });
+      expect((await getNotificationPreferencesForApi(context, a.caller, { ...options, phoneVerified: true })).sms).toEqual({ available: false, unavailable_reason: "consent_required" });
+
+      const changed = await updateNotificationPreferencesForApi(context, a.caller, { email_enabled: false, events: { voice_message: { email: false } }, daily_summary: { enabled: true, send_time: "08:30" } }, options);
+      expect(changed).toMatchObject({ email_enabled: false, events: { voice_message: { email: false, sms: false }, text_message: { email: true, sms: false } }, daily_summary: { enabled: true, send_time: "08:30" } });
+      expect(await getNotificationPreferencesForApi(context, a.caller, options)).toEqual(changed);
+      // The dashboard reads the same settings.
+      expect(await getNotificationPreferences(context, { userId: ownerId, businessId: a.businessId })).toMatchObject({ emailEnabled: false, eventPreferences: { voiceMessage: { email: false, sms: false } }, dailySummaryEnabled: true, dailySummarySendTime: "08:30" });
+      // Values it already has change nothing.
+      await updateNotificationPreferencesForApi(context, a.caller, { email_enabled: false, events: { voice_message: { email: false } } }, options);
+      expect(await audited()).toBe(1);
+      await expectApiError(updateNotificationPreferencesForApi(context, a.caller, { daily_summary: { send_time: null } }, options), 400, "invalid_request");
+      await expectApiError(updateNotificationPreferencesForApi(context, a.caller, {}, options), 400, "invalid_request");
+
+      // Texts saved before stay saved while they can't be sent, and turning them off sticks.
+      await admin!.db.update(operatorNotificationPreferences).set({ smsEnabled: true, eventPreferences: { ...defaultOperatorNotificationEventPreferences(), voiceMessage: { email: false, sms: false }, calendarSync: { email: true, sms: true }, aiReplyFailed: { email: true, sms: true } } }).where(own);
+      expect(await updateNotificationPreferencesForApi(context, a.caller, { email_enabled: true }, options)).toMatchObject({ email_enabled: true, sms_enabled: false, events: { calendar_sync: { email: true, sms: false } } });
+      expect(await saved()).toMatchObject({ emailEnabled: true, smsEnabled: true, eventPreferences: { calendarSync: { email: true, sms: true }, aiReplyFailed: { email: true, sms: true } } });
+      await updateNotificationPreferencesForApi(context, a.caller, { sms_enabled: false, events: { calendar_sync: { sms: false } } }, options);
+      expect(await saved()).toMatchObject({ smsEnabled: false, eventPreferences: { calendarSync: { email: true, sms: false }, aiReplyFailed: { email: true, sms: true } } });
+      // Turning one on without consent stays refused in the dashboard too.
+      await expect(setNotificationPreferences(context, { userId: ownerId, businessId: a.businessId, emailEnabled: true, smsEnabled: true, eventPreferences: defaultOperatorNotificationEventPreferences() })).rejects.toThrow("SMS notification consent is required before enabling SMS alerts.");
+
+      // Turning a text on needs a sender, a verified phone and consent the person gives in the dashboard.
+      expect(await refusal(updateNotificationPreferencesForApi(context, a.caller, { sms_enabled: true }, options))).toMatchObject({ status: 409, code: "conflict", message: expect.stringContaining("no verified mobile number") });
+      expect(await refusal(updateNotificationPreferencesForApi(context, a.caller, { events: { calendar_sync: { sms: true } } }, { ...options, phoneVerified: true }))).toMatchObject({ status: 409, code: "conflict", message: expect.stringContaining("hasn't agreed to alert texts") });
+      vi.stubEnv("TWILIO_ALERT_SMS_FROM", "");
+      expect(await refusal(updateNotificationPreferencesForApi(context, a.caller, { sms_enabled: true }, { ...options, phoneVerified: true }))).toMatchObject({ status: 409, code: "conflict", message: expect.stringContaining("no number to send alert texts from") });
+      vi.stubEnv("TWILIO_ALERT_SMS_FROM", "+14165550100");
+      // With the person's consent on record, texts can be turned on here.
+      await admin!.db.update(users).set({ phone: "+14165550199" }).where(eq(users.id, ownerId));
+      await admin!.db.update(operatorNotificationPreferences).set({ smsConsentGrantedAt: new Date(), smsConsentDisclosureVersion: OPERATOR_SMS_DISCLOSURE_VERSION, smsConsentPhone: "+14165550199", smsConsentSource: "operator_phone_verification" }).where(own);
+      expect(await updateNotificationPreferencesForApi(context, a.caller, { sms_enabled: true, events: { calendar_sync: { sms: true } } }, { ...options, phoneVerified: true })).toMatchObject({ sms_enabled: true, events: { calendar_sync: { email: true, sms: true } }, sms: { available: true, unavailable_reason: null } });
+      expect(await audited()).toBe(4);
+
+      // An account that isn't on the team gets no alerts about the business.
+      await expectApiError(getNotificationPreferencesForApi(context, b.caller, options), 409, "conflict");
+    } finally {
+      vi.unstubAllEnvs();
+      await admin!.db.update(users).set({ phone: null }).where(eq(users.id, ownerId));
+      await admin!.db.delete(operatorNotificationPreferences).where(own);
     }
   });
 

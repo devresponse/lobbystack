@@ -26,7 +26,7 @@
     "description": "Embed the chat widget on your website.",
     "created": {
       "title": "Widget key created",
-      "description": "Copy this key now. You will not see it again.",
+      "description": "You can copy this snippet again any time from the widget's settings below.",
       "copy": "Copy",
       "copied": "Copied",
       "copySnippet": "Copy embed snippet",
@@ -95,7 +95,10 @@
       "revokeConfirm": "Revoke this widget key? Existing embeds will stop working.",
       "save": "Save",
       "saved": "Saved",
-      "bubbleHint": "The chat bubble on your site takes its color and position from the embed snippet. After changing them here, update data-color and data-position in the snippet.",
+      "appearanceHint": "Color and position changes reach your website within about two minutes.",
+      "snippet": "Embed snippet",
+      "snippetCopied": "Snippet copied",
+      "noSnippet": "This widget was created before snippets were saved, so its snippet can't be shown. Create a new widget to get one you can copy any time.",
       "lastUsed": "Last used {{date}}"
     }
   },

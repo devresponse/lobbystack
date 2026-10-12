@@ -820,7 +820,7 @@ export async function createWidgetKeyForApi(context: DomainContext, caller: ApiC
     const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
     await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
     const widgetKey = serializeWidgetKey(row);
-    return { ...widgetKey, key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key, { position: widgetKey.config.position, color: widgetKey.config.color }) };
+    return { ...widgetKey, key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
   });
 }
 

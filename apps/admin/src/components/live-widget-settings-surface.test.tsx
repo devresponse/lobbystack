@@ -45,7 +45,7 @@ describe("website widget issuance restriction", () => {
     expect(screen.queryByText("widget.restricted.title")).toBeNull();
   });
 
-  it("starts the form over after creating a key while the snippet keeps the created key's look", async () => {
+  it("starts the form over after creating a key and shows the key's snippet", async () => {
     setup(true);
     const origins = await screen.findByPlaceholderText("https://example.com, https://www.example.com");
     fireEvent.change(origins, { target: { value: "https://shop.example" } });
@@ -53,17 +53,38 @@ describe("website widget issuance restriction", () => {
     fireEvent.change(screen.getByDisplayValue("widget.positions.bottomRight"), { target: { value: "bottom-left" } });
     fireEvent.click(screen.getByText("widget.create.action"));
     expect(await screen.findByText("widget.created.title")).toBeTruthy();
-    expect(screen.getByText(/data-widget-key="wk_live_created" data-position="bottom-left"/)).toBeTruthy();
+    expect(screen.getByText(/embed\.js\?key=wk_live_created" data-widget-key="wk_live_created"/)).toBeTruthy();
     expect((screen.getByPlaceholderText("widget.fields.titlePlaceholder") as HTMLInputElement).value).toBe("");
     expect(screen.getAllByDisplayValue("widget.positions.bottomRight").length).toBe(1);
   });
 
-  it("confirms a saved key and explains where the bubble's look comes from", async () => {
+  it("confirms a saved key and says when its look reaches the website", async () => {
     setup(true, [{ id: "widget", label: "Website", status: "active", allowedOrigins: ["https://a.com"], config: {}, lastUsedAt: null, createdAt: "2026-09-23T12:00:00.000Z" }]);
-    expect(await screen.findByText("widget.keys.bubbleHint")).toBeTruthy();
+    expect(await screen.findByText("widget.keys.appearanceHint")).toBeTruthy();
     expect(screen.queryByText("widget.keys.saved")).toBeNull();
     fireEvent.click(screen.getByText("widget.keys.save"));
     expect(await screen.findByText("widget.keys.saved")).toBeTruthy();
+  });
+
+  it("shows and copies a saved key's snippet at any time", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { ...navigator, clipboard: { writeText } });
+    setup(true, [{ id: "widget", key: "wk_live_saved", label: "Website", status: "active", allowedOrigins: ["https://a.com"], config: {}, lastUsedAt: null, createdAt: "2026-09-23T12:00:00.000Z" }]);
+    const snippet = `<script src="${window.location.origin}/embed.js?key=wk_live_saved" data-widget-key="wk_live_saved" defer></script>`;
+    expect(await screen.findByText(snippet)).toBeTruthy();
+    fireEvent.click(screen.getByText("widget.created.copySnippet"));
+    expect(writeText).toHaveBeenCalledWith(snippet);
+    expect(await screen.findByText("widget.keys.snippetCopied")).toBeTruthy();
+  });
+
+  it("explains why an older key has no snippet, and shows none for a revoked key", async () => {
+    setup(true, [
+      { id: "older", key: null, label: "Older", status: "active", allowedOrigins: ["https://a.com"], config: {}, lastUsedAt: null, createdAt: "2026-09-23T12:00:00.000Z" },
+      { id: "revoked", key: null, label: "Gone", status: "revoked", allowedOrigins: ["https://b.com"], config: {}, lastUsedAt: null, createdAt: "2026-09-22T12:00:00.000Z" },
+    ]);
+    expect(await screen.findByText("widget.keys.noSnippet")).toBeTruthy();
+    expect(screen.getAllByText("widget.keys.noSnippet")).toHaveLength(1);
+    expect(screen.queryByText("widget.created.copySnippet")).toBeNull();
   });
 
   it("formats the last-used date with the active dashboard locale", async () => {

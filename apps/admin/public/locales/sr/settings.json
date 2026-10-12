@@ -26,7 +26,7 @@
     "description": "Ugradite vidžet za ćaskanje na svoj sajt.",
     "created": {
       "title": "Ključ vidžeta je kreiran",
-      "description": "Kopirajte ovaj ključ sada. Više ga nećete videti.",
+      "description": "Ovaj kod možete ponovo kopirati bilo kada iz podešavanja vidžeta ispod.",
       "copy": "Kopiraj",
       "copied": "Kopirano",
       "copySnippet": "Kopiraj kod za ugradnju",
@@ -95,7 +95,10 @@
       "revokeConfirm": "Opozvati ovaj ključ vidžeta? Postojeće ugradnje će prestati da rade.",
       "save": "Sačuvaj",
       "saved": "Sačuvano",
-      "bubbleHint": "Balončić za čet na vašem sajtu uzima boju i položaj iz isečka za ugradnju. Kada ih ovde promenite, ažurirajte data-color i data-position u isečku.",
+      "appearanceHint": "Promene boje i položaja stižu na vaš sajt za oko dva minuta.",
+      "snippet": "Kod za ugradnju",
+      "snippetCopied": "Kod je kopiran",
+      "noSnippet": "Ovaj vidžet je napravljen pre nego što su kodovi za ugradnju počeli da se čuvaju, pa njegov kod ne može da se prikaže. Napravite novi vidžet da biste dobili kod koji možete kopirati bilo kada.",
       "lastUsed": "Poslednja upotreba: {{date}}"
     }
   },

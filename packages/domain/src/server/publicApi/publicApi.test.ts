@@ -241,8 +241,8 @@ describe("widget keys", () => {
     expect(normalizeWidgetOrigin("null")).toBe("null");
   });
 
-  it("builds the script tag from the dashboard's origin, with the widget's defaults", () => {
-    expect(widgetEmbedSnippet("https://app.example.com", "wk_live_x", { position: "bottom-left" })).toBe('<script src="https://app.example.com/embed.js" data-widget-key="wk_live_x" data-position="bottom-left" data-color="#0f766e" defer></script>');
+  it("builds the script tag from the dashboard's origin, naming the key in the loader URL", () => {
+    expect(widgetEmbedSnippet("https://app.example.com", "wk_live_x")).toBe('<script src="https://app.example.com/embed.js?key=wk_live_x" data-widget-key="wk_live_x" defer></script>');
   });
 });
 

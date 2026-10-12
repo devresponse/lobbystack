@@ -56,9 +56,38 @@ export function loaderLabels(language: string): LoaderLabels {
   return primary === "fr" || primary === "es" || primary === "sr" ? LOADER_LABELS[primary] : LOADER_LABELS.en;
 }
 
+/** The key in the loader's own URL (`/embed.js?key=…`), for a tag without data-widget-key. */
+function scriptSrcKey(): string | null {
+  const src = (document.currentScript as HTMLScriptElement | null)?.src;
+  if (!src) return null;
+  try {
+    return new URL(src, window.location.href).searchParams.get("key");
+  } catch {
+    return null;
+  }
+}
+
 function currentScriptAttribute(name: string): string | null {
   const script = document.currentScript as HTMLScriptElement | null;
   return script?.getAttribute(name) ?? null;
+}
+
+type WidgetPosition = "bottom-left" | "bottom-center" | "bottom-right";
+type WidgetAppearance = { color?: string; position?: WidgetPosition };
+
+// Filled by the dashboard's keyed loader (`/embed.js?key=…`) before this code
+// runs; the name matches WIDGET_APPEARANCE_GLOBAL in @lobbystack/shared.
+const APPEARANCE_GLOBAL = "__lobbyStackWidgetAppearance";
+const POSITIONS: ReadonlyArray<WidgetPosition> = ["bottom-left", "bottom-center", "bottom-right"];
+const COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
+
+/** The bubble look the dashboard saved for this key, when the loader carried it. */
+function savedAppearance(widgetKey: string): WidgetAppearance {
+  const saved = (window as unknown as Record<string, Record<string, WidgetAppearance> | undefined>)[APPEARANCE_GLOBAL]?.[widgetKey];
+  return {
+    ...(typeof saved?.color === "string" && COLOR_PATTERN.test(saved.color) ? { color: saved.color } : {}),
+    ...(saved?.position && POSITIONS.includes(saved.position) ? { position: saved.position } : {}),
+  };
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -91,10 +120,12 @@ function makeVisitorId(widgetKey: string): string {
 }
 
 export function initWidget(): boolean {
-  const widgetKey = (currentScriptAttribute("data-widget-key") ?? "").trim();
+  const widgetKey = (currentScriptAttribute("data-widget-key") ?? scriptSrcKey() ?? "").trim();
   if (!widgetKey) return false;
-  const position = (currentScriptAttribute("data-position") as "bottom-left" | "bottom-center" | "bottom-right" | null) ?? "bottom-right";
-  const color = currentScriptAttribute("data-color") ?? "#0f766e";
+  // The dashboard's saved look wins; the script tag's attributes cover older snippets.
+  const saved = savedAppearance(widgetKey);
+  const position = saved.position ?? (currentScriptAttribute("data-position") as WidgetPosition | null) ?? "bottom-right";
+  const color = saved.color ?? currentScriptAttribute("data-color") ?? "#0f766e";
   const labels = loaderLabels(currentScriptAttribute("data-locale") ?? document.documentElement.lang ?? "en");
   const adminOrigin = resolveOrigin();
   let visitorId = makeVisitorId(widgetKey);

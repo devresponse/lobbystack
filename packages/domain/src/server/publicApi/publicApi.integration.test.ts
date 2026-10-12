@@ -1190,8 +1190,8 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const created = await createWidgetKeyForApi(context, caller, { label: "Main site", allowed_origins: ["https://example.com/contact", "https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } }, { appOrigin: "https://app.lobbystack.example" });
       expect(apiWidgetKeyCreatedSchema.safeParse(created).success).toBe(true);
       expect(created).toMatchObject({ label: "Main site", status: "active", allowed_origins: ["https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } });
-      expect(created.embed_snippet).toBe(`<script src="https://app.lobbystack.example/embed.js" data-widget-key="${created.key}" data-position="bottom-left" data-color="#112233" defer></script>`);
-      // Only the key's hash is stored, and the widget finds the business by it.
+      expect(created.embed_snippet).toBe(`<script src="https://app.lobbystack.example/embed.js?key=${created.key}" data-widget-key="${created.key}" defer></script>`);
+      // The widget finds the business by the key's hash.
       expect(await resolve(created.key)).toBe(businessId);
       const { key: _key, embed_snippet: _snippet, ...listed } = created;
       expect(await listWidgetKeysForApi(context, caller)).toEqual([listed]);

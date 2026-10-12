@@ -2,7 +2,7 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { initWidget, loaderLabels } from "./index";
 
-afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; });
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; delete (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance; });
 
 function mountWidget(baseUrl: string | null = "https://admin.example.test"): HTMLIFrameElement {
   vi.useFakeTimers();
@@ -148,4 +148,45 @@ it("sends a UUID visitor id on http pages without crypto.randomUUID and replaces
   const { visitorId } = JSON.parse(fetchMock.mock.calls[0]![1].body as string) as { visitorId: string };
   expect(visitorId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(window.localStorage.getItem("lobbystack.visitorId.fixture-key")).toBe(visitorId);
+});
+
+function mountTag(attributes: Record<string, string>, src = "https://admin.example.test/embed.js?key=fixture-key"): void {
+  const script = document.createElement("script");
+  script.src = src;
+  for (const [name, value] of Object.entries(attributes)) script.setAttribute(name, value);
+  vi.spyOn(document, "currentScript", "get").mockReturnValue(script);
+  expect(initWidget()).toBe(true);
+}
+
+function bubble(): HTMLButtonElement {
+  return document.querySelector(".lobby-widget-bubble")!;
+}
+
+it("draws the bubble with the look saved in the dashboard over the script tag's attributes", () => {
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { color: "#112233", position: "bottom-left" } };
+  mountTag({ "data-widget-key": "fixture-key", "data-color": "#ff0000", "data-position": "bottom-right" });
+  expect(bubble().style.backgroundColor).toBe("rgb(17, 34, 51)");
+  expect(bubble().getAttribute("data-position")).toBe("bottom-left");
+  expect(document.querySelector(".lobby-widget-frame-holder")!.getAttribute("data-position")).toBe("bottom-left");
+});
+
+it("keeps the script tag's look for fields the dashboard did not save, and ignores invalid saved values", () => {
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { color: "red;background:url(x)", position: "top" } };
+  mountTag({ "data-widget-key": "fixture-key", "data-color": "#ff0000", "data-position": "bottom-center" });
+  expect(bubble().style.backgroundColor).toBe("rgb(255, 0, 0)");
+  expect(bubble().getAttribute("data-position")).toBe("bottom-center");
+});
+
+it("ignores a look saved for another key", () => {
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "other-key": { color: "#112233", position: "bottom-left" } };
+  mountTag({ "data-widget-key": "fixture-key" });
+  expect(bubble().style.backgroundColor).toBe("rgb(15, 118, 110)");
+  expect(bubble().getAttribute("data-position")).toBe("bottom-right");
+});
+
+it("takes the widget key from the loader URL when the tag has no data-widget-key", () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
+  mountTag({});
+  window.LobbyStack!.open();
+  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key");
 });

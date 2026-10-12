@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { createServer, type Server } from "node:http";
 import { and, eq, sql } from "drizzle-orm";
 
 import { businesses, conversations, createDatabaseClient, widgetKeys } from "@lobbystack/db";
@@ -15,6 +16,17 @@ import { startWidgetProvider } from "./fixtures/widget-provider";
 const password = "Widget-Settings-Password-123!";
 const prefix = "widget-settings";
 const hostOrigin = "http://localhost:18090";
+// A plain website that carries exactly the snippet the dashboard shows. The bubble draws without a session, so it needs no AI endpoint.
+const snippetSitePort = 18091;
+
+async function serveSnippetSite(snippet: string): Promise<Server> {
+  const server = createServer((_request, response) => {
+    response.setHeader("content-type", "text/html");
+    response.end(`<!doctype html><html lang="en"><body><h1>Snippet site</h1>${snippet}</body></html>`);
+  });
+  await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(snippetSitePort, "127.0.0.1", resolve); });
+  return server;
+}
 
 function migrator() {
   const databaseUrl = process.env.REPLACEMENT_E2E_DATABASE_URL;
@@ -44,6 +56,7 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
   const email = `${prefix}-${randomUUID()}@example.invalid`;
   let businessId: string | undefined;
   let provider: Awaited<ReturnType<typeof startWidgetProvider>> | undefined;
+  let snippetSite: Server | undefined;
   try {
     await page.addInitScript(() => localStorage.setItem("lobbystack.locale", "en"));
     await isolateAuthRateLimit(page, email, testInfo);
@@ -84,9 +97,9 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
     expect((await createdKey).ok()).toBe(true);
     await expect(page.getByText(settings.widget.created.title, { exact: true })).toBeVisible();
     const widgetKey = (await page.locator("code").filter({ hasText: /^wk_live_/ }).innerText()).trim();
-    const snippet = await page.locator("pre").filter({ hasText: "embed.js" }).innerText();
+    const snippet = await page.locator('[data-slot="card"]').filter({ hasText: settings.widget.created.title }).locator("pre").innerText();
+    expect(snippet).toContain(`/embed.js?key=${widgetKey}"`);
     expect(snippet).toContain(`data-widget-key="${widgetKey}"`);
-    expect(snippet).toContain('data-position="bottom-left"');
     await page.screenshot({ path: testInfo.outputPath("widget-settings-created.png"), fullPage: true });
     await page.getByRole("button", { name: settings.widget.created.done, exact: true }).click();
 
@@ -105,6 +118,38 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
     expect((await saved).ok()).toBe(true);
     await expect(editor.getByText(settings.widget.keys.saved, { exact: true })).toBeVisible();
     await expect.poll(async () => (await row())?.config).toMatchObject({ title: "Ask us anything", greeting: "Hello from the shop." });
+
+    // The snippet can be copied again after a reload, and a site using it draws the bubble the dashboard saved.
+    await page.reload();
+    const savedSnippet = (await editor.locator("pre").filter({ hasText: "embed.js" }).innerText()).trim();
+    expect(savedSnippet).toBe(snippet.trim());
+    await editor.screenshot({ path: testInfo.outputPath("widget-settings-editor.png") });
+    snippetSite = await serveSnippetSite(savedSnippet);
+    const bubbleOnSite = async () => {
+      // A fresh context each time, so the browser cache can't hide a change.
+      const context = await page.context().browser()!.newContext();
+      try {
+        const site = await context.newPage();
+        await site.goto(`http://127.0.0.1:${snippetSitePort}/`);
+        const bubble = site.getByRole("button", { name: "Open chat", exact: true });
+        await expect(bubble).toBeVisible();
+        return { position: await bubble.getAttribute("data-position"), color: await bubble.evaluate((element) => getComputedStyle(element).backgroundColor) };
+      } finally {
+        await context.close();
+      }
+    };
+    // The keyed loader carries the saved look and is cached only briefly; the plain loader keeps its long cache.
+    const keyedLoader = await request.get(`/embed.js?key=${encodeURIComponent(widgetKey)}`);
+    expect(keyedLoader.headers()["cache-control"]).toBe("public, max-age=60, s-maxage=60");
+    expect(await keyedLoader.text()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#0f766e","position":"bottom-left"};`);
+    expect((await request.get("/embed.js")).headers()["cache-control"]).toContain("max-age=600");
+    expect(await bubbleOnSite()).toEqual({ position: "bottom-left", color: "rgb(15, 118, 110)" });
+    await editor.getByLabel(new RegExp(`^${settings.widget.fields.color}`)).fill("#112233");
+    await editor.getByRole("combobox", { name: new RegExp(`^${settings.widget.fields.position}`) }).selectOption("bottom-center");
+    const restyled = page.waitForResponse((response) => response.url().includes("/api/widget-keys?") && response.request().method() === "PATCH");
+    await editor.getByRole("button", { name: settings.widget.keys.save, exact: true }).click();
+    expect((await restyled).ok()).toBe(true);
+    expect(await bubbleOnSite()).toEqual({ position: "bottom-center", color: "rgb(17, 34, 51)" });
 
     // Pausing stops new sessions and resuming brings them back.
     await editor.getByRole("button", { name: settings.widget.keys.pause, exact: true }).click();
@@ -146,6 +191,7 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
     expect(await sessionStatus(request, widgetKey)).not.toBe(200);
   } finally {
     if (provider) await new Promise<void>((resolve, reject) => provider!.server.close((error) => error ? reject(error) : resolve()));
+    if (snippetSite) await new Promise<void>((resolve) => snippetSite!.close(() => resolve()));
     await removeFixtures(database, email, businessId);
     await database.pool.end();
   }

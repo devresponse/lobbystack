@@ -5,7 +5,9 @@ import { and, eq } from "drizzle-orm";
 import { widgetKeys, type DatabaseTransaction } from "@lobbystack/db";
 
 // Website chat widget keys. A key is public, since the widget's script tag
-// carries it, but only its hash is stored, so it is shown once.
+// carries it. Lookups go by its hash; the key itself is kept too so the
+// dashboard can show the embed snippet again (keys made before that keep only
+// the hash).
 
 export type WidgetKeyRow = typeof widgetKeys.$inferSelect;
 export type WidgetKeyStatus = "active" | "disabled" | "revoked";
@@ -15,12 +17,13 @@ export function hashWidgetKey(key: string): string {
   return createHash("sha256").update(key.trim()).digest("hex");
 }
 
-/** Creates a widget key. Returns it with the key itself, which only this call ever sees. */
+/** Creates a widget key and returns it with the key itself. */
 export async function insertWidgetKeyInTransaction(tx: DatabaseTransaction, input: { businessId: string; label?: string | undefined; allowedOrigins: string[]; config: Record<string, unknown> }): Promise<{ row: WidgetKeyRow; key: string }> {
   const key = `wk_live_${randomBytes(24).toString("base64url")}`;
   const [row] = await tx.insert(widgetKeys).values({
     businessId: input.businessId,
     keyHash: hashWidgetKey(key),
+    keyValue: key,
     ...(input.label ? { label: input.label } : {}),
     allowedOrigins: input.allowedOrigins,
     config: input.config,

@@ -380,6 +380,8 @@ export const widgetKeys = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     keyHash: text("key_hash").notNull(),
+    // The key itself, which is public, so the dashboard can show its snippet again. Null on older keys.
+    keyValue: text("key_value"),
     label: varchar("label", { length: 120 }),
     status: varchar("status", { length: 32 }).default("active").notNull(),
     allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default([]),

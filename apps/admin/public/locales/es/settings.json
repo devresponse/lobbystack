@@ -26,7 +26,7 @@
     "description": "Inserte el widget de chat en su sitio web.",
     "created": {
       "title": "Clave del widget creada",
-      "description": "Copie esta clave ahora. No volverá a verla.",
+      "description": "Puede volver a copiar este código en cualquier momento desde la configuración del widget, más abajo.",
       "copy": "Copiar",
       "copied": "Copiado",
       "copySnippet": "Copiar código de inserción",
@@ -95,7 +95,10 @@
       "revokeConfirm": "¿Revocar esta clave de widget? Las inserciones existentes dejarán de funcionar.",
       "save": "Guardar",
       "saved": "Guardado",
-      "bubbleHint": "La burbuja de chat de su sitio toma el color y la posición del fragmento de inserción. Después de cambiarlos aquí, actualice data-color y data-position en el fragmento.",
+      "appearanceHint": "Los cambios de color y posición llegan a su sitio en unos dos minutos.",
+      "snippet": "Código de inserción",
+      "snippetCopied": "Código copiado",
+      "noSnippet": "Este widget se creó antes de que se guardaran los códigos de inserción, por lo que no se puede mostrar su código. Cree un widget nuevo para obtener uno que pueda copiar en cualquier momento.",
       "lastUsed": "Último uso: {{date}}"
     }
   },

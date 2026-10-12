@@ -28,9 +28,17 @@ export function normalizeWidgetOrigin(value: string): string {
   return trimmed.replace(/\/$/, "");
 }
 
-/** The script tag that puts the chat widget on a website, served from the dashboard's origin. */
-export function widgetEmbedSnippet(appOrigin: string, key: string, config: { position?: WidgetPosition | undefined; color?: string | undefined }): string {
-  const position = config.position ?? "bottom-right";
-  const color = config.color ?? "#0f766e";
-  return `<script src="${appOrigin}/embed.js" data-widget-key="${key}" data-position="${position}" data-color="${color}" defer></script>`;
+/**
+ * The script tag that puts the chat widget on a website, served from the
+ * dashboard's origin. The loader URL names the key, so the loader arrives with
+ * the bubble's color and position as the dashboard last saved them.
+ */
+export function widgetEmbedSnippet(appOrigin: string, key: string): string {
+  return `<script src="${appOrigin}/embed.js?key=${encodeURIComponent(key)}" data-widget-key="${key}" defer></script>`;
 }
+
+/** The bubble look the loader takes from the dashboard. Only fields the key's config sets. */
+export type WidgetAppearance = { color?: string; position?: WidgetPosition };
+
+/** The global the keyed loader fills before its own code runs, one entry per widget key. */
+export const WIDGET_APPEARANCE_GLOBAL = "__lobbyStackWidgetAppearance";

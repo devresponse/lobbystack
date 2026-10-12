@@ -26,7 +26,7 @@
     "description": "Intégrez le widget de clavardage à votre site web.",
     "created": {
       "title": "Clé de widget créée",
-      "description": "Copiez cette clé maintenant. Vous ne la verrez plus.",
+      "description": "Vous pouvez copier ce code à tout moment dans les réglages du widget ci-dessous.",
       "copy": "Copier",
       "copied": "Copié",
       "copySnippet": "Copier le code d’intégration",
@@ -95,7 +95,10 @@
       "revokeConfirm": "Révoquer cette clé de widget ? Les intégrations existantes cesseront de fonctionner.",
       "save": "Enregistrer",
       "saved": "Enregistré",
-      "bubbleHint": "La bulle de discussion sur votre site prend sa couleur et sa position dans l'extrait d'intégration. Après les avoir modifiées ici, mettez à jour data-color et data-position dans l'extrait.",
+      "appearanceHint": "Les changements de couleur et de position s'appliquent à votre site en environ deux minutes.",
+      "snippet": "Code d'intégration",
+      "snippetCopied": "Code copié",
+      "noSnippet": "Ce widget a été créé avant l'enregistrement des codes d'intégration, son code ne peut donc pas être affiché. Créez un nouveau widget pour obtenir un code à copier en tout temps.",
       "lastUsed": "Dernière utilisation {{date}}"
     }
   },

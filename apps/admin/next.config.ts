@@ -76,13 +76,16 @@ const nextConfig: NextConfig = {
     const embeddable = toNextHeaderList(embeddableSecurityHeaders());
     const immutableAssetCache = [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }];
     const embedLoaderCache = [{ key: "Cache-Control", value: "public, max-age=600, s-maxage=3600, stale-while-revalidate=86400" }];
+    // A loader for one key carries the bubble look saved in the dashboard, so edits must reach websites quickly.
+    const keyedEmbedLoaderCache = [{ key: "Cache-Control", value: "public, max-age=60, s-maxage=60" }];
     return [
       { source: "/locales/:path*", headers: immutableAssetCache },
       { source: "/brand/:path*", headers: immutableAssetCache },
       { source: "/lobbystack-logo.svg", headers: immutableAssetCache },
       { source: "/embed/embed.js", headers: immutableAssetCache },
       { source: "/((?!embed\\.js|embed/).*)", headers: toNextHeaderList(securityHeaders()) },
-      { source: "/embed.js", headers: [...embeddable, ...embedLoaderCache] },
+      { source: "/embed.js", missing: [{ type: "query", key: "key" }], headers: [...embeddable, ...embedLoaderCache] },
+      { source: "/embed.js", has: [{ type: "query", key: "key" }], headers: [...embeddable, ...keyedEmbedLoaderCache] },
       { source: "/embed/:key*", headers: embeddable },
     ];
   },

@@ -266,7 +266,7 @@ export const demoSnapshot: BusinessContextSnapshot = {
 };
 
 // Website chat widget contracts.
-export { normalizeWidgetOrigin, widgetEmbedSnippet, widgetPositions, type WidgetPosition } from "./widget";
+export { normalizeWidgetOrigin, WIDGET_APPEARANCE_GLOBAL, widgetEmbedSnippet, widgetPositions, type WidgetAppearance, type WidgetPosition } from "./widget";
 
 export type WidgetLeadFormConfig = {
   enabled: boolean;

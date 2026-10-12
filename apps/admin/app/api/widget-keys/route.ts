@@ -27,7 +27,8 @@ export async function GET(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       const rows = await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, businessId)).orderBy(desc(widgetKeys.createdAt));
-      return { keys: rows.map((row) => serializeWidgetKeyConfig(row)) };
+      // The key is public (it sits in the website's script tag), so the dashboard can show its snippet again. Older keys kept only a hash.
+      return { keys: rows.map((row) => ({ ...serializeWidgetKeyConfig(row), key: row.status === "revoked" ? null : row.keyValue })) };
     }));
   } catch (error) { return asApiResponse(error); }
 }

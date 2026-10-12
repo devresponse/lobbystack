@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
 import { hashWidgetKey } from "@lobbystack/domain";
-import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
+import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
 
 import { getWorkerDatabase } from "./api-helpers";
 import { trustedClientIp } from "./trusted-client-ip";
@@ -23,6 +23,23 @@ export async function resolveWidgetKeyByHash(keyHash: string): Promise<ResolvedW
   );
   const row = result.rows[0];
   return row ? { businessId: row.business_id, widgetKeyId: row.widget_key_id } : null;
+}
+
+/**
+ * The bubble color and position an active key's config sets, for the loader to
+ * use over its script tag's attributes. Fields the config leaves out stay out,
+ * so the tag's own attributes still apply to them. Null for an unknown or
+ * inactive key.
+ */
+export async function loadWidgetAppearance(key: string): Promise<WidgetAppearance | null> {
+  const resolved = await resolveWidgetKeyByHash(hashWidgetKey(key));
+  if (!resolved) return null;
+  const row = await withBusinessTransaction(getWorkerDatabase().db, { businessId: resolved.businessId, actorType: "worker" }, async (tx) => (
+    await tx.select({ config: widgetKeysTable.config }).from(widgetKeysTable).where(and(eq(widgetKeysTable.id, resolved.widgetKeyId), eq(widgetKeysTable.businessId, resolved.businessId))).limit(1)
+  )[0]);
+  const parsed = widgetConfigSchema.safeParse(row?.config ?? {});
+  if (!row || !parsed.success) return null;
+  return { ...(parsed.data.color ? { color: parsed.data.color } : {}), ...(parsed.data.position ? { position: parsed.data.position } : {}) };
 }
 
 export function normalizeOrigin(value: string): string {

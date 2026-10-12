@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { and, asc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
@@ -38,6 +38,10 @@ import {
   type ApiKnowledgeUploadCreate,
   type ApiMe,
   type ApiMessage,
+  type ApiOnboarding,
+  type ApiOnboardingComplete,
+  type ApiOnboardingItem,
+  type ApiOnboardingUpdate,
   type ApiPhoneNumber,
   type ApiPhoneNumberClaim,
   type ApiPhoneNumberOffer,
@@ -55,6 +59,8 @@ import {
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin } from "../../authz";
+import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
+import { attributeBusiness } from "../affiliates";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -62,6 +68,7 @@ import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction 
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
+import { normalizeOnboardingStage, resolveOnboardingStageForPlan, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
@@ -531,6 +538,110 @@ export async function releasePhoneNumberForApi(context: DomainContext, caller: A
     if (outcome === "being_replaced") throw conflict(NUMBER_BEING_REPLACED_MESSAGE);
     if (outcome === "scheduled") await audit(tx, caller, { eventType: "api.phone_number.release_scheduled", entityType: "phone_number", entityId: phoneNumberId, payload: { phoneNumber: number.phone_number } });
     return (await loadPhoneNumberResource(tx, caller.businessId, phoneNumberId)) ?? number;
+  });
+}
+
+// Onboarding. The API ignores the dashboard's step order: it reports what the
+// business has, and completion checks only what the dashboard can't finish without.
+
+// The setup guide step each skippable item stands for.
+const onboardingSetupSteps: Record<ApiOnboardingUpdate["skip_steps"][number], SetupGuideStepId> = { knowledge: "sources", phone_number: "phoneNumber", full_site_read: "fullScan", test_call: "testCall" };
+
+const onboardingHints: Record<ApiOnboardingItem, string> = {
+  business_details: "Set a name and time zone with PATCH /business.",
+  knowledge: "Add a website with POST /knowledge/sources, or knowledge with POST /knowledge.",
+  greeting: "Save a greeting with PATCH /receptionist.",
+  plan: "Start a paid plan with POST /billing/checkout.",
+  phone_number: "Claim a number with POST /phone-numbers/claims, or send skip_number.",
+  full_site_read: "Read the rest of the website with POST /knowledge/sources/{source_id}/expand.",
+  test_call: "Call the business's number once.",
+};
+
+async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Promise<ApiOnboarding> {
+  const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  if (!business) throw notFound("Business");
+  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
+  const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
+  const { steps } = await loadSetupGuideInTransaction(tx, businessId);
+  const { plan } = await loadBillingContext(tx, businessId);
+  const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
+  const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
+  const checklist = [
+    item("business_details", business.name.trim().length > 0 && business.timezone.trim().length > 0, false, true),
+    item("knowledge", Number(indexed?.count ?? 0) + Number(entries?.count ?? 0) > 0, steps.sources === "skipped", false),
+    // A business without a saved profile answers with the default greeting, as GET /receptionist shows.
+    item("greeting", !profile || profile.greeting.trim().length > 0, false, false),
+    item("plan", paid, !paid, false),
+    item("phone_number", steps.phoneNumber === "complete", steps.phoneNumber === "skipped", paid),
+    item("full_site_read", steps.fullScan === "complete", steps.fullScan === "skipped", false),
+    // From the command line there is no browser test call, so the first answered call to the number counts.
+    item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
+  ];
+  // The step the dashboard shows: a business on the free plan goes back from the number steps to its plan.
+  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null);
+  const complete = stage === "complete";
+  return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
+}
+
+export async function getOnboardingForApi(context: DomainContext, caller: ApiCaller): Promise<ApiOnboarding> {
+  return await inBusiness(context, caller, async (tx) => await loadOnboarding(tx, caller.businessId));
+}
+
+export async function updateOnboardingForApi(context: DomainContext, caller: ApiCaller, input: ApiOnboardingUpdate): Promise<ApiOnboarding> {
+  return await inBusiness(context, caller, async (tx) => {
+    const wanted = new Set<string>(input.skip_steps.map((step) => onboardingSetupSteps[step]));
+    const changed = await updateSetupGuideSkippedStepsInTransaction(tx, caller.businessId, (current) => {
+      const guide = new Set<string>(setupGuideStepIds);
+      const skipped = current.filter((step) => guide.has(step));
+      // The same steps in another order change nothing.
+      if (skipped.length === wanted.size && skipped.every((step) => wanted.has(step))) return current;
+      return [...current.filter((step) => !guide.has(step)), ...setupGuideStepIds.filter((step) => wanted.has(step))];
+    });
+    if (!changed) throw notFound("Business");
+    if (changed.after !== changed.before) await audit(tx, caller, { eventType: "api.onboarding.updated", entityType: "business", entityId: caller.businessId, payload: { skipSteps: input.skip_steps } });
+    return await loadOnboarding(tx, caller.businessId);
+  });
+}
+
+/**
+ * Finishes onboarding once the business has what the dashboard requires. A
+ * referral credits an affiliate only while onboarding is still open, as the
+ * dashboard's last step does; attributeBusiness runs as the system actor, so
+ * the caller passes a context whose database role can be one.
+ */
+export async function completeOnboardingForApi(context: DomainContext, caller: ApiCaller, input: ApiOnboardingComplete, options: { attribution?: { context: DomainContext; referredUserId: string } | undefined } = {}): Promise<ApiOnboarding> {
+  const refusal = (onboarding: ApiOnboarding): PublicApiError | null => {
+    const missing = onboarding.missing.filter((id) => !(id === "phone_number" && input.skip_number));
+    return missing.length ? new PublicApiError(409, "conflict", `The business isn't ready to finish onboarding. Missing: ${missing.join(", ")}.`, missing.map((id) => ({ path: id, message: onboardingHints[id] }))) : null;
+  };
+  const { onboarding: before, partnerOnboarded } = await inBusiness(context, caller, async (tx) => ({
+    onboarding: await loadOnboarding(tx, caller.businessId),
+    partnerOnboarded: (await tx.select({ businessId: platformPartnerBusinesses.businessId }).from(platformPartnerBusinesses).where(eq(platformPartnerBusinesses.businessId, caller.businessId)).limit(1)).length > 0,
+  }));
+  if (before.complete) return before;
+  // A business a partner onboarded came through the partner, whose own account
+  // owns it, so no affiliate is credited with it, whichever key asks.
+  if (input.referral_code && partnerOnboarded) throw invalidRequest("A business a partner onboarded can't credit a referral.", [{ path: "referral_code", message: "Not accepted for a business a partner onboarded." }]);
+  const notReady = refusal(before);
+  if (notReady) throw notReady;
+  if (input.referral_code && options.attribution) await attributeBusiness(options.attribution.context, { businessId: caller.businessId, referredUserId: options.attribution.referredUserId, referralCode: input.referral_code, source: "referral_link" });
+  return await inBusiness(context, caller, async (tx) => {
+    await tx.select({ id: businesses.id }).from(businesses).where(eq(businesses.id, caller.businessId)).for("no key update");
+    const current = await loadOnboarding(tx, caller.businessId);
+    if (current.complete) return current;
+    const stillNotReady = refusal(current);
+    if (stillNotReady) throw stillNotReady;
+    const source = input.source?.trim() || null;
+    const completedAt = new Date();
+    await tx.update(businesses).set({ onboardingAttribution: source, onboardingStage: "complete", updatedAt: completedAt }).where(eq(businesses.id, caller.businessId));
+    // The founder's check-in is for people who set up their own business. It
+    // goes to the first owner, which for a partner's business is the partner's account.
+    if (caller.platformKeyId === undefined && !partnerOnboarded) await scheduleOnboardingFollowupInTransaction(tx, caller.businessId, completedAt);
+    await audit(tx, caller, { eventType: "api.onboarding.completed", entityType: "business", entityId: caller.businessId, payload: { skipNumber: Boolean(input.skip_number), ...(source ? { source } : {}) } });
+    return await loadOnboarding(tx, caller.businessId);
   });
 }
 

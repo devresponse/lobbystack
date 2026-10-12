@@ -64,6 +64,9 @@ const domain = vi.hoisted(() => ({
   claimPhoneNumberForApi: vi.fn(),
   getPhoneNumberClaimForApi: vi.fn(),
   releasePhoneNumberForApi: vi.fn(),
+  getOnboardingForApi: vi.fn(),
+  updateOnboardingForApi: vi.fn(),
+  completeOnboardingForApi: vi.fn(),
   // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
@@ -72,7 +75,8 @@ const numbers = vi.hoisted(() => ({
   searchLimit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })),
 }));
 
-vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
+const appContext = vi.hoisted(() => ({ db: "app" }));
+vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }), createDomainContext: () => appContext }));
 vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
 vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret" }));
@@ -591,6 +595,58 @@ describe("phone numbers", () => {
     expect(domain.searchPhoneNumbersForApi).not.toHaveBeenCalled();
     expect(domain.claimPhoneNumberForApi).not.toHaveBeenCalled();
     expect(domain.listPhoneNumbersForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("onboarding", () => {
+  const onboarding = { stage: "website", complete: false, checklist: [{ id: "greeting", status: "missing", required: true }], missing: ["greeting"] };
+  const complete = (body: unknown, init: RequestInit = {}) => v1.completeOnboarding(call("/onboarding/complete", { method: "POST", body: JSON.stringify(body), ...init }));
+
+  it("reads progress and skips setup steps", async () => {
+    domain.getOnboardingForApi.mockResolvedValue(onboarding);
+    expect(await (await v1.getOnboarding(call("/onboarding"))).json()).toEqual({ data: onboarding });
+    domain.updateOnboardingForApi.mockResolvedValue(onboarding);
+    expect((await v1.updateOnboarding(call("/onboarding", { method: "PATCH", body: JSON.stringify({ skip_steps: ["test_call", "full_site_read"] }) }))).status).toBe(200);
+    expect(domain.updateOnboardingForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { skip_steps: ["test_call", "full_site_read"] });
+    for (const bad of [{}, { skip_steps: ["greeting"] }, { skip_steps: "test_call" }, { skip_steps: [], extra: true }]) {
+      expect((await v1.updateOnboarding(call("/onboarding", { method: "PATCH", body: JSON.stringify(bad) }))).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.updateOnboardingForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("finishes onboarding, crediting a referral only through the app's own database role", async () => {
+    domain.completeOnboardingForApi.mockResolvedValue({ ...onboarding, stage: "complete", complete: true, missing: [] });
+    expect((await complete({ source: "podcast", skip_number: true })).status).toBe(200);
+    expect(domain.completeOnboardingForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { source: "podcast", skip_number: true }, { attribution: undefined });
+    expect(domain.resolveActingUserId).not.toHaveBeenCalled();
+    expect((await complete({ referral_code: "friend" })).status).toBe(200);
+    expect(domain.completeOnboardingForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { referral_code: "friend" }, { attribution: { context: appContext, referredUserId: "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f" } });
+    for (const bad of [{ source: "x".repeat(121) }, { skip_number: "yes" }, { referral_code: "" }, { stage: "complete" }]) {
+      expect((await complete(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.completeOnboardingForApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps platform keys from crediting referrals", async () => {
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry]));
+    try {
+      const response = await v1.completeOnboarding(new Request("https://app.example.com/api/v1/onboarding/complete", { method: "POST", headers: { authorization: `Bearer ${partner.key}`, "LobbyStack-Business": "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }, body: JSON.stringify({ referral_code: "acme" }) }));
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: { code: "invalid_request", details: [{ path: "referral_code" }] } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(domain.completeOnboardingForApi).not.toHaveBeenCalled();
+  });
+
+  it("reads with business:read and changes with business:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    domain.getOnboardingForApi.mockResolvedValue(onboarding);
+    expect((await v1.getOnboarding(call("/onboarding"))).status).toBe(200);
+    expect((await complete({})).status).toBe(403);
+    expect((await v1.updateOnboarding(call("/onboarding", { method: "PATCH", body: JSON.stringify({ skip_steps: [] }) }))).status).toBe(403);
+    expect(domain.completeOnboardingForApi).not.toHaveBeenCalled();
   });
 });
 

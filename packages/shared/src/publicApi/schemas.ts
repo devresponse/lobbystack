@@ -252,6 +252,30 @@ export const apiPhoneNumberClaimSchema = z.object({
   updated_at: timestamp,
 }).describe("A request to buy a phone number for the business.");
 
+const onboardingItems = ["business_details", "knowledge", "greeting", "plan", "phone_number", "full_site_read", "test_call"] as const;
+const onboardingSkippableSteps = ["knowledge", "phone_number", "full_site_read", "test_call"] as const;
+
+export const apiOnboardingSchema = z.object({
+  stage: z.string().describe("The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."),
+  complete: z.boolean().describe("true once onboarding is finished, so the dashboard opens on the business itself."),
+  checklist: z.array(z.object({
+    id: z.enum(onboardingItems).describe("business_details: a name and time zone. knowledge: a website or knowledge the receptionist answers from. greeting: a greeting, the default one included; change it with PATCH /receptionist. plan: a paid plan. phone_number: a live number. full_site_read: the whole website read, beyond the first sample, and done when there is no website. test_call: a call the receptionist answered."),
+    status: z.enum(["done", "missing", "skipped"]).describe("skipped: left out through PATCH /onboarding or the dashboard's setup guide. A business on the free plan, or self-hosted, shows plan as skipped."),
+    required: z.boolean().describe("true when POST /onboarding/complete needs this done or skipped: the business details, and a phone number on a paid plan."),
+  })),
+  missing: z.array(z.enum(onboardingItems)).describe("Required items neither done nor skipped, and empty once onboarding is complete. POST /onboarding/complete refuses while any is missing; skip_number covers phone_number."),
+}).describe("How far the business is in setting up its receptionist.");
+
+export const apiOnboardingUpdateSchema = z.strictObject({
+  skip_steps: z.array(z.enum(onboardingSkippableSteps)).max(onboardingSkippableSteps.length).describe("The steps to skip, out of knowledge, phone_number, full_site_read and test_call. The list replaces the one before, so a step left out is no longer skipped."),
+});
+
+export const apiOnboardingCompleteSchema = z.strictObject({
+  source: z.string().trim().max(120).optional().describe("How the business heard about LobbyStack."),
+  referral_code: z.string().trim().min(1).max(64).optional().describe("An affiliate's referral code. Not accepted from a platform key, or for a business a partner onboarded."),
+  skip_number: z.boolean().optional().describe("true finishes a paid plan's onboarding without a phone number."),
+});
+
 export const apiBusinessCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
   timezone: z.string().trim().min(1).max(80).describe("IANA time zone, for example America/Toronto."),
@@ -577,6 +601,10 @@ export type ApiBilling = z.infer<typeof apiBillingSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiOnboarding = z.infer<typeof apiOnboardingSchema>;
+export type ApiOnboardingItem = ApiOnboarding["missing"][number];
+export type ApiOnboardingUpdate = z.infer<typeof apiOnboardingUpdateSchema>;
+export type ApiOnboardingComplete = z.infer<typeof apiOnboardingCompleteSchema>;
 export type ApiPhoneNumber = z.infer<typeof apiPhoneNumberSchema>;
 export type ApiPhoneNumberSearch = z.infer<typeof apiPhoneNumberSearchSchema>;
 export type ApiPhoneNumberOffer = z.infer<typeof apiPhoneNumberOfferSchema>;

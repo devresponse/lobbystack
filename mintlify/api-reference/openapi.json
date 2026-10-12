@@ -29,6 +29,9 @@
       "name": "Phone numbers"
     },
     {
+      "name": "Onboarding"
+    },
+    {
       "name": "Calls"
     },
     {
@@ -3006,6 +3009,359 @@
           },
           "422": {
             "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding": {
+      "get": {
+        "operationId": "getOnboarding",
+        "summary": "Get onboarding progress",
+        "description": "What the receptionist has and still needs, and which of it POST /onboarding/complete requires. Steps done in the dashboard count too, in any order.",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Onboarding"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateOnboarding",
+        "summary": "Skip setup steps",
+        "description": "Skips steps, or brings them back, as the dashboard's setup guide does. A skipped step no longer counts as missing.",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Onboarding"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/onboarding/complete": {
+      "post": {
+        "operationId": "completeOnboarding",
+        "summary": "Finish onboarding",
+        "description": "Finishes onboarding, so the dashboard opens on the business instead of its onboarding steps. On a paid plan, until the business has a phone number, a skipped phone_number step or skip_number, it's a 409 whose details list what's missing. Finishing a business that is already complete changes nothing. referral_code isn't accepted from a platform key, or for a business a partner onboarded.",
+        "tags": [
+          "Onboarding"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OnboardingComplete"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Onboarding"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10189,6 +10545,127 @@
         "required": [
           "plan"
         ],
+        "additionalProperties": false
+      },
+      "Onboarding": {
+        "type": "object",
+        "properties": {
+          "stage": {
+            "type": "string",
+            "description": "The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "true once onboarding is finished, so the dashboard opens on the business itself."
+          },
+          "checklist": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "enum": [
+                    "business_details",
+                    "knowledge",
+                    "greeting",
+                    "plan",
+                    "phone_number",
+                    "full_site_read",
+                    "test_call"
+                  ],
+                  "description": "business_details: a name and time zone. knowledge: a website or knowledge the receptionist answers from. greeting: a greeting, the default one included; change it with PATCH /receptionist. plan: a paid plan. phone_number: a live number. full_site_read: the whole website read, beyond the first sample, and done when there is no website. test_call: a call the receptionist answered."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "done",
+                    "missing",
+                    "skipped"
+                  ],
+                  "description": "skipped: left out through PATCH /onboarding or the dashboard's setup guide. A business on the free plan, or self-hosted, shows plan as skipped."
+                },
+                "required": {
+                  "type": "boolean",
+                  "description": "true when POST /onboarding/complete needs this done or skipped: the business details, and a phone number on a paid plan."
+                }
+              },
+              "required": [
+                "id",
+                "status",
+                "required"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "missing": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "business_details",
+                "knowledge",
+                "greeting",
+                "plan",
+                "phone_number",
+                "full_site_read",
+                "test_call"
+              ]
+            },
+            "description": "Required items neither done nor skipped, and empty once onboarding is complete. POST /onboarding/complete refuses while any is missing; skip_number covers phone_number."
+          }
+        },
+        "required": [
+          "stage",
+          "complete",
+          "checklist",
+          "missing"
+        ],
+        "additionalProperties": false,
+        "description": "How far the business is in setting up its receptionist."
+      },
+      "OnboardingUpdate": {
+        "type": "object",
+        "properties": {
+          "skip_steps": {
+            "maxItems": 4,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "knowledge",
+                "phone_number",
+                "full_site_read",
+                "test_call"
+              ]
+            },
+            "description": "The steps to skip, out of knowledge, phone_number, full_site_read and test_call. The list replaces the one before, so a step left out is no longer skipped."
+          }
+        },
+        "required": [
+          "skip_steps"
+        ],
+        "additionalProperties": false
+      },
+      "OnboardingComplete": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "description": "How the business heard about LobbyStack.",
+            "type": "string",
+            "maxLength": 120
+          },
+          "referral_code": {
+            "description": "An affiliate's referral code. Not accepted from a platform key, or for a business a partner onboarded.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "skip_number": {
+            "description": "true finishes a paid plan's onboarding without a phone number.",
+            "type": "boolean"
+          }
+        },
         "additionalProperties": false
       },
       "PhoneNumber": {

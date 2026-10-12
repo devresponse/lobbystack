@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
+import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
@@ -13,7 +13,7 @@ import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNum
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getPhoneNumberClaimForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -1006,6 +1006,95 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
       await admin!.db.delete(users).where(eq(users.id, userId));
+    }
+  });
+
+  it("reports onboarding in any order and finishes it once, when the business is ready", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-onboarding-${businessId}`, name: "Onboarding test", timezone: "America/Toronto", businessType: "test", onboardingStage: "website" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    const status = async () => Object.fromEntries((await getOnboardingForApi(context, caller)).checklist.map((entry) => [entry.id, entry.status]));
+    try {
+      const start = await getOnboardingForApi(context, caller);
+      expect(apiOnboardingSchema.safeParse(start).success).toBe(true);
+      expect(start).toEqual({
+        stage: "website",
+        complete: false,
+        checklist: [
+          { id: "business_details", status: "done", required: true },
+          { id: "knowledge", status: "missing", required: false },
+          // Without a saved profile the business answers with the default greeting.
+          { id: "greeting", status: "done", required: false },
+          { id: "plan", status: "skipped", required: false },
+          { id: "phone_number", status: "missing", required: false },
+          // With no website crawl there is nothing more to read.
+          { id: "full_site_read", status: "done", required: false },
+          { id: "test_call", status: "missing", required: false },
+        ],
+        missing: [],
+      });
+
+      // Knowledge and an answered call count however they were added.
+      await createKnowledgeEntryForApi(context, caller, { type: "text", title: "Hours", content: "Open every day." });
+      await admin!.db.insert(calls).values({ businessId, providerCallId: randomUUID(), transport: "voice", startedAt: new Date(), mediaStartedAt: new Date(), endedAt: new Date() });
+      expect(await status()).toMatchObject({ knowledge: "done", test_call: "done" });
+      // On a paid plan a number is required, so finishing too early says it's missing.
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "pro", subscriptionState: "active", billingInterval: "monthly" });
+      expect(await getOnboardingForApi(context, caller)).toMatchObject({ missing: ["phone_number"] });
+      expect(await status()).toMatchObject({ plan: "done", phone_number: "missing" });
+      const early = await completeOnboardingForApi(context, caller, {}).then(() => null, (error: unknown) => error);
+      expect(early).toBeInstanceOf(PublicApiError);
+      expect(early).toMatchObject({ status: 409, code: "conflict", details: [{ path: "phone_number", message: expect.stringContaining("skip_number") }] });
+
+      // Skipping replaces the list, and the same list again changes nothing.
+      expect(await updateOnboardingForApi(context, caller, { skip_steps: ["phone_number", "full_site_read"] })).toMatchObject({ missing: [] });
+      expect(await status()).toMatchObject({ phone_number: "skipped", full_site_read: "done" });
+      await updateOnboardingForApi(context, caller, { skip_steps: ["full_site_read", "phone_number"] });
+      expect(await audited("api.onboarding.updated")).toBe(1);
+      expect(await updateOnboardingForApi(context, caller, { skip_steps: [] })).toMatchObject({ missing: ["phone_number"] });
+      expect((await admin!.db.select({ skipped: businesses.setupGuideSkippedSteps }).from(businesses).where(eq(businesses.id, businessId)))[0]?.skipped).toEqual([]);
+
+      // skip_number finishes without one.
+      const done = await completeOnboardingForApi(context, caller, { source: "podcast", skip_number: true });
+      expect(done).toMatchObject({ stage: "complete", complete: true, missing: [] });
+      // The dashboard sees a finished business, and its owner gets the founder's check-in.
+      expect((await admin!.db.select({ stage: businesses.onboardingStage, attribution: businesses.onboardingAttribution }).from(businesses).where(eq(businesses.id, businessId)))[0]).toEqual({ stage: "complete", attribution: "podcast" });
+      expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "onboarding.sendFollowup")))).toHaveLength(1);
+      // Finishing again changes nothing.
+      expect(await completeOnboardingForApi(context, caller, { source: "radio" })).toEqual(done);
+      expect(await audited("api.onboarding.completed")).toBe(1);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(calls).where(eq(calls.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("credits no referral and sends no founder's check-in for a business someone else onboarded", async () => {
+    const context = { db: worker!.db };
+    const partnerBusinessId = randomUUID();
+    const operatorBusinessId = randomUUID();
+    for (const [id, label] of [[partnerBusinessId, "partner"], [operatorBusinessId, "operator"]] as const) {
+      await admin!.db.insert(businesses).values({ id, slug: `api-onboarding-${label}-${id}`, name: `Onboarded by ${label}`, timezone: "UTC", businessType: "test" });
+    }
+    await admin!.db.insert(platformPartnerBusinesses).values({ businessId: partnerBusinessId, partnerId: "acme" });
+    const followUps = async (businessId: string) => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "onboarding.sendFollowup")))).length;
+    try {
+      // A partner's business: even a key of the business's own can't credit a referral, and its check-in would reach the partner.
+      const keyCaller: ApiKeyCaller = { businessId: partnerBusinessId, apiKeyId: randomUUID() };
+      await expectApiError(completeOnboardingForApi(context, keyCaller, { referral_code: "friend" }, { attribution: { context, referredUserId: ownerId } }), 400, "invalid_request");
+      expect(await completeOnboardingForApi(context, keyCaller, {})).toMatchObject({ stage: "complete", complete: true });
+      expect(await followUps(partnerBusinessId)).toBe(0);
+      // A business an operator's platform key finished.
+      const platform: PlatformKeyCaller = { businessId: operatorBusinessId, platformKeyId: randomUUID(), partnerId: "lobbystack", actingUserId: ownerId, actor: "platform_key" };
+      expect(await completeOnboardingForApi(context, platform, {})).toMatchObject({ stage: "complete", complete: true });
+      expect(await followUps(operatorBusinessId)).toBe(0);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(inArray(outboxMessages.businessId, [partnerBusinessId, operatorBusinessId]));
+      await admin!.db.delete(businesses).where(inArray(businesses.id, [partnerBusinessId, operatorBusinessId]));
     }
   });
 

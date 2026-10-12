@@ -2,6 +2,7 @@ import {
   cancelAppointmentForApi,
   cancelKnowledgeSourceForApi,
   claimPhoneNumberForApi,
+  completeOnboardingForApi,
   completeKnowledgeUploadForApi,
   createAppointmentForApi,
   createBusinessForApi,
@@ -27,6 +28,7 @@ import {
   getKnowledgeEntryForApi,
   getKnowledgeSourceForApi,
   getMeForApi,
+  getOnboardingForApi,
   getPlatformMeForApi,
   getReceptionistForApi,
   getCallForApi,
@@ -59,6 +61,7 @@ import {
   updateBillingForApi,
   updateBusinessForApi,
   updateContactForApi,
+  updateOnboardingForApi,
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateReceptionistForApi,
@@ -75,6 +78,8 @@ import {
   apiBusinessCreateSchema,
   apiCheckoutCreateSchema,
   apiManagedPlanCreateSchema,
+  apiOnboardingCompleteSchema,
+  apiOnboardingUpdateSchema,
   apiPhoneNumberClaimCreateSchema,
   apiPhoneNumberSearchSchema,
   apiBusinessUpdateSchema,
@@ -99,6 +104,7 @@ import {
   type WebhookEventType,
 } from "@lobbystack/shared";
 
+import { createDomainContext } from "../domain-context";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { getStorageProvider } from "../storage";
 import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
@@ -222,6 +228,16 @@ export const v1 = {
     const body = await readApiBody(request, apiPhoneNumberClaimCreateSchema);
     const userId = await resolveActingUserId(context, caller);
     return { body: data(await claimPhoneNumberForApi(context, caller, { offerToken: body.offer_token, replaces: phoneNumberId }, { userId, claimTokenSecret: getNumberClaimTokenSecret() })) };
+  }),
+  getOnboarding: (request: Request) => handleApiRequest(request, "getOnboarding", async ({ context, caller }) => ({ body: data(await getOnboardingForApi(context, caller)) })),
+  updateOnboarding: (request: Request) => handleApiRequest(request, "updateOnboarding", async ({ context, caller }) => ({ body: data(await updateOnboardingForApi(context, caller, await readApiBody(request, apiOnboardingUpdateSchema))) })),
+  completeOnboarding: (request: Request) => handleApiRequest(request, "completeOnboarding", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiOnboardingCompleteSchema);
+    // A partner onboarding businesses must not credit them to an affiliate code.
+    if (body.referral_code !== undefined && caller.platformKeyId !== undefined) throw new PublicApiError(400, "invalid_request", "A platform key can't credit a referral. The business's owner can, with an API key they created.", [{ path: "referral_code", message: "Not accepted with a platform key." }]);
+    // Affiliate attribution runs as the system actor, which only the app's database role can be, as in the dashboard.
+    const attribution = body.referral_code !== undefined ? { context: createDomainContext(), referredUserId: await resolveActingUserId(context, caller) } : undefined;
+    return { body: data(await completeOnboardingForApi(context, caller, body, { attribution })) };
   }),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),

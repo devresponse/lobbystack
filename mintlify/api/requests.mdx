@@ -93,7 +93,7 @@ Errors use one shape:
 }
 ```
 
-`details` appears only on validation errors. Match on `code`; the `message` wording can change.
+`details` appears on validation errors, and on the 409 from `POST /onboarding/complete`, where each `path` names a missing step. Match on `code`; the `message` wording can change.
 
 | Status | Code | When |
 | --- | --- | --- |

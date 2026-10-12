@@ -93,7 +93,7 @@ Los errores siempre tienen la misma forma:
 }
 ```
 
-`details` solo aparece en los errores de validación. Base su lógica en `code`; la redacción de `message` puede cambiar.
+`details` aparece en los errores de validación y en el 409 de `POST /onboarding/complete`, donde cada `path` nombra un paso pendiente. Base su lógica en `code`; la redacción de `message` puede cambiar.
 
 | Estado | Código | Cuándo |
 | --- | --- | --- |

@@ -1,13 +1,12 @@
-import { randomBytes } from "node:crypto";
-
 import { and, desc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { widgetKeys } from "@lobbystack/db";
+import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "@lobbystack/domain";
 import { isWidgetKeyIssuanceEnabled, widgetConfigSchema } from "@lobbystack/shared";
 
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
-import { hashWidgetKey, normalizeOrigin, serializeWidgetKeyConfig } from "@/lib/widget-keys";
+import { normalizeOrigin, serializeWidgetKeyConfig } from "@/lib/widget-keys";
 
 export const dynamic = "force-dynamic";
 
@@ -40,16 +39,9 @@ export async function POST(request: Request) {
       const body = await readJson(request) as { label?: string; allowedOrigins?: string[]; config?: Record<string, unknown> };
       const allowedOrigins = parseAllowedOrigins(body.allowedOrigins ?? []);
       const config = parseConfig(body.config);
-      const keyToken = `wk_live_${randomBytes(24).toString("base64url")}`;
-      const [row] = await tx.insert(widgetKeys).values({
-        businessId,
-        keyHash: hashWidgetKey(keyToken),
-        ...(typeof body.label === "string" && body.label.trim() ? { label: body.label.trim().slice(0, 120) } : {}),
-        allowedOrigins,
-        config,
-      }).returning();
-      if (!row) throw new Error("A widget key could not be created.");
-      return { ok: true, key: { id: row.id, key: keyToken }, record: serializeWidgetKeyConfig(row) };
+      const label = typeof body.label === "string" && body.label.trim() ? body.label.trim().slice(0, 120) : undefined;
+      const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId, label, allowedOrigins, config });
+      return { ok: true, key: { id: row.id, key }, record: serializeWidgetKeyConfig(row) };
     }, { minimumRole: "business_admin" }));
   } catch (error) { return asApiResponse(error); }
 }
@@ -61,19 +53,21 @@ export async function PATCH(request: Request) {
       const id = url.searchParams.get("id");
       if (!id) throw new Error("A widget key id is required.");
       const body = await readJson(request) as { label?: string | null; allowedOrigins?: string[]; config?: Record<string, unknown>; status?: string };
-      const existing = (await tx.select({ id: widgetKeys.id }).from(widgetKeys).where(and(eq(widgetKeys.id, id), eq(widgetKeys.businessId, businessId))).limit(1))[0];
+      const existing = (await tx.select({ id: widgetKeys.id, status: widgetKeys.status }).from(widgetKeys).where(and(eq(widgetKeys.id, id), eq(widgetKeys.businessId, businessId))).limit(1))[0];
       if (!existing) throw new Error("The widget key was not found.");
       const allowedOrigins = body.allowedOrigins !== undefined ? parseAllowedOrigins(body.allowedOrigins) : undefined;
       const config = body.config !== undefined ? parseConfig(body.config) : undefined;
       const status = body.status === "active" || body.status === "disabled" || body.status === "revoked" ? body.status : undefined;
       if (status !== undefined && status !== "active" && status !== "disabled" && status !== "revoked") throw new Error("status is invalid.");
-      const patch: Record<string, unknown> = { updatedAt: new Date() };
+      // A revoked key may sit on a page someone else controls, so it stays off, as through the API.
+      if (existing.status === "revoked" && status !== undefined && status !== "revoked") throw jsonError("A revoked widget key can't be turned back on. Create a new one.", 409);
+      const patch: WidgetKeyPatch = {};
       if (status !== undefined) patch.status = status;
       if (allowedOrigins !== undefined) patch.allowedOrigins = allowedOrigins;
       if (config !== undefined) patch.config = config;
       if (body.label !== undefined) patch.label = body.label === null ? null : body.label.trim().slice(0, 120);
-      if (Object.keys(patch).length === 1) throw new Error("At least one field is required.");
-      const [row] = await tx.update(widgetKeys).set(patch).where(and(eq(widgetKeys.id, id), eq(widgetKeys.businessId, businessId))).returning();
+      if (Object.keys(patch).length === 0) throw new Error("At least one field is required.");
+      const row = await updateWidgetKeyInTransaction(tx, { businessId, widgetKeyId: id, patch });
       if (!row) throw new Error("The widget key could not be updated.");
       return { ok: true, record: serializeWidgetKeyConfig(row) };
     }, { minimumRole: "business_admin" }));

@@ -5,6 +5,7 @@ export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, n
 export type { InterfaceLocale } from "./locales";
 import { interfaceLocales, type InterfaceLocale } from "./locales";
 import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
+import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
@@ -259,7 +260,7 @@ export const demoSnapshot: BusinessContextSnapshot = {
 };
 
 // Website chat widget contracts.
-export type WidgetPosition = "bottom-right" | "bottom-left" | "bottom-center";
+export { normalizeWidgetOrigin, widgetEmbedSnippet, widgetPositions, type WidgetPosition } from "./widget";
 
 export type WidgetLeadFormConfig = {
   enabled: boolean;
@@ -277,12 +278,6 @@ export type WidgetConfig = {
   localeOverride?: InterfaceLocale;
   leadForm?: WidgetLeadFormConfig;
 };
-
-export const widgetPositions = [
-  "bottom-right",
-  "bottom-left",
-  "bottom-center",
-] as const satisfies ReadonlyArray<WidgetPosition>;
 
 export const defaultWidgetConfig: WidgetConfig = {
   position: "bottom-right",

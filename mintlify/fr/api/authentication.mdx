@@ -59,8 +59,8 @@ Chaque point de terminaison, sauf `GET /me`, exige une portée. Une clé qui ne 
 
 | Portée | Autorise |
 | --- | --- |
-| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist`, `GET /rules`, `GET /onboarding` |
-| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` et `DELETE` sur `/services/{service_id}`, `POST /rules`, `PATCH` et `DELETE` sur `/rules/{rule_id}`, `POST /rules/reorder`, `PATCH /onboarding`, `POST /onboarding/complete` |
+| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist`, `GET /rules`, `GET /onboarding`, `GET /widget-keys` |
+| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` et `DELETE` sur `/services/{service_id}`, `POST /rules`, `PATCH` et `DELETE` sur `/rules/{rule_id}`, `POST /rules/reorder`, `PATCH /onboarding`, `POST /onboarding/complete`, `POST /widget-keys`, `PATCH /widget-keys/{widget_key_id}` |
 | `calls:read` | `GET /calls`, `GET /calls/{call_id}` |
 | `contacts:read` | `GET /contacts`, `GET /contacts/{contact_id}` |
 | `contacts:write` | `POST /contacts`, `PATCH /contacts/{contact_id}` |

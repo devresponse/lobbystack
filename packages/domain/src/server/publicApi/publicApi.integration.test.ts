@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiTeamSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
@@ -14,7 +14,7 @@ import { acceptInvitation } from "../tenancy";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createClaimLinkForApi, createTeamInvitationForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createClaimLinkForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -1175,6 +1175,38 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
       await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId]));
+    }
+  });
+
+  it("creates a widget key the widget can resolve, and changes it", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-widget-${businessId}`, name: "Widget test", timezone: "UTC", businessType: "test" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    const resolve = async (key: string) => (await worker!.db.execute<{ business_id: string }>(sql`select business_id from app.resolve_business_by_widget_key(${createHash("sha256").update(key).digest("hex")})`)).rows[0]?.business_id;
+    try {
+      const created = await createWidgetKeyForApi(context, caller, { label: "Main site", allowed_origins: ["https://example.com/contact", "https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } }, { appOrigin: "https://app.lobbystack.example" });
+      expect(apiWidgetKeyCreatedSchema.safeParse(created).success).toBe(true);
+      expect(created).toMatchObject({ label: "Main site", status: "active", allowed_origins: ["https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } });
+      expect(created.embed_snippet).toBe(`<script src="https://app.lobbystack.example/embed.js" data-widget-key="${created.key}" data-position="bottom-left" data-color="#112233" defer></script>`);
+      // Only the key's hash is stored, and the widget finds the business by it.
+      expect(await resolve(created.key)).toBe(businessId);
+      const { key: _key, embed_snippet: _snippet, ...listed } = created;
+      expect(await listWidgetKeysForApi(context, caller)).toEqual([listed]);
+
+      // Sending back what GET showed, defaults and all, changes nothing.
+      await updateWidgetKeyForApi(context, caller, created.id, { label: listed.label, allowed_origins: ["https://example.com/"], config: listed.config });
+      expect(await audited("api.widget_key.updated")).toBe(0);
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "disabled", label: null })).toMatchObject({ status: "disabled", label: null });
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "active" })).toMatchObject({ status: "active" });
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "revoked" })).toMatchObject({ status: "revoked" });
+      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, { status: "active" }), 409, "conflict");
+      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, {}), 400, "invalid_request");
+      await expectApiError(updateWidgetKeyForApi(context, a.caller, created.id, { label: "Theirs" }), 404, "not_found");
+      expect(await audited("api.widget_key.updated")).toBe(3);
+    } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
   });
 

@@ -65,6 +65,10 @@ import {
   apiWebhookEventSchemas,
   apiWebhookTestEventSchema,
   apiWebhookTestResultSchema,
+  apiWidgetKeyCreateSchema,
+  apiWidgetKeyCreatedSchema,
+  apiWidgetKeySchema,
+  apiWidgetKeyUpdateSchema,
 } from "./schemas";
 
 type Param = { name: string; in: "path" | "query" | "header"; required?: boolean; description: string; schema: Record<string, unknown> };
@@ -137,6 +141,9 @@ export const apiOperations = {
   updateTeamMember: { method: "PATCH", path: "/team/members/{membership_id}", tag: "Team", summary: "Change someone's role", description: "A business keeps at least one owner, so demoting the last one is a 409.", scope: "team:manage", params: [idParam("membership_id", "membership")], request: "TeamMemberUpdate", response: "TeamMember", status: 200 },
   removeTeamMember: { method: "DELETE", path: "/team/members/{membership_id}", tag: "Team", summary: "Remove someone from the team", description: "Also revokes the invitations they sent or received. A business keeps at least one owner, so removing the last one is a 409.", scope: "team:manage", params: [idParam("membership_id", "membership")], response: "Deleted", status: 200 },
   createClaimLink: { method: "POST", path: "/team/claim-link", tag: "Team", summary: "Hand the business over", description: "Emails the new owner a link that claims the business, and returns it so you can send it too. Whoever accepts it with a verified LobbyStack account for that email becomes an owner, and the account the key acts as, which must own the business, leaves the team. A new claim link revokes the one before. Idempotency-Key is required, and the invitation limit of POST /team/invitations applies.", scope: "team:manage", idempotent: "required", request: "ClaimLinkCreate", response: "ClaimLink", status: 201 },
+  listWidgetKeys: { method: "GET", path: "/widget-keys", tag: "Website chat", summary: "List widget keys", description: "Every key for the website chat widget, newest first, all in one page. The keys themselves aren't shown again after they're created.", scope: "business:read", list: true, response: "WidgetKey", status: 200 },
+  createWidgetKey: { method: "POST", path: "/widget-keys", tag: "Website chat", summary: "Add the chat widget to a website", description: "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. The key is shown only in this response. A deployment that doesn't offer website chat yet answers 403.", scope: "business:write", idempotent: true, request: "WidgetKeyCreate", response: "WidgetKeyCreated", status: 201 },
+  updateWidgetKey: { method: "PATCH", path: "/widget-keys/{widget_key_id}", tag: "Website chat", summary: "Update a widget key", description: "Changes the fields sent. Values the key already has change nothing.", scope: "business:write", params: [idParam("widget_key_id", "widget key")], request: "WidgetKeyUpdate", response: "WidgetKey", status: 200 },
   listServices: { method: "GET", path: "/services", tag: "Business", summary: "List services", description: "Lists the active services customers can book. Deleted services never appear.", scope: "business:read", list: true, params: [{ name: "include_inactive", in: "query", description: "true also lists services that are turned off.", schema: { type: "boolean" } }], response: "Service", status: 200 },
   createService: { method: "POST", path: "/services", tag: "Business", summary: "Add a service", description: "Adds a service customers can book and the receptionist can offer.", scope: "business:write", idempotent: true, request: "ServiceCreate", response: "Service", status: 201 },
   updateService: { method: "PATCH", path: "/services/{service_id}", tag: "Business", summary: "Update a service", description: "Changes the fields sent. Values the service already has change nothing.", scope: "business:write", params: [idParam("service_id", "service")], request: "ServiceUpdate", response: "Service", status: 200 },
@@ -216,6 +223,10 @@ const componentSchemas: Record<string, z.ZodType> = {
   Checkout: apiCheckoutSchema,
   CheckoutCreate: apiCheckoutCreateSchema,
   ManagedPlanCreate: apiManagedPlanCreateSchema,
+  WidgetKey: apiWidgetKeySchema,
+  WidgetKeyCreated: apiWidgetKeyCreatedSchema,
+  WidgetKeyCreate: apiWidgetKeyCreateSchema,
+  WidgetKeyUpdate: apiWidgetKeyUpdateSchema,
   Team: apiTeamSchema,
   TeamMember: apiTeamMemberSchema,
   TeamInvitation: apiTeamInvitationSchema,
@@ -350,7 +361,7 @@ export function buildOpenApiDocument(input: { serverUrl: string }): Record<strin
     },
     servers: [{ url: input.serverUrl }],
     security: [{ bearerAuth: [] }],
-    tags: ["Business", "Receptionist", "Billing", "Phone numbers", "Onboarding", "Team", "Calls", "Contacts", "Appointments", "Messages", "Knowledge", "Webhooks", "Platform"].map((name) => ({ name })),
+    tags: ["Business", "Receptionist", "Billing", "Phone numbers", "Onboarding", "Team", "Website chat", "Calls", "Contacts", "Appointments", "Messages", "Knowledge", "Webhooks", "Platform"].map((name) => ({ name })),
     paths,
     webhooks,
     components: {

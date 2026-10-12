@@ -3,12 +3,14 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   RULES_MAX,
   isApiKeyScope,
   normalizeAuthEmail,
+  normalizeWidgetOrigin,
+  widgetEmbedSnippet,
   normalizeAppointmentChangePolicy,
   normalizeBookingMode,
   weekdays,
@@ -64,6 +66,11 @@ import {
   type ApiTeamInvitationCreate,
   type ApiTeamMember,
   type ApiTeamMemberUpdate,
+  type ApiWidgetConfig,
+  type ApiWidgetKey,
+  type ApiWidgetKeyCreate,
+  type ApiWidgetKeyCreated,
+  type ApiWidgetKeyUpdate,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin } from "../../authz";
@@ -84,6 +91,7 @@ import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
 import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
+import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
@@ -115,6 +123,7 @@ import {
   serializeKnowledgeEntry,
   serializeReceptionist,
   serializeRule,
+  serializeWidgetKey,
   toPage,
   type Page,
   type PageRequest,
@@ -759,6 +768,75 @@ export async function createClaimLinkForApi(context: DomainContext, caller: ApiC
     await audit(tx, caller, { eventType: "api.team.claim_link_created", entityType: "business_invitation", entityId: invitationId });
     const [row] = await tx.select(teamInvitationColumns).from(businessInvitations).where(eq(businessInvitations.id, invitationId)).limit(1);
     return { invitation: serializeTeamInvitation(row!), url: invitationUrl(token) };
+  });
+}
+
+// Website chat widget keys
+
+/** The configuration as the dashboard stores it, from the API's snake_case. */
+function widgetConfigFromApi(config: ApiWidgetConfig): Record<string, unknown> {
+  const lead = config.lead_form;
+  return {
+    ...(config.color !== undefined ? { color: config.color } : {}),
+    ...(config.position !== undefined ? { position: config.position } : {}),
+    ...(config.title !== undefined ? { title: config.title } : {}),
+    ...(config.subtitle !== undefined ? { subtitle: config.subtitle } : {}),
+    ...(config.greeting !== undefined ? { greeting: config.greeting } : {}),
+    ...(config.locale !== undefined ? { localeOverride: config.locale } : {}),
+    ...(lead !== undefined ? { leadForm: { enabled: lead.enabled, ...(lead.require_phone !== undefined ? { requirePhone: lead.require_phone } : {}), ...(lead.require_email !== undefined ? { requireEmail: lead.require_email } : {}), ...(lead.show_before_chat !== undefined ? { showBeforeChat: lead.show_before_chat } : {}) } } : {}),
+  };
+}
+
+function widgetOrigins(values: string[]): string[] {
+  return [...new Set(values.map(normalizeWidgetOrigin))];
+}
+
+/** JSON with sorted keys, so two configurations compare by value. */
+function sortedJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(sortedJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${sortedJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+}
+
+export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCaller): Promise<ApiWidgetKey[]> {
+  return await inBusiness(context, caller, async (tx) => (await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, caller.businessId)).orderBy(desc(widgetKeys.createdAt), desc(widgetKeys.id))).map(serializeWidgetKey));
+}
+
+/** Creates a widget key and the script tag for it, served from the dashboard's own origin. */
+export async function createWidgetKeyForApi(context: DomainContext, caller: ApiCaller, input: ApiWidgetKeyCreate, options: { appOrigin: string }): Promise<ApiWidgetKeyCreated> {
+  return await inBusiness(context, caller, async (tx) => {
+    const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
+    await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
+    const widgetKey = serializeWidgetKey(row);
+    return { ...widgetKey, key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key, { position: widgetKey.config.position, color: widgetKey.config.color }) };
+  });
+}
+
+export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiCaller, widgetKeyId: string, input: ApiWidgetKeyUpdate): Promise<ApiWidgetKey> {
+  if (Object.keys(input).length === 0) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const [current] = await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, widgetKeyId), eq(widgetKeys.businessId, caller.businessId))).limit(1).for("no key update");
+    if (!current) throw notFound("Widget key");
+    const before = serializeWidgetKey(current);
+    // A revoked key may be on a page someone else controls, so it stays off.
+    if (before.status === "revoked" && input.status !== undefined && input.status !== "revoked") throw conflict("A revoked widget key can't be turned back on. Create a new one.");
+    const patch: WidgetKeyPatch = {};
+    if (input.label !== undefined && input.label !== before.label) patch.label = input.label;
+    // Compare what the widget would use, so sending back what GET showed changes nothing.
+    if (input.allowed_origins !== undefined) {
+      const origins = widgetOrigins(input.allowed_origins);
+      if (sortedJson([...origins].sort()) !== sortedJson([...before.allowed_origins].sort())) patch.allowedOrigins = origins;
+    }
+    if (input.config !== undefined) {
+      const config = widgetConfigFromApi(input.config);
+      if (sortedJson(serializeWidgetKey({ ...current, config }).config) !== sortedJson(before.config)) patch.config = config;
+    }
+    if (input.status !== undefined && input.status !== before.status) patch.status = input.status;
+    if (Object.keys(patch).length === 0) return before;
+    const row = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
+    if (!row) throw notFound("Widget key");
+    await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
+    return serializeWidgetKey(row);
   });
 }
 

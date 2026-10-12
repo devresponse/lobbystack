@@ -15,6 +15,7 @@ import {
   createRuleForApi,
   createServiceForApi,
   createTeamInvitationForApi,
+  createWidgetKeyForApi,
   createWebhookEndpoint,
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
@@ -51,6 +52,7 @@ import {
   listRulesForApi,
   listServicesForApi,
   listStaffForApi,
+  listWidgetKeysForApi,
   listWebhookEndpoints,
   PublicApiError,
   releasePhoneNumberForApi,
@@ -73,6 +75,7 @@ import {
   updateRuleForApi,
   updateServiceForApi,
   updateTeamMemberForApi,
+  updateWidgetKeyForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
   type WebhookManager,
@@ -108,6 +111,9 @@ import {
   apiTeamMemberUpdateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
+  apiWidgetKeyCreateSchema,
+  apiWidgetKeyUpdateSchema,
+  isWidgetKeyIssuanceEnabled,
   webhookEventScope,
   type ApiWebhookEndpoint,
   type WebhookEventType,
@@ -168,6 +174,15 @@ async function requireInvitationAllowed(userId: string): Promise<void> {
   // The limit counts in fixed one-hour windows.
   const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
   throw new PublicApiError(429, "rate_limited", `Too many invitations. The account this key acts as can invite 20 people an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
+}
+
+/** Where the widget's script is served: the dashboard's public address, or this request's origin without one. */
+function widgetAppOrigin(request: Request): string {
+  try {
+    return new URL(process.env.APP_BASE_URL ?? "").origin;
+  } catch {
+    return new URL(request.url).origin;
+  }
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -283,6 +298,15 @@ export const v1 = {
     const body = await readApiBody(request, apiClaimLinkCreateSchema);
     const userId = await resolveActingUserId(context, caller);
     return { body: data(await createClaimLinkForApi(context, caller, body, { userId, beforeSend: () => requireInvitationAllowed(userId) })) };
+  }),
+  listWidgetKeys: (request: Request) => handleApiRequest(request, "listWidgetKeys", async ({ context, caller }) => ({ body: { data: await listWidgetKeysForApi(context, caller), next_cursor: null, has_more: false } })),
+  createWidgetKey: (request: Request) => handleApiRequest(request, "createWidgetKey", async ({ context, caller }) => {
+    if (!isWidgetKeyIssuanceEnabled(process.env)) throw new PublicApiError(403, "forbidden", "Website chat widgets aren't available on this deployment yet.");
+    return { body: data(await createWidgetKeyForApi(context, caller, await readApiBody(request, apiWidgetKeyCreateSchema), { appOrigin: widgetAppOrigin(request) })) };
+  }),
+  updateWidgetKey: (request: Request, { params }: Params<"widget_key_id">) => handleApiRequest(request, "updateWidgetKey", async ({ context, caller }) => {
+    const widgetKeyId = uuidParam((await params).widget_key_id, "widget_key_id");
+    return { body: data(await updateWidgetKeyForApi(context, caller, widgetKeyId, await readApiBody(request, apiWidgetKeyUpdateSchema))) };
   }),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),

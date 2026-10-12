@@ -5,6 +5,9 @@ import { agentRules, appointments, businessHours, businesses, calls, contacts, c
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
+  defaultWidgetConfig,
+  normalizeWidgetOrigin,
+  widgetConfigSchema,
   isUuid,
   isWebhookEventType,
   normalizeAppointmentChangePolicy,
@@ -27,6 +30,7 @@ import {
   type ApiService,
   type ApiStaff,
   type ApiWebhookEndpoint,
+  type ApiWidgetKey,
 } from "@lobbystack/shared";
 
 import { resolveCallOutcome } from "../callOutcome";
@@ -553,6 +557,32 @@ export function serializePhoneNumberClaim(row: PhoneNumberClaimRow): ApiPhoneNum
 export async function loadPhoneNumberClaimResource(tx: DatabaseTransaction, businessId: string, claimId: string): Promise<ApiPhoneNumberClaim | null> {
   const [row] = await tx.select({ id: onboardingNumberClaimEvents.id, status: onboardingNumberClaimEvents.status, requestedE164: onboardingNumberClaimEvents.requestedE164, phoneNumberId: onboardingNumberClaimEvents.phoneNumberId, replacingPhoneNumberId: onboardingNumberClaimEvents.replacingPhoneNumberId, lastError: onboardingNumberClaimEvents.lastError, createdAt: onboardingNumberClaimEvents.createdAt, updatedAt: onboardingNumberClaimEvents.updatedAt }).from(onboardingNumberClaimEvents).where(and(eq(onboardingNumberClaimEvents.id, claimId), eq(onboardingNumberClaimEvents.businessId, businessId))).limit(1);
   return row ? serializePhoneNumberClaim(row) : null;
+}
+
+// Website chat widget keys. The stored configuration uses the dashboard's
+// field names; the API's are snake_case. A key shows the defaults the widget
+// falls back to, as the dashboard does.
+
+export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; lastUsedAt: Date | null; createdAt: Date }): ApiWidgetKey {
+  const parsed = widgetConfigSchema.safeParse(row.config ?? {});
+  const config = { ...defaultWidgetConfig, ...(parsed.success ? parsed.data : {}) };
+  return {
+    id: row.id,
+    label: row.label,
+    status: row.status === "disabled" || row.status === "revoked" ? row.status : "active",
+    allowed_origins: Array.isArray(row.allowedOrigins) ? row.allowedOrigins.filter((value): value is string => typeof value === "string").map(normalizeWidgetOrigin) : [],
+    config: {
+      ...(config.color !== undefined ? { color: config.color } : {}),
+      ...(config.position !== undefined ? { position: config.position } : {}),
+      ...(config.title !== undefined ? { title: config.title } : {}),
+      ...(config.subtitle !== undefined ? { subtitle: config.subtitle } : {}),
+      ...(config.greeting !== undefined ? { greeting: config.greeting } : {}),
+      ...(config.localeOverride !== undefined ? { locale: config.localeOverride } : {}),
+      ...(config.leadForm !== undefined ? { lead_form: { enabled: config.leadForm.enabled, require_phone: config.leadForm.requirePhone ?? false, require_email: config.leadForm.requireEmail ?? false, show_before_chat: config.leadForm.showBeforeChat ?? false } } : {}),
+    },
+    last_used_at: isoOrNull(row.lastUsedAt),
+    created_at: iso(row.createdAt),
+  };
 }
 
 // Receptionist

@@ -3,6 +3,7 @@ import { z } from "zod";
 import { billingPlanSlugs } from "../billing";
 import { interfaceLocales } from "../locales";
 import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
+import { widgetPositions } from "../widget";
 import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
@@ -251,6 +252,52 @@ export const apiPhoneNumberClaimSchema = z.object({
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A request to buy a phone number for the business.");
+
+const widgetKeyStatuses = ["active", "disabled", "revoked"] as const;
+const widgetOrigins = z.array(z.url({ protocol: /^https?$/ }).max(2_000)).max(50);
+
+export const apiWidgetConfigSchema = z.strictObject({
+  color: z.string().regex(/^#[0-9a-fA-F]{3,8}$/, "Use a hex color such as #0f766e.").optional(),
+  position: z.enum(widgetPositions).optional(),
+  title: z.string().max(160).optional(),
+  subtitle: z.string().max(320).optional(),
+  greeting: z.string().max(400).optional(),
+  locale: z.enum(interfaceLocales).optional().describe("The widget's language: en, fr, es or sr. Left out, it follows the visitor's browser."),
+  lead_form: z.strictObject({
+    enabled: z.boolean(),
+    require_phone: z.boolean().optional(),
+    require_email: z.boolean().optional(),
+    show_before_chat: z.boolean().optional(),
+  }).optional().describe("Asks visitors for their contact details."),
+}).describe("How the widget looks and behaves.");
+
+export const apiWidgetKeySchema = z.object({
+  id,
+  label: z.string().nullable(),
+  status: z.enum(widgetKeyStatuses).describe("active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."),
+  allowed_origins: z.array(z.string()).describe("The websites the widget runs on, such as https://example.com."),
+  config: apiWidgetConfigSchema,
+  last_used_at: nullableTimestamp,
+  created_at: timestamp,
+}).describe("A key that puts the chat widget on the business's websites.");
+
+export const apiWidgetKeyCreatedSchema = apiWidgetKeySchema.extend({
+  key: z.string().describe("The key itself, shown only here. The widget's script tag carries it."),
+  embed_snippet: z.string().describe("The script tag to paste into the website's HTML."),
+}).describe("A new widget key, with the script tag that adds the widget to a website.");
+
+export const apiWidgetKeyCreateSchema = z.strictObject({
+  label: z.string().trim().min(1).max(120).optional(),
+  allowed_origins: widgetOrigins.describe("The websites the widget may run on, as full http or https URLs. Only each one's origin is kept."),
+  config: apiWidgetConfigSchema.optional(),
+});
+
+export const apiWidgetKeyUpdateSchema = z.strictObject({
+  label: z.string().trim().min(1).max(120).nullable().optional().describe("null removes the label."),
+  allowed_origins: widgetOrigins.optional().describe("Replaces the list."),
+  config: apiWidgetConfigSchema.optional().describe("Replaces the whole configuration."),
+  status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
+});
 
 const memberRoles = ["business_owner", "business_admin", "scheduler", "viewer"] as const;
 const invitableRoles = ["business_admin", "scheduler", "viewer"] as const;
@@ -647,6 +694,11 @@ export type ApiBilling = z.infer<typeof apiBillingSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiWidgetConfig = z.infer<typeof apiWidgetConfigSchema>;
+export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
+export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;
+export type ApiWidgetKeyCreate = z.infer<typeof apiWidgetKeyCreateSchema>;
+export type ApiWidgetKeyUpdate = z.infer<typeof apiWidgetKeyUpdateSchema>;
 export type ApiTeam = z.infer<typeof apiTeamSchema>;
 export type ApiTeamMember = z.infer<typeof apiTeamMemberSchema>;
 export type ApiTeamInvitation = z.infer<typeof apiTeamInvitationSchema>;

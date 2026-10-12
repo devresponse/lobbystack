@@ -73,6 +73,9 @@ const domain = vi.hoisted(() => ({
   updateTeamMemberForApi: vi.fn(),
   removeTeamMemberForApi: vi.fn(async () => undefined),
   createClaimLinkForApi: vi.fn(),
+  listWidgetKeysForApi: vi.fn(async (): Promise<unknown[]> => []),
+  createWidgetKeyForApi: vi.fn(),
+  updateWidgetKeyForApi: vi.fn(),
   // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
@@ -718,6 +721,54 @@ describe("team", () => {
     expect((await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }))).status).toBe(403);
     expect(domain.getTeamForApi).not.toHaveBeenCalled();
     expect(domain.createClaimLinkForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("widget keys", () => {
+  const keyId = "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
+  const widgetKey = { id: keyId, label: "Site", status: "active", allowed_origins: ["https://example.com"], config: { position: "bottom-right", title: "" }, last_used_at: null, created_at: "2026-10-11T12:00:00.000Z" };
+  const create = (body: unknown) => v1.createWidgetKey(call("/widget-keys", { method: "POST", body: JSON.stringify(body) }));
+  const update = (body: unknown, id = keyId) => v1.updateWidgetKey(call(`/widget-keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ widget_key_id: id }) });
+
+  it("lists keys and creates one with the script tag served from the dashboard", async () => {
+    domain.listWidgetKeysForApi.mockResolvedValue([widgetKey]);
+    expect(await (await v1.listWidgetKeys(call("/widget-keys"))).json()).toEqual({ data: [widgetKey], next_cursor: null, has_more: false });
+    // Website chat is a restricted capability, so issuing keys needs the deployment to turn it on.
+    const response403 = await create({ allowed_origins: [] });
+    expect(response403.status).toBe(403);
+    vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.example/dashboard");
+    vi.stubEnv("WIDGET_KEY_ISSUANCE_ENABLED", "true");
+    try {
+      domain.createWidgetKeyForApi.mockResolvedValue({ ...widgetKey, key: "wk_live_x", embed_snippet: "<script></script>" });
+      const response = await create({ label: "Site", allowed_origins: ["https://example.com/contact"], config: { color: "#0f766e", lead_form: { enabled: true, require_email: true } } });
+      expect(response.status).toBe(201);
+      expect(domain.createWidgetKeyForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { label: "Site", allowed_origins: ["https://example.com/contact"], config: { color: "#0f766e", lead_form: { enabled: true, require_email: true } } }, { appOrigin: "https://app.lobbystack.example" });
+      for (const bad of [{ allowed_origins: ["javascript:alert(1)"] }, { allowed_origins: ["example.com"] }, { allowed_origins: [], config: { color: "teal" } }, { allowed_origins: [], config: { localeOverride: "fr" } }, {}]) {
+        expect((await create(bad)).status, JSON.stringify(bad)).toBe(400);
+      }
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(domain.createWidgetKeyForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks a key's changes before the domain sees them", async () => {
+    domain.updateWidgetKeyForApi.mockResolvedValue({ ...widgetKey, status: "disabled" });
+    expect((await update({ status: "disabled", label: null })).status).toBe(200);
+    expect(domain.updateWidgetKeyForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), keyId, { status: "disabled", label: null });
+    for (const bad of [{ status: "deleted" }, { label: "" }, { allowed_origins: ["ftp://example.com"] }, { config: { position: "top" } }]) {
+      expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect((await update({ status: "active" }, "x")).status).toBe(400);
+    expect(domain.updateWidgetKeyForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("lists with business:read and changes with business:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.listWidgetKeys(call("/widget-keys"))).status).toBe(200);
+    expect((await create({ allowed_origins: [] })).status).toBe(403);
+    expect((await update({ status: "disabled" })).status).toBe(403);
+    expect(domain.createWidgetKeyForApi).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 
-import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiCallSchema, apiContactSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiMessageSchema, apiPhoneNumberClaimSchema, apiPhoneNumberSchema, apiWidgetKeySchema, normalizeWidgetOrigin, WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_SECONDS, widgetEmbedSnippet } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { KnowledgeStorageLimitError } from "../knowledge";
@@ -9,7 +9,7 @@ import { apiKeyPepper, bearerToken, generateApiKey, hashApiKey, isWellFormedApiK
 import { idempotencyRequestHash, validateIdempotencyKey } from "./idempotency";
 import { PublicApiError } from "./errors";
 import { apiErrorFromDomain, claimPhoneNumberForApi } from "./operations";
-import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, toPage } from "./resources";
+import { decodeCursor, encodeCursor, pageSize, serializeAppointment, serializeCall, serializeContact, serializeKnowledgeEntry, serializeKnowledgeSource, serializeMessage, serializePhoneNumber, serializePhoneNumberClaim, serializeWidgetKey, toPage } from "./resources";
 import { webhookRetryDelaySeconds } from "./webhooks";
 
 describe("API keys", () => {
@@ -189,6 +189,31 @@ describe("phone numbers", () => {
     expect(serializePhoneNumberClaim({ ...row, status: "claimed", phoneNumberId: userId })).toMatchObject({ status: "claimed", phone_number_id: userId });
     expect(serializePhoneNumberClaim({ ...row, status: "unavailable", lastError: "The selected number is no longer available." })).toMatchObject({ status: "failed", error: "The selected number is no longer available." });
     expect(serializePhoneNumberClaim({ ...row, status: "failed" })).toMatchObject({ status: "failed", error: "The number could not be claimed." });
+  });
+});
+
+describe("widget keys", () => {
+  const now = new Date("2026-10-11T12:00:00.000Z");
+  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], lastUsedAt: null, createdAt: now };
+
+  it("shows the dashboard's configuration in snake_case, with the defaults the widget falls back to", () => {
+    const plain = serializeWidgetKey({ ...row, config: {} });
+    expect(apiWidgetKeySchema.parse(plain)).toEqual(plain);
+    expect(plain).toMatchObject({ allowed_origins: ["https://example.com", "https://shop.example.com"], config: { position: "bottom-right", title: "", lead_form: { enabled: false, require_phone: false, require_email: false, show_before_chat: false } } });
+    const styled = serializeWidgetKey({ ...row, status: "weird", config: { color: "#112233", localeOverride: "sr", leadForm: { enabled: true, requireEmail: true } } });
+    expect(styled).toMatchObject({ status: "active", config: { color: "#112233", locale: "sr", lead_form: { enabled: true, require_phone: false, require_email: true, show_before_chat: false } } });
+  });
+
+  it("keeps an origin's scheme, host and port, and reads a bare host as https", () => {
+    expect(normalizeWidgetOrigin("https://Example.com/contact/")).toBe("https://example.com");
+    expect(normalizeWidgetOrigin("http://localhost:3000/")).toBe("http://localhost:3000");
+    expect(normalizeWidgetOrigin(" Example.com ")).toBe("https://example.com");
+    expect(normalizeWidgetOrigin("localhost:3000")).toBe("https://localhost:3000");
+    expect(normalizeWidgetOrigin("null")).toBe("null");
+  });
+
+  it("builds the script tag from the dashboard's origin, with the widget's defaults", () => {
+    expect(widgetEmbedSnippet("https://app.example.com", "wk_live_x", { position: "bottom-left" })).toBe('<script src="https://app.example.com/embed.js" data-widget-key="wk_live_x" data-position="bottom-left" data-color="#0f766e" defer></script>');
   });
 });
 

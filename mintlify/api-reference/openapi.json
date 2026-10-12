@@ -35,6 +35,9 @@
       "name": "Team"
     },
     {
+      "name": "Website chat"
+    },
+    {
       "name": "Calls"
     },
     {
@@ -4143,6 +4146,403 @@
           },
           "422": {
             "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widget-keys": {
+      "get": {
+        "operationId": "listWidgetKeys",
+        "summary": "List widget keys",
+        "description": "Every key for the website chat widget, newest first, all in one page. The keys themselves aren't shown again after they're created.",
+        "tags": [
+          "Website chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WidgetKey"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "createWidgetKey",
+        "summary": "Add the chat widget to a website",
+        "description": "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. The key is shown only in this response. A deployment that doesn't offer website chat yet answers 403.",
+        "tags": [
+          "Website chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WidgetKeyCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WidgetKeyCreated"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/widget-keys/{widget_key_id}": {
+      "patch": {
+        "operationId": "updateWidgetKey",
+        "summary": "Update a widget key",
+        "description": "Changes the fields sent. Values the key already has change nothing.",
+        "tags": [
+          "Website chat"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "widget_key_id",
+            "in": "path",
+            "required": true,
+            "description": "The widget key id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WidgetKeyUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/WidgetKey"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11326,6 +11726,450 @@
         "required": [
           "plan"
         ],
+        "additionalProperties": false
+      },
+      "WidgetKey": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "revoked"
+            ],
+            "description": "active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."
+          },
+          "allowed_origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The websites the widget runs on, such as https://example.com."
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{3,8}$"
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "bottom-right",
+                  "bottom-left",
+                  "bottom-center"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 320
+              },
+              "greeting": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "locale": {
+                "description": "The widget's language: en, fr, es or sr. Left out, it follows the visitor's browser.",
+                "type": "string",
+                "enum": [
+                  "en",
+                  "fr",
+                  "es",
+                  "sr"
+                ]
+              },
+              "lead_form": {
+                "description": "Asks visitors for their contact details.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "require_phone": {
+                    "type": "boolean"
+                  },
+                  "require_email": {
+                    "type": "boolean"
+                  },
+                  "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false,
+            "description": "How the widget looks and behaves."
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "status",
+          "allowed_origins",
+          "config",
+          "last_used_at",
+          "created_at"
+        ],
+        "additionalProperties": false,
+        "description": "A key that puts the chat widget on the business's websites."
+      },
+      "WidgetKeyCreated": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "revoked"
+            ],
+            "description": "active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."
+          },
+          "allowed_origins": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The websites the widget runs on, such as https://example.com."
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{3,8}$"
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "bottom-right",
+                  "bottom-left",
+                  "bottom-center"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 320
+              },
+              "greeting": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "locale": {
+                "description": "The widget's language: en, fr, es or sr. Left out, it follows the visitor's browser.",
+                "type": "string",
+                "enum": [
+                  "en",
+                  "fr",
+                  "es",
+                  "sr"
+                ]
+              },
+              "lead_form": {
+                "description": "Asks visitors for their contact details.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "require_phone": {
+                    "type": "boolean"
+                  },
+                  "require_email": {
+                    "type": "boolean"
+                  },
+                  "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false,
+            "description": "How the widget looks and behaves."
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "key": {
+            "type": "string",
+            "description": "The key itself, shown only here. The widget's script tag carries it."
+          },
+          "embed_snippet": {
+            "type": "string",
+            "description": "The script tag to paste into the website's HTML."
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "status",
+          "allowed_origins",
+          "config",
+          "last_used_at",
+          "created_at",
+          "key",
+          "embed_snippet"
+        ],
+        "additionalProperties": false,
+        "description": "A new widget key, with the script tag that adds the widget to a website."
+      },
+      "WidgetKeyCreate": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "allowed_origins": {
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2000,
+              "format": "uri"
+            },
+            "description": "The websites the widget may run on, as full http or https URLs. Only each one's origin is kept."
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{3,8}$"
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "bottom-right",
+                  "bottom-left",
+                  "bottom-center"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 320
+              },
+              "greeting": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "locale": {
+                "description": "The widget's language: en, fr, es or sr. Left out, it follows the visitor's browser.",
+                "type": "string",
+                "enum": [
+                  "en",
+                  "fr",
+                  "es",
+                  "sr"
+                ]
+              },
+              "lead_form": {
+                "description": "Asks visitors for their contact details.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "require_phone": {
+                    "type": "boolean"
+                  },
+                  "require_email": {
+                    "type": "boolean"
+                  },
+                  "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false,
+            "description": "How the widget looks and behaves."
+          }
+        },
+        "required": [
+          "allowed_origins"
+        ],
+        "additionalProperties": false
+      },
+      "WidgetKeyUpdate": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "description": "null removes the label.",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allowed_origins": {
+            "description": "Replaces the list.",
+            "maxItems": 50,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "maxLength": 2000,
+              "format": "uri"
+            }
+          },
+          "config": {
+            "description": "Replaces the whole configuration.",
+            "type": "object",
+            "properties": {
+              "color": {
+                "type": "string",
+                "pattern": "^#[0-9a-fA-F]{3,8}$"
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "bottom-right",
+                  "bottom-left",
+                  "bottom-center"
+                ]
+              },
+              "title": {
+                "type": "string",
+                "maxLength": 160
+              },
+              "subtitle": {
+                "type": "string",
+                "maxLength": 320
+              },
+              "greeting": {
+                "type": "string",
+                "maxLength": 400
+              },
+              "locale": {
+                "description": "The widget's language: en, fr, es or sr. Left out, it follows the visitor's browser.",
+                "type": "string",
+                "enum": [
+                  "en",
+                  "fr",
+                  "es",
+                  "sr"
+                ]
+              },
+              "lead_form": {
+                "description": "Asks visitors for their contact details.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "require_phone": {
+                    "type": "boolean"
+                  },
+                  "require_email": {
+                    "type": "boolean"
+                  },
+                  "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          },
+          "status": {
+            "description": "A revoked key can't be turned back on.",
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "revoked"
+            ]
+          }
+        },
         "additionalProperties": false
       },
       "Team": {

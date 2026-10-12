@@ -4,14 +4,13 @@ import { normalizeIP } from "@better-auth/core/utils/ip";
 import { and, eq, sql } from "drizzle-orm";
 
 import { widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
-import { defaultWidgetConfig, widgetConfigSchema, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
+import { hashWidgetKey } from "@lobbystack/domain";
+import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
 
 import { getWorkerDatabase } from "./api-helpers";
 import { trustedClientIp } from "./trusted-client-ip";
 
-export function hashWidgetKey(key: string): string {
-  return createHash("sha256").update(key.trim()).digest("hex");
-}
+export { hashWidgetKey };
 
 type ResolvedWidgetKey = {
   businessId: string;
@@ -27,11 +26,7 @@ export async function resolveWidgetKeyByHash(keyHash: string): Promise<ResolvedW
 }
 
 export function normalizeOrigin(value: string): string {
-  try {
-    return new URL(value).origin.replace(/\/$/, "");
-  } catch {
-    return value.trim().replace(/\/$/, "");
-  }
+  return normalizeWidgetOrigin(value);
 }
 
 export function normalizeAllowedOrigins(origins: unknown): Set<string> {

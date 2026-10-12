@@ -7,12 +7,14 @@ import {
   createAppointmentForApi,
   createBusinessForApi,
   createCheckoutForApi,
+  createClaimLinkForApi,
   createContactForApi,
   createKnowledgeEntryForApi,
   createKnowledgeSourceForApi,
   createKnowledgeUploadForApi,
   createRuleForApi,
   createServiceForApi,
+  createTeamInvitationForApi,
   createWebhookEndpoint,
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
@@ -31,6 +33,7 @@ import {
   getOnboardingForApi,
   getPlatformMeForApi,
   getReceptionistForApi,
+  getTeamForApi,
   getCallForApi,
   getCheckoutForApi,
   getPhoneNumberClaimForApi,
@@ -51,10 +54,12 @@ import {
   listWebhookEndpoints,
   PublicApiError,
   releasePhoneNumberForApi,
+  removeTeamMemberForApi,
   reorderRulesForApi,
   rescheduleAppointmentForApi,
   resolveActingUserId,
   retryKnowledgeSourceForApi,
+  revokeTeamInvitationForApi,
   searchPhoneNumbersForApi,
   sendWebhookTestEvent,
   setManagedPlanForApi,
@@ -67,6 +72,7 @@ import {
   updateReceptionistForApi,
   updateRuleForApi,
   updateServiceForApi,
+  updateTeamMemberForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
   type WebhookManager,
@@ -77,6 +83,7 @@ import {
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiCheckoutCreateSchema,
+  apiClaimLinkCreateSchema,
   apiManagedPlanCreateSchema,
   apiOnboardingCompleteSchema,
   apiOnboardingUpdateSchema,
@@ -97,6 +104,8 @@ import {
   apiRuleUpdateSchema,
   apiServiceCreateSchema,
   apiServiceUpdateSchema,
+  apiTeamInvitationCreateSchema,
+  apiTeamMemberUpdateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
   webhookEventScope,
@@ -105,6 +114,7 @@ import {
 } from "@lobbystack/shared";
 
 import { createDomainContext } from "../domain-context";
+import { enforceFixedWindow, fixedWindowLimit } from "../fixed-window-limit";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { getStorageProvider } from "../storage";
 import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
@@ -148,6 +158,16 @@ async function requireNumberSearchAllowed(userId: string): Promise<void> {
   // The limit counts in fixed 10-minute windows.
   const retryAfter = 600 - (Math.floor(Date.now() / 1_000) % 600);
   throw new PublicApiError(429, "rate_limited", `Too many number searches. The account this key acts as can search 20 times in 10 minutes. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
+}
+
+/** Each invitation sends an email, so a key's invitations count against its account's dashboard limit of 20 an hour. */
+async function requireInvitationAllowed(userId: string): Promise<void> {
+  const result = await enforceFixedWindow([fixedWindowLimit("team-invite", "user-hour", userId, 20, 60 * 60, "rate_limit_user_hour")]);
+  if (result.allowed) return;
+  if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Invitations are unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
+  // The limit counts in fixed one-hour windows.
+  const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
+  throw new PublicApiError(429, "rate_limited", `Too many invitations. The account this key acts as can invite 20 people an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
 function dateParam(request: Request, name: string): Date | undefined {
@@ -238,6 +258,31 @@ export const v1 = {
     // Affiliate attribution runs as the system actor, which only the app's database role can be, as in the dashboard.
     const attribution = body.referral_code !== undefined ? { context: createDomainContext(), referredUserId: await resolveActingUserId(context, caller) } : undefined;
     return { body: data(await completeOnboardingForApi(context, caller, body, { attribution })) };
+  }),
+  getTeam: (request: Request) => handleApiRequest(request, "getTeam", async ({ context, caller }) => ({ body: data(await getTeamForApi(context, caller)) })),
+  createTeamInvitation: (request: Request) => handleApiRequest(request, "createTeamInvitation", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiTeamInvitationCreateSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await createTeamInvitationForApi(context, caller, body, { userId, beforeSend: () => requireInvitationAllowed(userId) })) };
+  }),
+  revokeTeamInvitation: (request: Request, { params }: Params<"invitation_id">) => handleApiRequest(request, "revokeTeamInvitation", async ({ context, caller }) => {
+    const invitationId = uuidParam((await params).invitation_id, "invitation_id");
+    await revokeTeamInvitationForApi(context, caller, invitationId);
+    return { body: data({ id: invitationId, deleted: true }) };
+  }),
+  updateTeamMember: (request: Request, { params }: Params<"membership_id">) => handleApiRequest(request, "updateTeamMember", async ({ context, caller }) => {
+    const membershipId = uuidParam((await params).membership_id, "membership_id");
+    return { body: data(await updateTeamMemberForApi(context, caller, membershipId, await readApiBody(request, apiTeamMemberUpdateSchema))) };
+  }),
+  removeTeamMember: (request: Request, { params }: Params<"membership_id">) => handleApiRequest(request, "removeTeamMember", async ({ context, caller }) => {
+    const membershipId = uuidParam((await params).membership_id, "membership_id");
+    await removeTeamMemberForApi(context, caller, membershipId);
+    return { body: data({ id: membershipId, deleted: true }) };
+  }),
+  createClaimLink: (request: Request) => handleApiRequest(request, "createClaimLink", async ({ context, caller }) => {
+    const body = await readApiBody(request, apiClaimLinkCreateSchema);
+    const userId = await resolveActingUserId(context, caller);
+    return { body: data(await createClaimLinkForApi(context, caller, body, { userId, beforeSend: () => requireInvitationAllowed(userId) })) };
   }),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),

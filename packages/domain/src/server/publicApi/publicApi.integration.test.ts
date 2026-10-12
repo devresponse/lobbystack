@@ -5,16 +5,18 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiBillingSchema, apiOnboardingSchema, apiTeamSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
+import { acceptInvitation } from "../tenancy";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createClaimLinkForApi, createTeamInvitationForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
+import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
 
@@ -1095,6 +1097,84 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     } finally {
       await admin!.db.delete(outboxMessages).where(inArray(outboxMessages.businessId, [partnerBusinessId, operatorBusinessId]));
       await admin!.db.delete(businesses).where(inArray(businesses.id, [partnerBusinessId, operatorBusinessId]));
+    }
+  });
+
+  it("manages the team and hands the business over with a claim link", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    const customerId = randomUUID();
+    const viewerId = randomUUID();
+    const coOwnerId = randomUUID();
+    const customerEmail = `${customerId}@example.invalid`;
+    for (const userId of [customerId, viewerId, coOwnerId]) await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: userId === viewerId ? "Vic" : "Cam" });
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-team-${businessId}`, name: "Team test", timezone: "UTC", businessType: "test" });
+    // The operator owns what its platform key set up, until it hands it over.
+    // Two statements, so the owner joined first.
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: viewerId, role: "viewer" });
+    const platform: PlatformKeyCaller = { businessId, platformKeyId: randomUUID(), partnerId: "lobbystack", actingUserId: ownerId, actor: "platform_key" };
+    const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
+    try {
+      const team = await getTeamForApi(context, platform);
+      expect(apiTeamSchema.safeParse(team).success).toBe(true);
+      expect(team.members.map((member) => [member.user_id, member.role])).toEqual([[ownerId, "business_owner"], [viewerId, "viewer"]]);
+      const owner = team.members.find((member) => member.user_id === ownerId)!;
+      const viewer = team.members.find((member) => member.user_id === viewerId)!;
+      expect(viewer).toMatchObject({ name: "Vic", email: `${viewerId}@example.invalid` });
+
+      // An invitation emails its link, and can be revoked once.
+      const invitation = await createTeamInvitationForApi(context, platform, { email: " Sam@Example.com ", role: "scheduler" }, { userId: ownerId });
+      expect(invitation).toMatchObject({ email: "sam@example.com", role: "scheduler", status: "pending", transfers_ownership: false });
+      expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "email.send"), eq(outboxMessages.aggregateId, invitation.id)))).toHaveLength(1);
+      await expectApiError(createTeamInvitationForApi(context, platform, { email: "sam@example.com, kai@example.com", role: "viewer" }, { userId: ownerId }), 400, "invalid_request");
+      await revokeTeamInvitationForApi(context, platform, invitation.id);
+      await expectApiError(revokeTeamInvitationForApi(context, platform, invitation.id), 404, "not_found");
+
+      // Roles change once, and the last owner stays.
+      expect(await updateTeamMemberForApi(context, platform, viewer.id, { role: "scheduler" })).toMatchObject({ id: viewer.id, role: "scheduler" });
+      await updateTeamMemberForApi(context, platform, viewer.id, { role: "scheduler" });
+      expect(await audited("api.team.member_updated")).toBe(1);
+      await expectApiError(updateTeamMemberForApi(context, platform, owner.id, { role: "viewer" }), 409, "conflict");
+      await expectApiError(removeTeamMemberForApi(context, platform, owner.id), 409, "conflict");
+      await expectApiError(updateTeamMemberForApi(context, platform, randomUUID(), { role: "viewer" }), 404, "not_found");
+
+      // Only an owner hands the business over, and a link stops working once its sender isn't one.
+      await expectApiError(createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: viewerId }), 409, "conflict");
+      const accept = async (url: string) => await acceptInvitation({ db: app!.db }, { userId: customerId, tokenHash: createHash("sha256").update(new URL(url).searchParams.get("token")!).digest("hex"), email: customerEmail, emailVerified: true });
+      await admin!.db.insert(businessMemberships).values({ businessId, userId: coOwnerId, role: "business_owner" });
+      const coOwner = (await getTeamForApi(context, platform)).members.find((member) => member.user_id === coOwnerId)!;
+      const stale = await createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: coOwnerId });
+      await updateTeamMemberForApi(context, platform, coOwner.id, { role: "viewer" });
+      await expect(accept(stale.url)).rejects.toMatchObject({ status: 409 });
+      await removeTeamMemberForApi(context, platform, coOwner.id);
+      // A new claim link replaces the open one.
+      await createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: ownerId });
+      const link = await createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: ownerId });
+      expect(link.invitation).toMatchObject({ email: customerEmail, role: "business_owner", status: "pending", transfers_ownership: true });
+      expect((await getTeamForApi(context, platform)).invitations.map((open) => open.id)).toEqual([link.invitation.id]);
+
+      // A partner onboarded the business, and the operator's account made an API key for it.
+      await admin!.db.insert(platformPartnerBusinesses).values({ businessId, partnerId: "acme" });
+      const generated = generateApiKey();
+      const [operatorKey] = await admin!.db.insert(apiKeys).values({ businessId, name: "operator", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["business:read"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+      const partnerAccess = () => requirePlatformBusinessAccess(context, { businessId, partnerId: "acme", access: "partner" });
+      await partnerAccess();
+
+      // The owner accepts it in the dashboard: the business is theirs and opens for them, and the operator loses its access.
+      expect(await accept(link.url)).toEqual({ businessId, role: "business_owner" });
+      expect((await admin!.db.select({ active: users.activeBusinessId }).from(users).where(eq(users.id, customerId)))[0]?.active).toBe(businessId);
+      await expectApiError(partnerAccess(), 404, "not_found");
+      expect((await admin!.db.select({ revokedAt: apiKeys.revokedAt }).from(apiKeys).where(eq(apiKeys.id, operatorKey!.id)))[0]?.revokedAt).toBeInstanceOf(Date);
+      const handedOver = await getTeamForApi(context, platform);
+      expect(handedOver.members.map((member) => [member.user_id, member.role]).sort()).toEqual([[customerId, "business_owner"], [viewerId, "scheduler"]].sort());
+      expect(handedOver.invitations).toEqual([]);
+      await removeTeamMemberForApi(context, platform, viewer.id);
+      expect((await getTeamForApi(context, platform)).members.map((member) => member.user_id)).toEqual([customerId]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId]));
     }
   });
 

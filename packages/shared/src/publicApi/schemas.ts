@@ -252,6 +252,52 @@ export const apiPhoneNumberClaimSchema = z.object({
   updated_at: timestamp,
 }).describe("A request to buy a phone number for the business.");
 
+const memberRoles = ["business_owner", "business_admin", "scheduler", "viewer"] as const;
+const invitableRoles = ["business_admin", "scheduler", "viewer"] as const;
+const teamEmail = z.string().trim().min(3).max(320);
+
+export const apiTeamMemberSchema = z.object({
+  id: id.describe("The membership id."),
+  user_id: id,
+  name: z.string().nullable(),
+  email: z.string(),
+  role: z.enum(memberRoles),
+  joined_at: timestamp,
+}).describe("Someone on the business's team.");
+
+export const apiTeamInvitationSchema = z.object({
+  id,
+  email: z.string(),
+  role: z.enum(memberRoles),
+  status: z.enum(["pending", "expired"]).describe("pending: waiting to be accepted. expired: can no longer be accepted; send a new one."),
+  transfers_ownership: z.boolean().describe("true for a claim link: accepting it makes the invitee an owner and takes the account that sent it off the team."),
+  expires_at: timestamp,
+  created_at: timestamp,
+}).describe("An invitation nobody has accepted yet.");
+
+export const apiTeamSchema = z.object({
+  members: z.array(apiTeamMemberSchema).describe("Everyone on the team, earliest first."),
+  invitations: z.array(apiTeamInvitationSchema).describe("Invitations nobody has accepted or revoked, newest first."),
+}).describe("The business's team and its open invitations.");
+
+export const apiTeamInvitationCreateSchema = z.strictObject({
+  email: teamEmail.describe("One address. Only a LobbyStack account with this verified email can accept."),
+  role: z.enum(invitableRoles),
+});
+
+export const apiTeamMemberUpdateSchema = z.strictObject({
+  role: z.enum(invitableRoles).describe("Ownership changes hands through POST /team/claim-link instead."),
+});
+
+export const apiClaimLinkCreateSchema = z.strictObject({
+  email: teamEmail.describe("The new owner's email. Only a LobbyStack account with this verified email can claim the business."),
+});
+
+export const apiClaimLinkSchema = z.object({
+  invitation: apiTeamInvitationSchema,
+  url: z.string().describe("The link that claims the business. LobbyStack emails it to the new owner; you can also send it yourself."),
+}).describe("A link that hands the business over to its owner.");
+
 const onboardingItems = ["business_details", "knowledge", "greeting", "plan", "phone_number", "full_site_read", "test_call"] as const;
 const onboardingSkippableSteps = ["knowledge", "phone_number", "full_site_read", "test_call"] as const;
 
@@ -601,6 +647,13 @@ export type ApiBilling = z.infer<typeof apiBillingSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
+export type ApiTeam = z.infer<typeof apiTeamSchema>;
+export type ApiTeamMember = z.infer<typeof apiTeamMemberSchema>;
+export type ApiTeamInvitation = z.infer<typeof apiTeamInvitationSchema>;
+export type ApiTeamInvitationCreate = z.infer<typeof apiTeamInvitationCreateSchema>;
+export type ApiTeamMemberUpdate = z.infer<typeof apiTeamMemberUpdateSchema>;
+export type ApiClaimLinkCreate = z.infer<typeof apiClaimLinkCreateSchema>;
+export type ApiClaimLink = z.infer<typeof apiClaimLinkSchema>;
 export type ApiOnboarding = z.infer<typeof apiOnboardingSchema>;
 export type ApiOnboardingItem = ApiOnboarding["missing"][number];
 export type ApiOnboardingUpdate = z.infer<typeof apiOnboardingUpdateSchema>;

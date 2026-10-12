@@ -1,13 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { and, asc, count, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   RULES_MAX,
   isApiKeyScope,
+  normalizeAuthEmail,
   normalizeAppointmentChangePolicy,
   normalizeBookingMode,
   weekdays,
@@ -24,6 +25,8 @@ import {
   type ApiCallDetail,
   type ApiCheckout,
   type ApiCheckoutCreate,
+  type ApiClaimLink,
+  type ApiClaimLinkCreate,
   type ApiContact,
   type ApiContactCreate,
   type ApiContactUpdate,
@@ -56,6 +59,11 @@ import {
   type ApiServiceCreate,
   type ApiServiceUpdate,
   type ApiStaff,
+  type ApiTeam,
+  type ApiTeamInvitation,
+  type ApiTeamInvitationCreate,
+  type ApiTeamMember,
+  type ApiTeamMemberUpdate,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin } from "../../authz";
@@ -76,7 +84,7 @@ import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
 import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
-import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
+import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
 import {
@@ -642,6 +650,115 @@ export async function completeOnboardingForApi(context: DomainContext, caller: A
     if (caller.platformKeyId === undefined && !partnerOnboarded) await scheduleOnboardingFollowupInTransaction(tx, caller.businessId, completedAt);
     await audit(tx, caller, { eventType: "api.onboarding.completed", entityType: "business", entityId: caller.businessId, payload: { skipNumber: Boolean(input.skip_number), ...(source ? { source } : {}) } });
     return await loadOnboarding(tx, caller.businessId);
+  });
+}
+
+// Team. People join through invitations they accept with a verified account
+// for the invited email; a claim link is an owner invitation that also takes
+// the account that sent it off the team, which is how an operator or partner
+// hands over a business it set up.
+
+type TeamInvitationRow = { id: string; email: string; role: string; transfersOwnership: boolean; expiresAt: Date; createdAt: Date };
+const teamInvitationColumns = { id: businessInvitations.id, email: businessInvitations.email, role: businessInvitations.role, transfersOwnership: businessInvitations.transfersOwnership, expiresAt: businessInvitations.expiresAt, createdAt: businessInvitations.createdAt };
+
+function serializeTeamInvitation(row: TeamInvitationRow): ApiTeamInvitation {
+  return { id: row.id, email: row.email, role: row.role as ApiTeamInvitation["role"], status: row.expiresAt.getTime() <= Date.now() ? "expired" : "pending", transfers_ownership: row.transfersOwnership, expires_at: row.expiresAt.toISOString(), created_at: row.createdAt.toISOString() };
+}
+
+// The worker role may read the name and email of any account, so it joins them in directly.
+function selectTeamMembers(tx: DatabaseTransaction, businessId: string, membershipId?: string) {
+  return tx.select({ id: businessMemberships.id, userId: businessMemberships.userId, name: users.name, email: users.email, role: businessMemberships.role, joinedAt: businessMemberships.createdAt }).from(businessMemberships).innerJoin(users, eq(users.id, businessMemberships.userId)).where(and(eq(businessMemberships.businessId, businessId), eq(businessMemberships.status, "active"), membershipId === undefined ? undefined : eq(businessMemberships.id, membershipId)));
+}
+
+function serializeTeamMember(row: { id: string; userId: string; name: string | null; email: string; role: string; joinedAt: Date }): ApiTeamMember {
+  return { id: row.id, user_id: row.userId, name: row.name, email: row.email, role: row.role as ApiTeamMember["role"], joined_at: row.joinedAt.toISOString() };
+}
+
+async function loadTeamMember(tx: DatabaseTransaction, businessId: string, membershipId: string): Promise<ApiTeamMember | null> {
+  const [row] = await selectTeamMembers(tx, businessId, membershipId).limit(1);
+  return row ? serializeTeamMember(row) : null;
+}
+
+function teamEmail(value: string): string {
+  const normalized = normalizeAuthEmail(value);
+  if (!isSingleEmailAddress(normalized)) throw invalidRequest("Enter one valid email address.", [{ path: "email", message: "One address, such as sam@example.com." }]);
+  return normalized;
+}
+
+const lastOwner = () => conflict("A business keeps at least one owner. Hand it over with POST /team/claim-link first.");
+
+export async function getTeamForApi(context: DomainContext, caller: ApiCaller): Promise<ApiTeam> {
+  return await inBusiness(context, caller, async (tx) => {
+    const members = await selectTeamMembers(tx, caller.businessId).orderBy(asc(businessMemberships.createdAt), asc(businessMemberships.id));
+    const invitations = await tx.select(teamInvitationColumns).from(businessInvitations).where(and(eq(businessInvitations.businessId, caller.businessId), eq(businessInvitations.status, "pending"))).orderBy(desc(businessInvitations.createdAt), desc(businessInvitations.id));
+    return { members: members.map(serializeTeamMember), invitations: invitations.map(serializeTeamInvitation) };
+  });
+}
+
+/**
+ * Invites someone as the account the caller acts as. `beforeSend` runs once
+ * the request is valid, just before the email is queued, so a refused one
+ * uses up no invitation limit.
+ */
+export async function createTeamInvitationForApi(context: DomainContext, caller: ApiCaller, input: ApiTeamInvitationCreate, options: { userId: string; beforeSend?: (() => Promise<void>) | undefined }): Promise<ApiTeamInvitation> {
+  const normalizedEmail = teamEmail(input.email);
+  await options.beforeSend?.();
+  return await inBusiness(context, caller, async (tx) => {
+    const { invitationId } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: input.role });
+    await audit(tx, caller, { eventType: "api.team.invitation_created", entityType: "business_invitation", entityId: invitationId, payload: { role: input.role } });
+    const [row] = await tx.select(teamInvitationColumns).from(businessInvitations).where(eq(businessInvitations.id, invitationId)).limit(1);
+    return serializeTeamInvitation(row!);
+  });
+}
+
+export async function revokeTeamInvitationForApi(context: DomainContext, caller: ApiCaller, invitationId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    if (!await revokeInvitationInTransaction(tx, { businessId: caller.businessId, invitationId })) throw notFound("Invitation");
+    await audit(tx, caller, { eventType: "api.team.invitation_revoked", entityType: "business_invitation", entityId: invitationId });
+  });
+}
+
+export async function updateTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string, input: ApiTeamMemberUpdate): Promise<ApiTeamMember> {
+  return await inBusiness(context, caller, async (tx) => {
+    const current = await loadTeamMember(tx, caller.businessId, membershipId);
+    if (!current) throw notFound("Team member");
+    if (current.role === input.role) return current;
+    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role });
+    if (outcome === "not_found") throw notFound("Team member");
+    if (outcome === "final_owner") throw lastOwner();
+    await audit(tx, caller, { eventType: "api.team.member_updated", entityType: "business_membership", entityId: membershipId, payload: { role: input.role, previousRole: current.role } });
+    return (await loadTeamMember(tx, caller.businessId, membershipId))!;
+  });
+}
+
+export async function removeTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string): Promise<void> {
+  await inBusiness(context, caller, async (tx) => {
+    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
+    if (outcome === "not_found") throw notFound("Team member");
+    if (outcome === "final_owner") throw lastOwner();
+    await audit(tx, caller, { eventType: "api.team.member_removed", entityType: "business_membership", entityId: membershipId });
+  });
+}
+
+/**
+ * Hands the business over (D2): an owner invitation that also takes the
+ * account the caller acts as off the team once accepted, so that account must
+ * own the business. A new claim link revokes the open one.
+ */
+export async function createClaimLinkForApi(context: DomainContext, caller: ApiCaller, input: ApiClaimLinkCreate, options: { userId: string; beforeSend?: (() => Promise<void>) | undefined }): Promise<ApiClaimLink> {
+  const normalizedEmail = teamEmail(input.email);
+  const owns = async (tx: DatabaseTransaction) => (await tx.select({ role: businessMemberships.role }).from(businessMemberships).where(and(eq(businessMemberships.businessId, caller.businessId), eq(businessMemberships.userId, options.userId), eq(businessMemberships.status, "active"))).limit(1))[0]?.role === "business_owner";
+  const notOwner = () => conflict("Only an owner can hand the business over, and the account this key acts as doesn't own it.");
+  if (!await inBusiness(context, caller, owns)) throw notOwner();
+  await options.beforeSend?.();
+  return await inBusiness(context, caller, async (tx) => {
+    await lockBusinessTeam(tx, caller.businessId);
+    if (!await owns(tx)) throw notOwner();
+    await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, caller.businessId), eq(businessInvitations.status, "pending"), eq(businessInvitations.transfersOwnership, true)));
+    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: caller.businessId, invitedByUserId: options.userId, normalizedEmail, role: "business_owner", transfersOwnership: true });
+    await audit(tx, caller, { eventType: "api.team.claim_link_created", entityType: "business_invitation", entityId: invitationId });
+    const [row] = await tx.select(teamInvitationColumns).from(businessInvitations).where(eq(businessInvitations.id, invitationId)).limit(1);
+    return { invitation: serializeTeamInvitation(row!), url: invitationUrl(token) };
   });
 }
 

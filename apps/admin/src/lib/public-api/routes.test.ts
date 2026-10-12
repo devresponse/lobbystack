@@ -67,6 +67,12 @@ const domain = vi.hoisted(() => ({
   getOnboardingForApi: vi.fn(),
   updateOnboardingForApi: vi.fn(),
   completeOnboardingForApi: vi.fn(),
+  getTeamForApi: vi.fn(),
+  createTeamInvitationForApi: vi.fn(),
+  revokeTeamInvitationForApi: vi.fn(async () => undefined),
+  updateTeamMemberForApi: vi.fn(),
+  removeTeamMemberForApi: vi.fn(async () => undefined),
+  createClaimLinkForApi: vi.fn(),
   // Requests with an Idempotency-Key run the handler once, as the real store does for a new key.
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
@@ -81,6 +87,8 @@ vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
 vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret" }));
 vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: numbers.searchLimit }));
+const invites = vi.hoisted(() => ({ limit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })) }));
+vi.mock("../fixed-window-limit", () => ({ enforceFixedWindow: invites.limit, fixedWindowLimit: (...args: unknown[]) => args }));
 vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/errors")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
@@ -647,6 +655,69 @@ describe("onboarding", () => {
     expect((await complete({})).status).toBe(403);
     expect((await v1.updateOnboarding(call("/onboarding", { method: "PATCH", body: JSON.stringify({ skip_steps: [] }) }))).status).toBe(403);
     expect(domain.completeOnboardingForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("team", () => {
+  const actingUserId = "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f";
+  const membershipId = "8c2b7f4e-1d3a-4e5b-9c6d-0e1f2a3b4c5d";
+  const invitation = { id: "4e5f6a7b-8c9d-4e0f-a1b2-c3d4e5f6a7b8", email: "sam@example.com", role: "scheduler", status: "pending", transfers_ownership: false, expires_at: "2026-10-18T12:00:00.000Z", created_at: "2026-10-11T12:00:00.000Z" };
+  const post = (path: string, body: unknown, headers: Record<string, string> = { "Idempotency-Key": `key-${path}` }) => call(path, { method: "POST", headers, body: JSON.stringify(body) });
+  // As the domain does: the request is checked first, then beforeSend counts it.
+  const sends = async (...args: unknown[]) => { await (args[3] as { beforeSend?: () => Promise<void> }).beforeSend?.(); return invitation; };
+
+  it("reads the team", async () => {
+    const team = { members: [{ id: membershipId, user_id: actingUserId, name: "Sam", email: "sam@example.com", role: "business_owner", joined_at: "2026-10-11T12:00:00.000Z" }], invitations: [invitation] };
+    domain.getTeamForApi.mockResolvedValue(team);
+    expect(await (await v1.getTeam(call("/team"))).json()).toEqual({ data: team });
+  });
+
+  it("invites as the account the key acts as, within its invitation limit", async () => {
+    domain.createTeamInvitationForApi.mockImplementation(sends);
+    expect((await v1.createTeamInvitation(post("/team/invitations", { email: "sam@example.com", role: "scheduler" }, {}))).status).toBe(400);
+    const response = await v1.createTeamInvitation(post("/team/invitations", { email: "sam@example.com", role: "scheduler" }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toEqual({ data: invitation });
+    expect(domain.createTeamInvitationForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { email: "sam@example.com", role: "scheduler" }, { userId: actingUserId, beforeSend: expect.any(Function) });
+    expect(invites.limit).toHaveBeenCalledWith([["team-invite", "user-hour", actingUserId, 20, 3_600, "rate_limit_user_hour"]]);
+    invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_user_hour" });
+    const limited = await v1.createTeamInvitation(post("/team/invitations", { email: "kai@example.com", role: "viewer" }));
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    for (const bad of [{ email: "sam@example.com", role: "business_owner" }, { role: "viewer" }, { email: "sam@example.com", role: "viewer", name: "Sam" }]) {
+      expect((await v1.createTeamInvitation(post("/team/invitations", bad))).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.createTeamInvitationForApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("revokes invitations and changes or removes members by id", async () => {
+    const revoked = await v1.revokeTeamInvitation(call(`/team/invitations/${invitation.id}`, { method: "DELETE" }), { params: Promise.resolve({ invitation_id: invitation.id }) });
+    expect(await revoked.json()).toEqual({ data: { id: invitation.id, deleted: true } });
+    domain.updateTeamMemberForApi.mockResolvedValue({ id: membershipId, role: "viewer" });
+    expect((await v1.updateTeamMember(call(`/team/members/${membershipId}`, { method: "PATCH", body: JSON.stringify({ role: "viewer" }) }), { params: Promise.resolve({ membership_id: membershipId }) })).status).toBe(200);
+    expect(domain.updateTeamMemberForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), membershipId, { role: "viewer" });
+    expect((await v1.updateTeamMember(call(`/team/members/${membershipId}`, { method: "PATCH", body: JSON.stringify({ role: "business_owner" }) }), { params: Promise.resolve({ membership_id: membershipId }) })).status).toBe(400);
+    expect((await v1.removeTeamMember(call(`/team/members/${membershipId}`, { method: "DELETE" }), { params: Promise.resolve({ membership_id: membershipId }) })).status).toBe(200);
+    expect((await v1.removeTeamMember(call("/team/members/x", { method: "DELETE" }), { params: Promise.resolve({ membership_id: "x" }) })).status).toBe(400);
+    expect(domain.removeTeamMemberForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands the business over with a claim link, under the same limit", async () => {
+    domain.createClaimLinkForApi.mockImplementation(async (...args: unknown[]) => ({ invitation: { ...(await sends(...args)), role: "business_owner", transfers_ownership: true }, url: "https://app.example.com/accept-invite?token=t" }));
+    expect((await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }, {}))).status).toBe(400);
+    const response = await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }));
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({ data: { invitation: { role: "business_owner", transfers_ownership: true }, url: expect.stringContaining("accept-invite") } });
+    expect(domain.createClaimLinkForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { email: "owner@example.com" }, { userId: actingUserId, beforeSend: expect.any(Function) });
+    expect(invites.limit).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs team:manage", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write"] });
+    expect((await v1.getTeam(call("/team"))).status).toBe(403);
+    expect((await v1.createClaimLink(post("/team/claim-link", { email: "owner@example.com" }))).status).toBe(403);
+    expect(domain.getTeamForApi).not.toHaveBeenCalled();
+    expect(domain.createClaimLinkForApi).not.toHaveBeenCalled();
   });
 });
 

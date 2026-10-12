@@ -580,7 +580,8 @@
       "joinedOn": "A rejoint le {{date}}",
       "invitedOn": "Invité le {{date}}",
       "status": {
-        "pending": "En attente"
+        "pending": "En attente",
+        "handover": "Cède l'entreprise"
       },
       "actions": {
         "moreOptions": "Plus d'options",
@@ -900,6 +901,7 @@
       "knowledge_write": "Ajouter, modifier et supprimer des entrées de connaissances, des FAQ, des sites web et des fichiers",
       "billing_manage": "Voir le forfait, fixer le plafond de dépenses et lancer des paiements",
       "phone_numbers_manage": "Rechercher, acheter, remplacer et libérer des numéros de téléphone",
+      "team_manage": "Inviter et retirer des membres de l'équipe, changer les rôles et céder l'entreprise",
       "webhooks_manage": "Créer et supprimer des points de terminaison webhook"
     }
   },

@@ -580,7 +580,8 @@
       "joinedOn": "Joined on {{date}}",
       "invitedOn": "Invited on {{date}}",
       "status": {
-        "pending": "Pending"
+        "pending": "Pending",
+        "handover": "Hands over the business"
       },
       "actions": {
         "moreOptions": "More options",
@@ -900,6 +901,7 @@
       "knowledge_write": "Add, edit and delete knowledge entries, FAQs, websites and files",
       "billing_manage": "See the plan, set the spending cap and start checkouts",
       "phone_numbers_manage": "Find, buy, replace and release phone numbers",
+      "team_manage": "Invite and remove team members, change roles and hand the business over",
       "webhooks_manage": "Create and delete webhook endpoints"
     }
   },

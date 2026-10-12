@@ -580,7 +580,8 @@
       "joinedOn": "Se unió el {{date}}",
       "invitedOn": "Invitado el {{date}}",
       "status": {
-        "pending": "Pendiente"
+        "pending": "Pendiente",
+        "handover": "Entrega el negocio"
       },
       "actions": {
         "moreOptions": "Más opciones",
@@ -900,6 +901,7 @@
       "knowledge_write": "Agregar, editar y eliminar entradas de conocimiento, preguntas frecuentes, sitios web y archivos",
       "billing_manage": "Ver el plan, fijar el límite de gasto e iniciar pagos",
       "phone_numbers_manage": "Buscar, comprar, reemplazar y liberar números de teléfono",
+      "team_manage": "Invitar y quitar miembros del equipo, cambiar roles y entregar el negocio",
       "webhooks_manage": "Crear y eliminar endpoints de webhook"
     }
   },

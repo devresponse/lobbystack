@@ -173,6 +173,8 @@ export const businessInvitations = pgTable(
     tokenHash: text("token_hash").notNull(),
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    // A claim link: accepting it makes the invitee an owner and takes the inviter off the team.
+    transfersOwnership: boolean("transfers_ownership").default(false).notNull(),
     acceptedByUserId: uuid("accepted_by_user_id").references(() => users.id),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
     ...timestamps,

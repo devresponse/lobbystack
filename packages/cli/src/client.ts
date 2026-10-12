@@ -28,6 +28,7 @@ export type ClientOptions = {
   business?: string | undefined;
   fetch?: typeof fetch;
   timeoutMs?: number;
+  userAgent?: string;
 };
 
 export type Client = { call<Id extends ApiOperationId>(operationId: Id, ...args: CallArgs<Id>): Promise<ApiResponseBody<Id>> };
@@ -56,7 +57,7 @@ export function createClient(options: ClientOptions): Client {
       for (const [name, value] of Object.entries(input.query ?? {})) {
         if (value !== undefined) url.searchParams.set(name, String(value));
       }
-      const headers: Record<string, string> = { authorization: `Bearer ${options.key}`, accept: "application/json", "user-agent": "lobbystack-cli" };
+      const headers: Record<string, string> = { authorization: `Bearer ${options.key}`, accept: "application/json", "user-agent": options.userAgent ?? "lobbystack-cli" };
       // An operation that acts on no one business ignores the header, so it isn't sent.
       if (options.business && operation.business !== "none") headers[BUSINESS_HEADER] = options.business;
       if (input.idempotencyKey) headers["idempotency-key"] = input.idempotencyKey;

@@ -1,7 +1,7 @@
 /** Exit codes scripts can tell apart. */
 export const exitCodes = {
   ok: 0,
-  /** LobbyStack or the network failed, or the key hit a rate limit: trying again later may work. */
+  /** LobbyStack or the network failed, the work failed, or the key hit a rate limit: trying again later may work. */
   failed: 1,
   /** The command or its input is wrong. */
   invalid: 2,
@@ -13,6 +13,9 @@ export type ExitCode = (typeof exitCodes)[keyof typeof exitCodes];
 
 /** A failure to report as a message and an exit code, without a stack trace. */
 export class CliError extends Error {
+  /** The Idempotency-Key a retry should send, when the command made one up. */
+  idempotencyKey?: string;
+
   constructor(message: string, readonly exitCode: ExitCode = exitCodes.invalid) {
     super(message);
     this.name = "CliError";

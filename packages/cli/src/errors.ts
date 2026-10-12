@@ -7,6 +7,8 @@ export const exitCodes = {
   invalid: 2,
   /** The API key is missing or invalid, or isn't allowed to do this. */
   auth: 3,
+  /** It did all it could, and the rest waits on someone else, such as a payment: run it again once they're done. */
+  waiting: 4,
 } as const;
 
 export type ExitCode = (typeof exitCodes)[keyof typeof exitCodes];

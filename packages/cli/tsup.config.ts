@@ -9,10 +9,11 @@ export default defineConfig({
   platform: "node",
   target: "node26",
   bundle: true,
-  banner: { js: "#!/usr/bin/env node" },
+  // yaml ships CommonJS that requires Node's own modules, which an ES module bundle needs require for.
+  banner: { js: "#!/usr/bin/env node\nimport { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" },
   splitting: false,
   sourcemap: true,
   clean: true,
   treeshake: true,
-  noExternal: [/^@lobbystack\//, "zod"],
+  noExternal: [/^@lobbystack\//, "yaml", "zod"],
 });

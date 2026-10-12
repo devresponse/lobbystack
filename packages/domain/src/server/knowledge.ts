@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, ilike, lt, ne, sql } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { getKnowledgeStorageLimitBytes, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { FULL_CRAWL_PAGE_LIMIT, getKnowledgeStorageLimitBytes, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { buildBusinessContextSnapshot } from "../snapshot";
 import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
 
@@ -63,15 +63,8 @@ export function hashContent(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-/**
- * Onboarding reads enough of a site to make the agent recognisable and no more.
- * Most people who start onboarding never finish it, and every crawled page is
- * billed, so the full read waits until someone asks for it.
- */
-export const ONBOARDING_CRAWL_PAGE_LIMIT = 10;
-
-/** Matches the crawler's own default, used once someone asks for the full read. */
-export const FULL_CRAWL_PAGE_LIMIT = 50;
+// The API reports a website's page limit, so its clients tell a sample from a full read by these.
+export { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT };
 
 export async function createKnowledgeDocument(
   context: DomainContext,

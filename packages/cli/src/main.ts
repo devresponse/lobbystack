@@ -5,13 +5,14 @@ import { createClient } from "./client";
 import { businessId, commandHelp, globalOptions, stringValue, type Command, type Group, type Io, type Options, type Values } from "./command";
 import { groups } from "./commands";
 import { configPath, readConfig, resolveConnection } from "./config";
+import { onboard } from "./onboard";
 import { ApiError, CliError, exitCodes, type ExitCode } from "./errors";
 import type { Output } from "./output";
 import { userAgent, version } from "./version";
 
 export type { Io } from "./command";
 
-const accountCommands: Record<string, Command> = { login, logout, whoami, profiles };
+const accountCommands: Record<string, Command> = { login, logout, whoami, profiles, onboard };
 
 function list(entries: ReadonlyArray<readonly [string, string]>): string[] {
   const width = Math.max(...entries.map(([name]) => name.length));
@@ -39,6 +40,7 @@ function helpText(): string {
     "",
     "Exit codes: 0 done. 1 LobbyStack or the network failed, or a rate limit: try again later.",
     "2 the command or its input is wrong. 3 the API key is missing or invalid, or isn't allowed to do this.",
+    "4 not finished: the rest waits on someone else, such as a payment. Run it again once they're done.",
   ].join("\n");
 }
 
@@ -96,7 +98,7 @@ export async function main(io: Io): Promise<ExitCode> {
     }
     const path = configPath(io.env);
     const output: Output = { json, out: io.out, err: io.err };
-    await command.run({
+    const code = await command.run({
       io,
       output,
       values: parsed.values,
@@ -107,7 +109,7 @@ export async function main(io: Io): Promise<ExitCode> {
         return { connection, client: createClient({ url: connection.url, key: connection.key, business: connection.business, userAgent, ...(io.fetch ? { fetch: io.fetch } : {}) }) };
       },
     });
-    return exitCodes.ok;
+    return code ?? exitCodes.ok;
   } catch (error) {
     if (error instanceof CliError) {
       reportError(io, json, error);

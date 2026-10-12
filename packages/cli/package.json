@@ -14,7 +14,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@lobbystack/shared": "workspace:*"
+    "@lobbystack/shared": "workspace:*",
+    "yaml": "^2.9.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.0.0",

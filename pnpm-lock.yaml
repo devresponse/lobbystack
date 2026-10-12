@@ -568,6 +568,12 @@ importers:
       '@lobbystack/shared':
         specifier: workspace:*
         version: link:../shared
+      yaml:
+        specifier: ^2.9.0
+        version: 2.9.0
+      zod:
+        specifier: ^4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/node':
         specifier: ^26.0.0

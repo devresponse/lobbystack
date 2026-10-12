@@ -2,7 +2,7 @@ import { isUuid, type ApiOperationId } from "@lobbystack/shared";
 
 import type { Client } from "./client";
 import type { Connection } from "./config";
-import { CliError } from "./errors";
+import { CliError, type ExitCode } from "./errors";
 import type { Output } from "./output";
 
 /** What the command runs with. bin.ts passes the real process; tests pass fakes. */
@@ -12,6 +12,8 @@ export type Io = {
   out(text: string): void;
   err(text: string): void;
   readStdin?(): Promise<string>;
+  /** Asks a yes or no question in a terminal. Left out, or false, when nobody can answer. */
+  confirm?(question: string): Promise<boolean>;
   fetch?: typeof fetch;
   sleep?(milliseconds: number): Promise<void>;
 };
@@ -37,9 +39,12 @@ export type Command = {
   /** The positionals' help, in order. */
   arguments?: ReadonlyArray<{ name: string; description: string }>;
   options?: Options;
+  /** More about the command, which help shows after its flags. */
+  notes?: string;
   /** The API operations it calls, so a test can check every endpoint has a command. */
   operations?: readonly ApiOperationId[];
-  run(context: CommandContext): Promise<void>;
+  /** Returns an exit code only when it isn't 0. */
+  run(context: CommandContext): Promise<ExitCode | void>;
 };
 
 export type Group = { summary: string; commands: Record<string, Command> };
@@ -76,6 +81,7 @@ export function commandHelp(command: Command): string {
   const sections = [command.summary, `Usage: ${command.usage}`];
   if (command.arguments?.length) sections.push(`Arguments:\n${rows(command.arguments.map((argument) => [`<${argument.name}>`, argument.description] as const))}`);
   if (Object.keys(command.options ?? {}).length) sections.push(`Options:\n${optionRows(command.options!)}`);
+  if (command.notes) sections.push(command.notes);
   sections.push(`Options for every command:\n${optionRows(globalOptions)}`);
   return sections.join("\n\n");
 }

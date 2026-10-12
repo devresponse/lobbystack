@@ -113,6 +113,16 @@ export const PUBLIC_API_AVAILABILITY_MAX_DAYS = 7;
 export const KNOWLEDGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
+ * The pages a website's first crawl reads: enough of a site to make the agent
+ * recognisable and no more. Most people who start onboarding never finish it,
+ * and every crawled page is billed, so the full read waits until someone asks.
+ */
+export const ONBOARDING_CRAWL_PAGE_LIMIT = 10;
+
+/** The pages the full read takes, the crawler's own default. */
+export const FULL_CRAWL_PAGE_LIMIT = 50;
+
+/**
  * Seconds to wait before each retry after a failed delivery. The first attempt
  * is immediate; the schedule spans about 23 hours across 9 attempts.
  */

@@ -1,21 +1,18 @@
-import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
-import { basename, extname } from "node:path";
-
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, isUuid, weekdays, type ApiHoursWindow } from "@lobbystack/shared";
+import { isUuid, weekdays, type ApiHoursWindow } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
 import { readConfig, resolveConnection, writeConfig } from "./config";
 import { CliError, exitCodes } from "./errors";
-import { defaultSleep, operationCommand, showRecord, waitUntilDone, type Column, type OperationSpec, type WaitSpec } from "./operations";
+import { defaultSleep, operationCommand, showRecord, waitUntilDone, type Column, type OperationSpec, type Row } from "./operations";
 import { formatTable, print } from "./output";
+import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent } from "./version";
+import { checkoutWait, claimWait, sourceWait } from "./waits";
 
 // The command groups. Most commands are specs for operationCommand; the few
 // that need more than one call, or a file, are written out below.
 
-type Row = Record<string, unknown>;
 type Entry = OperationSpec | ((path: string) => Command);
 
 function group(name: string, summary: string, entries: Record<string, Entry>): [string, Group] {
@@ -27,26 +24,6 @@ function group(name: string, summary: string, entries: Record<string, Entry>): [
 }
 
 const columns = (...keys: string[]): Column[] => keys.map((key) => ({ key, label: key.replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase()) }));
-// The API's reason, without its full stop, so it reads inside a sentence.
-const reason = (data: Row) => (typeof data.error === "string" && data.error.trim() ? data.error.trim().replace(/\.$/, "") : "no reason was given");
-const claimWait: WaitSpec = {
-  operation: "getPhoneNumberClaim",
-  param: "claim_id",
-  done: (data) => data.status === "claimed" || data.status === "failed",
-  failed: (data) => (data.status === "failed" ? `The claim failed: ${reason(data)}. Search again for another number.` : undefined),
-};
-const checkoutWait: WaitSpec = {
-  operation: "getCheckout",
-  param: "checkout_id",
-  done: (data) => data.status === "ready" || data.status === "error",
-  failed: (data) => (data.status === "error" ? `Polar couldn't make the checkout page: ${reason(data)}. Start another checkout.` : undefined),
-};
-const sourceWait: WaitSpec = {
-  operation: "getKnowledgeSource",
-  param: "source_id",
-  done: (data) => !["pending", "processing"].includes(String(data.status)),
-  failed: (data) => (data.status === "error" ? `Reading it failed: ${reason(data)}.` : data.status === "cancelled" ? "Reading it was cancelled." : undefined),
-};
 
 const businessUse = (path: string): Command => ({
   summary: "Make a business the one this profile's commands act on.",
@@ -118,20 +95,6 @@ const hoursSet = (path: string): Command => {
   };
 };
 
-const uploadTypes: Record<string, string> = {
-  ".pdf": "application/pdf",
-  ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-  ".txt": "text/plain",
-  ".md": "text/markdown",
-  ".markdown": "text/markdown",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".png": "image/png",
-  ".webp": "image/webp",
-  ".tif": "image/tiff",
-  ".tiff": "image/tiff",
-};
-
 const knowledgeUpload = (path: string): Command => {
   const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--wait]`;
   return {
@@ -145,25 +108,12 @@ const knowledgeUpload = (path: string): Command => {
     operations: ["createKnowledgeUpload", "completeKnowledgeUpload", "getKnowledgeSource"],
     async run(context) {
       const { io, output, values, positionals } = context;
-      const [file, ...extra] = positionals;
-      if (!file || extra.length) throw new CliError(`Usage: ${usage}`);
-      const contentType = uploadTypes[extname(file).toLowerCase()];
-      if (!contentType) throw new CliError(`${basename(file)} isn't a type the receptionist reads. Upload a PDF, Word (.docx), text, Markdown, JPEG, PNG, WebP or TIFF file.`);
-      const size = await stat(file).then((info) => info.size, (error: Error) => { throw new CliError(`Couldn't read ${file}: ${error.message}`); });
-      if (size === 0 || size > KNOWLEDGE_UPLOAD_MAX_BYTES) throw new CliError(`${basename(file)} has to be between 1 byte and 10 MB.`);
-      const bytes = await readFile(file);
+      const [path, ...extra] = positionals;
+      if (!path || extra.length) throw new CliError(`Usage: ${usage}`);
+      const file = await readUploadFile(path);
       const { client, connection } = await context.connect();
-      const upload = (await client.call("createKnowledgeUpload", { body: { file_name: basename(file), content_type: contentType as never, length: bytes.length, checksum_sha256: createHash("sha256").update(bytes).digest("base64") } })).data;
-      // The upload URL is signed for this file: it gets the bytes, never the API key.
-      let stored: Response;
-      try {
-        stored = await (io.fetch ?? fetch)(new URL(upload.upload_url, connection.url), { method: "PUT", headers: upload.upload_headers, body: new Uint8Array(bytes), redirect: "error", signal: AbortSignal.timeout(5 * 60_000) });
-      } catch (error) {
-        throw new CliError(`Couldn't send ${basename(file)} to storage: ${(error as Error).message}`, exitCodes.failed);
-      }
-      if (!stored.ok) throw new CliError(`Storage refused ${basename(file)} with status ${stored.status}. Run the command again for a new upload.`, exitCodes.failed);
       const tags = values.tags === undefined ? undefined : (Array.isArray(values.tags) ? values.tags : [String(values.tags)]).flatMap((tag) => tag.split(",")).map((tag) => tag.trim()).filter(Boolean);
-      let source = (await client.call("completeKnowledgeUpload", { params: { upload_id: upload.upload_id }, body: { ...(typeof values.title === "string" ? { title: values.title } : {}), ...(tags ? { tags } : {}) } })).data as Row;
+      let source = await uploadKnowledgeFile(client, { baseUrl: connection.url, fetch: io.fetch ?? fetch, file, title: typeof values.title === "string" ? values.title : undefined, tags });
       if (values.wait === true) source = await waitUntilDone(client, sourceWait, source, io.sleep ?? defaultSleep);
       print(output, source, () => showRecord(source));
       const failure = values.wait === true ? sourceWait.failed(source) : undefined;

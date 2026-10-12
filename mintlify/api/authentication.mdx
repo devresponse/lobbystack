@@ -59,8 +59,8 @@ Each endpoint except `GET /me` requires one scope. A key without it gets `403` w
 
 | Scope | Allows |
 | --- | --- |
-| `business:read` | `GET /business`, `GET /services`, `GET /staff` |
-| `business:write` | `PATCH /business` |
+| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist` |
+| `business:write` | `PATCH /business`, `PATCH /receptionist` |
 | `calls:read` | `GET /calls`, `GET /calls/{call_id}` |
 | `contacts:read` | `GET /contacts`, `GET /contacts/{contact_id}` |
 | `contacts:write` | `POST /contacts`, `PATCH /contacts/{contact_id}` |

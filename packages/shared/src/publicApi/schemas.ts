@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { interfaceLocales } from "../locales";
+import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, transferModes } from "../receptionist";
 import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
@@ -81,7 +82,7 @@ export const apiBusinessSchema = z.object({
   website_url: z.string().nullable(),
   business_type: z.string().describe("What kind of business it is. The dashboard uses service_company."),
   onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
-  booking_mode: z.enum(["instant", "request", "off"]).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
+  booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
   created_at: timestamp,
   updated_at: timestamp,
@@ -95,6 +96,47 @@ export const apiBusinessUpdateSchema = z.strictObject({
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
 });
+
+const appointmentChangePolicyFields = {
+  enabled: z.boolean().describe("Whether callers can change their own appointments with the receptionist."),
+  allow_cancel: z.boolean(),
+  allow_reschedule: z.boolean(),
+  verification_mode: z.enum(appointmentChangeVerificationModes).describe("How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."),
+};
+
+const receptionistText = z.string().trim().min(1).max(RECEPTIONIST_TEXT_MAX_LENGTH);
+const receptionistInstructions = z.string().trim().min(1).max(RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH).nullable();
+
+export const apiReceptionistSchema = z.object({
+  greeting: z.string().describe("What the receptionist says when it answers."),
+  tone: z.string().describe("How it speaks, such as professional or warm."),
+  summary: z.string().describe("What it tells callers the business does. Calls leave it out while summary_source is placeholder."),
+  summary_source: z.enum(["placeholder", "generated", "operator"]).describe("placeholder: the default from sign-up. generated: written by AI from the business's knowledge. operator: written by a person or through the API, and AI never replaces it."),
+  booking_policy: z.string().describe("Rules it follows when it books."),
+  voice_instructions: z.string().nullable().describe("Extra instructions for calls."),
+  sms_instructions: z.string().nullable().describe("Extra instructions for text messages."),
+  chat_instructions: z.string().nullable().describe("Extra instructions for website chat."),
+  transfer_mode: z.enum(transferModes).describe("When it puts a caller through to transfer_number: never, always, on_request, on_urgent or during_business_hours."),
+  transfer_number: z.string().nullable().describe("Where it transfers calls, in E.164 format. A number saved before that was required may be in another format. With no number, it never transfers."),
+  booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
+  appointment_change_policy: z.object(appointmentChangePolicyFields).describe("Whether callers can cancel or reschedule their own appointments, and how they prove it's theirs."),
+  updated_at: timestamp,
+}).describe("How the receptionist answers, what it says about the business, and what it may do.");
+
+export const apiReceptionistUpdateSchema = z.strictObject({
+  greeting: receptionistText.optional(),
+  tone: receptionistText.optional(),
+  summary: receptionistText.optional().describe("AI never rewrites a summary set here."),
+  regenerate_summary: z.literal(true).optional().describe("Hands the summary back to AI, which rewrites it from the business's knowledge. Can't be sent with summary."),
+  booking_policy: receptionistText.optional(),
+  voice_instructions: receptionistInstructions.optional().describe("null removes them."),
+  sms_instructions: receptionistInstructions.optional().describe("null removes them."),
+  chat_instructions: receptionistInstructions.optional().describe("null removes them."),
+  transfer_mode: z.enum(transferModes).optional(),
+  transfer_number: e164.nullable().optional().describe("null removes it, which stops transfers."),
+  booking_mode: z.enum(bookingModes).optional(),
+  appointment_change_policy: z.strictObject(appointmentChangePolicyFields).optional().describe("Send all four fields."),
+}).refine((value) => value.summary === undefined || value.regenerate_summary === undefined, { message: "Send summary or regenerate_summary, not both.", path: ["regenerate_summary"] });
 
 export const apiBusinessCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200),
@@ -387,6 +429,8 @@ export type ApiBusinessUpdate = z.infer<typeof apiBusinessUpdateSchema>;
 export type ApiBusinessCreate = z.infer<typeof apiBusinessCreateSchema>;
 export type ApiBusinessSummary = z.infer<typeof apiBusinessSummarySchema>;
 export type ApiHoursWindow = z.infer<typeof apiHoursWindowSchema>;
+export type ApiReceptionist = z.infer<typeof apiReceptionistSchema>;
+export type ApiReceptionistUpdate = z.infer<typeof apiReceptionistUpdateSchema>;
 export type ApiService = z.infer<typeof apiServiceSchema>;
 export type ApiStaff = z.infer<typeof apiStaffSchema>;
 export type ApiCall = z.infer<typeof apiCallSchema>;

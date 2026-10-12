@@ -7,6 +7,7 @@ import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarCo
 import {
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   isApiKeyScope,
+  normalizeAppointmentChangePolicy,
   normalizeBookingMode,
   weekdays,
   type ApiAppointment,
@@ -32,6 +33,8 @@ import {
   type ApiKnowledgeUploadCreate,
   type ApiMe,
   type ApiMessage,
+  type ApiReceptionist,
+  type ApiReceptionistUpdate,
   type ApiService,
   type ApiStaff,
 } from "@lobbystack/shared";
@@ -45,6 +48,7 @@ import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
+import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
 import { ianaTimeZone, insertBusinessInTransaction, updateBusinessInTransaction } from "../tenancy";
 import { conflict, invalidRequest, notFound, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
@@ -70,6 +74,7 @@ import {
   pageSize,
   serializeContact,
   serializeKnowledgeEntry,
+  serializeReceptionist,
   toPage,
   type Page,
   type PageRequest,
@@ -225,6 +230,76 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
     const business = await loadBusinessResource(tx, caller.businessId);
     if (!business) throw notFound("Business");
     return business;
+  });
+}
+
+// Receptionist settings
+
+const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiReceptionistUpdate> = {
+  greeting: "greeting",
+  tone: "tone",
+  summary: "summary",
+  bookingPolicy: "booking_policy",
+  voiceInstructions: "voice_instructions",
+  smsInstructions: "sms_instructions",
+  chatInstructions: "chat_instructions",
+  transferMode: "transfer_mode",
+  transferNumber: "transfer_number",
+  appointmentChangePolicy: "appointment_change_policy",
+  bookingMode: "booking_mode",
+};
+
+/** The business's receptionist row, or the defaults it would be saved with when it has none yet. */
+async function loadReceptionistState(tx: DatabaseTransaction, businessId: string, lock: boolean) {
+  const [business] = await tx.select({ name: businesses.name, updatedAt: businesses.updatedAt }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  if (!business) throw notFound("Business");
+  const query = tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = lock ? await query.for("update") : await query;
+  return { business, profile: profile ?? null, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
+}
+
+export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
+  return await inBusiness(context, caller, async (tx) => serializeReceptionist((await loadReceptionistState(tx, caller.businessId, false)).shown));
+}
+
+/**
+ * Changes the fields sent. Values the receptionist already has change nothing,
+ * so an unchanged receptionist isn't written, audited or refreshed. Sending a
+ * summary makes it the business's own, so AI won't replace it, even when the
+ * text is the same.
+ */
+export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate): Promise<ApiReceptionist> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const { business, profile: current, shown } = await loadReceptionistState(tx, caller.businessId, true);
+    const policy = input.appointment_change_policy;
+    const requested: ReceptionistProfilePatch = {
+      ...(input.greeting !== undefined ? { greeting: input.greeting } : {}),
+      ...(input.tone !== undefined ? { tone: input.tone } : {}),
+      ...(input.summary !== undefined ? { summary: input.summary } : {}),
+      ...(input.booking_policy !== undefined ? { bookingPolicy: input.booking_policy } : {}),
+      ...(input.voice_instructions !== undefined ? { voiceInstructions: input.voice_instructions } : {}),
+      ...(input.sms_instructions !== undefined ? { smsInstructions: input.sms_instructions } : {}),
+      ...(input.chat_instructions !== undefined ? { chatInstructions: input.chat_instructions } : {}),
+      ...(input.transfer_mode !== undefined ? { transferMode: input.transfer_mode } : {}),
+      ...(input.transfer_number !== undefined ? { transferNumber: input.transfer_number } : {}),
+      ...(input.booking_mode !== undefined ? { bookingMode: input.booking_mode } : {}),
+      ...(policy ? { appointmentChangePolicy: { enabled: policy.enabled, allowCancel: policy.allow_cancel, allowReschedule: policy.allow_reschedule, verificationMode: policy.verification_mode } } : {}),
+    };
+    const unchanged = (field: keyof ReceptionistProfilePatch): boolean => {
+      if (!current) return false;
+      if (field === "summary") return requested.summary === current.summary && current.summarySource === "operator";
+      if (field === "appointmentChangePolicy") return JSON.stringify(requested.appointmentChangePolicy) === JSON.stringify(normalizeAppointmentChangePolicy(current.appointmentChangePolicy));
+      return requested[field] === current[field];
+    };
+    const patch = Object.fromEntries(Object.entries(requested).filter(([field]) => !unchanged(field as keyof ReceptionistProfilePatch))) as ReceptionistProfilePatch;
+    const regenerateSummary = input.regenerate_summary === true;
+    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(shown);
+    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, businessName: business.name, patch, regenerateSummary });
+    if (!profile) throw new Error("The receptionist settings could not be saved.");
+    const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
+    await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });
+    return serializeReceptionist(profile);
   });
 }
 
@@ -579,6 +654,7 @@ export async function getKnowledgeEntryForApi(context: DomainContext, caller: Ap
  * the entry's own, and an FAQ keeps the tag that makes it an FAQ.
  */
 export async function updateKnowledgeEntryForApi(context: DomainContext, caller: ApiCaller, entryId: string, input: ApiKnowledgeEntryUpdate): Promise<ApiKnowledgeEntry> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     const [current] = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, caller.businessId), eq(knowledgeSnippets.id, entryId))).limit(1).for("update");
     if (!current) throw notFound("Knowledge entry");

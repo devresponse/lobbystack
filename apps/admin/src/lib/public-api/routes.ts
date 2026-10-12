@@ -20,6 +20,7 @@ import {
   getKnowledgeSourceForApi,
   getMeForApi,
   getPlatformMeForApi,
+  getReceptionistForApi,
   getCallForApi,
   getContactForApi,
   getWebhookEndpoint,
@@ -42,6 +43,7 @@ import {
   updateContactForApi,
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
+  updateReceptionistForApi,
   updateWebhookEndpoint,
   type WebhookEndpointDetail,
   type WebhookManager,
@@ -59,6 +61,7 @@ import {
   apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
   apiKnowledgeUploadCreateSchema,
+  apiReceptionistUpdateSchema,
   apiWebhookEndpointCreateSchema,
   apiWebhookEndpointUpdateSchema,
   webhookEventScope,
@@ -126,6 +129,8 @@ export const v1 = {
     return { body: data(result.business), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
   }),
   listBusinesses: (request: Request) => handleApiRequest(request, "listBusinesses", async ({ context, credential }) => ({ body: await listBusinessesForApi(context, { partnerId: credential.partnerId, ...pageQuery(request) }) })),
+  getReceptionist: (request: Request) => handleApiRequest(request, "getReceptionist", async ({ context, caller }) => ({ body: data(await getReceptionistForApi(context, caller)) })),
+  updateReceptionist: (request: Request) => handleApiRequest(request, "updateReceptionist", async ({ context, caller }) => ({ body: data(await updateReceptionistForApi(context, caller, await readApiBody(request, apiReceptionistUpdateSchema))) })),
   listServices: (request: Request) => handleApiRequest(request, "listServices", async ({ context, caller }) => ({ body: { data: await listServicesForApi(context, caller), next_cursor: null, has_more: false } })),
   listStaff: (request: Request) => handleApiRequest(request, "listStaff", async ({ context, caller }) => ({ body: { data: await listStaffForApi(context, caller), next_cursor: null, has_more: false } })),
 

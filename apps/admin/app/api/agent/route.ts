@@ -1,67 +1,11 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { updateBusinessInTransaction } from "@lobbystack/domain";
-import { businesses, enqueueOutbox, receptionistProfiles } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, type AppointmentChangePolicy, type BookingMode } from "@lobbystack/shared";
+import { readReceptionistSettingsChange, saveReceptionistProfileInTransaction, updateBusinessInTransaction } from "@lobbystack/domain";
+import { businesses, receptionistProfiles } from "@lobbystack/db";
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
-
-const profileFields = [
-  "greeting",
-  "tone",
-  "summary",
-  "bookingPolicy",
-  "voiceInstructions",
-  "smsInstructions",
-  "chatInstructions",
-  "transferMode",
-  "transferNumber",
-] as const;
-
-type ProfileField = (typeof profileFields)[number];
-type ProfilePatch = Partial<Record<"greeting" | "tone" | "summary" | "bookingPolicy" | "transferMode", string>> &
-  Partial<Record<"voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferNumber", string | null>> &
-  { appointmentChangePolicy?: AppointmentChangePolicy; bookingMode?: BookingMode };
-
-function appointmentPolicy(value: unknown): AppointmentChangePolicy | undefined {
-  if (value === undefined) return undefined;
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw jsonError("appointmentChangePolicy is invalid.");
-  const policy = value as Record<string, unknown>;
-  if (typeof policy.enabled !== "boolean" || typeof policy.allowCancel !== "boolean" || typeof policy.allowReschedule !== "boolean" || !["phone_match_and_facts", "otp_required", "operator_only"].includes(String(policy.verificationMode))) throw jsonError("appointmentChangePolicy is invalid.");
-  return { enabled: policy.enabled, allowCancel: policy.allowCancel, allowReschedule: policy.allowReschedule, verificationMode: policy.verificationMode as AppointmentChangePolicy["verificationMode"] };
-}
-
-function optionalText(value: unknown, field: string, maxLength: number): string | null | undefined {
-  if (value === undefined) return undefined;
-  if (value === null) return null;
-  if (typeof value !== "string") throw jsonError(`${field} must be a string.`);
-  const normalized = value.trim();
-  if (!normalized || normalized.length > maxLength) throw jsonError(`${field} is invalid.`);
-  return normalized;
-}
-
-function readProfilePatch(body: Record<string, unknown>): ProfilePatch {
-  const patch: Partial<Record<ProfileField, string | null | undefined>> = {};
-  for (const field of profileFields) {
-    if (!(field in body)) continue;
-    const maxLength = field === "voiceInstructions" || field === "smsInstructions" || field === "chatInstructions" ? 8_000 : 2_000;
-    const value = optionalText(body[field], field, maxLength);
-    if (value === null && !["voiceInstructions", "smsInstructions", "chatInstructions", "transferNumber"].includes(field)) {
-      throw jsonError(`${field} cannot be empty.`);
-    }
-    if (value !== undefined) patch[field] = value;
-  }
-
-  if (patch.transferMode !== undefined && !["never", "always", "on_request", "on_urgent", "during_business_hours"].includes(patch.transferMode ?? "")) {
-    throw jsonError("transferMode is invalid.");
-  }
-  const policy = appointmentPolicy(body.appointmentChangePolicy);
-  const bookingMode = body.bookingMode;
-  if (bookingMode !== undefined && bookingMode !== "off" && bookingMode !== "request" && bookingMode !== "instant") throw jsonError("bookingMode is invalid.");
-  return { ...patch, ...(policy !== undefined ? { appointmentChangePolicy: policy } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}) } as ProfilePatch;
-}
 
 export async function GET(request: Request) {
   try {
@@ -80,22 +24,8 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
-      const body = await readJson(request);
-      if (typeof body !== "object" || body === null || Array.isArray(body)) {
-        throw jsonError("A profile object is required.");
-      }
-      const patch = readProfilePatch(body as Record<string, unknown>);
-      const locale = (body as Record<string, unknown>).locale;
-      if (locale !== undefined && locale !== "en" && locale !== "fr") throw jsonError("locale is invalid.");
-      const timezone = (body as Record<string, unknown>).timezone;
-      if (timezone !== undefined && typeof timezone !== "string") throw jsonError("timezone must be a string.");
-      // Hands the summary back to AI, which rewrites it from the knowledge sources.
-      const regenerateSummary = (body as Record<string, unknown>).regenerateSummary;
-      if (regenerateSummary !== undefined && regenerateSummary !== true) throw jsonError("regenerateSummary must be true.");
-      if (regenerateSummary && patch.summary !== undefined) throw jsonError("Send summary or regenerateSummary, not both.");
-      if (Object.keys(patch).length === 0 && locale === undefined && timezone === undefined && !regenerateSummary) {
-        throw jsonError("At least one profile field is required.");
-      }
+      // The field rules live in the domain, which the v1 API shares.
+      const { patch, locale, timezone, regenerateSummary } = readReceptionistSettingsChange(await readJson(request));
 
       const business = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
       if (!business) throw jsonError("Business not found.", 404);
@@ -105,45 +35,8 @@ export async function PATCH(request: Request) {
         await updateBusinessInTransaction(tx, { businessId, ...(locale !== undefined ? { defaultLocale: locale } : {}), ...(timezone !== undefined ? { timezone } : {}) });
       }
 
-      const [profile] = await tx.insert(receptionistProfiles).values({
-        businessId,
-        greeting: patch.greeting ?? `Thank you for calling ${business.name}.`,
-        tone: patch.tone ?? "professional",
-        summary: patch.summary ?? business.name,
-        // A summary a person writes is never replaced by AI.
-        summarySource: patch.summary !== undefined ? "operator" : "placeholder",
-        bookingPolicy: patch.bookingPolicy ?? "Confirm availability before booking.",
-        ...(patch.voiceInstructions !== undefined ? { voiceInstructions: patch.voiceInstructions } : {}),
-        ...(patch.smsInstructions !== undefined ? { smsInstructions: patch.smsInstructions } : {}),
-        ...(patch.chatInstructions !== undefined ? { chatInstructions: patch.chatInstructions } : {}),
-        transferMode: patch.transferMode ?? "on_request",
-        ...(patch.transferNumber !== undefined ? { transferNumber: patch.transferNumber } : {}),
-        appointmentChangePolicy: patch.appointmentChangePolicy ?? defaultAppointmentChangePolicy,
-        ...(patch.bookingMode !== undefined ? { bookingMode: patch.bookingMode } : {}),
-      }).onConflictDoUpdate({
-        target: receptionistProfiles.businessId,
-        set: { ...patch, ...(patch.summary !== undefined ? { summarySource: "operator" as const } : {}), ...(regenerateSummary ? { summarySource: "generated" as const } : {}), updatedAt: new Date() },
-      }).returning();
-
+      const profile = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: business.name, patch, regenerateSummary });
       if (!profile) throw jsonError("Receptionist profile could not be saved.", 500);
-      await enqueueOutbox(tx, {
-        topic: "snapshot.refresh",
-        businessId,
-        aggregateType: "receptionist_profile",
-        aggregateId: profile.id,
-        dedupeKey: `snapshot:${businessId}:profile:${profile.updatedAt.toISOString()}`,
-        payload: { businessId },
-      });
-      if (regenerateSummary) {
-        await enqueueOutbox(tx, {
-          topic: "business.generateSummary",
-          businessId,
-          aggregateType: "business",
-          aggregateId: businessId,
-          dedupeKey: `business-summary:${businessId}:regenerate:${Date.now()}`,
-          payload: { businessId, reason: "operator_regenerate", force: true },
-        });
-      }
       return { profile };
     }, { minimumRole: "business_admin" }));
   } catch (error) {

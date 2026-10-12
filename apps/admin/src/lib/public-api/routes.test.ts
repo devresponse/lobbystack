@@ -34,6 +34,8 @@ const domain = vi.hoisted(() => ({
   getKnowledgeSourceForApi: vi.fn(),
   updateKnowledgeSourceForApi: vi.fn(),
   deleteKnowledgeSourceForApi: vi.fn(async () => undefined),
+  getReceptionistForApi: vi.fn(),
+  updateReceptionistForApi: vi.fn(),
   listKnowledgeEntriesForApi: vi.fn(),
   getKnowledgeEntryForApi: vi.fn(),
   updateKnowledgeEntryForApi: vi.fn(),
@@ -343,6 +345,37 @@ describe("knowledge entries", () => {
     expect(domain.listKnowledgeEntriesForApi).not.toHaveBeenCalled();
     expect(domain.getKnowledgeSourceForApi).not.toHaveBeenCalled();
     expect(domain.deleteKnowledgeEntryForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("receptionist settings", () => {
+  const receptionist = { greeting: "Hi", tone: "warm", summary: "Maple", summary_source: "operator", booking_policy: "Book", voice_instructions: null, sms_instructions: null, chat_instructions: null, transfer_mode: "never", transfer_number: null, booking_mode: "instant", appointment_change_policy: { enabled: true, allow_cancel: true, allow_reschedule: true, verification_mode: "phone_match_and_facts" }, updated_at: "2026-10-11T12:00:00.000Z" };
+
+  it("reads the settings", async () => {
+    domain.getReceptionistForApi.mockResolvedValue(receptionist);
+    const response = await v1.getReceptionist(call("/receptionist"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: receptionist });
+  });
+
+  it("passes the checked fields through and refuses anything the dashboard would refuse", async () => {
+    domain.updateReceptionistForApi.mockResolvedValue({ ...receptionist, greeting: "Hello." });
+    const response = await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify({ greeting: " Hello. ", booking_mode: "request", transfer_number: "+14165550134" }) }));
+    expect(response.status).toBe(200);
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { greeting: "Hello.", booking_mode: "request", transfer_number: "+14165550134" });
+    for (const bad of [{ transfer_mode: "sometimes" }, { summary: "Mine.", regenerate_summary: true }, { greeting: "" }, { appointment_change_policy: { enabled: false } }, { locale: "fr" }]) {
+      expect((await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify(bad) }))).status).toBe(400);
+    }
+    expect(domain.updateReceptionistForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs business:read to read and business:write to change", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.updateReceptionist(call("/receptionist", { method: "PATCH", body: JSON.stringify({ greeting: "Hello." }) }))).status).toBe(403);
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write"] });
+    expect((await v1.getReceptionist(call("/receptionist"))).status).toBe(403);
+    expect(domain.updateReceptionistForApi).not.toHaveBeenCalled();
+    expect(domain.getReceptionistForApi).not.toHaveBeenCalled();
   });
 });
 

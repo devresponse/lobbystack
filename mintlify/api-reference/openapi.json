@@ -20,6 +20,9 @@
       "name": "Business"
     },
     {
+      "name": "Receptionist"
+    },
+    {
       "name": "Calls"
     },
     {
@@ -587,6 +590,234 @@
           },
           "403": {
             "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/receptionist": {
+      "get": {
+        "operationId": "getReceptionist",
+        "summary": "Get the receptionist settings",
+        "description": "How the receptionist greets callers, what it says about the business, when it transfers calls and what it may book.",
+        "tags": [
+          "Receptionist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Receptionist"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updateReceptionist",
+        "summary": "Update the receptionist settings",
+        "description": "Changes the fields sent and leaves the rest. Calls and chats pick up the change once the business snapshot refreshes. The business default caller language is locale on PATCH /business.",
+        "tags": [
+          "Receptionist"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReceptionistUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Receptionist"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5946,9 +6177,9 @@
           "booking_mode": {
             "type": "string",
             "enum": [
-              "instant",
+              "off",
               "request",
-              "off"
+              "instant"
             ],
             "description": "instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."
           },
@@ -7022,6 +7253,272 @@
           "created_at",
           "updated_at"
         ],
+        "additionalProperties": false
+      },
+      "Receptionist": {
+        "type": "object",
+        "properties": {
+          "greeting": {
+            "type": "string",
+            "description": "What the receptionist says when it answers."
+          },
+          "tone": {
+            "type": "string",
+            "description": "How it speaks, such as professional or warm."
+          },
+          "summary": {
+            "type": "string",
+            "description": "What it tells callers the business does. Calls leave it out while summary_source is placeholder."
+          },
+          "summary_source": {
+            "type": "string",
+            "enum": [
+              "placeholder",
+              "generated",
+              "operator"
+            ],
+            "description": "placeholder: the default from sign-up. generated: written by AI from the business's knowledge. operator: written by a person or through the API, and AI never replaces it."
+          },
+          "booking_policy": {
+            "type": "string",
+            "description": "Rules it follows when it books."
+          },
+          "voice_instructions": {
+            "description": "Extra instructions for calls.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sms_instructions": {
+            "description": "Extra instructions for text messages.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "chat_instructions": {
+            "description": "Extra instructions for website chat.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "transfer_mode": {
+            "type": "string",
+            "enum": [
+              "never",
+              "always",
+              "on_request",
+              "on_urgent",
+              "during_business_hours"
+            ],
+            "description": "When it puts a caller through to transfer_number: never, always, on_request, on_urgent or during_business_hours."
+          },
+          "transfer_number": {
+            "description": "Where it transfers calls, in E.164 format. A number saved before that was required may be in another format. With no number, it never transfers.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "booking_mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "request",
+              "instant"
+            ],
+            "description": "instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."
+          },
+          "appointment_change_policy": {
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether callers can change their own appointments with the receptionist."
+              },
+              "allow_cancel": {
+                "type": "boolean"
+              },
+              "allow_reschedule": {
+                "type": "boolean"
+              },
+              "verification_mode": {
+                "type": "string",
+                "enum": [
+                  "phone_match_and_facts",
+                  "otp_required",
+                  "operator_only"
+                ],
+                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."
+              }
+            },
+            "required": [
+              "enabled",
+              "allow_cancel",
+              "allow_reschedule",
+              "verification_mode"
+            ],
+            "additionalProperties": false,
+            "description": "Whether callers can cancel or reschedule their own appointments, and how they prove it's theirs."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          }
+        },
+        "required": [
+          "greeting",
+          "tone",
+          "summary",
+          "summary_source",
+          "booking_policy",
+          "voice_instructions",
+          "sms_instructions",
+          "chat_instructions",
+          "transfer_mode",
+          "transfer_number",
+          "booking_mode",
+          "appointment_change_policy",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "How the receptionist answers, what it says about the business, and what it may do."
+      },
+      "ReceptionistUpdate": {
+        "type": "object",
+        "properties": {
+          "greeting": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "tone": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "summary": {
+            "description": "AI never rewrites a summary set here.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "regenerate_summary": {
+            "description": "Hands the summary back to AI, which rewrites it from the business's knowledge. Can't be sent with summary.",
+            "type": "boolean",
+            "const": true
+          },
+          "booking_policy": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "voice_instructions": {
+            "description": "null removes them.",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sms_instructions": {
+            "description": "null removes them.",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "chat_instructions": {
+            "description": "null removes them.",
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transfer_mode": {
+            "type": "string",
+            "enum": [
+              "never",
+              "always",
+              "on_request",
+              "on_urgent",
+              "during_business_hours"
+            ]
+          },
+          "transfer_number": {
+            "description": "null removes it, which stops transfers.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^\\+[1-9]\\d{6,14}$",
+                "description": "Phone number in E.164 format."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "booking_mode": {
+            "type": "string",
+            "enum": [
+              "off",
+              "request",
+              "instant"
+            ]
+          },
+          "appointment_change_policy": {
+            "description": "Send all four fields.",
+            "type": "object",
+            "properties": {
+              "enabled": {
+                "type": "boolean",
+                "description": "Whether callers can change their own appointments with the receptionist."
+              },
+              "allow_cancel": {
+                "type": "boolean"
+              },
+              "allow_reschedule": {
+                "type": "boolean"
+              },
+              "verification_mode": {
+                "type": "string",
+                "enum": [
+                  "phone_match_and_facts",
+                  "otp_required",
+                  "operator_only"
+                ],
+                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."
+              }
+            },
+            "required": [
+              "enabled",
+              "allow_cancel",
+              "allow_reschedule",
+              "verification_mode"
+            ],
+            "additionalProperties": false
+          }
+        },
         "additionalProperties": false
       },
       "KnowledgeEntry": {

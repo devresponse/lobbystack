@@ -4,6 +4,8 @@ export { isMaintenanceMode } from "./maintenance";
 export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, normalizeInterfaceLocale } from "./locales";
 export type { InterfaceLocale } from "./locales";
 import { interfaceLocales, type InterfaceLocale } from "./locales";
+import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
+export * from "./receptionist";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";
@@ -84,14 +86,11 @@ export type ServiceSummary = {
 };
 
 export type TransferPolicy = {
-  mode: "never" | "always" | "on_request" | "on_urgent" | "during_business_hours";
+  mode: (typeof transferModes)[number];
   transferNumber?: string;
 };
 
-export type AppointmentChangeVerificationMode =
-  | "phone_match_and_facts"
-  | "otp_required"
-  | "operator_only";
+export type AppointmentChangeVerificationMode = (typeof appointmentChangeVerificationModes)[number];
 
 export type AppointmentChangePolicy = {
   enabled: boolean;
@@ -111,7 +110,7 @@ export const defaultAppointmentChangePolicy: AppointmentChangePolicy = {
 export function normalizeAppointmentChangePolicy(value: unknown): AppointmentChangePolicy {
   if (value == null) return { ...defaultAppointmentChangePolicy };
   const policy = value as Partial<AppointmentChangePolicy>;
-  if (typeof policy.enabled === "boolean" && typeof policy.allowCancel === "boolean" && typeof policy.allowReschedule === "boolean" && ["phone_match_and_facts", "otp_required", "operator_only"].includes(policy.verificationMode ?? "")) {
+  if (typeof policy.enabled === "boolean" && typeof policy.allowCancel === "boolean" && typeof policy.allowReschedule === "boolean" && (appointmentChangeVerificationModes as readonly string[]).includes(policy.verificationMode ?? "")) {
     return { enabled: policy.enabled, allowCancel: policy.allowCancel, allowReschedule: policy.allowReschedule, verificationMode: policy.verificationMode! };
   }
   return { enabled: false, allowCancel: false, allowReschedule: false, verificationMode: "operator_only" };
@@ -133,11 +132,11 @@ export type AgentRuleSummary = {
 };
 
 /** How the agent handles appointment requests. */
-export type BookingMode = "off" | "request" | "instant";
+export type BookingMode = (typeof bookingModes)[number];
 
 /** Unknown or missing values keep today's behavior: book directly. */
 export function normalizeBookingMode(value: string | null | undefined): BookingMode {
-  return value === "off" || value === "request" ? value : "instant";
+  return (bookingModes as readonly string[]).includes(value ?? "") ? value as BookingMode : "instant";
 }
 
 export type BusinessContextSnapshot = {

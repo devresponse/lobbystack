@@ -5,14 +5,14 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { apiKeys, appointments, auditLogs, businessHours, businesses, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, operatorNotificationDeliveries, outboxMessages, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { apiAppointmentSchema, apiBusinessSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiReceptionistSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, type ApiKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, completeKnowledgeUploadForApi, createAppointmentForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listStaffForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateReceptionistForApi, type ApiKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
 import { encryptWebhookSecret } from "./webhookTransport";
@@ -495,6 +495,64 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(business).toEqual({ websiteUrl: "https://birch-api.example/", stage: "knowledge" });
   });
 
+  it("reads and changes the receptionist, refreshing the snapshot only when something changes", async () => {
+    const context = { db: worker!.db };
+    const before = await getReceptionistForApi(context, a.caller);
+    expect(before).toMatchObject({ greeting: "Hi", tone: "warm", booking_policy: "Book", transfer_mode: "never", booking_mode: "instant", appointment_change_policy: { enabled: true, allow_cancel: true, allow_reschedule: true, verification_mode: "phone_match_and_facts" } });
+    expect(apiReceptionistSchema.safeParse(before).success).toBe(true);
+    const [profile] = await admin!.db.select({ id: receptionistProfiles.id }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, a.businessId));
+    const refreshes = async () => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateId, profile!.id)))).length;
+    const audits = async () => await admin!.db.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.entityId, profile!.id), eq(auditLogs.eventType, "api.receptionist.updated")));
+    const savedAt = async () => (await admin!.db.select({ at: receptionistProfiles.updatedAt }).from(receptionistProfiles).where(eq(receptionistProfiles.id, profile!.id)))[0]!.at.getTime();
+    const baseline = await refreshes();
+    // No policy is stored, which calls read as the default, so sending the default changes nothing.
+    await updateReceptionistForApi(context, a.caller, { appointment_change_policy: before.appointment_change_policy });
+    expect(await refreshes()).toBe(baseline);
+    expect(await audits()).toEqual([]);
+    await expectApiError(updateReceptionistForApi(context, a.caller, {}), 400, "invalid_request");
+
+    const policy = { enabled: true, allow_cancel: false, allow_reschedule: true, verification_mode: "otp_required" as const };
+    const updated = await updateReceptionistForApi(context, a.caller, { greeting: "Welcome to Maple.", voice_instructions: "Speak slowly.", transfer_mode: "on_request", transfer_number: "+14165550134", appointment_change_policy: policy });
+    expect(updated).toMatchObject({ greeting: "Welcome to Maple.", tone: "warm", voice_instructions: "Speak slowly.", transfer_mode: "on_request", transfer_number: "+14165550134", appointment_change_policy: policy });
+    expect(await refreshes()).toBe(baseline + 1);
+    expect(await audits()).toEqual([{ payload: expect.objectContaining({ fields: ["greeting", "voice_instructions", "transfer_mode", "transfer_number", "appointment_change_policy"] }) }]);
+    // Sending what it already has writes, audits and refreshes nothing.
+    const written = await savedAt();
+    await updateReceptionistForApi(context, a.caller, { greeting: "Welcome to Maple.", appointment_change_policy: policy });
+    expect(await refreshes()).toBe(baseline + 1);
+    expect(await audits()).toHaveLength(1);
+    expect(await savedAt()).toBe(written);
+    expect(await updateReceptionistForApi(context, a.caller, { voice_instructions: null, transfer_number: null })).toMatchObject({ voice_instructions: null, transfer_number: null });
+
+    // Sending the summary it already has still makes it the business's own, so AI won't replace it.
+    await admin!.db.update(receptionistProfiles).set({ summary: "Maple cuts hair.", summarySource: "generated" }).where(eq(receptionistProfiles.id, profile!.id));
+    expect(await updateReceptionistForApi(context, a.caller, { summary: "Maple cuts hair." })).toMatchObject({ summary: "Maple cuts hair.", summary_source: "operator" });
+    // Asking for a new summary hands it back to AI and queues the rewrite.
+    expect(await updateReceptionistForApi(context, a.caller, { regenerate_summary: true })).toMatchObject({ summary_source: "generated" });
+    expect(await audits()).toContainEqual({ payload: expect.objectContaining({ fields: ["regenerate_summary"] }) });
+    const rewrites = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "business.generateSummary"), eq(outboxMessages.businessId, a.businessId)));
+    expect(rewrites).toContainEqual({ payload: expect.objectContaining({ reason: "operator_regenerate", force: true }) });
+    // The other business's receptionist is untouched.
+    expect((await getReceptionistForApi(context, b.caller)).greeting).toBe("Hi");
+  });
+
+  it("shows a business with no receptionist row the defaults, and saves them with its first change", async () => {
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-bare-${businessId}`, name: "Bare Clinic", timezone: "UTC", businessType: "test" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const rows = async () => await admin!.db.select({ greeting: receptionistProfiles.greeting, tone: receptionistProfiles.tone }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+    try {
+      const context = { db: worker!.db };
+      expect(await getReceptionistForApi(context, caller)).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", summary: "Bare Clinic", summary_source: "placeholder", transfer_mode: "on_request", booking_mode: "instant" });
+      expect(await rows()).toEqual([]);
+      expect(await updateReceptionistForApi(context, caller, { tone: "warm" })).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", tone: "warm", summary_source: "placeholder" });
+      expect(await rows()).toEqual([{ greeting: "Thank you for calling Bare Clinic.", tone: "warm" }]);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
   it("lists, edits and deletes knowledge entries, and keeps an FAQ an FAQ", async () => {
     const context = { db: worker!.db };
     const faq = await createKnowledgeEntryForApi(context, a.caller, { type: "faq", question: "Do you park?", answer: "Behind the building." });
@@ -523,10 +581,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(updatedAudit?.payload).toMatchObject({ fields: ["content", "tags", "priority", "active"] });
     // A text entry can't turn into an FAQ through its tags.
     expect(await updateKnowledgeEntryForApi(context, a.caller, text.id, { tags: ["faq"] })).toMatchObject({ type: "text", tags: [] });
-    // An empty change, or one to the values it already has, writes nothing.
+    // An empty change is refused, and one to the values it already has writes nothing.
     const updatedAt = async () => (await admin!.db.select({ at: knowledgeSnippets.updatedAt }).from(knowledgeSnippets).where(eq(knowledgeSnippets.id, text.id)))[0]!.at.getTime();
     const before = await updatedAt();
-    await updateKnowledgeEntryForApi(context, a.caller, text.id, {});
+    await expectApiError(updateKnowledgeEntryForApi(context, a.caller, text.id, {}), 400, "invalid_request");
     await updateKnowledgeEntryForApi(context, a.caller, text.id, { title: "Holidays", active: true });
     expect(await updatedAt()).toBe(before);
 

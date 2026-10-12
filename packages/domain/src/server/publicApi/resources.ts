@@ -7,7 +7,9 @@ import {
   PUBLIC_API_MAX_PAGE_SIZE,
   isUuid,
   isWebhookEventType,
+  normalizeAppointmentChangePolicy,
   normalizeBookingMode,
+  normalizeTransferMode,
   weekdays,
   type ApiAppointment,
   type ApiBusiness,
@@ -18,6 +20,7 @@ import {
   type ApiKnowledgeEntry,
   type ApiKnowledgeSource,
   type ApiMessage,
+  type ApiReceptionist,
   type ApiService,
   type ApiStaff,
   type ApiWebhookEndpoint,
@@ -483,6 +486,32 @@ export async function listKnowledgeSourceResources(tx: DatabaseTransaction, busi
     afterCursor(knowledgeDocuments.createdAt, knowledgeDocuments.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(knowledgeDocuments.createdAt, knowledgeDocuments.id)).limit(limit + 1);
   return toPage(rows, limit, serializeKnowledgeSource, (row) => ({ at: row.createdAt, id: row.id }));
+}
+
+// Receptionist
+
+const summarySources = ["placeholder", "generated", "operator"] as const;
+
+type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "greeting" | "tone" | "summary" | "summarySource" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "appointmentChangePolicy" | "bookingMode" | "updatedAt">;
+
+/** Shows the settings as calls use them: a transfer mode, booking mode or policy calls don't know reads as what they fall back to. */
+export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
+  const policy = normalizeAppointmentChangePolicy(row.appointmentChangePolicy);
+  return {
+    greeting: row.greeting,
+    tone: row.tone,
+    summary: row.summary,
+    summary_source: (summarySources as readonly string[]).includes(row.summarySource) ? row.summarySource : "placeholder",
+    booking_policy: row.bookingPolicy,
+    voice_instructions: row.voiceInstructions,
+    sms_instructions: row.smsInstructions,
+    chat_instructions: row.chatInstructions,
+    transfer_mode: normalizeTransferMode(row.transferMode),
+    transfer_number: row.transferNumber,
+    booking_mode: normalizeBookingMode(row.bookingMode),
+    appointment_change_policy: { enabled: policy.enabled, allow_cancel: policy.allowCancel, allow_reschedule: policy.allowReschedule, verification_mode: policy.verificationMode },
+    updated_at: iso(row.updatedAt),
+  };
 }
 
 // Webhook endpoints

@@ -1,9 +1,9 @@
 import type { BusinessContextSnapshot, TransferPolicy } from "./index";
+import { transferModes } from "./receptionist";
 
 export function normalizeTransferMode(value: string | null | undefined): TransferPolicy["mode"] {
   if (value == null) return "on_request";
-  return ["never", "always", "on_request", "on_urgent", "during_business_hours"].includes(value)
-    ? value as TransferPolicy["mode"] : "never";
+  return (transferModes as readonly string[]).includes(value) ? value as TransferPolicy["mode"] : "never";
 }
 
 /** Authoritative transfer gate, including automated provider-failure fallbacks. */

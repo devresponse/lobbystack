@@ -62,6 +62,15 @@ describe("buildLiveInstructions", () => {
     expect(delegate).toContain("- Ending the call: hang up when the caller is done, or on a spam or abusive call.");
   });
 
+  // Only the backend can transfer. GPT-Live said "Connecting you now" without delegating.
+  it("sends every transfer to the backend and promises none before the result, when the business takes transfers", () => {
+    const rule = "Transferring the call always goes to the backend, because only the backend can connect the caller to a person. Never say you're transferring or connecting the caller until a backend result says the call is being transferred.";
+    const instructions = buildLiveInstructions({ ...demoSnapshot, transferPolicy: { mode: "on_request", transferNumber: "+14165550199" } }, callStart);
+    expect(instructions).toContain(`Ending the call always goes to the backend, even though you could answer a goodbye yourself.\n${rule}\n`);
+    expect(buildLiveInstructions({ ...demoSnapshot, transferPolicy: { mode: "never", transferNumber: "+14165550199" } }, callStart)).not.toContain(rule);
+    expect(buildLiveInstructions({ ...demoSnapshot, transferPolicy: { mode: "on_request" } }, callStart)).not.toContain(rule);
+  });
+
   // The result that ends the call is spoken, so the goodbye comes with it, once.
   it("says one goodbye once a backend result says the call is ending", () => {
     const instructions = buildLiveInstructions(demoSnapshot, callStart);

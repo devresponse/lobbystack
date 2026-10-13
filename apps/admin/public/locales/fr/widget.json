@@ -16,6 +16,7 @@
     "handoffBanner": "Un membre de l'équipe vous répondra sous peu.",
     "handoffActive": "Messagerie en pause",
     "voiceButton": "Parlez-nous en direct",
+    "voiceStart": "Dites Allo !",
     "voiceConnected": "Vous parlez avec la réceptionniste.",
     "voiceEnded": "La connexion vocale a été interrompue. Vous pouvez continuer à discuter ci-dessous.",
     "voiceUnavailable": "La voix en direct n'est pas disponible. Réessayez plus tard.",
@@ -24,6 +25,7 @@
     "voiceEnd": "Terminer l'appel",
     "voiceTranscript": "Appel vocal",
     "voiceLive": "En direct",
+    "visitorId": "Votre identifiant : {{id}}",
     "leaveDetails": "Laissez vos coordonnées",
     "leadFormSubmitted": "Merci ! Nous vous contacterons bientôt."
   },

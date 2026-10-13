@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string }) => (options?.id ? `${key} ${options.id}` : key) }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
@@ -74,8 +74,68 @@ describe("widget voice captions", () => {
     expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
     expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
     expect(screen.getByText("chat.voiceLive")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "chat.voiceEnd" })).toBeTruthy();
     expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*");
     postMessage.mockRestore();
+    client.clear();
+  });
+});
+
+describe("widget composer", () => {
+  it("puts the details button on its own row under the message box and shows the start of the visitor id", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [visitorMessage, teamReply] }) : Response.json({ ...config, config: { leadForm: { enabled: true } } })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    const details = await screen.findByRole("button", { name: "chat.leaveDetails" });
+    const composer = screen.getByRole("textbox", { name: "chat.composerPlaceholder" });
+    const send = screen.getByRole("button", { name: "chat.send" });
+    // The message box and send button share the first row; the details button sits in the row below.
+    expect(composer.parentElement).toBe(send.parentElement);
+    expect(composer.parentElement?.contains(details)).toBe(false);
+    expect(composer.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText("chat.visitorId 5ef3b4ef")).toBeTruthy();
+    expect(screen.queryByText(visitorId)).toBeNull();
+    client.clear();
+  });
+});
+
+describe("widget call button", () => {
+  it("shows a full-width Say Allo! button under the business name", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const startCall = vi.fn();
+    vi.mocked(useWebVoiceCall).mockReturnValue({
+      status: "idle",
+      errorKey: null,
+      remoteAudioRef: { current: null },
+      transcript: [],
+      startCall,
+      endCall: vi.fn(),
+    } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    const call = await screen.findByRole("button", { name: "chat.voiceStart" });
+    // Its own row in the header, after the row with the business name, as wide as the chat.
+    const header = call.closest("header");
+    expect(call.parentElement).toBe(header);
+    expect(header?.querySelector("p")?.textContent).toBe("Acme");
+    expect(call.className).toContain("w-full");
+    expect(call.getAttribute("title")).toBe("chat.voiceButton");
+    fireEvent.click(call);
+    expect(startCall).toHaveBeenCalledTimes(1);
     client.clear();
   });
 });

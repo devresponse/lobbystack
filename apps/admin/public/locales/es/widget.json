@@ -16,6 +16,7 @@
     "handoffBanner": "Un miembro del equipo le responderá en breve.",
     "handoffActive": "Chat en pausa",
     "voiceButton": "Hable con nosotros",
+    "voiceStart": "¡Diga Allo!",
     "voiceConnected": "Está hablando con la recepcionista.",
     "voiceEnded": "La llamada de voz terminó. Puede seguir escribiendo abajo.",
     "voiceUnavailable": "La voz en vivo no está disponible. Inténtelo más tarde.",
@@ -24,6 +25,7 @@
     "voiceEnd": "Colgar",
     "voiceTranscript": "Llamada de voz",
     "voiceLive": "En vivo",
+    "visitorId": "Su identificador: {{id}}",
     "leaveDetails": "Déjenos sus datos",
     "leadFormSubmitted": "¡Gracias! Nos pondremos en contacto pronto."
   },

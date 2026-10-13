@@ -16,6 +16,7 @@
     "handoffBanner": "Član tima će Vam uskoro odgovoriti.",
     "handoffActive": "Čet je pauziran",
     "voiceButton": "Razgovarajte s nama uživo",
+    "voiceStart": "Recite Allo!",
     "voiceConnected": "Razgovarate sa recepcionerom.",
     "voiceEnded": "Glasovna veza je završena. Možete nastaviti da pišete ispod.",
     "voiceUnavailable": "Razgovor uživo nije dostupan. Pokušajte kasnije.",
@@ -24,6 +25,7 @@
     "voiceEnd": "Završi poziv",
     "voiceTranscript": "Glasovni poziv",
     "voiceLive": "Uživo",
+    "visitorId": "Vaš ID: {{id}}",
     "leaveDetails": "Ostavite svoje podatke",
     "leadFormSubmitted": "Hvala! Uskoro ćemo Vam se javiti."
   },

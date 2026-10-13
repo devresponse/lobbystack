@@ -130,6 +130,15 @@ it("asks before the page unloads only while the chat has a voice call or its cap
   expect(unload()).toBe(false);
 });
 
+it("keeps the panel at one height when the chat reports its content height", async () => {
+  const { frame } = await start(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  const holder = frame.parentElement as HTMLElement;
+  const height = holder.style.height;
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "resize", height: 200 } }));
+  expect(holder.style.height).toBe(height);
+  expect(holder.style.height).not.toBe("200px");
+});
+
 it("labels the loader in the host page language", () => {
   expect(loaderLabels("es-MX").open).toBe("Abrir el chat");
   expect(loaderLabels("sr-Latn-RS").title).toBe("Pišite nam");

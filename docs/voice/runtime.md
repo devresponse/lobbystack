@@ -255,3 +255,5 @@ pnpm exec tsx scripts/operations/move-number-to-gpt-live.ts \
 ```
 
 A number off the trunk has nothing to answer its calls, so keep every number on it.
+
+To take calls and texts on a local stack while a deployment keeps its numbers, see [Debug calls and texts on your desktop](./local-debugging.md).

@@ -7,7 +7,7 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
-import { WidgetChatClient } from "./widget-chat-client";
+import { readableOn, WidgetChatClient } from "./widget-chat-client";
 
 const visitorId = "5ef3b4ef-720d-47a7-8320-e6f4707a64e2";
 const config = { key: "widget-key", business: { id: "business", name: "Acme", defaultLocale: "en" }, config: {}, billing: { chatAllowed: true, plan: "starter" }, snapshotPresent: true };
@@ -137,5 +137,46 @@ describe("widget call button", () => {
     fireEvent.click(call);
     expect(startCall).toHaveBeenCalledTimes(1);
     client.clear();
+  });
+});
+
+describe("widget loading state", () => {
+  it("draws the chat in the loader's color with placeholders until the settings arrive", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({ status: "idle", errorKey: null, remoteAudioRef: { current: null }, transcript: [], startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    let answer: (response: Response) => void = () => {};
+    vi.stubGlobal("fetch", vi.fn((url: URL | string) => String(url).includes("/api/widget/history")
+      ? Promise.resolve(Response.json({ messages: [] }))
+      : new Promise<Response>((resolve) => { answer = resolve; })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" initialColor="#ffd100" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    const send = screen.getByRole("button", { name: "chat.send" });
+    expect(send.style.backgroundColor).toBe("rgb(255, 209, 0)");
+    expect(screen.getByRole("status").textContent).toContain("chat.loadingTranscript");
+    // Placeholders stand in for the name and the call button.
+    expect(container.querySelectorAll("header .animate-pulse")).toHaveLength(2);
+
+    await act(async () => {
+      answer(Response.json({ ...config, config: { color: "#ffd100" }, businessSlug: "acme", voiceEnabled: true }));
+    });
+    expect(await screen.findByText("chat.voiceStart")).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("Acme")).toBeTruthy();
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
+    expect(send.style.backgroundColor).toBe("rgb(255, 209, 0)");
+    client.clear();
+  });
+
+  it("puts dark text on light widget colors and white text on dark ones", () => {
+    expect(readableOn("#ffd100")).toBe("#18181b");
+    expect(readableOn("#fff")).toBe("#18181b");
+    expect(readableOn("#0f766e")).toBe("#ffffff");
+    expect(readableOn("#7c3aed")).toBe("#ffffff");
   });
 });

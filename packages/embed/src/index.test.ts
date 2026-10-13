@@ -31,7 +31,7 @@ async function start(response: Response) {
   // Only the chat iframe is deferred: no src until the visitor opens.
   expect(frame.hasAttribute("src")).toBe(false);
   window.LobbyStack!.open();
-  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key");
+  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
   expect(fetchMock).toHaveBeenCalledTimes(1);
   const post = vi.spyOn(frame.contentWindow!, "postMessage");
   await flush();
@@ -56,7 +56,7 @@ it("issues exactly one session request across successful repeated opens", async 
   window.LobbyStack!.open();
   await flush();
   expect(fetchMock).toHaveBeenCalledTimes(1);
-  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key");
+  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
 });
 
 it("resends the completed session when the hydrated iframe announces readiness", async () => {
@@ -160,7 +160,7 @@ it("loads the chat from the loader's own origin when the snippet has no data-bas
   vi.stubGlobal("fetch", fetchMock);
   const frame = mountWidget(null);
   window.LobbyStack!.open();
-  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key");
+  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
   expect(fetchMock).toHaveBeenCalledWith("https://admin.example.test/api/widget/session", expect.anything());
 });
 
@@ -216,5 +216,13 @@ it("takes the widget key from the loader URL when the tag has no data-widget-key
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
   mountTag({});
   window.LobbyStack!.open();
-  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key");
+  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
+});
+
+it("tells the chat page the bubble's color, so it loads in that color", () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { color: "#ffd100" } };
+  mountTag({ "data-widget-key": "fixture-key", "data-color": "#ff0000" });
+  window.LobbyStack!.open();
+  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%23ffd100");
 });

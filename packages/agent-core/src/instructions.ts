@@ -3,7 +3,7 @@ import { countKnowledgeTokens } from "@lobbystack/domain";
 import { DateTime } from "luxon";
 
 import { businessSummary, describeClosure, describeServices, serviceFacts, upcomingClosures, weeklyHours } from "./businessFacts";
-import { cancelsDirectly, type AgentChannel } from "./tools";
+import { cancelsDirectly, verifiesWithKeypadPin, type AgentChannel } from "./tools";
 
 function businessFacts(snapshot: BusinessContextSnapshot): string[] {
   const rules = (snapshot.rules ?? []).slice().sort((left, right) => left.order - right.order);
@@ -34,6 +34,13 @@ const NO_HOURS_GUIDANCE = "The business hasn't set its opening hours yet, so you
 const SAVE_TEXT_ANSWER = "Whenever the caller says whether they want texts, save their answer with recordTextPreference, even after the booking or cancellation is done. Their answer on this call replaces smsConsentOnFile: a no means no texts, even when it was subscribed. Only an answer about texts counts: a yes to a time or to booking isn't a yes to texts, and a no to texts isn't a no to the appointment. Once the caller answers, tell them whether they'll get texts only after recordTextPreference has saved it.";
 const BOOKING_TEXT_GUIDANCE = "On a phone call, findAvailability returns smsConsentOnFile, the caller's earlier answer about texts from this business. When it's not_asked, or missing, ask together with the time you offer, in the language of the call: \"Can I text this number with your appointment confirmation and reminder? Message and data rates may apply. Reply STOP to opt out or HELP for help.\" When it's subscribed, don't ask: tell the caller they'll get a confirmation text. When it's declined or opted_out, don't ask and don't mention texts.";
 const CANCELLATION_TEXT_GUIDANCE = "Once verifyAppointmentForChange or verifyAppointmentChangeOtp verifies a cancellation, its result has smsConsentOnFile. When it's not_asked, ask once, together with the final confirmation and in the language of the call: \"Can I text this number to confirm the cancellation? Message and data rates may apply. Reply STOP to opt out or HELP for help.\" When it's subscribed, don't ask: tell the caller they'll get a text confirming the cancellation. When it's declined or opted_out, don't ask and don't mention texts.";
+// With a keypad PIN, the caller confirms right after the PIN, before the agent
+// knows their answer about texts, so the question follows the cancellation.
+const PIN_CANCELLATION_TEXT_GUIDANCE = "Once the keypad PIN check accepts a cancellation, its result has smsConsentOnFile. When it's not_asked, ask once, right after cancelling and in the language of the call: \"Can I text this number to confirm the cancellation? Message and data rates may apply. Reply STOP to opt out or HELP for help.\" When it's subscribed, don't ask: tell the caller they'll get a text confirming the cancellation. When it's declined or opted_out, don't ask and don't mention texts.";
+
+// The business requires a PIN typed on the keypad. Only the call controller
+// sees the digits; the agent learns the outcome in a later request.
+const KEYPAD_PIN_GUIDANCE = "This business also requires the caller's PIN before any change. When verifyAppointmentForChange says a PIN is required, start the check with requestKeypadPasscode. The caller types the PIN on their phone keypad and the call checks it, so you never see it: never ask for the PIN aloud, and never accept one the caller says. The outcome appears under \"Keypad PIN check in this call\" in a later request. Once it's accepted, make the change when the caller confirms, with the verificationId and appointmentId it gives, and don't ask for the PIN again. When the check fails, or the caller has no PIN or it's locked, don't make the change: for a cancellation, save the request with requestAppointmentCancellation as above, and for anything else, offer to take a message.";
 
 // Every business gets this rule: the receptionist answers for the business,
 // not as a general assistant. On 2026-10-12 the website chat wrote Python code
@@ -46,12 +53,13 @@ function topicRule(snapshot: BusinessContextSnapshot, decline: string): string {
 
 // Instructions for the text agent that does the work. On voice it runs behind
 // GPT-Live, so its reply is spoken to the caller by the live model.
-export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channel: AgentChannel, options: { intakeOnly?: boolean; callerPhone?: string; endsCalls?: boolean } = {}): string {
+export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channel: AgentChannel, options: { intakeOnly?: boolean; callerPhone?: string; endsCalls?: boolean; keypad?: boolean } = {}): string {
   const now = DateTime.now().setZone(snapshot.timezone);
   const bookingMode = normalizeBookingMode(snapshot.bookingMode);
   const voice = channel !== "web_chat";
   // Matches the tools: texts are offered only on phone calls the business can text back.
   const textable = channel === "voice" && canTextNumber(snapshot.contactChannels?.smsNumber, options.callerPhone);
+  const keypadPin = verifiesWithKeypadPin(snapshot, options);
   return [
     `You are the receptionist for ${snapshot.displayName}. You represent this business, not the software platform.`,
     voice
@@ -76,9 +84,10 @@ export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channe
       : cancelsDirectly(snapshot, options)
         ? [
           "To verify an appointment the caller wants to change, you need its time or its service, not their name. When verification fails because the caller hasn't said either yet, ask for it and verify again. When it still fails with the time or service, or the caller isn't calling from the number it was booked with, don't take a message: ask for the name it's booked under and its date, time and service, save the request with requestAppointmentCancellation, and tell the caller the team will take care of the cancellation. Never say or suggest the appointment is already cancelled.",
-          textable ? CANCELLATION_TEXT_GUIDANCE : "This business can't text the caller's number, so don't offer or mention a text about a cancellation.",
+          textable ? (keypadPin ? PIN_CANCELLATION_TEXT_GUIDANCE : CANCELLATION_TEXT_GUIDANCE) : "This business can't text the caller's number, so don't offer or mention a text about a cancellation.",
         ].join("\n\n")
         : `You can't cancel appointments ${voice ? "on this call" : "in this chat"}. When the caller asks to cancel one, tell them that plainly and that the team will take care of the cancellation. Ask for the name it's booked under and its date, time and service, then save the request with requestAppointmentCancellation. Never say or suggest the appointment is already cancelled.`,
+    keypadPin ? KEYPAD_PIN_GUIDANCE : "",
     !options.intakeOnly && bookingMode === "instant"
       ? snapshot.hours.length
         ? "When a booking tool says a time isn't available, tell the caller the reason it gives. Say a time is taken only when the tool says it's already booked."
@@ -173,6 +182,12 @@ function liveBusinessFacts(snapshot: BusinessContextSnapshot, now: DateTime): st
   ].filter(Boolean);
 }
 
+// Whether the business's appointment changes need a PIN typed on the keypad.
+function changesNeedKeypadPin(snapshot: BusinessContextSnapshot): boolean {
+  const changes = normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy);
+  return normalizeBookingMode(snapshot.bookingMode) !== "off" && changes.enabled && changes.verificationMode === "passcode_required";
+}
+
 // What the backend agent can do, so GPT-Live knows which requests to hand off.
 function backendCapabilities(snapshot: BusinessContextSnapshot): string[] {
   const bookingMode = normalizeBookingMode(snapshot.bookingMode);
@@ -180,9 +195,11 @@ function backendCapabilities(snapshot: BusinessContextSnapshot): string[] {
   // Live calls don't know the caller's number here, so the line covers both cases.
   const cancellations = bookingMode === "off"
     ? ""
-    : changes.enabled && changes.verificationMode !== "operator_only"
-      ? "- Appointment changes: reschedule or cancel an appointment when the call comes from the phone number it was booked with. When it can't find or verify the appointment, as on a call from another number, the backend passes a cancellation request to the team, and the appointment stays booked until the team cancels it."
-      : "- Appointment cancellations: the backend passes a cancellation request to the team. The appointment stays booked until the team cancels it.";
+    : changes.enabled && changes.verificationMode === "passcode_required"
+      ? "- Appointment changes: reschedule or cancel an appointment when the call comes from the phone number it was booked with and the caller types their PIN on the phone keypad. When it can't find or verify the appointment, as on a call from another number or without the PIN, the backend passes a cancellation request to the team, and the appointment stays booked until the team cancels it."
+      : changes.enabled && changes.verificationMode !== "operator_only"
+        ? "- Appointment changes: reschedule or cancel an appointment when the call comes from the phone number it was booked with. When it can't find or verify the appointment, as on a call from another number, the backend passes a cancellation request to the team, and the appointment stays booked until the team cancels it."
+        : "- Appointment cancellations: the backend passes a cancellation request to the team. The appointment stays booked until the team cancels it.";
   return [
     "- Knowledge: business facts not listed below, such as prices, policies, parking and what to bring.",
     bookingMode === "instant" && snapshot.hours.length ? "- Appointments: check open times and book appointments." : "",
@@ -251,6 +268,10 @@ export function buildLiveInstructions(snapshot: BusinessContextSnapshot, now: Da
       // said "Connecting you now" without delegating, so nobody was dialled.
       ...(snapshot.transferPolicy.transferNumber && snapshot.transferPolicy.mode !== "never"
         ? ["Transferring the call always goes to the backend, because only the backend can connect the caller to a person. Never say you're transferring or connecting the caller until a backend result says the call is being transferred."]
+        : []),
+      // GPT-Live never hears keypad presses: the worker checks the PIN and tells it the outcome.
+      ...(changesNeedKeypadPin(snapshot)
+        ? ["When a backend result says the caller has to type their PIN on the keypad, ask them to type it on their phone keypad and press the pound key, then wait quietly while they do. Never ask them to say their PIN. If they say digits aloud, don't repeat them: ask them to use the keypad instead. You'll be told whether the PIN was accepted; until then, don't say it was."]
         : []),
       "Delegate before giving an answer that depends on backend work.",
       "Do not guess the result while waiting. While you wait, say one short neutral line such as \"One moment.\" When the caller is done, say nothing while you wait. Don't say you've booked, cancelled, saved, sent or confirmed anything until the backend's result says it's done.",

@@ -18,7 +18,7 @@ Use `.env.example` as the source of truth. Store production values in your deplo
 | `LOBBYSTACK_<ROLE>_DATABASE_URL` | Optional. Overrides the built connection string for one role, for example to use a different host. |
 | `BETTER_AUTH_SECRET` | Better Auth signing secret. Use at least 32 random characters. |
 | `ENCRYPTION_KEY` | Encrypts stored application credentials. |
-| `OTP_HASH_SECRET` | Hashes one-time verification codes. |
+| `OTP_HASH_SECRET` | Hashes one-time verification codes and callers' keypad PINs. Set the same value on the admin and the worker. Changing it makes every saved PIN stop working. |
 
 ## Internal services
 

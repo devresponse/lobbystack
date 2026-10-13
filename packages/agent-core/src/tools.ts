@@ -17,6 +17,7 @@ import {
   searchKnowledgeEvidence,
   takeMessageForStaff,
   verifyCallerChangeCode,
+  verifyCallerChangePasscode,
   verifyCallerForChange,
   type DomainContext,
   type SmsConsentOnFile,
@@ -32,6 +33,24 @@ import { serviceFacts, upcomingClosures, weeklyHours } from "./businessFacts";
 /** Where the conversation happens. Phone calls know the caller's number. */
 export type AgentChannel = "voice" | "web_voice" | "web_chat";
 
+/**
+ * What came of a PIN the caller typed on the keypad. "accepted" verifies the
+ * change; "retry" means it didn't match and the caller can type it again;
+ * "failed" means the change can't be verified on this call.
+ */
+export type KeypadPasscodeOutcome = {
+  status: "accepted" | "retry" | "failed";
+  /** Tries left on this call, when the caller can try again. */
+  attemptsLeft?: number;
+  /** Why the PIN wasn't accepted, as plain facts. */
+  reason?: string;
+  /** What the next request's agent sees, with the ids it needs to make the change. */
+  result: object;
+};
+
+/** Checks the digits the caller typed. Only the call controller sees them. */
+export type KeypadPasscodeCheck = (passcode: string) => Promise<KeypadPasscodeOutcome>;
+
 /** Live-call controls the agent can use. Only phone calls provide them. */
 export type CallControl = {
   /**
@@ -41,6 +60,13 @@ export type CallControl = {
    */
   transfer?(destination: string): Promise<boolean>;
   hangup(reason: "caller_finished" | "spam" | "abuse"): Promise<void>;
+  /**
+   * Phone calls only. Starts taking a PIN on the keypad: the digits the caller
+   * types next go to `check`, never to the transcript or the agent, and the
+   * voice model hears the outcome. Resolves false when the call can't take
+   * one, for example because it's ending.
+   */
+  collectPasscode?(check: KeypadPasscodeCheck): Promise<boolean>;
 };
 
 export type AgentToolContext = {
@@ -130,14 +156,27 @@ const OFFERINGS_QUERY = "What does the business do and offer: services, products
 /**
  * Whether the agent can cancel on this conversation itself. Cancelling
  * identifies the caller by a trusted phone number, which browser calls and
- * website chats don't have, and the business can turn it off. Otherwise, and
- * when it can't find or verify the appointment, the agent passes the request
- * to the team with requestAppointmentCancellation.
+ * website chats don't have, and the business can turn it off. A business that
+ * requires a keypad PIN also needs a call that takes one. Otherwise, and when
+ * it can't find or verify the appointment, the agent passes the request to the
+ * team with requestAppointmentCancellation.
  */
-export function cancelsDirectly(snapshot: BusinessContextSnapshot, context: { callerPhone?: string; intakeOnly?: boolean }): boolean {
+export function cancelsDirectly(snapshot: BusinessContextSnapshot, context: { callerPhone?: string; intakeOnly?: boolean; keypad?: boolean }): boolean {
   if (context.intakeOnly || normalizeBookingMode(snapshot.bookingMode) === "off") return false;
   const policy = normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy);
+  if (policy.verificationMode === "passcode_required" && !context.keypad) return false;
   return Boolean(context.callerPhone && policy.enabled && policy.allowCancel && policy.verificationMode !== "operator_only");
+}
+
+/**
+ * Whether appointment changes on this conversation wait for a keypad PIN: the
+ * business requires one and the call can take it. The tools offer
+ * requestKeypadPasscode instead of the texted code then.
+ */
+export function verifiesWithKeypadPin(snapshot: BusinessContextSnapshot, context: { callerPhone?: string; intakeOnly?: boolean; keypad?: boolean }): boolean {
+  if (context.intakeOnly || normalizeBookingMode(snapshot.bookingMode) === "off") return false;
+  const policy = normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy);
+  return Boolean(context.callerPhone && context.keypad && policy.enabled && policy.verificationMode === "passcode_required");
 }
 
 export function createReceptionistTools(context: AgentToolContext): ToolSet {
@@ -361,10 +400,13 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   }
 
   // Changing an appointment identifies the caller by their phone number, so it
-  // is only offered when the call itself carries a trusted number.
+  // is only offered when the call itself carries a trusted number. A business
+  // that requires a keypad PIN also needs a call that can take one.
   const changePolicy = normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy);
   const callerPhone = context.callerPhone;
-  if (callerPhone && changePolicy.enabled && changePolicy.verificationMode !== "operator_only" && bookingMode !== "off") {
+  const passcodeRequired = changePolicy.verificationMode === "passcode_required";
+  const collectPasscode = context.callControl?.collectPasscode?.bind(context.callControl);
+  if (callerPhone && changePolicy.enabled && changePolicy.verificationMode !== "operator_only" && (!passcodeRequired || collectPasscode) && bookingMode !== "off") {
     tools.lookupAppointmentForChange = tool({
       description: "Check whether this caller's number has upcoming appointments before cancelling or rescheduling. It does not reveal appointment details.",
       inputSchema: z.object({}),
@@ -385,16 +427,33 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
         ...(input.serviceName ? { serviceName: input.serviceName } : {}),
       })),
     });
-    tools.sendAppointmentChangeOtp = tool({
-      description: "Text the caller a one-time code when verifyAppointmentForChange says a code is required.",
-      inputSchema: z.object({ verificationId: z.string() }),
-      execute: async ({ verificationId }) => await issueAppointmentChangeOtp(domain, { businessId, verificationId }),
-    });
-    tools.verifyAppointmentChangeOtp = tool({
-      description: "Check the one-time code the caller reads back.",
-      inputSchema: z.object({ verificationId: z.string(), code: z.string() }),
-      execute: async ({ verificationId, code }) => withConsentOnFile(await verifyCallerChangeCode(domain, { businessId, verificationId, code })),
-    });
+    if (passcodeRequired && collectPasscode) {
+      // The caller types the PIN on the keypad, which only the call controller
+      // hears, so the PIN never reaches the agent, the voice model or the transcript.
+      tools.requestKeypadPasscode = tool({
+        description: "Start the keypad PIN check when verifyAppointmentForChange says a PIN is required. The caller types their PIN on the phone keypad; you never see it, and the result comes in a later request.",
+        inputSchema: z.object({ verificationId: z.string() }),
+        execute: async ({ verificationId }) => {
+          const started = await collectPasscode(async (passcode) => {
+            const result = withConsentOnFile(await verifyCallerChangePasscode(domain, { businessId, verificationId, passcode }));
+            const status = result.ok ? "accepted" : result.status === "passcode_pending" ? "retry" : "failed";
+            return { status, result, ...(result.attemptsLeft !== undefined ? { attemptsLeft: result.attemptsLeft } : {}), ...(result.reason ? { reason: result.reason } : {}) };
+          });
+          return started ? { ok: true, waitingForKeypad: true } : { ok: false, reason: "The call can't take a PIN right now, so the change can't be verified." };
+        },
+      });
+    } else {
+      tools.sendAppointmentChangeOtp = tool({
+        description: "Text the caller a one-time code when verifyAppointmentForChange says a code is required.",
+        inputSchema: z.object({ verificationId: z.string() }),
+        execute: async ({ verificationId }) => await issueAppointmentChangeOtp(domain, { businessId, verificationId }),
+      });
+      tools.verifyAppointmentChangeOtp = tool({
+        description: "Check the one-time code the caller reads back.",
+        inputSchema: z.object({ verificationId: z.string(), code: z.string() }),
+        execute: async ({ verificationId, code }) => withConsentOnFile(await verifyCallerChangeCode(domain, { businessId, verificationId, code })),
+      });
+    }
     if (changePolicy.allowCancel) {
       tools.cancelAppointment = tool({
         description: "Cancel the verified appointment. Only after the caller explicitly confirms they want it cancelled now.",

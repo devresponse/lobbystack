@@ -374,6 +374,22 @@ export const contacts = pgTable(
   (table) => [uniqueIndex("contacts_business_phone_unique").on(table.businessId, table.phone).where(sql`${table.phone} is not null`), index("contacts_business_email_idx").on(table.businessId, table.email)],
 );
 
+// A contact's keypad PIN for appointment changes, kept apart so the contact row never carries it.
+export const contactPasscodes = pgTable(
+  "contact_passcodes",
+  {
+    contactId: uuid("contact_id").primaryKey().references(() => contacts.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    passcodeHash: text("passcode_hash").notNull(),
+    // Wrong PINs in a row, across calls. Reaching the limit sets lockedAt until a new PIN is set.
+    failedAttempts: integer("failed_attempts").default(0).notNull(),
+    lockedAt: timestamp("locked_at", { withTimezone: true }),
+    setAt: timestamp("set_at", { withTimezone: true }).defaultNow().notNull(),
+    ...timestamps,
+  },
+  (table) => [index("contact_passcodes_business_idx").on(table.businessId)],
+);
+
 export const widgetKeys = pgTable(
   "widget_keys",
   {

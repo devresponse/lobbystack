@@ -110,6 +110,8 @@ const FORMATTERS: Record<string, Formatter> = {
     const details = [text(input.serviceName), text(input.appointmentStartsAt)].filter(Boolean).join(", ");
     return `The cancellation request is saved for the team${details ? ` (${details})` : ""}. The appointment is still booked until the team cancels it, and the team will confirm with the caller.`;
   },
+  // The worker takes the PIN from the keypad and tells GPT-Live the outcome.
+  requestKeypadPasscode: (_input, output) => (output.ok === true ? "The caller has to type their PIN on the phone keypad, then press the pound key. It's checked as they type it, and you'll be told whether it was accepted." : undefined),
   endCall: (_input, output) => (output.ok === true ? CALL_ENDING : undefined),
   // The REFER waits until GPT-Live has said this, so it goes out at once.
   transferCall: (_input, output) => (output.ok === true && output.transferring === true ? "The call is being transferred to a person at the business now." : undefined),

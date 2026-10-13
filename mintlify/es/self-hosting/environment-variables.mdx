@@ -18,7 +18,7 @@ Use `.env.example` como fuente de referencia. Guarde los valores de producción 
 | `LOBBYSTACK_<ROLE>_DATABASE_URL` | Opcional. Reemplaza la cadena de conexión construida para un rol, por ejemplo para usar otro host. |
 | `BETTER_AUTH_SECRET` | Secreto de firma de Better Auth. Use al menos 32 caracteres aleatorios. |
 | `ENCRYPTION_KEY` | Cifra las credenciales de la aplicación almacenadas. |
-| `OTP_HASH_SECRET` | Genera el hash de los códigos de verificación de un solo uso. |
+| `OTP_HASH_SECRET` | Genera el hash de los códigos de verificación de un solo uso y de los PIN de quienes llaman. Configure el mismo valor en el servicio de administración y en el worker. Si lo cambia, todos los PIN guardados dejan de funcionar. |
 
 ## Servicios internos
 

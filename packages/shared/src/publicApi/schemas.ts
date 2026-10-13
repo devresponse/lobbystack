@@ -103,7 +103,7 @@ const appointmentChangePolicyFields = {
   enabled: z.boolean().describe("Whether callers can change their own appointments with the receptionist."),
   allow_cancel: z.boolean(),
   allow_reschedule: z.boolean(),
-  verification_mode: z.enum(appointmentChangeVerificationModes).describe("How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."),
+  verification_mode: z.enum(appointmentChangeVerificationModes).describe("How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. passcode_required: a PIN they type on the phone keypad, set on their contact in the dashboard. operator_only: the team makes the change."),
 };
 
 const receptionistText = z.string().trim().min(1).max(RECEPTIONIST_TEXT_MAX_LENGTH);

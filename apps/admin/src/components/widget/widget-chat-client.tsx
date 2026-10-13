@@ -57,6 +57,23 @@ function MessageContent({ content, pending }: { content: string; pending?: boole
   return <span className="widget-message-content" dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(content || (pending ? "…" : "")) }} />;
 }
 
+const DEFAULT_COLOR = "#0f766e";
+// Only used while the settings load on a chat opened by an older loader, which doesn't pass its color.
+const LOADING_COLOR = "#d4d4d8";
+
+/** Near-black or white, whichever reads better on the widget color (a yellow gets dark text). */
+export function readableOn(hex: string): string {
+  let value = hex.replace("#", "");
+  if (value.length <= 4) value = [...value].map((digit) => digit + digit).join("");
+  const [red, green, blue] = [0, 2, 4].map((start) => {
+    const channel = Number.parseInt(value.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  // Contrast ratios against white and against zinc-900 (luminance 0.0097).
+  return (luminance + 0.05) / 0.0597 > 1.05 / (luminance + 0.05) ? "#18181b" : "#ffffff";
+}
+
 function storageVisitorKey(widgetKey: string): string {
   return `lobbystack.widget.visitorId.${widgetKey}`;
 }
@@ -77,7 +94,7 @@ function localVisitorId(widgetKey: string): string {
   return id;
 }
 
-export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
+export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: string; initialColor?: string | undefined }) {
   const { t, i18n } = useTranslation("widget");
   const visitorIdRef = useRef<string>("");
   const [parentVisitorId, setParentVisitorId] = useState<string | null>(null);
@@ -254,7 +271,9 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
     window.parent?.postMessage({ type: "leave-warning", enabled: voiceTranscriptShown }, "*");
   }, [voiceTranscriptShown]);
 
-  const color = configState?.config?.color ?? "#0f766e";
+  // The loader's color holds until the settings arrive, so the chat never flashes the default color.
+  const color = configState ? configState.config?.color ?? initialColor ?? DEFAULT_COLOR : initialColor ?? LOADING_COLOR;
+  const onColor = readableOn(color);
   const title = configState?.config?.title || configState?.business?.name || t("chat.titlePlaceholder");
 
   async function submitChat(event: FormEvent) {
@@ -315,6 +334,9 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   const shortVisitorId = parentVisitorId?.slice(0, 8) ?? "";
   const voiceEnabled = Boolean(configState?.voiceEnabled) && Boolean(configState?.businessSlug);
   const configErrorCode = config.error instanceof Error && ["originDenied", "invalidKey", "configLoad"].includes(config.error.message) ? config.error.message : null;
+  // Until the settings load, placeholders hold the place of the name, the call button, the greeting
+  // and the visitor ID, so nothing moves when they arrive.
+  const settingsPending = !config.data && !config.isError && !submitError?.startsWith("errors.");
 
   return (
     // The chat fills the frame at a fixed height and only the thread scrolls, so new messages never
@@ -322,14 +344,15 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
     <main className="relative flex h-dvh min-h-0 flex-col overflow-hidden bg-white text-zinc-900">
       <header className="flex shrink-0 flex-col gap-3 border-b px-4 py-3">
         <div className="flex items-center gap-3">
-          <div className="flex size-9 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: color }} aria-hidden="true">
-            {(title || "?")[0]?.toUpperCase()}
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold" style={{ backgroundColor: color, color: onColor }} aria-hidden="true">
+            {settingsPending ? null : (title || "?")[0]?.toUpperCase()}
           </div>
           <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">{title}</p>
+            {settingsPending ? <div className="my-0.5 h-4 w-32 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : <p className="truncate text-sm font-semibold">{title}</p>}
             {configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
           </div>
         </div>
+        {settingsPending ? <div className="h-10 w-full animate-pulse rounded-4xl bg-zinc-100" aria-hidden="true" /> : null}
         {voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
       </header>
 
@@ -345,7 +368,13 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
       >
         {configErrorCode ? <p className="text-center text-sm text-zinc-500">{t(`errors.${configErrorCode}` as never)}</p> : null}
         {config.isError ? <p className="text-center text-sm text-zinc-500">{t("errors.configLoad")}</p> : null}
-        {config.isLoading ? <p className="text-center text-sm text-zinc-400">{t("chat.loadingTranscript")}</p> : null}
+        {settingsPending ? (
+          <div className="flex flex-col gap-1" role="status">
+            <span className="sr-only">{t("chat.loadingTranscript")}</span>
+            <div className="my-0.5 h-4 w-44 animate-pulse rounded bg-zinc-100" aria-hidden="true" />
+            <div className="h-14 w-4/5 animate-pulse rounded-xl rounded-bl-sm bg-zinc-100" aria-hidden="true" />
+          </div>
+        ) : null}
         {config.data && messages.length === 0 && !showLeadBeforeChat ? (
           <div className="flex flex-col gap-1 text-sm text-zinc-600">
             <p className="font-medium text-zinc-800">{t("chat.welcome")}</p>
@@ -354,13 +383,13 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
         ) : null}
         {messages.map((message) => (
           <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-            <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", message.role === "user" ? "rounded-br-sm text-white" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color } : undefined}>
+            <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", message.role === "user" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color, color: onColor } : undefined}>
               <p><MessageContent content={messageText(message)} pending={streamingMessageId === message.id} /></p>
             </div>
           </div>
         ))}
         {sending && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
-        {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} t={t} /> : null}
+        {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} onColor={onColor} t={t} /> : null}
         {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
       </div>
 
@@ -378,14 +407,13 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
             disabled={!config.data || sending || leadOpen}
             aria-label={t("chat.composerPlaceholder")}
           />
-          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color }}><Send /></Button>
+          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><Send /></Button>
         </div>
-        {showLeadButton || shortVisitorId ? (
-          <div className="flex min-h-8 items-center gap-2">
-            {showLeadButton ? <Button type="button" onClick={() => setLeadOpen(true)} variant="outline" size="sm" className="shrink-0 text-xs" disabled={leadOpen}>{t("chat.leaveDetails")}</Button> : null}
-            {shortVisitorId ? <p className="ml-auto truncate text-xs text-zinc-400 tabular-nums">{t("chat.visitorId", { id: shortVisitorId })}</p> : null}
-          </div>
-        ) : null}
+        {/* This row is always there, so the visitor ID arriving doesn't push the composer up. */}
+        <div className="flex min-h-8 items-center gap-2">
+          {showLeadButton ? <Button type="button" onClick={() => setLeadOpen(true)} variant="outline" size="sm" className="shrink-0 text-xs" disabled={leadOpen}>{t("chat.leaveDetails")}</Button> : null}
+          {shortVisitorId ? <p className="ml-auto truncate text-xs text-zinc-400 tabular-nums">{t("chat.visitorId", { id: shortVisitorId })}</p> : settingsPending ? <div className="ml-auto h-3 w-24 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : null}
+        </div>
       </form>
 
       {leadOpen && !showLeadBeforeChat ? <LeadOverlay lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onClose={() => setLeadOpen(false)} t={t} /> : null}
@@ -429,7 +457,7 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
 
 // Live captions of a widget voice call, in the chat thread. They stay after the
 // call ends, until the next call starts, and aren't kept on reload.
-function VoiceTranscript({ captions, color, t }: { captions: VoiceCaptions; color: string; t: (key: string) => string }) {
+function VoiceTranscript({ captions, color, onColor, t }: { captions: VoiceCaptions; color: string; onColor: string; t: (key: string) => string }) {
   const turns = captions.turns.filter((turn) => turn.text.trim());
   return (
     <section className="flex flex-col gap-3" aria-label={t("chat.voiceTranscript")}>
@@ -445,7 +473,7 @@ function VoiceTranscript({ captions, color, t }: { captions: VoiceCaptions; colo
       {captions.live && turns.length === 0 ? <p className="text-center text-xs text-zinc-400">{t("chat.voiceConnected")}</p> : null}
       {turns.map((turn, index) => (
         <div key={index} className={cn("flex", turn.speaker === "caller" ? "justify-end" : "justify-start")}>
-          <p className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm text-white" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color } : undefined}>
+          <p className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color, color: onColor } : undefined}>
             {turn.text.trim()}
           </p>
         </div>

@@ -129,7 +129,9 @@ export function initWidget(): boolean {
   const labels = loaderLabels(currentScriptAttribute("data-locale") ?? document.documentElement.lang ?? "en");
   const adminOrigin = resolveOrigin();
   let visitorId = makeVisitorId(widgetKey);
-  const frameSrc = `${adminOrigin}/embed/${encodeURIComponent(widgetKey)}`;
+  // The chat page draws itself in the bubble's color from its first paint, instead of a default
+  // that its settings then replace.
+  const frameSrc = `${adminOrigin}/embed/${encodeURIComponent(widgetKey)}?${new URLSearchParams({ color })}`;
 
   injectStyles();
 

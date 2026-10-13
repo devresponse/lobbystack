@@ -1,9 +1,9 @@
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { auditLogs, contactPasscodes, contacts, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { isContactPasscode, isGuessableContactPasscode } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_LOCK_ATTEMPTS, isContactPasscode, isGuessableContactPasscode } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
@@ -11,10 +11,7 @@ import { verificationCodeSecret } from "./verificationCode";
 
 // A contact's keypad PIN, which callers type to change appointments when the
 // business's verification mode is passcode_required. The worker checks it; the
-// dashboard sets and removes it.
-
-/** Wrong PINs in a row, across calls, that lock a PIN until someone sets a new one. */
-export const CONTACT_PASSCODE_LOCK_ATTEMPTS = 5;
+// dashboard and the v1 API set and remove it.
 
 const PASSCODE_HASH_PREFIX = "scrypt-v1:";
 
@@ -33,6 +30,60 @@ function passcodeKey(contactId: string, passcode: string, salt: string): Promise
 async function hashContactPasscode(contactId: string, passcode: string): Promise<string> {
   const salt = randomBytes(16).toString("hex");
   return `${PASSCODE_HASH_PREFIX}${salt}:${(await passcodeKey(contactId, passcode, salt)).toString("hex")}`;
+}
+
+/**
+ * PINs that bulk changes hash at once across the whole process, however many
+ * run together, so the rest of the thread pool stays free for other requests.
+ */
+const BULK_HASH_CONCURRENCY = 2;
+let bulkHashesRunning = 0;
+const bulkHashWaiting: Array<() => void> = [];
+
+async function withBulkHashSlot<T>(run: () => Promise<T>): Promise<T> {
+  if (bulkHashesRunning < BULK_HASH_CONCURRENCY) bulkHashesRunning += 1;
+  else await new Promise<void>((resolve) => bulkHashWaiting.push(resolve));
+  try {
+    return await run();
+  } finally {
+    // The slot passes straight to the next waiting hash, if any.
+    const next = bulkHashWaiting.shift();
+    if (next) next();
+    else bulkHashesRunning -= 1;
+  }
+}
+
+/**
+ * Hashes many contacts' PINs, in the order given. Each hash takes about a
+ * tenth of a second, so bulk changes hash before their write transaction.
+ */
+export async function hashContactPasscodes(entries: ReadonlyArray<{ contactId: string; passcode: string }>): Promise<string[]> {
+  return await Promise.all(entries.map((entry) => withBulkHashSlot(() => hashContactPasscode(entry.contactId, entry.passcode))));
+}
+
+/**
+ * Saves PIN hashes for contacts the caller checked, which also clears a lock.
+ * With replace false, a contact that has a PIN keeps it. Returns the contacts
+ * whose PIN was saved.
+ */
+export async function saveContactPasscodesInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; hashes: ReadonlyArray<{ contactId: string; passcodeHash: string }>; replace: boolean; now: Date },
+): Promise<string[]> {
+  if (!input.hashes.length) return [];
+  const fresh = { failedAttempts: 0, lockedAt: null, setAt: input.now, updatedAt: input.now };
+  const insert = tx.insert(contactPasscodes).values(input.hashes.map((entry) => ({ contactId: entry.contactId, businessId: input.businessId, passcodeHash: entry.passcodeHash, ...fresh })));
+  const saved = input.replace
+    ? await insert.onConflictDoUpdate({ target: contactPasscodes.contactId, set: { passcodeHash: sql`excluded.passcode_hash`, ...fresh } }).returning({ contactId: contactPasscodes.contactId })
+    : await insert.onConflictDoNothing({ target: contactPasscodes.contactId }).returning({ contactId: contactPasscodes.contactId });
+  return saved.map((row) => row.contactId);
+}
+
+/** Removes the PINs of contacts the caller checked. Returns the contacts that had one. */
+export async function removeContactPasscodesInTransaction(tx: DatabaseTransaction, input: { businessId: string; contactIds: readonly string[] }): Promise<string[]> {
+  if (!input.contactIds.length) return [];
+  const removed = await tx.delete(contactPasscodes).where(and(eq(contactPasscodes.businessId, input.businessId), inArray(contactPasscodes.contactId, [...input.contactIds]))).returning({ contactId: contactPasscodes.contactId });
+  return removed.map((row) => row.contactId);
 }
 
 async function matchesContactPasscode(storedHash: string, contactId: string, passcode: string): Promise<boolean> {
@@ -68,8 +119,7 @@ export async function setContactPasscode(
     const contact = (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.id, input.contactId), eq(contacts.businessId, input.businessId))).limit(1))[0];
     if (!contact) return null;
     const now = new Date();
-    const values = { passcodeHash: await hashContactPasscode(contact.id, input.passcode), failedAttempts: 0, lockedAt: null, setAt: now, updatedAt: now };
-    await tx.insert(contactPasscodes).values({ contactId: contact.id, businessId: input.businessId, ...values }).onConflictDoUpdate({ target: contactPasscodes.contactId, set: values });
+    await saveContactPasscodesInTransaction(tx, { businessId: input.businessId, hashes: [{ contactId: contact.id, passcodeHash: await hashContactPasscode(contact.id, input.passcode) }], replace: true, now });
     await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "contact.passcode_set", entityType: "contact", entityId: contact.id });
     return { setAt: now.toISOString(), locked: false };
   });
@@ -84,7 +134,7 @@ export async function removeContactPasscode(
     await requireBusinessAdmin(tx, input);
     const contact = (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.id, input.contactId), eq(contacts.businessId, input.businessId))).limit(1))[0];
     if (!contact) return false;
-    const removed = await tx.delete(contactPasscodes).where(and(eq(contactPasscodes.contactId, contact.id), eq(contactPasscodes.businessId, input.businessId))).returning({ contactId: contactPasscodes.contactId });
+    const removed = await removeContactPasscodesInTransaction(tx, { businessId: input.businessId, contactIds: [contact.id] });
     if (removed.length) await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "contact.passcode_removed", entityType: "contact", entityId: contact.id });
     return true;
   });

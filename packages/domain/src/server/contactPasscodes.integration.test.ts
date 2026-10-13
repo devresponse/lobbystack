@@ -3,13 +3,15 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, describe, expect, it } from "vitest";
-import { appointmentChangeVerifications, appointments, auditLogs, businessHours, businessMemberships, businesses, contactPasscodes, contacts, createDatabaseClient, receptionistProfiles, services, staff, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import type { AppointmentChangeVerificationMode } from "@lobbystack/shared";
+import { apiKeys, appointmentChangeVerifications, appointments, auditLogs, businessHours, businessMemberships, businesses, contactPasscodes, contacts, createDatabaseClient, receptionistProfiles, services, staff, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { isGuessableContactPasscode, type ApiContactPasscodesGenerate, type ApiContactPasscodesUpdate, type AppointmentChangeVerificationMode } from "@lobbystack/shared";
 
 import { createAppointmentChangeVerification, issueAppointmentChangeOtp, verifyAppointmentChangePasscode } from "./appointmentChanges";
 import { cancelAppointmentForCaller, rescheduleAppointmentForCaller } from "./booking";
 import { removeContactPasscode, setContactPasscode } from "./contactPasscodes";
 import { deleteContact, getContactDetail } from "./contacts";
+import { generateApiKey } from "./publicApi/apiKeys";
+import { generateContactPasscodesForApi, getContactForApi, listContactsForApi, setContactPasscodesForApi, type ApiKeyCaller } from "./publicApi/operations";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -331,6 +333,168 @@ describe.skipIf(!client)("appointment changes that need the keypad PIN", () => {
       await setMode("phone_match_and_facts");
       expect(await cancel(pending.verificationId)).not.toBeNull();
       expect(await appointmentStatus()).toBe("canceled");
+    });
+  });
+});
+
+/**
+ * The seed plus an API key the business's admin made, and the v1 PIN
+ * operations run as the worker role, as the admin serves /api/v1.
+ */
+async function seedApi(tx: DatabaseTransaction) {
+  const seeded = await seed(tx);
+  const generated = generateApiKey();
+  const [key] = await tx.insert(apiKeys).values({ businessId: seeded.businessId, name: "PINs", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["contacts:read", "contacts:write"], createdByUserId: seeded.userIds.admin }).returning({ id: apiKeys.id });
+  const caller: ApiKeyCaller = { businessId: seeded.businessId, apiKeyId: key!.id };
+  const db = tx as unknown as Database;
+  const asWorker = async () => { await tx.execute(sql`set local role lobbystack_worker`); };
+  const asOwner = async () => { await tx.execute(sql`reset role`); };
+  return {
+    ...seeded,
+    setPins: async (passcodes: ApiContactPasscodesUpdate["passcodes"]) => {
+      await asWorker();
+      return await setContactPasscodesForApi({ db }, caller, { passcodes });
+    },
+    generate: async (input: ApiContactPasscodesGenerate = {}) => {
+      await asWorker();
+      return await generateContactPasscodesForApi({ db }, caller, input);
+    },
+    get: async (contactId: string) => {
+      await asWorker();
+      return await getContactForApi({ db }, caller, contactId);
+    },
+    list: async () => {
+      await asWorker();
+      return (await listContactsForApi({ db }, caller, { limit: 100 })).data;
+    },
+    addContacts: async (values: Array<{ name: string; phone?: string | null; email?: string; createdAt?: Date }>) => {
+      await asOwner();
+      return (await tx.insert(contacts).values(values.map((value) => ({ businessId: seeded.businessId, ...value }))).returning({ id: contacts.id })).map((row) => row.id);
+    },
+    demoteAdmin: async () => {
+      await asOwner();
+      await tx.update(businessMemberships).set({ role: "scheduler" }).where(and(eq(businessMemberships.businessId, seeded.businessId), eq(businessMemberships.userId, seeded.userIds.admin)));
+    },
+  };
+}
+
+const daysAgo = (days: number) => DateTime.utc().minus({ days }).toJSDate();
+
+describe.skipIf(!client)("keypad PINs through the v1 API", () => {
+  it("sets, replaces and removes many contacts' PINs at once, and shows only whether each has one", async () => {
+    await rollbackTest(async (tx) => {
+      const { contactId, setPins, get, list, row, lock, verify, type, expire, addContacts, audits } = await seedApi(tx);
+      const [ana] = await addContacts([{ name: "Ana", phone: "+14165550101" }]);
+      expect((await get(contactId)).passcode).toBeNull();
+
+      const set = await setPins([{ contact_id: ana!, passcode: "935172" }, { contact_id: contactId, passcode: pin }]);
+      expect(set.map((contact) => contact.id)).toEqual([ana, contactId]);
+      for (const contact of set) expect(contact.passcode).toEqual({ set_at: expect.any(String), locked: false });
+      expect((await row(ana))!.passcodeHash).toMatch(/^scrypt-v1:[0-9a-f]{32}:[0-9a-f]{128}$/);
+      expect(JSON.stringify(await list())).not.toMatch(/935172|480613|scrypt/);
+      // The PIN works on a call.
+      const call = (await verify())!;
+      expect(await type(call.verificationId, pin)).toMatchObject({ ok: true, status: "passcode_verified" });
+      await expire(call.verificationId);
+
+      await lock();
+      expect((await get(contactId)).passcode).toMatchObject({ locked: true });
+      expect((await list()).find((contact) => contact.id === contactId)!.passcode).toMatchObject({ locked: true });
+
+      // Ids in any case; a new PIN unlocks, and null removes.
+      const changed = await setPins([{ contact_id: contactId.toUpperCase(), passcode: "935172" }, { contact_id: ana!, passcode: null }]);
+      expect(changed.map((contact) => [contact.id, contact.passcode?.locked ?? null])).toEqual([[contactId, false], [ana, null]]);
+      expect(await row(ana)).toBeUndefined();
+      const nextCall = (await verify())!;
+      expect(nextCall.status).toBe("passcode_pending");
+      expect(await type(nextCall.verificationId, pin)).toMatchObject({ ok: false, status: "passcode_pending" });
+      expect(await type(nextCall.verificationId, "935172")).toMatchObject({ ok: true, status: "passcode_verified" });
+      expect(await audits("api.contact.passcode")).toEqual(["api.contact.passcode_removed", "api.contact.passcode_set", "api.contact.passcode_set", "api.contact.passcode_set"]);
+    });
+  });
+
+  it("changes nothing when a contact is another business's or sent twice", async () => {
+    await rollbackTest(async (tx) => {
+      const { contactId, setPins, generate, row } = await seedApi(tx);
+      const other = await seed(tx);
+      await expect(setPins([{ contact_id: contactId, passcode: pin }, { contact_id: other.contactId, passcode: pin }])).rejects.toMatchObject({ status: 400, code: "invalid_request", details: [{ path: "passcodes.1.contact_id", message: "Unknown contact." }] });
+      await expect(setPins([{ contact_id: contactId, passcode: pin }, { contact_id: contactId.toUpperCase(), passcode: null }])).rejects.toMatchObject({ status: 400, details: [{ path: "passcodes.1.contact_id", message: "This contact is already in the list." }] });
+      await expect(generate({ contact_ids: [other.contactId] })).rejects.toMatchObject({ status: 400, details: [{ path: "contact_ids.0", message: "Unknown contact." }] });
+      expect(await row()).toBeUndefined();
+      expect(await other.row()).toBeUndefined();
+    });
+  });
+
+  it("refuses a key whose creator is no longer an owner or admin, as the dashboard would", async () => {
+    await rollbackTest(async (tx) => {
+      const { contactId, setPins, generate, demoteAdmin, row } = await seedApi(tx);
+      await demoteAdmin();
+      await expect(setPins([{ contact_id: contactId, passcode: pin }])).rejects.toMatchObject({ status: 403, code: "key_owner_inactive" });
+      await expect(generate()).rejects.toMatchObject({ status: 403, code: "key_owner_inactive" });
+      expect(await row()).toBeUndefined();
+    });
+  });
+
+  it("gives a PIN to each contact with a phone number and none yet, oldest first, and returns it once", async () => {
+    await rollbackTest(async (tx) => {
+      const { contactId, setPin, generate, get, row, verify, type, addContacts, audits } = await seedApi(tx);
+      const [oldest, hasPin, noPhone] = await addContacts([
+        { name: "Ana", phone: "+14165550101", createdAt: daysAgo(3) },
+        { name: "Bo", phone: "+14165550102", createdAt: daysAgo(5) },
+        { name: "Cy", phone: null, email: "cy@example.invalid", createdAt: daysAgo(4) },
+      ]);
+      await setPin(pin, undefined, hasPin);
+      const kept = (await row(hasPin))!.passcodeHash;
+
+      const generated = await generate({ length: 4 });
+      expect(generated.contacts.map((contact) => contact.id)).toEqual([oldest, contactId]);
+      for (const contact of generated.contacts) {
+        expect(contact.new_passcode).toMatch(/^\d{4}$/);
+        expect(isGuessableContactPasscode(contact.new_passcode)).toBe(false);
+        expect(contact.passcode).toEqual({ set_at: expect.any(String), locked: false });
+      }
+      expect(generated.remaining).toBe(0);
+      expect((await row(hasPin))!.passcodeHash).toBe(kept);
+      expect(await row(noPhone)).toBeUndefined();
+      // Only the response has the PIN; the contact shows whether there is one.
+      expect(await get(contactId)).not.toHaveProperty("new_passcode");
+      const milan = generated.contacts.find((contact) => contact.id === contactId)!;
+      expect(await type((await verify())!.verificationId, milan.new_passcode)).toMatchObject({ ok: true, status: "passcode_verified" });
+
+      expect(await generate()).toEqual({ contacts: [], remaining: 0 });
+      expect(await audits("api.contact.passcode")).toEqual(["api.contact.passcode_generated", "api.contact.passcode_generated"]);
+    });
+  });
+
+  it("gives the named contacts a new PIN even when they have one, which unlocks it", async () => {
+    await rollbackTest(async (tx) => {
+      const { contactId, setPin, generate, lock, row, verify, type, addContacts } = await seedApi(tx);
+      const [noPhone, waiting] = await addContacts([{ name: "Cy", phone: null, email: "cy@example.invalid" }, { name: "Ana", phone: "+14165550101" }]);
+      await setPin(pin);
+      await lock();
+
+      const generated = await generate({ contact_ids: [noPhone!, contactId] });
+      expect(generated.contacts.map((contact) => [contact.id, contact.passcode?.locked, contact.new_passcode.length])).toEqual([[noPhone, false, 6], [contactId, false, 6]]);
+      expect((await row())!).toMatchObject({ failedAttempts: 0, lockedAt: null });
+      expect(await row(waiting)).toBeUndefined();
+      expect(generated.remaining).toBe(1);
+      const milan = generated.contacts[1]!;
+      expect(await type((await verify())!.verificationId, milan.new_passcode)).toMatchObject({ ok: true });
+    });
+  });
+
+  it("gives at most 100 PINs per request and counts the contacts still waiting", { timeout: 120_000 }, async () => {
+    await rollbackTest(async (tx) => {
+      const { generate, addContacts } = await seedApi(tx);
+      // With the seeded contact, 101 contacts have a phone number and no PIN.
+      await addContacts(Array.from({ length: 100 }, (_, index) => ({ name: `Caller ${index}`, phone: `+1416555${String(2000 + index)}`, createdAt: daysAgo(1) })));
+      const first = await generate({ length: 4 });
+      expect(first.contacts).toHaveLength(100);
+      expect(first.remaining).toBe(1);
+      const second = await generate({ length: 4 });
+      expect(second.contacts).toHaveLength(1);
+      expect(second.remaining).toBe(0);
+      expect(new Set([...first.contacts, ...second.contacts].map((contact) => contact.id)).size).toBe(101);
     });
   });
 });

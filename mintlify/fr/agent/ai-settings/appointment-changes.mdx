@@ -66,6 +66,8 @@ Avec **Code PIN sur le clavier**, la réceptionniste demande à l'appelant de sa
   </Step>
 </Steps>
 
+Pour donner un code PIN à de nombreux clients à la fois, utilisez la [ligne de commande](/fr/api/cli) ou l'[API](/fr/api/overview). `lobbystack contacts generate-pins --all` crée un code PIN pour chaque contact qui a un numéro de téléphone et aucun code PIN, et affiche chaque code PIN cette seule fois. `lobbystack contacts set-pins` définit les codes PIN que vous choisissez. Dans l'API, ce sont `POST /contacts/passcodes/generate` et `POST /contacts/passcodes`.
+
 L'appelant peut essayer son code PIN 3 fois par modification. Après 5 codes PIN erronés d'affilée, même sur plusieurs appels, le code PIN est bloqué et la fiche contact l'indique. Définir un nouveau code PIN le débloque.
 
 Un appelant sans code PIN, ou dont le code PIN est bloqué, ne peut pas modifier ses rendez-vous par téléphone. La réceptionniste transmet plutôt sa demande d'annulation à votre équipe.

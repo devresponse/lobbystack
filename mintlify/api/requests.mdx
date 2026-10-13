@@ -64,6 +64,8 @@ Network errors can leave you unsure whether a request worked. Send an `Idempoten
 
 `POST /webhooks` ignores the header, so LobbyStack never stores a copy of the signing secret. If a create request fails with a network error, check `GET /webhooks` before you retry.
 
+`POST /contacts/passcodes` and `POST /contacts/passcodes/generate` ignore it too, so LobbyStack never stores a copy of a keypad PIN. Sending the same PINs to `POST /contacts/passcodes` again just sets them again. If `POST /contacts/passcodes/generate` fails with a network error, look for contacts whose `passcode.set_at` is from that request, and give them new PINs with `contact_ids`.
+
 ```bash
 curl https://app.lobbystack.com/api/v1/appointments \
   -H "Authorization: Bearer $LOBBYSTACK_API_KEY" \

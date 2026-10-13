@@ -66,6 +66,8 @@ With **Keypad PIN** selected, the receptionist asks the caller to type their PIN
   </Step>
 </Steps>
 
+To give PINs to many customers at once, use the [command line](/api/cli) or the [API](/api/overview). `lobbystack contacts generate-pins --all` makes up a PIN for every contact that has a phone number and no PIN, and shows each PIN this one time. `lobbystack contacts set-pins` sets PINs you choose. In the API, these are `POST /contacts/passcodes/generate` and `POST /contacts/passcodes`.
+
 A caller can try their PIN 3 times on each change. After 5 wrong PINs in a row, even across calls, the PIN is locked and the contact shows it as locked. Setting a new PIN unlocks it.
 
 Callers without a PIN, or with a locked one, can't change appointments by phone. The receptionist passes their cancellation request to your team instead.

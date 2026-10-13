@@ -2,9 +2,9 @@ import { z } from "zod";
 
 import { billingPlanSlugs } from "../billing";
 import { interfaceLocales } from "../locales";
-import { appointmentChangeVerificationModes, bookingModes, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
+import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
-import { KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
+import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
 
 // The v1 public contract. Responses built by packages/domain are typed from
 // these schemas, and the OpenAPI document is generated from them, so the docs,
@@ -556,6 +556,10 @@ export const apiContactSchema = z.object({
   email: z.string().nullable(),
   locale: z.string().nullable(),
   timezone: z.string().nullable(),
+  passcode: z.object({
+    set_at: timestamp,
+    locked: z.boolean().describe(`true after ${CONTACT_PASSCODE_LOCK_ATTEMPTS} wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set.`),
+  }).nullable().describe("The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -574,6 +578,29 @@ export const apiContactUpdateSchema = z.strictObject({
   email: z.email().max(320).nullable().optional(),
   locale: contactLocale.nullable().optional(),
   timezone: z.string().trim().min(1).max(80).nullable().optional(),
+});
+
+const contactPasscode = z.string()
+  .regex(new RegExp(`^\\d{${CONTACT_PASSCODE_MIN_LENGTH},${CONTACT_PASSCODE_MAX_LENGTH}}$`), `Use ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH} digits.`)
+  .refine((value) => !isContactPasscode(value) || !isGuessableContactPasscode(value), "Too easy to guess: avoid one digit repeated or digits in a row, such as 1111 or 1234.");
+
+export const apiContactPasscodesUpdateSchema = z.strictObject({
+  passcodes: z.array(z.strictObject({
+    contact_id: id,
+    passcode: contactPasscode.nullable().describe(`The new PIN: ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH} digits, not one digit repeated or digits in a row such as 1111 or 1234. null removes the contact's PIN.`),
+  })).min(1).max(CONTACT_PASSCODES_MAX_PER_REQUEST).describe(`Each item has a contact_id and its passcode: the new PIN, or null to remove the PIN. 1 to ${CONTACT_PASSCODES_MAX_PER_REQUEST} contacts, each once.`),
+});
+
+export const apiContactPasscodesGenerateSchema = z.strictObject({
+  contact_ids: z.array(id).min(1).max(CONTACT_PASSCODES_MAX_PER_REQUEST).optional().describe(`1 to ${CONTACT_PASSCODES_MAX_PER_REQUEST} contacts to give a new PIN, each once, replacing any PIN they have. Leave it out to give one to contacts that have a phone number and no PIN.`),
+  length: z.number().int().min(CONTACT_PASSCODE_MIN_LENGTH).max(CONTACT_PASSCODE_MAX_LENGTH).optional().describe(`Digits in each PIN, ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH}. Defaults to ${CONTACT_PASSCODE_DEFAULT_LENGTH}.`),
+});
+
+export const apiGeneratedContactPasscodesSchema = z.object({
+  contacts: z.array(apiContactSchema.extend({
+    new_passcode: z.string().describe("The PIN just set. LobbyStack keeps only a hash of it, so this is the only time it's shown: give it to the contact."),
+  })).describe("The contacts that got a new PIN."),
+  remaining: z.number().int().describe("Contacts that have a phone number and still no PIN. Without contact_ids, send the request again until this is 0."),
 });
 
 export const apiAppointmentSchema = z.object({
@@ -823,6 +850,9 @@ export type ApiCallDetail = z.infer<typeof apiCallDetailSchema>;
 export type ApiContact = z.infer<typeof apiContactSchema>;
 export type ApiContactCreate = z.infer<typeof apiContactCreateSchema>;
 export type ApiContactUpdate = z.infer<typeof apiContactUpdateSchema>;
+export type ApiContactPasscodesUpdate = z.infer<typeof apiContactPasscodesUpdateSchema>;
+export type ApiContactPasscodesGenerate = z.infer<typeof apiContactPasscodesGenerateSchema>;
+export type ApiGeneratedContactPasscodes = z.infer<typeof apiGeneratedContactPasscodesSchema>;
 export type ApiAppointment = z.infer<typeof apiAppointmentSchema>;
 export type ApiAppointmentCreate = z.infer<typeof apiAppointmentCreateSchema>;
 export type ApiAvailabilitySlot = z.infer<typeof apiAvailabilitySlotSchema>;

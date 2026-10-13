@@ -1,12 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
 
-import { and, asc, count, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notExists, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
+  CONTACT_PASSCODE_DEFAULT_LENGTH,
+  CONTACT_PASSCODE_MAX_LENGTH,
+  CONTACT_PASSCODE_MIN_LENGTH,
+  CONTACT_PASSCODES_MAX_PER_REQUEST,
   PUBLIC_API_AVAILABILITY_MAX_DAYS,
   apiNotificationEvents,
+  isContactPasscode,
+  isGuessableContactPasscode,
+  randomContactPasscode,
   RULES_MAX,
   isApiKeyScope,
   normalizeAuthEmail,
@@ -36,7 +43,10 @@ import {
   type ApiClaimLinkCreate,
   type ApiContact,
   type ApiContactCreate,
+  type ApiContactPasscodesGenerate,
+  type ApiContactPasscodesUpdate,
   type ApiContactUpdate,
+  type ApiGeneratedContactPasscodes,
   type ApiKnowledgeEntry,
   type ApiKnowledgeEntryCreate,
   type ApiKnowledgeEntryUpdate,
@@ -88,6 +98,7 @@ import { bookAppointment, cancelAppointmentInTransaction, findAvailability, resc
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
 import { NUMBER_BEING_REPLACED_MESSAGE, schedulePhoneNumberReleaseInTransaction } from "../compliance";
+import { hashContactPasscodes, removeContactPasscodesInTransaction, saveContactPasscodesInTransaction } from "../contactPasscodes";
 import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
@@ -122,6 +133,7 @@ import {
   loadBusinessResource,
   loadCallDetailResource,
   loadContactResource,
+  loadContactResources,
   loadServiceResource,
   notificationEventKeys,
   loadKnowledgeEntryResource,
@@ -1407,7 +1419,7 @@ export async function createContactForApi(context: DomainContext, caller: ApiCal
       if (!row) throw new Error("The contact could not be created.");
       await audit(tx, caller, { eventType: "api.contact.created", entityType: "contact", entityId: row.id });
       await emitWebhookEventInTransaction(tx, { businessId: caller.businessId, type: "contact.created", resourceId: row.id });
-      return serializeContact(row);
+      return serializeContact(row, null);
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw conflict("A contact with this phone number already exists.");
@@ -1427,15 +1439,114 @@ export async function updateContactForApi(context: DomainContext, caller: ApiCal
   if (!Object.keys(patch).length) throw invalidRequest("Send at least one field to update.");
   try {
     return await inBusiness(context, caller, async (tx) => {
-      const [row] = await tx.update(contacts).set({ ...patch, updatedAt: new Date() }).where(and(eq(contacts.businessId, caller.businessId), eq(contacts.id, contactId))).returning();
+      const [row] = await tx.update(contacts).set({ ...patch, updatedAt: new Date() }).where(and(eq(contacts.businessId, caller.businessId), eq(contacts.id, contactId))).returning({ id: contacts.id });
       if (!row) throw notFound("Contact");
       await audit(tx, caller, { eventType: "api.contact.updated", entityType: "contact", entityId: row.id, payload: { fields: Object.keys(patch) } });
-      return serializeContact(row);
+      const contact = await loadContactResource(tx, caller.businessId, row.id);
+      if (!contact) throw notFound("Contact");
+      return contact;
     });
   } catch (error) {
     if (isUniqueViolation(error)) throw conflict("Another contact already has this phone number.");
     throw error;
   }
+}
+
+// Keypad PINs. Only a slow hash of each PIN is kept, so these hash before
+// their write transaction, which then holds the contacts so none is deleted
+// before its PIN is saved.
+
+/** Lowercased contact ids, refusing one sent twice. */
+function distinctContactIds(contactIds: readonly string[], path: (index: number) => string): string[] {
+  const lowered = contactIds.map((contactId) => contactId.toLowerCase());
+  const repeated = lowered.flatMap((contactId, index) => (lowered.indexOf(contactId) < index ? [{ path: path(index), message: "This contact is already in the list." }] : []));
+  if (repeated.length) throw invalidRequest("Send each contact once.", repeated);
+  return lowered;
+}
+
+/** Refuses ids the business has no contact for. With lock, holds the contacts until the transaction ends. */
+async function requireContacts(tx: DatabaseTransaction, businessId: string, contactIds: readonly string[], path: (index: number) => string, lock: boolean): Promise<void> {
+  const query = tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.businessId, businessId), inArray(contacts.id, [...contactIds])));
+  const found = new Set((lock ? await query.for("key share") : await query).map((row) => row.id));
+  const unknown = contactIds.flatMap((contactId, index) => (found.has(contactId) ? [] : [{ path: path(index), message: "Unknown contact." }]));
+  if (unknown.length) throw invalidRequest("Some contacts aren't this business's.", unknown);
+}
+
+/** Contacts a request without contact_ids gives a PIN: the ones that can call in by phone and have none. */
+function lacksPasscode(tx: DatabaseTransaction, businessId: string) {
+  return and(eq(contacts.businessId, businessId), isNotNull(contacts.phone), notExists(tx.select({ contactId: contactPasscodes.contactId }).from(contactPasscodes).where(eq(contactPasscodes.contactId, contacts.id))));
+}
+
+async function auditContacts(tx: DatabaseTransaction, caller: ApiCaller, eventType: string, contactIds: readonly string[]): Promise<void> {
+  if (!contactIds.length) return;
+  const { actorUserId, payload } = callerAudit(caller);
+  await tx.insert(auditLogs).values(contactIds.map((contactId) => ({ businessId: caller.businessId, eventType, entityType: "contact", entityId: contactId, ...(actorUserId ? { actorUserId } : {}), payload })));
+}
+
+/**
+ * Sets contacts' PINs, or removes them where the PIN is null: all of them, or
+ * none when a contact isn't the business's. A new PIN also unlocks a locked
+ * one. Only owners and admins set PINs in the dashboard, so a per-business key
+ * whose creator no longer is one is refused.
+ */
+export async function setContactPasscodesForApi(context: DomainContext, caller: ApiCaller, input: ApiContactPasscodesUpdate): Promise<ApiContact[]> {
+  const path = (index: number) => `passcodes.${index}.contact_id`;
+  const contactIds = distinctContactIds(input.passcodes.map((entry) => entry.contact_id), path);
+  const weak = input.passcodes.flatMap((entry, index) => (entry.passcode === null || (isContactPasscode(entry.passcode) && !isGuessableContactPasscode(entry.passcode)) ? [] : [{ path: `passcodes.${index}.passcode`, message: `Use ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH} digits that aren't easy to guess.` }]));
+  if (weak.length) throw invalidRequest("Some PINs can't be used.", weak);
+  await resolveActingUserId(context, caller);
+  await inBusiness(context, caller, async (tx) => await requireContacts(tx, caller.businessId, contactIds, path, false));
+  const toSet = input.passcodes.flatMap((entry, index) => (entry.passcode === null ? [] : [{ contactId: contactIds[index]!, passcode: entry.passcode }]));
+  const toRemove = input.passcodes.flatMap((entry, index) => (entry.passcode === null ? [contactIds[index]!] : []));
+  const hashes = await hashContactPasscodes(toSet);
+  return await inBusiness(context, caller, async (tx) => {
+    await requireContacts(tx, caller.businessId, contactIds, path, true);
+    const saved = await saveContactPasscodesInTransaction(tx, { businessId: caller.businessId, hashes: toSet.map((entry, index) => ({ contactId: entry.contactId, passcodeHash: hashes[index]! })), replace: true, now: new Date() });
+    const removed = await removeContactPasscodesInTransaction(tx, { businessId: caller.businessId, contactIds: toRemove });
+    await auditContacts(tx, caller, "api.contact.passcode_set", saved);
+    await auditContacts(tx, caller, "api.contact.passcode_removed", removed);
+    return await loadContactResources(tx, caller.businessId, contactIds);
+  });
+}
+
+/**
+ * Gives contacts a random PIN and returns each PIN this once. contact_ids
+ * names the contacts, replacing PINs they have. Without it, contacts that can
+ * call in and have no PIN get one, oldest first,
+ * CONTACT_PASSCODES_MAX_PER_REQUEST at a time, and remaining counts the rest.
+ * Only owners and admins set PINs, as for setContactPasscodesForApi.
+ */
+export async function generateContactPasscodesForApi(context: DomainContext, caller: ApiCaller, input: ApiContactPasscodesGenerate): Promise<ApiGeneratedContactPasscodes> {
+  const path = (index: number) => `contact_ids.${index}`;
+  const named = input.contact_ids ? distinctContactIds(input.contact_ids, path) : undefined;
+  const length = input.length ?? CONTACT_PASSCODE_DEFAULT_LENGTH;
+  await resolveActingUserId(context, caller);
+  const contactIds = await inBusiness(context, caller, async (tx) => {
+    if (!named) return (await tx.select({ id: contacts.id }).from(contacts).where(lacksPasscode(tx, caller.businessId)).orderBy(asc(contacts.createdAt), asc(contacts.id)).limit(CONTACT_PASSCODES_MAX_PER_REQUEST)).map((row) => row.id);
+    await requireContacts(tx, caller.businessId, named, path, false);
+    return named;
+  });
+  const passcodes = contactIds.map((contactId) => ({ contactId, passcode: randomContactPasscode(length) }));
+  const hashes = await hashContactPasscodes(passcodes);
+  const generated = passcodes.map((entry, index) => ({ ...entry, passcodeHash: hashes[index]! }));
+  return await inBusiness(context, caller, async (tx) => {
+    let present = generated;
+    if (named) {
+      await requireContacts(tx, caller.businessId, named, path, true);
+    } else if (contactIds.length) {
+      // A contact deleted since it was picked is left out.
+      const kept = new Set((await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.businessId, caller.businessId), inArray(contacts.id, contactIds))).for("key share")).map((row) => row.id));
+      present = generated.filter((entry) => kept.has(entry.contactId));
+    }
+    // Without contact_ids, a contact given a PIN meanwhile keeps that one.
+    const saved = new Set(await saveContactPasscodesInTransaction(tx, { businessId: caller.businessId, hashes: present, replace: Boolean(named), now: new Date() }));
+    const given = present.filter((entry) => saved.has(entry.contactId));
+    await auditContacts(tx, caller, "api.contact.passcode_generated", given.map((entry) => entry.contactId));
+    const newPasscodes = new Map(given.map((entry) => [entry.contactId, entry.passcode]));
+    const updated = await loadContactResources(tx, caller.businessId, given.map((entry) => entry.contactId));
+    const [remaining] = await tx.select({ count: count() }).from(contacts).where(lacksPasscode(tx, caller.businessId));
+    return { contacts: updated.map((contact) => ({ ...contact, new_passcode: newPasscodes.get(contact.id)! })), remaining: Number(remaining?.count ?? 0) };
+  });
 }
 
 // Appointments

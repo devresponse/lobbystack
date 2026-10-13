@@ -99,3 +99,66 @@ describe("knowledge upload", () => {
     }
   });
 });
+
+describe("contact PINs", () => {
+  const ana = "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6";
+  const milan = "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
+  const given = (id: string, name: string, pin: string) => ({ id, name, phone: "+14165550134", passcode: { set_at: "2026-10-13T21:00:00.000Z", locked: false }, new_passcode: pin });
+
+  it("sets and removes PINs from --passcodes, one contact each", async () => {
+    const api = fakeApi({ "POST /api/v1/contacts/passcodes": { body: { data: [{ id: ana, name: "Ana", phone: "+14165550134", passcode: { set_at: "2026-10-13T21:00:00.000Z", locked: false } }, { id: milan, name: "Milan", phone: null, passcode: null }], next_cursor: null, has_more: false } } });
+    const result = await runCli(["contacts", "set-pins", "--passcodes", JSON.stringify({ contact_id: ana, passcode: "480613" }), "--passcodes", JSON.stringify({ contact_id: milan, passcode: null })], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]!.body).toEqual({ passcodes: [{ contact_id: ana, passcode: "480613" }, { contact_id: milan, passcode: null }] });
+    // Setting a PIN twice changes nothing, and a stored replay would keep the PIN, so no Idempotency-Key is sent.
+    expect(api.sent[0]!.headers).not.toHaveProperty("idempotency-key");
+    expect(result.out).toMatch(/^ID\s+NAME\s+PHONE\s+PASSCODE/);
+    expect(result.out).toContain("\"locked\":false");
+  });
+
+  it("gives the named contacts new PINs once and shows them", async () => {
+    const api = fakeApi({ "POST /api/v1/contacts/passcodes/generate": { body: { data: { contacts: [given(ana, "Ana", "4806")], remaining: 3 } } } });
+    const result = await runCli(["contacts", "generate-pins", ana, "--length", "4"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]!.body).toEqual({ contact_ids: [ana], length: 4 });
+    expect(result.out).toMatch(/Ana\s+\+14165550134\s+4806/);
+    expect(result.out).toContain("These PINs aren't shown again");
+    expect(result.out).toContain("3 contacts with a phone number still have no PIN. To give them one, run lobbystack contacts generate-pins --all.");
+  });
+
+  it("keeps going with --all until every contact with a phone number has a PIN", async () => {
+    const api = fakeApi({ "POST /api/v1/contacts/passcodes/generate": [
+      { body: { data: { contacts: [given(ana, "Ana", "480613")], remaining: 1 } } },
+      { body: { data: { contacts: [given(milan, "Milan", "975310")], remaining: 0 } } },
+    ] });
+    const result = await runCli(["contacts", "generate-pins", "--all", "--json"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent.map((request) => request.body)).toEqual([{}, {}]);
+    expect(JSON.parse(result.out)).toEqual({ contacts: [given(ana, "Ana", "480613"), given(milan, "Milan", "975310")], remaining: 0 });
+
+    // A request that gives nobody a PIN ends the run instead of looping.
+    const stuck = fakeApi({ "POST /api/v1/contacts/passcodes/generate": { body: { data: { contacts: [], remaining: 2 } } } });
+    const nothing = await runCli(["contacts", "generate-pins", "--all"], { fetch: stuck.fetch });
+    expect(stuck.sent).toHaveLength(1);
+    expect(nothing.out).toContain("No contact got a new PIN.");
+  });
+
+  it("shows the PINs already given when a later request fails", async () => {
+    const api = fakeApi({ "POST /api/v1/contacts/passcodes/generate": [
+      { body: { data: { contacts: [given(ana, "Ana", "480613")], remaining: 1 } } },
+      { status: 503, body: { error: { code: "rate_limit_unavailable", message: "The API is temporarily unavailable. Retry shortly." } } },
+    ] });
+    const result = await runCli(["contacts", "generate-pins", "--all"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.failed);
+    expect(result.out).toMatch(/Ana\s+\+14165550134\s+480613/);
+    expect(result.err).toContain("temporarily unavailable");
+  });
+
+  it("refuses --all with contact ids, and a length a PIN can't have", async () => {
+    const api = fakeApi({});
+    expect((await runCli(["contacts", "generate-pins", ana, "--all"], { fetch: api.fetch })).code).toBe(exitCodes.invalid);
+    for (const length of ["3", "9", "six", "4.5"]) expect((await runCli(["contacts", "generate-pins", "--length", length], { fetch: api.fetch })).code, length).toBe(exitCodes.invalid);
+    expect(api.sent).toHaveLength(0);
+  });
+});

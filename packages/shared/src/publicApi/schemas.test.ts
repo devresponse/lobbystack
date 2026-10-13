@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
-import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
+import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
+import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -67,6 +67,17 @@ describe("parseApiInput", () => {
       expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, file_name: fileName })).toEqual({ ok: false, details: [{ path: "file_name", message: "Use the file's name, such as prices.pdf." }] });
     }
     expect(parseApiInput(apiKnowledgeUploadCreateSchema, { ...upload, length: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 }).ok).toBe(false);
+  });
+
+  it("checks keypad PINs with the dashboard's rules, one message each", () => {
+    const one = (passcode: unknown) => ({ passcodes: [{ contact_id: "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f", passcode }] });
+    expect(parseApiInput(apiContactPasscodesUpdateSchema, one("480613"))).toEqual({ ok: true, data: one("480613") });
+    expect(parseApiInput(apiContactPasscodesUpdateSchema, one(null))).toEqual({ ok: true, data: one(null) });
+    for (const malformed of ["123", "123456789", "12a4", "١٢٣٤٥"]) expect(parseApiInput(apiContactPasscodesUpdateSchema, one(malformed)), malformed).toEqual({ ok: false, details: [{ path: "passcodes.0.passcode", message: "Use 4 to 8 digits." }] });
+    for (const guessable of ["1111", "1234", "98765432"]) expect(parseApiInput(apiContactPasscodesUpdateSchema, one(guessable)), guessable).toEqual({ ok: false, details: [{ path: "passcodes.0.passcode", message: "Too easy to guess: avoid one digit repeated or digits in a row, such as 1111 or 1234." }] });
+    expect(parseApiInput(apiContactPasscodesUpdateSchema, { passcodes: Array.from({ length: CONTACT_PASSCODES_MAX_PER_REQUEST + 1 }, () => one("480613").passcodes[0]) }).ok).toBe(false);
+    expect(parseApiInput(apiContactPasscodesGenerateSchema, {})).toEqual({ ok: true, data: {} });
+    for (const bad of [{ length: 3 }, { length: 9 }, { length: 4.5 }, { contact_ids: [] }, { contact_ids: ["x"] }, { all: true }]) expect(parseApiInput(apiContactPasscodesGenerateSchema, bad).ok, JSON.stringify(bad)).toBe(false);
   });
 
   it("accepts start times with or without seconds", () => {

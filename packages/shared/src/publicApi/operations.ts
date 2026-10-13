@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { BUSINESS_HEADER, PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, businessApiKeyScopes, webhookEventTypes, type ApiKeyScope, type BusinessApiKeyScope } from "./constants";
+import { BUSINESS_HEADER, CONTACT_PASSCODES_MAX_PER_REQUEST, PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, businessApiKeyScopes, webhookEventTypes, type ApiKeyScope, type BusinessApiKeyScope } from "./constants";
 import {
   apiAccountCalendarSchema,
   apiAppointmentCreateSchema,
@@ -25,10 +25,13 @@ import {
   apiClaimLinkSchema,
   apiCheckoutSchema,
   apiContactCreateSchema,
+  apiContactPasscodesGenerateSchema,
+  apiContactPasscodesUpdateSchema,
   apiContactSchema,
   apiContactUpdateSchema,
   apiDeletedSchema,
   apiErrorSchema,
+  apiGeneratedContactPasscodesSchema,
   apiKnowledgeEntryCreateSchema,
   apiKnowledgeEntrySchema,
   apiKnowledgeEntryUpdateSchema,
@@ -171,6 +174,9 @@ export const apiOperations = {
   createContact: { method: "POST", path: "/contacts", tag: "Contacts", summary: "Create a contact", description: "Returns 409 conflict when a contact with the same phone number exists.", scope: "contacts:write", idempotent: true, request: "ContactCreate", response: "Contact", status: 201 },
   getContact: { method: "GET", path: "/contacts/{contact_id}", tag: "Contacts", summary: "Get a contact", scope: "contacts:read", params: [idParam("contact_id", "contact")], response: "Contact", status: 200 },
   updateContact: { method: "PATCH", path: "/contacts/{contact_id}", tag: "Contacts", summary: "Update a contact", scope: "contacts:write", params: [idParam("contact_id", "contact")], request: "ContactUpdate", response: "Contact", status: 200 },
+  // Neither PIN operation is idempotent: the stored record would keep a hash of the body and a copy of the response, from which a short PIN is easy to recover.
+  setContactPasscodes: { method: "POST", path: "/contacts/passcodes", tag: "Contacts", summary: "Set or remove keypad PINs", description: `Sets the keypad PIN each contact types to change appointments by phone when verification_mode is passcode_required, or removes it with null. A new PIN also unlocks a locked one. Send up to ${CONTACT_PASSCODES_MAX_PER_REQUEST} contacts, each once: if any isn't this business's, nothing changes. Returns the contacts in the order sent. LobbyStack keeps only a hash of each PIN, and this endpoint ignores Idempotency-Key so it never stores a copy. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.`, scope: "contacts:write", list: true, request: "ContactPasscodesUpdate", response: "Contact", status: 200 },
+  generateContactPasscodes: { method: "POST", path: "/contacts/passcodes/generate", tag: "Contacts", summary: "Generate keypad PINs", description: `Gives contacts a random keypad PIN and returns each one in new_passcode. LobbyStack keeps only a hash, so this response is the only time the PINs appear: give each contact theirs. With contact_ids, those contacts get a new PIN, replacing any they have. Without it, contacts that have a phone number and no PIN get one, oldest first, ${CONTACT_PASSCODES_MAX_PER_REQUEST} per request: send it again until remaining is 0. This endpoint ignores Idempotency-Key, so no copy of a PIN is stored. After a network error, look for contacts whose passcode set_at is from that request, and give them new PINs with contact_ids. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.`, scope: "contacts:write", request: "ContactPasscodesGenerate", response: "GeneratedContactPasscodes", status: 200 },
   listAppointments: { method: "GET", path: "/appointments", tag: "Appointments", summary: "List appointments", description: "Newest booking first.", scope: "appointments:read", list: true, params: [...pageParams, { name: "status", in: "query", description: "confirmed or cancelled.", schema: { type: "string", enum: ["confirmed", "cancelled"] } }, { name: "starts_after", in: "query", description: "Only appointments starting at or after this time.", schema: { type: "string", format: "date-time" } }, { name: "starts_before", in: "query", description: "Only appointments starting before this time.", schema: { type: "string", format: "date-time" } }, { name: "contact_id", in: "query", description: "Only this contact's appointments.", schema: { type: "string", format: "uuid" } }], response: "Appointment", status: 200 },
   getAvailability: { method: "GET", path: "/availability", tag: "Appointments", summary: "List open appointment times", description: `Open start times for one service, in 30-minute steps within opening hours. The range can span up to ${PUBLIC_API_AVAILABILITY_MAX_DAYS} days.`, scope: "appointments:read", list: true, params: [{ name: "service_id", in: "query", required: true, description: "The service to book.", schema: { type: "string", format: "uuid" } }, { name: "start_date", in: "query", required: true, description: "First day, YYYY-MM-DD, in the business time zone.", schema: { type: "string", format: "date" } }, { name: "end_date", in: "query", description: "Last day, YYYY-MM-DD. Defaults to start_date.", schema: { type: "string", format: "date" } }, { name: "staff_id", in: "query", description: "Only times this active staff member is free.", schema: { type: "string", format: "uuid" } }], response: "AvailabilitySlot", status: 200 },
   createAppointment: { method: "POST", path: "/appointments", tag: "Appointments", summary: "Book an appointment", description: "Books only when the business's booking_mode is instant. Returns 409 booking_requires_confirmation in request mode and 409 booking_disabled when booking is off.", scope: "appointments:write", idempotent: true, request: "AppointmentCreate", response: "Appointment", status: 201 },
@@ -235,6 +241,9 @@ export const apiComponentSchemas = {
   Contact: apiContactSchema,
   ContactCreate: apiContactCreateSchema,
   ContactUpdate: apiContactUpdateSchema,
+  ContactPasscodesUpdate: apiContactPasscodesUpdateSchema,
+  ContactPasscodesGenerate: apiContactPasscodesGenerateSchema,
+  GeneratedContactPasscodes: apiGeneratedContactPasscodesSchema,
   Appointment: apiAppointmentSchema,
   AppointmentCreate: apiAppointmentCreateSchema,
   AppointmentReschedule: apiAppointmentRescheduleSchema,

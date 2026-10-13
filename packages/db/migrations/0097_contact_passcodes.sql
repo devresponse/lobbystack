@@ -1,8 +1,9 @@
 -- A contact's keypad PIN. When a business requires one to change appointments
 -- (verification mode passcode_required), callers type it on the phone keypad.
--- Only an HMAC of the PIN is kept, keyed by the server's OTP_HASH_SECRET, so
--- changing that secret makes every PIN stop matching. It lives apart from
--- contacts so the contact row the dashboard reads never carries it.
+-- Only a salted scrypt hash of the PIN is kept, with the server's
+-- OTP_HASH_SECRET in its input, so changing that secret makes every PIN stop
+-- matching. It lives apart from contacts so the contact row the dashboard
+-- reads never carries it.
 CREATE TABLE IF NOT EXISTS public.contact_passcodes (
   contact_id uuid PRIMARY KEY REFERENCES public.contacts(id) ON DELETE CASCADE,
   business_id uuid NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,

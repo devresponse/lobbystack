@@ -35,7 +35,7 @@ The worker logs each answer as `live.delegation` with `agentMs`, `totalMs`, `que
 
 ### Keypad PINs
 
-A business can require a PIN before the receptionist cancels or reschedules (verification mode `passcode_required`). Operators set each caller's PIN on the contact's **Details** tab, and `contact_passcodes` keeps only an HMAC of it, keyed by `OTP_HASH_SECRET` (or `ENCRYPTION_KEY`, then `BETTER_AUTH_SECRET`). Changing that secret makes every saved PIN stop matching.
+A business can require a PIN before the receptionist cancels or reschedules (verification mode `passcode_required`). Operators set each caller's PIN on the contact's **Details** tab, and `contact_passcodes` keeps only a salted scrypt hash of it, with `OTP_HASH_SECRET` (or `ENCRYPTION_KEY`, then `BETTER_AUTH_SECRET`) in the hash input. Changing that secret makes every saved PIN stop matching.
 
 GPT-Live never hears key presses, so the worker takes the PIN:
 

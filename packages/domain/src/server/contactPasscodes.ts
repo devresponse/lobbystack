@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
@@ -16,17 +16,32 @@ import { verificationCodeSecret } from "./verificationCode";
 /** Wrong PINs in a row, across calls, that lock a PIN until someone sets a new one. */
 export const CONTACT_PASSCODE_LOCK_ATTEMPTS = 5;
 
+const PASSCODE_HASH_PREFIX = "scrypt-v1:";
+
 /**
- * HMAC of a PIN with the server secret, so a leaked database alone doesn't
- * give PINs away. The contact id keeps two contacts with the same PIN apart.
+ * Salted scrypt of a PIN, with the same cost as admin passwords and on the
+ * libuv thread pool so a check doesn't stall the worker's calls. The server
+ * secret goes into the input, so a leaked database alone doesn't give PINs
+ * away, and the contact id ties a hash to its contact.
  */
-function hashContactPasscode(contactId: string, passcode: string): string {
-  return createHmac("sha256", verificationCodeSecret()).update(`contact-passcode:${contactId}:${passcode}`).digest("hex");
+function passcodeKey(contactId: string, passcode: string, salt: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    scrypt(`${verificationCodeSecret()}:contact-passcode:${contactId}:${passcode}`, salt, 64, { N: 16384, r: 16, p: 1, maxmem: 64 * 1024 * 1024 }, (error, key) => (error ? reject(error) : resolve(key)));
+  });
 }
 
-function matchesContactPasscode(expectedHash: string, contactId: string, passcode: string): boolean {
-  const actual = Buffer.from(hashContactPasscode(contactId, passcode), "hex");
-  const expected = Buffer.from(expectedHash, "hex");
+async function hashContactPasscode(contactId: string, passcode: string): Promise<string> {
+  const salt = randomBytes(16).toString("hex");
+  return `${PASSCODE_HASH_PREFIX}${salt}:${(await passcodeKey(contactId, passcode, salt)).toString("hex")}`;
+}
+
+async function matchesContactPasscode(storedHash: string, contactId: string, passcode: string): Promise<boolean> {
+  if (!storedHash.startsWith(PASSCODE_HASH_PREFIX)) return false;
+  const parts = storedHash.slice(PASSCODE_HASH_PREFIX.length).split(":");
+  if (parts.length !== 2) return false;
+  const [salt, key] = parts as [string, string];
+  const actual = await passcodeKey(contactId, passcode, salt);
+  const expected = Buffer.from(key, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
@@ -53,7 +68,7 @@ export async function setContactPasscode(
     const contact = (await tx.select({ id: contacts.id }).from(contacts).where(and(eq(contacts.id, input.contactId), eq(contacts.businessId, input.businessId))).limit(1))[0];
     if (!contact) return null;
     const now = new Date();
-    const values = { passcodeHash: hashContactPasscode(contact.id, input.passcode), failedAttempts: 0, lockedAt: null, setAt: now, updatedAt: now };
+    const values = { passcodeHash: await hashContactPasscode(contact.id, input.passcode), failedAttempts: 0, lockedAt: null, setAt: now, updatedAt: now };
     await tx.insert(contactPasscodes).values({ contactId: contact.id, businessId: input.businessId, ...values }).onConflictDoUpdate({ target: contactPasscodes.contactId, set: values });
     await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: "contact.passcode_set", entityType: "contact", entityId: contact.id });
     return { setAt: now.toISOString(), locked: false };
@@ -89,7 +104,7 @@ export async function checkContactPasscodeInTransaction(
   if (!row) return { status: "missing" };
   if (row.lockedAt) return { status: "locked", justLocked: false };
   const now = new Date();
-  if (matchesContactPasscode(row.passcodeHash, input.contactId, input.passcode)) {
+  if (await matchesContactPasscode(row.passcodeHash, input.contactId, input.passcode)) {
     if (row.failedAttempts > 0) await tx.update(contactPasscodes).set({ failedAttempts: 0, updatedAt: now }).where(where);
     return { status: "accepted" };
   }

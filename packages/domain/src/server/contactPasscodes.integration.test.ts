@@ -147,7 +147,7 @@ describe.skipIf(!client)("a contact's keypad PIN", () => {
       const first = await setPin(pin);
       expect(first).toMatchObject({ locked: false });
       const stored = await row();
-      expect(stored!.passcodeHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(stored!.passcodeHash).toMatch(/^scrypt-v1:[0-9a-f]{32}:[0-9a-f]{128}$/);
       expect(stored!.passcodeHash).not.toContain(pin);
       expect((await detail()).passcode).toEqual({ setAt: first!.setAt, locked: false });
       expect(JSON.stringify(await detail())).not.toContain(stored!.passcodeHash);

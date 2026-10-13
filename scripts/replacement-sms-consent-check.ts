@@ -63,6 +63,20 @@ async function main(): Promise<void> {
     const crossTenant = await setContactSmsManualBlock({ db: app.db }, { userId, businessId: foreignBusinessId, contactId, blocked: true }).catch(() => false);
     assert(!crossTenant, "Cross-tenant manual block was accepted.");
 
+    // A reply in a conversation the contact texted needs no yes to texts, but STOP still holds it back.
+    const texter = "+14165550776";
+    await receiveInboundSms({ db: worker.db }, { businessId, providerMessageId: `SM-${randomUUID()}`, from: texter, to: "+14165550779", body: "Are you open Saturday?", payload: {} });
+    const texterConversation = await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async (tx) => (await tx.select({ id: conversations.id }).from(conversations).innerJoin(contacts, eq(contacts.id, conversations.contactId)).where(and(eq(conversations.businessId, businessId), eq(contacts.phone, texter))).limit(1))[0]);
+    assert(texterConversation, "The texter's conversation was not persisted.");
+    const queueReply = async (body: string) => {
+      const messageId = await appendMessage({ db: worker.db }, { businessId, conversationId: texterConversation.id, direction: "outbound", channel: "sms", body, aiGenerated: false });
+      assert(await claimSmsDelivery({ db: worker.db }, { businessId, messageId }), "A reply to the texter could not be claimed.");
+      return await loadSmsDeliveryTarget(worker.db, { businessId, messageId });
+    };
+    assert((await queueReply("We're open 9 to 5."))?.to === texter, "A reply to a contact who texted first was held back.");
+    await receiveInboundSms({ db: worker.db }, { businessId, providerMessageId: `SM-${randomUUID()}`, from: texter, to: "+14165550779", body: "STOP", payload: {} });
+    assert(await queueReply("Queued after STOP") === null, "A reply went to a contact who texted STOP.");
+
     const preferences = defaultOperatorNotificationEventPreferences();
     preferences.voiceMessage.sms = true;
     let missingConsentDenied = false;
@@ -98,7 +112,7 @@ async function main(): Promise<void> {
     for (const action of ["opted_out", "resubscribed", "manual_blocked", "manual_unblocked", "operator_alert_consent_granted", "operator_alert_consent_revoked"]) assert(events.some((event) => event.action === action), `${action} consent event is missing.`);
     const delivery = (await migrator.db.select().from(operatorNotificationDeliveries).where(eq(operatorNotificationDeliveries.id, operatorDeliveryId)).limit(1))[0];
     assert(delivery?.status === "processing", "Certification expected the claimed operator delivery to remain available for the worker skip path.");
-    console.log(JSON.stringify({ contactStopStart: true, duplicateWebhookIdempotent: true, complianceReplyDeduplicated: true, manualBlockPreserved: true, queuedMessageRaceBlocked: true, operatorConsentRechecked: true, crossTenantDenied: true, immutableHistory: true }));
+    console.log(JSON.stringify({ contactStopStart: true, duplicateWebhookIdempotent: true, complianceReplyDeduplicated: true, manualBlockPreserved: true, queuedMessageRaceBlocked: true, replyToTexterDelivered: true, replyAfterStopHeld: true, operatorConsentRechecked: true, crossTenantDenied: true, immutableHistory: true }));
   } finally {
     if (originalAlertSender === undefined) delete process.env.TWILIO_ALERT_SMS_FROM; else process.env.TWILIO_ALERT_SMS_FROM = originalAlertSender;
     await migrator.db.delete(businesses).where(eq(businesses.id, businessId)).catch(() => undefined);

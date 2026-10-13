@@ -188,6 +188,18 @@ export async function smsDeliveryLeaseEndsAt(context: DomainContext, input: { bu
   });
 }
 
+/** Whether the contact texted the conversation an outbound text belongs to, so the text answers them. */
+function contactTextedConversationSql(businessId: string) {
+  return sql<boolean>`exists (select 1 from ${messages} as "contact_texts" where "contact_texts"."business_id" = ${businessId} and "contact_texts"."conversation_id" = ${messages.conversationId} and "contact_texts"."direction" = 'inbound' and "contact_texts"."channel" = 'sms')`;
+}
+
+/**
+ * Where and what to text for a queued outbound text, or null when it can't go
+ * out. A text the business starts needs the contact's yes. HELP and START
+ * answers don't, and neither does a reply in a conversation the contact
+ * texted: declining was about appointment texts, so only an opt-out stops
+ * it. A blocked contact gets nothing.
+ */
 export async function loadSmsDeliveryTarget(db: Database, input: { businessId: string; messageId: string }): Promise<{ to: string; from: string; body: string } | null> {
   return await withBusinessTransaction(db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const row = (await tx.select({ to: contacts.phone, from: phoneNumbers.e164, body: messages.body })
@@ -195,7 +207,7 @@ export async function loadSmsDeliveryTarget(db: Database, input: { businessId: s
       .innerJoin(conversations, and(eq(conversations.id, messages.conversationId), eq(conversations.businessId, input.businessId)))
       .innerJoin(contacts, and(eq(contacts.id, conversations.contactId), eq(contacts.businessId, input.businessId)))
       .innerJoin(phoneNumbers, and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.smsEnabled, true)))
-      .where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.direction, "outbound"), eq(messages.channel, "sms"), isNull(contacts.operatorBlockedAt), isNotNull(contacts.phone), or(eq(contacts.smsConsentStatus, "subscribed"), eq(messages.providerStatus, "compliance_reply")), inArray(messages.status, ["queued", "sending"])))
+      .where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.direction, "outbound"), eq(messages.channel, "sms"), isNull(contacts.operatorBlockedAt), isNotNull(contacts.phone), or(eq(contacts.smsConsentStatus, "subscribed"), eq(messages.providerStatus, "compliance_reply"), and(or(isNull(contacts.smsConsentStatus), eq(contacts.smsConsentStatus, "declined")), contactTextedConversationSql(input.businessId))), inArray(messages.status, ["queued", "sending"])))
       .limit(1))[0];
     if (!row || row.to === null) return null;
     return { to: row.to, from: row.from, body: row.body };

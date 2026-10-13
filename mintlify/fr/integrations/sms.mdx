@@ -25,7 +25,7 @@ Un numéro sans frais peut seulement envoyer des textos aux numéros des États-
 
 Sur une installation autohébergée de LobbyStack, les textos viennent du numéro Twilio de votre entreprise compatible SMS. Enregistrez ce numéro avant d'envoyer des textos à vos clients. Un numéro local américain demande une marque et une campagne 10DLC (10-digit long code), et un numéro sans frais demande une vérification sans frais (toll-free verification). Les opérateurs américains bloquent les textos des numéros non enregistrés.
 
-Quand un client envoie un texto à votre numéro d'entreprise, LobbyStack enregistre le message dans **Messages** et alerte votre équipe. L'IA ne répond pas. `STOP` et `HELP` reçoivent des réponses fixes. Le numéro sans frais partagé ne tient aucune conversation et répond seulement à `STOP`, `START` et `HELP`.
+Quand un client envoie un texto à votre numéro d'entreprise, LobbyStack enregistre le message dans **Messages** et alerte votre équipe. L'IA ne répond pas, mais votre équipe peut répondre depuis **Messages**. `STOP` et `HELP` reçoivent des réponses fixes. Le numéro sans frais partagé ne tient aucune conversation et répond seulement à `STOP`, `START` et `HELP`.
 
 ## Modèle de consentement
 
@@ -52,6 +52,12 @@ Quand un appelant annule un rendez-vous et n'a jamais répondu à la question, l
 Un appelant qui a déjà répondu ne se fait pas redemander : LobbyStack suit sa réponse précédente.
 
 LobbyStack enregistre le consentement seulement pendant un appel téléphonique, pour le numéro d'où le client appelle. Le clavardage du site Web et les appels depuis le navigateur ne proposent pas de textos, et une réponse donnée là n'est pas enregistrée.
+
+### Clients qui vous envoient un texto
+
+Un client qui envoie un texto à votre numéro d'entreprise peut recevoir les réponses de votre équipe dans cette conversation. Il n'a pas à accepter d'abord les textos de rendez-vous. Un client qui a refusé les textos de rendez-vous reçoit quand même vos réponses.
+
+LobbyStack n'envoie pas de réponse à un client qui a répondu `STOP` ni à un contact que votre équipe a bloqué. Pour envoyer un texto à un client qui ne vous en a jamais envoyé, il doit d'abord accepter les textos.
 
 ### Opérateurs
 

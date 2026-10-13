@@ -16,6 +16,7 @@
     "handoffBanner": "A team member will reply shortly.",
     "handoffActive": "Chat paused",
     "voiceButton": "Talk to us live",
+    "voiceStart": "Say Allo!",
     "voiceConnected": "You are speaking with the receptionist.",
     "voiceEnded": "The voice connection ended. You can keep chatting below.",
     "voiceUnavailable": "Live voice is unavailable. Try again later.",
@@ -24,6 +25,7 @@
     "voiceEnd": "End call",
     "voiceTranscript": "Voice call",
     "voiceLive": "Live",
+    "visitorId": "Your ID: {{id}}",
     "leaveDetails": "Leave your details",
     "leadFormSubmitted": "Thanks! We'll reach out soon."
   },

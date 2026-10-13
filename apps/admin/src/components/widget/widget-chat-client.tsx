@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Phone, PhoneOff, Send } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
@@ -89,6 +89,8 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [configState, setConfigState] = useState<WidgetConfigPayload | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  // Whether the thread follows new messages: true while the visitor is at the bottom.
+  const followThreadRef = useRef(true);
   const [lead, setLead] = useState({ name: "", email: "", phone: "" });
   const [leadSubmitting, setLeadSubmitting] = useState(false);
   const [handoff, setHandoff] = useState(false);
@@ -236,9 +238,13 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
     };
   }, [handoff, loadHistory, sending]);
 
-  useEffect(() => {
-    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
-  }, [messages, status, voiceCaptions]);
+  // New messages and each streamed piece of a reply scroll the thread to the
+  // bottom, unless the visitor scrolled up to reread something. This runs
+  // before the browser paints, so new text never shows below the fold first.
+  useLayoutEffect(() => {
+    const thread = threadRef.current;
+    if (thread && followThreadRef.current) thread.scrollTop = thread.scrollHeight;
+  }, [messages, status, voiceCaptions, submitError]);
 
   // A live voice call or its captions are on screen. Typed messages come back
   // from history after a reload; these don't, so the loader asks the visitor
@@ -247,17 +253,6 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   useEffect(() => {
     window.parent?.postMessage({ type: "leave-warning", enabled: voiceTranscriptShown }, "*");
   }, [voiceTranscriptShown]);
-
-  useEffect(() => {
-    const reportHeight = () => {
-      window.parent?.postMessage({ type: "resize", height: document.documentElement.scrollHeight }, "*");
-    };
-    reportHeight();
-    const observer = new ResizeObserver(reportHeight);
-    observer.observe(document.documentElement);
-    observer.observe(document.body);
-    return () => observer.disconnect();
-  }, []);
 
   const color = configState?.config?.color ?? "#0f766e";
   const title = configState?.config?.title || configState?.business?.name || t("chat.titlePlaceholder");
@@ -269,6 +264,7 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
     if (!visitorIdRef.current) return;
     setSubmitError(null);
     setDraft("");
+    followThreadRef.current = true;
     try {
       clearError();
       await sendMessage({ text: content });
@@ -313,25 +309,40 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
   }
 
   const showLeadBeforeChat = Boolean(configState?.config?.leadForm?.showBeforeChat) && !leadDone && messages.length === 0;
+  const showLeadButton = !leadDone && messages.length > 0 && Boolean(configState?.config?.leadForm?.enabled);
+  // The id the loader keeps for this visitor, so the same chat comes back on every visit. Only its
+  // start is shown: with the widget key, the full id is enough to open this visitor's chat.
+  const shortVisitorId = parentVisitorId?.slice(0, 8) ?? "";
   const voiceEnabled = Boolean(configState?.voiceEnabled) && Boolean(configState?.businessSlug);
   const configErrorCode = config.error instanceof Error && ["originDenied", "invalidKey", "configLoad"].includes(config.error.message) ? config.error.message : null;
 
   return (
-    <main className="flex h-full min-h-0 flex-col bg-white text-zinc-900" style={{ minHeight: "100dvh" }}>
-      <header className="flex items-center gap-3 border-b px-4 py-3">
-        <div className="flex size-9 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: color }} aria-hidden="true">
-          {(title || "?")[0]?.toUpperCase()}
+    // The chat fills the frame at a fixed height and only the thread scrolls, so new messages never
+    // resize the frame or move the page around it.
+    <main className="relative flex h-dvh min-h-0 flex-col overflow-hidden bg-white text-zinc-900">
+      <header className="flex shrink-0 flex-col gap-3 border-b px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex size-9 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: color }} aria-hidden="true">
+            {(title || "?")[0]?.toUpperCase()}
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{title}</p>
+            {configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{title}</p>
-          {configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
-        </div>
-        {voiceEnabled ? <VoiceButton className="ml-auto" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
+        {voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
       </header>
 
-      {handoff ? <div className="border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800">{t("chat.handoffBanner")}</div> : null}
+      {handoff ? <div className="shrink-0 border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800">{t("chat.handoffBanner")}</div> : null}
 
-      <div ref={threadRef} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+      <div
+        ref={threadRef}
+        className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto overscroll-contain p-4"
+        onScroll={(event) => {
+          const thread = event.currentTarget;
+          followThreadRef.current = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 64;
+        }}
+      >
         {configErrorCode ? <p className="text-center text-sm text-zinc-500">{t(`errors.${configErrorCode}` as never)}</p> : null}
         {config.isError ? <p className="text-center text-sm text-zinc-500">{t("errors.configLoad")}</p> : null}
         {config.isLoading ? <p className="text-center text-sm text-zinc-400">{t("chat.loadingTranscript")}</p> : null}
@@ -354,22 +365,27 @@ export function WidgetChatClient({ widgetKey }: { widgetKey: string }) {
       </div>
 
       {showLeadBeforeChat ? (
-        <LeadForm className="border-t p-4" lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onSkip={() => { setLeadDone(true); setLeadOpen(false); }} t={t} />
+        <LeadForm className="shrink-0 border-t p-4" lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onSkip={() => { setLeadDone(true); setLeadOpen(false); }} t={t} />
       ) : null}
 
-      <form className="flex items-end gap-2 border-t p-3" onSubmit={(event) => void submitChat(event)}>
-        {!leadDone && messages.length > 0 && configState?.config?.leadForm?.enabled ? (
-          <Button type="button" onClick={() => setLeadOpen(true)} variant="outline" className="shrink-0 text-xs" disabled={leadOpen}>{t("chat.leaveDetails")}</Button>
+      <form className="flex shrink-0 flex-col gap-2 border-t p-3" onSubmit={(event) => void submitChat(event)}>
+        <div className="flex items-end gap-2">
+          <Input
+            className="min-h-11 min-w-0 flex-1"
+            placeholder={t("chat.composerPlaceholder")}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            disabled={!config.data || sending || leadOpen}
+            aria-label={t("chat.composerPlaceholder")}
+          />
+          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color }}><Send /></Button>
+        </div>
+        {showLeadButton || shortVisitorId ? (
+          <div className="flex min-h-8 items-center gap-2">
+            {showLeadButton ? <Button type="button" onClick={() => setLeadOpen(true)} variant="outline" size="sm" className="shrink-0 text-xs" disabled={leadOpen}>{t("chat.leaveDetails")}</Button> : null}
+            {shortVisitorId ? <p className="ml-auto truncate text-xs text-zinc-400 tabular-nums">{t("chat.visitorId", { id: shortVisitorId })}</p> : null}
+          </div>
         ) : null}
-        <Input
-          className="min-h-11 flex-1"
-          placeholder={t("chat.composerPlaceholder")}
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          disabled={!config.data || sending || leadOpen}
-          aria-label={t("chat.composerPlaceholder")}
-        />
-        <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color }}><Send /></Button>
       </form>
 
       {leadOpen && !showLeadBeforeChat ? <LeadOverlay lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onClose={() => setLeadOpen(false)} t={t} /> : null}
@@ -398,13 +414,14 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
   }, [onCaptions, status, transcript]);
 
   const active = status === "requesting_microphone" || status === "connecting" || status === "connected";
+  // A labelled button the width of the chat, under the business name, so calling is as easy to find as typing.
   return (
     <>
       <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       {active ? (
-        <Button variant="destructive" size="icon" className="ml-auto" aria-label={t("chat.voiceEnd")} onClick={() => void endCall()}><PhoneOff /></Button>
+        <Button variant="destructive" size="lg" className={className} onClick={() => void endCall()}><PhoneOff />{t("chat.voiceEnd")}</Button>
       ) : (
-        <Button variant="outline" size="icon" className={cn("ml-auto", className)} aria-label={t("chat.voiceButton")} onClick={() => void startCall()} disabled={status === "ending"}><Phone /></Button>
+        <Button size="lg" className={className} title={t("chat.voiceButton")} onClick={() => void startCall()} disabled={status === "ending"}><Phone />{t("chat.voiceStart")}</Button>
       )}
     </>
   );

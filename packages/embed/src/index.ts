@@ -212,6 +212,7 @@ export function initWidget(): boolean {
       void refreshSession(visitorId);
     }
     holder.classList.toggle("lobby-widget-open", open);
+    // The panel keeps one height whatever the chat holds, so new messages never move the page.
     if (open && !holder.style.height) holder.style.height = "min(640px, calc(100vh - 120px))";
     bubble.setAttribute("aria-expanded", String(open));
     bubble.setAttribute("aria-label", open ? labels.close : labels.open);
@@ -262,9 +263,6 @@ export function initWidget(): boolean {
     const data = event.data as Partial<WidgetMessage>;
     if (!data || typeof data !== "object") return;
     if (data.type === "ready") onFrameReady();
-    if (data.type === "resize" && typeof data.height === "number" && Number.isFinite(data.height) && open) {
-      holder.style.height = `${Math.max(0, Math.min(data.height, Math.floor(window.innerHeight - 120)))}px`;
-    }
     if (data.type === "close") setOpen(false);
     if (data.type === "leave-warning") setWarnOnLeave(data.enabled === true);
   });

@@ -28,6 +28,7 @@ import {
   deleteWebhookEndpoint,
   endManagedPlanForApi,
   expandKnowledgeSourceForApi,
+  generateContactPasscodesForApi,
   getAppointmentForApi,
   getAvailabilityForApi,
   getBillingForApi,
@@ -71,6 +72,7 @@ import {
   revokeTeamInvitationForApi,
   searchPhoneNumbersForApi,
   sendWebhookTestEvent,
+  setContactPasscodesForApi,
   setManagedPlanForApi,
   updateBillingForApi,
   updateBusinessForApi,
@@ -108,6 +110,8 @@ import {
   apiPhoneNumberSearchSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
+  apiContactPasscodesGenerateSchema,
+  apiContactPasscodesUpdateSchema,
   apiContactUpdateSchema,
   apiKnowledgeEntryCreateSchema,
   apiKnowledgeEntryUpdateSchema,
@@ -418,6 +422,9 @@ export const v1 = {
     const contactId = uuidParam((await params).contact_id, "contact_id");
     return { body: data(await updateContactForApi(context, caller, contactId, await readApiBody(request, apiContactUpdateSchema))) };
   }),
+  setContactPasscodes: (request: Request) => handleApiRequest(request, "setContactPasscodes", async ({ context, caller }) => ({ body: { data: await setContactPasscodesForApi(context, caller, await readApiBody(request, apiContactPasscodesUpdateSchema)), next_cursor: null, has_more: false } })),
+  // The answer is the only copy of each new PIN, so nothing on the way may keep it.
+  generateContactPasscodes: (request: Request) => handleApiRequest(request, "generateContactPasscodes", async ({ context, caller }) => ({ body: data(await generateContactPasscodesForApi(context, caller, await readApiBody(request, apiContactPasscodesGenerateSchema))), headers: { "Cache-Control": "no-store" } })),
 
   listAppointments: (request: Request) => handleApiRequest(request, "listAppointments", async ({ context, caller }) => ({ body: await listAppointmentsForApi(context, caller, { ...pageQuery(request), status: enumParam(request, "status", ["confirmed", "cancelled"] as const), startsAfter: dateParam(request, "starts_after"), startsBefore: dateParam(request, "starts_before"), contactId: queryParam(request, "contact_id") === undefined ? undefined : uuidParam(queryParam(request, "contact_id"), "contact_id") }) })),
   getAvailability: (request: Request) => handleApiRequest(request, "getAvailability", async ({ context, caller }) => {

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
-import { agentRules, appointments, businessHours, businesses, calls, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
 import {
   PUBLIC_API_DEFAULT_PAGE_SIZE,
   PUBLIC_API_MAX_PAGE_SIZE,
@@ -274,14 +274,35 @@ export async function loadCallDetailResource(tx: DatabaseTransaction, businessId
 // Contacts
 
 type ContactRow = typeof contacts.$inferSelect;
+/** A contact's keypad PIN row, without the hash: null when it has none. */
+type ContactPasscodeRow = { setAt: Date; lockedAt: Date | null } | null;
 
-export function serializeContact(row: Pick<ContactRow, "id" | "name" | "phone" | "email" | "preferredLocale" | "timezone" | "createdAt" | "updatedAt">): ApiContact {
-  return { id: row.id, name: row.name, phone: row.phone, email: row.email, locale: row.preferredLocale, timezone: row.timezone, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+export function serializeContact(row: Pick<ContactRow, "id" | "name" | "phone" | "email" | "preferredLocale" | "timezone" | "createdAt" | "updatedAt">, passcode: ContactPasscodeRow): ApiContact {
+  return { id: row.id, name: row.name, phone: row.phone, email: row.email, locale: row.preferredLocale, timezone: row.timezone, passcode: passcode ? { set_at: iso(passcode.setAt), locked: passcode.lockedAt !== null } : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+}
+
+/** Contacts with their PIN's status. The hash is never selected. */
+function selectContacts(tx: DatabaseTransaction) {
+  return tx.select({ contact: contacts, passcodeSetAt: contactPasscodes.setAt, passcodeLockedAt: contactPasscodes.lockedAt }).from(contacts).leftJoin(contactPasscodes, and(eq(contactPasscodes.contactId, contacts.id), eq(contactPasscodes.businessId, contacts.businessId)));
+}
+
+function serializeContactRow(row: { contact: ContactRow; passcodeSetAt: Date | null; passcodeLockedAt: Date | null }): ApiContact {
+  return serializeContact(row.contact, row.passcodeSetAt ? { setAt: row.passcodeSetAt, lockedAt: row.passcodeLockedAt } : null);
 }
 
 export async function loadContactResource(tx: DatabaseTransaction, businessId: string, contactId: string): Promise<ApiContact | null> {
-  const [row] = await tx.select().from(contacts).where(and(eq(contacts.businessId, businessId), eq(contacts.id, contactId))).limit(1);
-  return row ? serializeContact(row) : null;
+  const [row] = await selectContacts(tx).where(and(eq(contacts.businessId, businessId), eq(contacts.id, contactId))).limit(1);
+  return row ? serializeContactRow(row) : null;
+}
+
+/** The business's contacts among these ids, in the order given. */
+export async function loadContactResources(tx: DatabaseTransaction, businessId: string, contactIds: readonly string[]): Promise<ApiContact[]> {
+  if (!contactIds.length) return [];
+  const rows = new Map((await selectContacts(tx).where(and(eq(contacts.businessId, businessId), inArray(contacts.id, [...contactIds])))).map((row) => [row.contact.id, row]));
+  return contactIds.flatMap((contactId) => {
+    const row = rows.get(contactId);
+    return row ? [serializeContactRow(row)] : [];
+  });
 }
 
 /** Escapes LIKE wildcards so a search term matches literally. */
@@ -292,14 +313,14 @@ function likeContains(value: string): string {
 export async function listContactResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { phone?: string | undefined; email?: string | undefined; name?: string | undefined }): Promise<Page<ApiContact>> {
   const limit = pageSize(request.limit);
   const name = request.name?.trim();
-  const rows = await tx.select().from(contacts).where(and(
+  const rows = await selectContacts(tx).where(and(
     eq(contacts.businessId, businessId),
     request.phone ? eq(contacts.phone, request.phone) : undefined,
     request.email ? sql`lower(${contacts.email}) = lower(${request.email})` : undefined,
     name ? sql`${contacts.name} ilike ${likeContains(name)}` : undefined,
     afterCursor(contacts.createdAt, contacts.id, decodeCursor(request.cursor)),
   )).orderBy(...newestFirst(contacts.createdAt, contacts.id)).limit(limit + 1);
-  return toPage(rows, limit, serializeContact, (row) => ({ at: row.createdAt, id: row.id }));
+  return toPage(rows, limit, serializeContactRow, (row) => ({ at: row.contact.createdAt, id: row.contact.id }));
 }
 
 // Appointments

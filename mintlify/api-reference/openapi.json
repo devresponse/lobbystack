@@ -7025,6 +7025,271 @@
         }
       }
     },
+    "/contacts/passcodes": {
+      "post": {
+        "operationId": "setContactPasscodes",
+        "summary": "Set or remove keypad PINs",
+        "description": "Sets the keypad PIN each contact types to change appointments by phone when verification_mode is passcode_required, or removes it with null. A new PIN also unlocks a locked one. Send up to 100 contacts, each once: if any isn't this business's, nothing changes. Returns the contacts in the order sent. LobbyStack keeps only a hash of each PIN, and this endpoint ignores Idempotency-Key so it never stores a copy. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
+        "tags": [
+          "Contacts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "contacts:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactPasscodesUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Contact"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contacts/passcodes/generate": {
+      "post": {
+        "operationId": "generateContactPasscodes",
+        "summary": "Generate keypad PINs",
+        "description": "Gives contacts a random keypad PIN and returns each one in new_passcode. LobbyStack keeps only a hash, so this response is the only time the PINs appear: give each contact theirs. With contact_ids, those contacts get a new PIN, replacing any they have. Without it, contacts that have a phone number and no PIN get one, oldest first, 100 per request: send it again until remaining is 0. This endpoint ignores Idempotency-Key, so no copy of a PIN is stored. After a network error, look for contacts whose passcode set_at is from that request, and give them new PINs with contact_ids. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
+        "tags": [
+          "Contacts"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "contacts:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ContactPasscodesGenerate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/GeneratedContactPasscodes"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/appointments": {
       "get": {
         "operationId": "listAppointments",
@@ -12139,6 +12404,33 @@
               "null"
             ]
           },
+          "passcode": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "set_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 timestamp in UTC."
+                  },
+                  "locked": {
+                    "type": "boolean",
+                    "description": "true after 5 wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set."
+                  }
+                },
+                "required": [
+                  "set_at",
+                  "locked"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12157,6 +12449,7 @@
           "email",
           "locale",
           "timezone",
+          "passcode",
           "created_at",
           "updated_at"
         ],
@@ -12260,6 +12553,185 @@
             ]
           }
         },
+        "additionalProperties": false
+      },
+      "ContactPasscodesUpdate": {
+        "type": "object",
+        "properties": {
+          "passcodes": {
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "contact_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                },
+                "passcode": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "pattern": "^\\d{4,8}$"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The new PIN: 4 to 8 digits, not one digit repeated or digits in a row such as 1111 or 1234. null removes the contact's PIN."
+                }
+              },
+              "required": [
+                "contact_id",
+                "passcode"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each item has a contact_id and its passcode: the new PIN, or null to remove the PIN. 1 to 100 contacts, each once."
+          }
+        },
+        "required": [
+          "passcodes"
+        ],
+        "additionalProperties": false
+      },
+      "ContactPasscodesGenerate": {
+        "type": "object",
+        "properties": {
+          "contact_ids": {
+            "description": "1 to 100 contacts to give a new PIN, each once, replacing any PIN they have. Leave it out to give one to contacts that have a phone number and no PIN.",
+            "minItems": 1,
+            "maxItems": 100,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid",
+              "description": "Stable identifier (UUID)."
+            }
+          },
+          "length": {
+            "description": "Digits in each PIN, 4 to 8. Defaults to 6.",
+            "type": "integer",
+            "minimum": 4,
+            "maximum": 8
+          }
+        },
+        "additionalProperties": false
+      },
+      "GeneratedContactPasscodes": {
+        "type": "object",
+        "properties": {
+          "contacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                },
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "phone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "email": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "locale": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "timezone": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "passcode": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "set_at": {
+                          "type": "string",
+                          "format": "date-time",
+                          "description": "ISO 8601 timestamp in UTC."
+                        },
+                        "locked": {
+                          "type": "boolean",
+                          "description": "true after 5 wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set."
+                        }
+                      },
+                      "required": [
+                        "set_at",
+                        "locked"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "new_passcode": {
+                  "type": "string",
+                  "description": "The PIN just set. LobbyStack keeps only a hash of it, so this is the only time it's shown: give it to the contact."
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "phone",
+                "email",
+                "locale",
+                "timezone",
+                "passcode",
+                "created_at",
+                "updated_at",
+                "new_passcode"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The contacts that got a new PIN."
+          },
+          "remaining": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Contacts that have a phone number and still no PIN. Without contact_ids, send the request again until this is 0."
+          }
+        },
+        "required": [
+          "contacts",
+          "remaining"
+        ],
         "additionalProperties": false
       },
       "Appointment": {
@@ -16386,6 +16858,33 @@
                   "null"
                 ]
               },
+              "passcode": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "set_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      "locked": {
+                        "type": "boolean",
+                        "description": "true after 5 wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set."
+                      }
+                    },
+                    "required": [
+                      "set_at",
+                      "locked"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time",
@@ -16404,6 +16903,7 @@
               "email",
               "locale",
               "timezone",
+              "passcode",
               "created_at",
               "updated_at"
             ],

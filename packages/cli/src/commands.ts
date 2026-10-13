@@ -1,4 +1,4 @@
-import { isUuid, weekdays, type ApiHoursWindow } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, isUuid, weekdays, type ApiHoursWindow } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
@@ -122,6 +122,52 @@ const knowledgeUpload = (path: string): Command => {
   };
 };
 
+function generatedPinsText(path: string, given: readonly Row[], remaining: number): string {
+  const pins = given.length ? `${formatTable(given, columns("id", "name", "phone", "new_passcode"))}\n\nThese PINs aren't shown again, so give each customer theirs.` : "No contact got a new PIN.";
+  const rest = remaining === 0 ? "Every contact with a phone number has a PIN." : `${remaining === 1 ? "1 contact with a phone number still has" : `${remaining} contacts with a phone number still have`} no PIN. To give them one, run lobbystack ${path} --all.`;
+  return `${pins}\n\n${rest}`;
+}
+
+const contactsGeneratePins = (path: string): Command => {
+  const usage = `lobbystack ${path} [<contact_id>...] [--length <digits>] [--all]`;
+  return {
+    summary: "Give contacts a random keypad PIN, and show each PIN this once.",
+    usage,
+    arguments: [{ name: "contact_id...", description: `Contacts to give a new PIN, replacing any PIN they have. Leave them out for contacts that have a phone number and no PIN, ${CONTACT_PASSCODES_MAX_PER_REQUEST} at a time.` }],
+    options: {
+      length: { type: "string", placeholder: "<digits>", description: `Digits in each PIN, ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH}. Defaults to ${CONTACT_PASSCODE_DEFAULT_LENGTH}.` },
+      all: { type: "boolean", description: "Keep going until every contact with a phone number has a PIN." },
+    },
+    notes: "LobbyStack keeps only a hash of each PIN, so this is the only time the PINs are shown. Keep the output safe until every customer has theirs.",
+    operations: ["generateContactPasscodes"],
+    async run({ output, values, positionals, connect }) {
+      const digits = stringValue(values, "length");
+      const length = digits === undefined ? undefined : Number(digits);
+      if (length !== undefined && (!/^\d+$/.test(digits!) || length < CONTACT_PASSCODE_MIN_LENGTH || length > CONTACT_PASSCODE_MAX_LENGTH)) throw new CliError(`--length takes ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH}.`);
+      if (values.all === true && positionals.length) throw new CliError(`--all gives a PIN to the contacts without one, so it takes no contact ids.\nUsage: ${usage}`);
+      const body = { ...(positionals.length ? { contact_ids: positionals } : {}), ...(length !== undefined ? { length } : {}) };
+      const { client } = await connect();
+      const given: Row[] = [];
+      let remaining = 0;
+      const show = () => print(output, { contacts: given, remaining }, () => generatedPinsText(path, given, remaining));
+      try {
+        for (;;) {
+          const batch = (await client.call("generateContactPasscodes", { body })).data;
+          given.push(...batch.contacts);
+          remaining = batch.remaining;
+          // A request that gave no PIN stops the loop rather than repeating it.
+          if (values.all !== true || remaining === 0 || !batch.contacts.length) break;
+        }
+      } catch (error) {
+        // The PINs given so far exist nowhere else, so they're shown before the error.
+        if (given.length) show();
+        throw error;
+      }
+      show();
+    },
+  };
+};
+
 function teamTables(data: Row): string {
   const members = data.members as Row[];
   const invitations = data.invitations as Row[];
@@ -239,6 +285,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     get: { operation: "getContact" },
     add: { operation: "createContact" },
     update: { operation: "updateContact" },
+    "set-pins": { operation: "setContactPasscodes", columns: columns("id", "name", "phone", "passcode") },
+    "generate-pins": contactsGeneratePins,
   }),
   group("appointments", "Appointments and open times.", {
     list: { operation: "listAppointments", columns: columns("id", "starts_at", "status", "service_name", "staff_name", "contact_name") },

@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { CONTACT_PASSCODE_MAX_LENGTH, isContactPasscode, isGuessableContactPasscode } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_MAX_LENGTH, isContactPasscode, isGuessableContactPasscode, randomContactPasscode } from "@lobbystack/shared";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { DetailSection } from "@/components/detail-fields";
 import { Badge } from "@/components/ui/badge";
@@ -18,17 +18,6 @@ import { requestJson } from "@/lib/request-json";
 
 /** Whether the contact has a keypad PIN, as the contact detail API returns it. */
 export type ContactPasscodeStatus = { setAt: string; locked: boolean } | null;
-
-// Six random digits, drawn evenly. The server refuses guessable ones, so draw again.
-function randomPasscode(): string {
-  let passcode = "";
-  while (passcode.length < 6 || isGuessableContactPasscode(passcode)) {
-    if (passcode.length === 6) passcode = "";
-    const [byte = 255] = crypto.getRandomValues(new Uint8Array(1));
-    if (byte < 250) passcode += String(byte % 10);
-  }
-  return passcode;
-}
 
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : undefined;
@@ -97,7 +86,7 @@ export function ContactPasscodeSection({ businessId, canMutate, contactId, local
             <FieldLabel htmlFor="contact-passcode">{t("detail.passcode.label")}</FieldLabel>
             <div className="flex gap-2">
               <Input aria-invalid={error ? true : undefined} autoComplete="off" className="font-mono tracking-widest" id="contact-passcode" inputMode="numeric" maxLength={CONTACT_PASSCODE_MAX_LENGTH} onChange={(event) => { setValue(event.target.value.replace(/\D/g, "").slice(0, CONTACT_PASSCODE_MAX_LENGTH)); setError(null); }} placeholder={t("detail.passcode.placeholder")} value={value} />
-              <Button onClick={() => { setValue(randomPasscode()); setError(null); }} type="button" variant="outline">{t("detail.passcode.generate")}</Button>
+              <Button onClick={() => { setValue(randomContactPasscode()); setError(null); }} type="button" variant="outline">{t("detail.passcode.generate")}</Button>
             </div>
             {error ? <FieldError>{error}</FieldError> : <FieldDescription>{t("detail.passcode.fieldHint")}</FieldDescription>}
           </Field>

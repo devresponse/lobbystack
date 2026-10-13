@@ -64,6 +64,8 @@ Un error de red puede dejarle sin saber si una solicitud funcionó. Envíe un en
 
 `POST /webhooks` ignora este encabezado para que LobbyStack nunca guarde una copia del secreto de firma. Si una creación falla por un error de red, consulte `GET /webhooks` antes de reintentar.
 
+`POST /contacts/passcodes` y `POST /contacts/passcodes/generate` también lo ignoran, para que LobbyStack nunca guarde una copia de un PIN. Volver a enviar los mismos PIN a `POST /contacts/passcodes` solo los vuelve a establecer. Si `POST /contacts/passcodes/generate` falla por un error de red, busque los contactos cuyo `passcode.set_at` sea de esa solicitud y deles PIN nuevos con `contact_ids`.
+
 ```bash
 curl https://app.lobbystack.com/api/v1/appointments \
   -H "Authorization: Bearer $LOBBYSTACK_API_KEY" \

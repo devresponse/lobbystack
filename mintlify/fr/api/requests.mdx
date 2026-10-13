@@ -64,6 +64,8 @@ Une erreur réseau peut vous laisser dans le doute : la requête a-t-elle foncti
 
 `POST /webhooks` ignore cet en-tête, pour que LobbyStack ne garde jamais de copie du secret de signature. Si une création échoue à cause d'une erreur réseau, vérifiez `GET /webhooks` avant de relancer.
 
+`POST /contacts/passcodes` et `POST /contacts/passcodes/generate` l'ignorent aussi, pour que LobbyStack ne garde jamais de copie d'un code PIN. Renvoyer les mêmes codes PIN à `POST /contacts/passcodes` les définit simplement de nouveau. Si `POST /contacts/passcodes/generate` échoue à cause d'une erreur réseau, cherchez les contacts dont `passcode.set_at` date de cette requête, et donnez-leur de nouveaux codes PIN avec `contact_ids`.
+
 ```bash
 curl https://app.lobbystack.com/api/v1/appointments \
   -H "Authorization: Bearer $LOBBYSTACK_API_KEY" \

@@ -134,9 +134,15 @@ describe("v1 resource serializers match the published schemas", () => {
     expect(appointment).toMatchObject({ status: "cancelled", calendar_sync_status: "pending" });
   });
 
-  it("serializes contacts", () => {
-    const contact = serializeContact({ id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Ada", phone: "+14165550134", email: null, preferredLocale: "fr", timezone: null, createdAt: now, updatedAt: now });
+  it("serializes contacts with whether they have a keypad PIN", () => {
+    const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Ada", phone: "+14165550134", email: null, preferredLocale: "fr", timezone: null, createdAt: now, updatedAt: now };
+    const contact = serializeContact(row, null);
     expect(apiContactSchema.parse(contact)).toEqual(contact);
+    expect(contact.passcode).toBeNull();
+    const locked = serializeContact(row, { setAt: now, lockedAt: now });
+    expect(apiContactSchema.parse(locked)).toEqual(locked);
+    expect(locked.passcode).toEqual({ set_at: now.toISOString(), locked: true });
+    expect(serializeContact(row, { setAt: now, lockedAt: null }).passcode).toEqual({ set_at: now.toISOString(), locked: false });
   });
 
   it("withholds expired message content", () => {

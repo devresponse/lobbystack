@@ -12,6 +12,8 @@ const domain = vi.hoisted(() => ({
   getCallForApi: vi.fn(),
   getContactForApi: vi.fn(),
   updateContactForApi: vi.fn(),
+  setContactPasscodesForApi: vi.fn(async (): Promise<unknown[]> => []),
+  generateContactPasscodesForApi: vi.fn(),
   cancelAppointmentForApi: vi.fn(),
   getWebhookEndpoint: vi.fn(),
   createWebhookEndpoint: vi.fn(),
@@ -233,6 +235,71 @@ describe("v1 list filters", () => {
   it("documents the new filters in the contract", () => {
     expect(apiOperations.listCalls.params.map((param) => param.name)).toEqual(expect.arrayContaining(["started_after", "started_before"]));
     expect(apiOperations.listContacts.params.map((param) => param.name)).toContain("name");
+  });
+});
+
+describe("contact PINs", () => {
+  const ana = "06d9c0dc-f18a-4cc6-a987-ac4963c87113";
+  const milan = "3f0f6f2e-7c1a-4b8e-9a5d-2c3b4a5d6e7f";
+  const contact = { id: ana, name: "Ana", phone: "+14165550134", email: null, locale: "en", timezone: null, passcode: { set_at: "2026-10-13T21:00:00.000Z", locked: false }, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" };
+  const setPins = (body: unknown, headers: Record<string, string> = {}) => v1.setContactPasscodes(call("/contacts/passcodes", { method: "POST", headers, body: JSON.stringify(body) }));
+  const generate = (body: unknown, headers: Record<string, string> = {}) => v1.generateContactPasscodes(call("/contacts/passcodes/generate", { method: "POST", headers, body: JSON.stringify(body) }));
+  const one = (passcode: unknown) => ({ passcodes: [{ contact_id: ana, passcode }] });
+
+  it("sets and removes PINs in one request and answers with the contacts as a list", async () => {
+    const contacts = [contact, { ...contact, id: milan, name: "Milan", passcode: null }];
+    domain.setContactPasscodesForApi.mockResolvedValue(contacts);
+    const body = { passcodes: [{ contact_id: ana, passcode: "480613" }, { contact_id: milan, passcode: null }] };
+    const response = await setPins(body);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: contacts, next_cursor: null, has_more: false });
+    expect(domain.setContactPasscodesForApi).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), body);
+  });
+
+  it("refuses a PIN the dashboard would refuse, before the domain sees it", async () => {
+    for (const bad of [
+      one("123"), one("123456789"), one("12a4"), one(" 480613"), one(480613), one("1111"), one("123456"), one("9876"),
+      { passcodes: [] },
+      { passcodes: Array.from({ length: 101 }, () => ({ contact_id: ana, passcode: "480613" })) },
+      { passcodes: [{ contact_id: "x", passcode: "480613" }] },
+      { passcodes: [{ contact_id: ana }] },
+      { passcodes: [{ contact_id: ana, passcode: "480613", name: "Ana" }] },
+    ]) expect((await setPins(bad)).status, JSON.stringify(bad)).toBe(400);
+    expect(await (await setPins(one("1234"))).json()).toEqual({ error: { code: "invalid_request", message: "The request body is invalid.", details: [{ path: "passcodes.0.passcode", message: "Too easy to guess: avoid one digit repeated or digits in a row, such as 1111 or 1234." }] } });
+    expect(domain.setContactPasscodesForApi).not.toHaveBeenCalled();
+  });
+
+  it("gives out new PINs in a response no cache may keep", async () => {
+    const generated = { contacts: [{ ...contact, new_passcode: "480613" }], remaining: 4 };
+    domain.generateContactPasscodesForApi.mockResolvedValue(generated);
+    const named = await generate({ contact_ids: [ana], length: 6 });
+    expect(named.status).toBe(200);
+    expect(named.headers.get("cache-control")).toBe("no-store");
+    expect(await named.json()).toEqual({ data: generated });
+    expect(domain.generateContactPasscodesForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), { contact_ids: [ana], length: 6 });
+    expect((await generate({})).status).toBe(200);
+    expect(domain.generateContactPasscodesForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), {});
+    for (const bad of [{ length: 3 }, { length: 9 }, { length: 4.5 }, { length: "6" }, { contact_ids: [] }, { contact_ids: ["x"] }, { contact_ids: Array.from({ length: 101 }, () => ana) }, { all: true }]) {
+      expect((await generate(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.generateContactPasscodesForApi).toHaveBeenCalledTimes(2);
+  });
+
+  it("never keeps a PIN in an idempotency record", async () => {
+    domain.generateContactPasscodesForApi.mockResolvedValue({ contacts: [], remaining: 0 });
+    expect((await setPins(one("480613"), { "Idempotency-Key": "pins-1" })).status).toBe(200);
+    expect((await generate({}, { "Idempotency-Key": "pins-2" })).status).toBe(200);
+    expect(domain.runIdempotent).not.toHaveBeenCalled();
+    expect(apiOperations.setContactPasscodes).not.toHaveProperty("idempotent");
+    expect(apiOperations.generateContactPasscodes).not.toHaveProperty("idempotent");
+  });
+
+  it("needs contacts:write", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["contacts:read"] });
+    expect((await setPins(one("480613"))).status).toBe(403);
+    expect((await generate({})).status).toBe(403);
+    expect(domain.setContactPasscodesForApi).not.toHaveBeenCalled();
+    expect(domain.generateContactPasscodesForApi).not.toHaveBeenCalled();
   });
 });
 

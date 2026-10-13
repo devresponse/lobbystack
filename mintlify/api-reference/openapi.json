@@ -14588,9 +14588,10 @@
                 "enum": [
                   "phone_match_and_facts",
                   "otp_required",
+                  "passcode_required",
                   "operator_only"
                 ],
-                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."
+                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. passcode_required: a PIN they type on the phone keypad, set on their contact in the dashboard. operator_only: the team makes the change."
               }
             },
             "required": [
@@ -14744,9 +14745,10 @@
                 "enum": [
                   "phone_match_and_facts",
                   "otp_required",
+                  "passcode_required",
                   "operator_only"
                 ],
-                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. operator_only: the team makes the change."
+                "description": "How a caller proves an appointment is theirs. phone_match_and_facts: their phone number and details of the booking. otp_required: a code sent by text. passcode_required: a PIN they type on the phone keypad, set on their contact in the dashboard. operator_only: the team makes the change."
               }
             },
             "required": [

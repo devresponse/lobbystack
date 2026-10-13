@@ -278,6 +278,45 @@ describe("cancellations without a trusted caller number", () => {
   });
 });
 
+describe("appointment changes with a keypad PIN", () => {
+  const pinSnapshot = { ...demoSnapshot, appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode: "passcode_required" as const } };
+  const phone = { callerPhone: "+14165550134" };
+
+  it("has the agent start the keypad check, never take a spoken PIN, and wait for the outcome", () => {
+    const instructions = buildAgentInstructions(pinSnapshot, "voice", { ...phone, keypad: true });
+    expect(instructions).toContain("When verifyAppointmentForChange says a PIN is required, start the check with requestKeypadPasscode.");
+    expect(instructions).toContain("never ask for the PIN aloud, and never accept one the caller says.");
+    expect(instructions).toContain("The outcome appears under \"Keypad PIN check in this call\" in a later request.");
+    // The caller confirms right after the PIN, so the texts question follows the cancellation.
+    expect(instructions).toContain("Once the keypad PIN check accepts a cancellation, its result has smsConsentOnFile. When it's not_asked, ask once, right after cancelling");
+    expect(instructions).not.toContain("together with the final confirmation");
+  });
+
+  it("sends cancellations to the team on a call that can't take a PIN", () => {
+    for (const instructions of [buildAgentInstructions(pinSnapshot, "voice", phone), buildAgentInstructions(pinSnapshot, "web_voice", { keypad: true })]) {
+      expect(instructions).toContain("You can't cancel appointments on this call.");
+      expect(instructions).not.toContain("requestKeypadPasscode");
+    }
+  });
+
+  it("leaves the other checks' instructions as they were", () => {
+    for (const verificationMode of ["phone_match_and_facts", "otp_required"] as const) {
+      const snapshot = { ...demoSnapshot, appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode } };
+      expect(buildAgentInstructions(snapshot, "voice", { ...phone, keypad: true })).toBe(buildAgentInstructions(snapshot, "voice", phone));
+      expect(buildAgentInstructions(snapshot, "voice", { ...phone, keypad: true })).not.toContain("PIN");
+      expect(buildLiveInstructions(snapshot, callStart)).not.toContain("PIN");
+    }
+  });
+
+  it("has GPT-Live ask for the PIN on the keypad and wait to hear whether it was accepted", () => {
+    const instructions = buildLiveInstructions(pinSnapshot, callStart);
+    expect(instructions).toContain("- Appointment changes: reschedule or cancel an appointment when the call comes from the phone number it was booked with and the caller types their PIN on the phone keypad.");
+    expect(instructions).toContain("When a backend result says the caller has to type their PIN on the keypad, ask them to type it on their phone keypad and press the pound key, then wait quietly while they do. Never ask them to say their PIN.");
+    expect(instructions).toContain("You'll be told whether the PIN was accepted; until then, don't say it was.");
+    expect(buildLiveInstructions({ ...pinSnapshot, bookingMode: "off" }, callStart)).not.toContain("PIN");
+  });
+});
+
 describe("instant booking without opening hours", () => {
   const noHours = { ...demoSnapshot, bookingMode: "instant" as const, hours: [] };
 

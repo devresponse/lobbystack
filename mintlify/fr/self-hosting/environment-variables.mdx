@@ -18,7 +18,7 @@ Utilisez `.env.example` comme source de référence. Stockez les valeurs de prod
 | `LOBBYSTACK_<ROLE>_DATABASE_URL` | Facultatif. Remplace la chaîne de connexion construite pour un rôle, par exemple pour utiliser un autre hôte. |
 | `BETTER_AUTH_SECRET` | Secret de signature de Better Auth. Utilisez au moins 32 caractères aléatoires. |
 | `ENCRYPTION_KEY` | Chiffre les identifiants d'application stockés. |
-| `OTP_HASH_SECRET` | Hache les codes de vérification à usage unique. |
+| `OTP_HASH_SECRET` | Hache les codes de vérification à usage unique et les codes PIN des appelants. Définissez la même valeur sur l'admin et le worker. La changer rend inutilisables tous les codes PIN enregistrés. |
 
 ## Services internes
 

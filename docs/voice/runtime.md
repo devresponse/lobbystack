@@ -33,6 +33,19 @@ Keypad presses on phone calls reach the sideband as `transport.dtmf.received`, a
 
 The worker logs each answer as `live.delegation` with `agentMs`, `totalMs`, `queueMs` (time waiting for an earlier request), `tools`, `modelSteps`, `directAnswer`, `stepMs` (each model step with the tools it called), `toolMs` (time in tools), `failed` and `superseded`. It also records each answer's tokens and cost as an AI generation with the operation `voice.delegation`.
 
+### Keypad PINs
+
+A business can require a PIN before the receptionist cancels or reschedules (verification mode `passcode_required`). Operators set each caller's PIN on the contact's **Details** tab, and `contact_passcodes` keeps only an HMAC of it, keyed by `OTP_HASH_SECRET` (or `ENCRYPTION_KEY`, then `BETTER_AUTH_SECRET`). Changing that secret makes every saved PIN stop matching.
+
+GPT-Live never hears key presses, so the worker takes the PIN:
+
+- On a phone call for such a business, every press goes into the transcript as `[pressed a key]`, without the key, so a PIN typed early stays out of it too.
+- When `verifyAppointmentForChange` returns `requiresPasscode`, the agent calls `requestKeypadPasscode`, and the controller starts taking keys for that verification. GPT-Live is told to ask the caller to type the PIN and press the pound key.
+- The PIN ends at the pound key, at 8 digits, or 6 seconds after the last key once it has 4 digits. The star key starts it over. With no key for 60 seconds, the controller stops taking a PIN.
+- The digits go only to the domain check. The transcript gets `[typed a PIN]`, GPT-Live gets the outcome with `session.instructions.append`, and the next delegated request sees the check's result with the verification and appointment ids, never the PIN.
+- Each change allows 3 tries. Five wrong PINs in a row, across calls, lock the contact's PIN until an operator sets a new one. A caller without a PIN, or with a locked one, can't change appointments on a call, and the agent passes a cancellation to the team.
+- An accepted PIN counts for that appointment and caller until the verification expires (10 minutes), so the agent doesn't ask for it again for the other change.
+
 ## Greet the caller before they speak
 
 GPT-Live waits for the caller by default. To make it greet first, the admin starts every session with the greeting command in its starting history (`input`), as OpenAI's guide suggests for context the model needs from the start. In tests against the API, GPT-Live ignored a command appended after `session.started` more often, and on phone calls the worker can only connect after the session has started.

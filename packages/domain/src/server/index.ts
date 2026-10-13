@@ -11,6 +11,7 @@ export * from "./calendar";
 export * from "./catalog";
 export * from "./compliance";
 export * from "./contacts";
+export * from "./contactPasscodes";
 export * from "./contactSmsConsent";
 export * from "./context";
 export * from "./conversations";

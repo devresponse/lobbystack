@@ -1,4 +1,5 @@
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
+import { DateTime } from "luxon";
 import type { MediaSessionConfig } from "openai/resources/live/live";
 import type { SessionAcceptParams } from "openai/resources/live/sessions";
 
@@ -27,10 +28,12 @@ function openingHistory(snapshot: BusinessContextSnapshot): { input?: Array<{ ro
   return greeting ? { input: [{ role: "developer", content: [{ type: "input_text", text: greetingCommand(greeting) }] }] } : {};
 }
 
+// Browser calls: the website widget, dashboard test calls and demos. They
+// can't be transferred, so GPT-Live hears it's on a browser call.
 export function buildBrowserSessionConfig(snapshot: BusinessContextSnapshot, voice = DEFAULT_VOICE): MediaSessionConfig {
   return {
     model: LIVE_MODEL,
-    instructions: buildLiveInstructions(snapshot),
+    instructions: buildLiveInstructions(snapshot, DateTime.now(), "web_voice"),
     ...openingHistory(snapshot),
     audio: { output: { voice } },
     delegation: { type: "client" },
@@ -44,7 +47,7 @@ export function buildPhoneSessionConfig(snapshot: BusinessContextSnapshot, voice
   return {
     type: "live",
     model: LIVE_MODEL,
-    instructions: buildLiveInstructions(snapshot),
+    instructions: buildLiveInstructions(snapshot, DateTime.now(), "voice"),
     ...openingHistory(snapshot),
     audio: { output: { voice } },
     delegation: { type: "client" },

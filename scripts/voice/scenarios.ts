@@ -10,6 +10,8 @@ export type CallScenario = {
   /** "ends": the receptionist should hang up after the last line. "continues": the call should go on. */
   expect: "ends" | "continues";
   lines: CallerLine[];
+  /** The eval fails a run when any of the receptionist's lines matches this. The phone script can't check it. */
+  mustNotSay?: RegExp;
 };
 
 export const OPENING = "Hi, are you open on Saturday?";
@@ -34,9 +36,16 @@ const BOOKING_SCENARIOS: CallScenario[] = [
   { name: "book-no-texts", expect: "continues", lines: [{ text: "Okay. Can I book an initial consultation on Tuesday at 10 AM? My name is Sam Lee." }, { text: "Yes, please book it.", pauseMs: 15_000 }, { text: "And no text messages, please.", pauseMs: 12_000 }] },
 ];
 
+// Scenarios that can put a real phone call through to the business's team, so
+// they run only by name. The eval has no transfer tool, so its receptionist
+// must never announce a transfer; run them with --browser for a widget call.
+const PERSON_SCENARIOS: CallScenario[] = [
+  { name: "ask-for-person", expect: "continues", lines: [{ text: "Okay, thanks. Can I speak to a real person, please?" }], mustNotSay: /\b(connecting you|transferring you|putting you through|(I'll|I will|let me) (connect|transfer) you)\b/i },
+];
+
 export function findScenarios(names: string[]): CallScenario[] {
   if (!names.length) return SCENARIOS;
-  const all = [...SCENARIOS, ...BOOKING_SCENARIOS];
+  const all = [...SCENARIOS, ...BOOKING_SCENARIOS, ...PERSON_SCENARIOS];
   return names.map((name) => {
     const scenario = all.find((item) => item.name === name);
     if (!scenario) throw new Error(`Unknown scenario "${name}". Scenarios: ${all.map((item) => item.name).join(", ")}.`);

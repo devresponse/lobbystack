@@ -37,6 +37,14 @@ LobbyStack signe les sessions du widget et compare l'origine de la page parente 
 
 Utilisez un site Web en HTTPS en production. Gardez `WIDGET_SESSION_SECRET` et les autres identifiants de signature sur le serveur.
 
+## Quand un visiteur demande à parler à quelqu'un
+
+Les clavardages du site Web et les appels depuis le navigateur ne peuvent pas être transférés à votre équipe. Quand un visiteur demande à parler à quelqu'un, ou qu'une de vos règles dit de le transférer, la réceptionniste IA ne dit jamais qu'elle le met en relation. Elle propose de prendre un message pour que votre équipe le rappelle.
+
+Si vous avez défini un **Numéro de transfert par défaut**, la réceptionniste donne aussi au visiteur le numéro de téléphone de votre entreprise, pour qu'il appelle et demande à parler à quelqu'un. Elle suit votre règle de transfert : par exemple, si les transferts sont réservés aux urgences, elle donne le numéro pour les urgences.
+
+Les demandes de rappel apparaissent dans le tableau de bord comme les autres messages.
+
 ## Gérer les clés du widget
 
 Chaque clé a sa propre liste d'origines autorisées et sa propre configuration. Vous pouvez modifier une clé active, la suspendre temporairement ou la révoquer définitivement. La révocation d'une clé arrête toutes les intégrations qui l'utilisent.

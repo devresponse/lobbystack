@@ -374,3 +374,76 @@ describe("staying on topic", () => {
     expect(buildAgentInstructions(demoSnapshot, "voice")).not.toContain("under about 100 words");
   });
 });
+
+// A browser call (the website widget, a dashboard test call or a demo) and a
+// website chat have no phone line, so nobody can be transferred from them.
+describe("asking for a person on a browser call or a website chat", () => {
+  const onRequest = { ...demoSnapshot, transferPolicy: { mode: "on_request" as const, transferNumber: "+14165550199" } };
+  const browserCall = "This call is in the caller's web browser, not on a phone line, so it can't be transferred: you can't connect the caller to a person or put anyone else on the call. Never say or suggest the caller is being transferred or connected to someone, even when a business rule or instruction says to transfer.";
+  const callBack = "and offer to take a message so someone from the team calls them back";
+
+  it("tells GPT-Live a browser call can't be transferred, and to give the number to call and offer a callback", () => {
+    const instructions = buildLiveInstructions(onRequest, callStart, "web_voice");
+    expect(instructions).toContain(`${browserCall} When the caller asks for a person, or a rule says to transfer them, tell them they can call +14165550000 and ask for a person, ${callBack}.`);
+    expect(instructions).toContain("Phone number: +14165550000.");
+    expect(instructions).toContain("- Messages: take a message for the team, such as a request to be called back.");
+    expect(instructions).toContain("- The caller wants an appointment or to change one, or wants to leave a message or be called back.");
+    expect(instructions).toContain("You are the receptionist for Maple Family Clinic, answering a voice call from a web browser.");
+    expect(instructions).not.toMatch(/phone receptionist|- Transfers:|Transferring the call|connecting them now|wants a person/);
+  });
+
+  // Business rules and instructions are written for phone calls and often say to transfer.
+  it("puts the browser call rule after the business's own rules and instructions", () => {
+    const instructions = buildLiveInstructions(demoSnapshot, callStart, "web_voice");
+    const rule = instructions.indexOf(browserCall);
+    expect(rule).toBeGreaterThan(instructions.indexOf("- Urgent escalation: Transfer urgent medical issues"));
+    expect(rule).toBeGreaterThan(instructions.indexOf(demoSnapshot.voiceInstructions));
+    expect(rule).toBeLessThan(instructions.indexOf("Delegation policy:"));
+  });
+
+  it("gives the number only when a phone call there can reach a person under the transfer rule", () => {
+    const person = (snapshot: typeof demoSnapshot) => buildLiveInstructions(snapshot, callStart, "web_voice");
+    const transfer = (mode: "always" | "on_urgent" | "during_business_hours" | "never") => ({ ...demoSnapshot, transferPolicy: { mode, transferNumber: "+14165550199" } });
+    expect(person(transfer("always"))).toContain(`tell them they can call +14165550000 and ask for a person, ${callBack}.`);
+    expect(person(transfer("on_urgent"))).toContain(`tell them that for something urgent they can call +14165550000 and ask for a person, ${callBack}.`);
+    expect(person(transfer("during_business_hours"))).toContain(`tell them they can call +14165550000 during opening hours and ask for a person, ${callBack}.`);
+    // Calling would only reach the receptionist again, or there's no number to call.
+    for (const snapshot of [transfer("never"), { ...onRequest, transferPolicy: { mode: "on_request" as const } }, { ...onRequest, contactChannels: {} }]) {
+      expect(person(snapshot)).toContain(`When the caller asks for a person, or a rule says to transfer them, tell them you can't connect them with anyone from here, ${callBack}.`);
+      expect(person(snapshot)).not.toContain("ask for a person");
+    }
+  });
+
+  it("leaves the keypad PIN and texts out of a browser call, and sends cancellations to the team", () => {
+    const pinSnapshot = { ...demoSnapshot, appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode: "passcode_required" as const } };
+    const instructions = buildLiveInstructions(pinSnapshot, callStart, "web_voice");
+    expect(instructions).not.toMatch(/PIN|keypad|texts/);
+    expect(instructions).toContain("- Appointment cancellations: a browser call has no phone number to identify the caller, so the backend passes a cancellation request to the team. The appointment stays booked until the team cancels it.");
+    expect(instructions).not.toContain("reschedule or cancel an appointment");
+    expect(buildLiveInstructions({ ...pinSnapshot, bookingMode: "off" }, callStart, "web_voice")).not.toContain("- Appointment cancellations:");
+  });
+
+  it("keeps phone calls as they were, with transfers through the backend", () => {
+    const phone = buildLiveInstructions(onRequest, callStart, "voice");
+    expect(phone).toBe(buildLiveInstructions(onRequest, callStart));
+    expect(phone).toContain("You are the phone receptionist for Maple Family Clinic.");
+    expect(phone).toContain("- Transfers: connect the caller to a person when the business allows it.");
+    expect(phone).toContain("When a backend result says the call is being transferred, tell the caller you're connecting them now, then stop talking.");
+    expect(phone).not.toMatch(/web browser|Phone number:/);
+  });
+
+  it("has the agent on a browser call or a website chat give the number and take a callback message instead of transferring", () => {
+    const browser = buildAgentInstructions(onRequest, "web_voice", { endsCalls: true });
+    expect(browser).toContain(`${browserCall} When the caller asks for a person, or a rule says to transfer them, tell them they can call +14165550000 and ask for a person, ${callBack}: get their name and the best number to reach them, then save it with takeMessage.`);
+    const chat = buildAgentInstructions(onRequest, "web_chat");
+    expect(chat).toContain(`This website chat can't be transferred: you can't connect the visitor to a person or bring anyone else into the chat. Never say or suggest the visitor is being transferred or connected to someone, even when a business rule or instruction says to transfer. When the visitor asks for a person, or a rule says to transfer them, tell them they can call +14165550000 and ask for a person, ${callBack}: get their name and the best number to reach them, then save it with takeMessage.`);
+    for (const instructions of [browser, chat]) {
+      expect(instructions).toContain("Phone number: +14165550000.");
+      expect(instructions).not.toMatch(/Transfer rule:|Transfer to a person only when/);
+    }
+    const phone = buildAgentInstructions(onRequest, "voice", { callerPhone: "+14165550134", endsCalls: true });
+    expect(phone).toContain("Transfer to a person only when the transfer rules allow it; otherwise offer to take a message.");
+    expect(phone).toContain("Transfer rule: on_request.");
+    expect(phone).not.toMatch(/web browser|website chat|Phone number:/);
+  });
+});

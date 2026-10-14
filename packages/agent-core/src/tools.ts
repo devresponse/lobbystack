@@ -34,6 +34,13 @@ import { serviceFacts, upcomingClosures, weeklyHours } from "./businessFacts";
 export type AgentChannel = "voice" | "web_voice" | "web_chat";
 
 /**
+ * Where a GPT-Live call comes from: a phone line, or a web browser (the
+ * website widget, a dashboard test call or a demo). Only a phone call can be
+ * transferred or take a keypad PIN.
+ */
+export type LiveChannel = Extract<AgentChannel, "voice" | "web_voice">;
+
+/**
  * What came of a PIN the caller typed on the keypad. "accepted" verifies the
  * change; "retry" means it didn't match and the caller can type it again;
  * "failed" means the change can't be verified on this call.

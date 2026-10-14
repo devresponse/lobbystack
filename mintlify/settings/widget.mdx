@@ -37,6 +37,14 @@ LobbyStack signs widget sessions and checks the visitor's parent origin against 
 
 Use an HTTPS website in production. Keep `WIDGET_SESSION_SECRET` and other signing credentials on the server.
 
+## When a visitor asks for a person
+
+Website chats and browser calls can't be transferred to your team. When a visitor asks for a person, or one of your rules says to transfer them, the AI receptionist never says it's connecting them. It offers to take a message so your team can call them back.
+
+When you've set a **Default transfer number**, the receptionist also gives the visitor your business phone number, so they can call and ask for a person there. It follows your transfer rule: if transfers are only for urgent issues, for example, it gives the number for urgent matters.
+
+Callback requests appear in the dashboard like other messages.
+
 ## Manage widget keys
 
 Each key has its own origin allowlist and configuration. You can edit an active key, pause it temporarily, or revoke it permanently. Revoking a key stops every embed that uses it.

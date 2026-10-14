@@ -31,6 +31,7 @@ These options change what runs:
 - **`--runs <n>`**: runs each scenario this many times. The default is 3.
 - **`--concurrency <n>`**: how many sessions run at once. The default is 4. With 22 sessions at once, many runs lost their transcripts.
 - **`--snapshot <file>`**: uses a real business's snapshot instead of the demo business.
+- **`--browser`**: plays a browser call, like one from the website widget, instead of a phone call. GPT-Live gets the browser call's instructions, the agent runs on the `web_voice` channel, and the caller's audio skips the phone-line filter. Use it after a change to what browser calls hear, such as how they handle a caller who asks for a person.
 
 Each run uses under a minute of GPT-Live audio, plus a delegation model call for each hand-over. The default 18 runs take about 5 minutes.
 
@@ -109,5 +110,12 @@ Both scripts read their callers from `scripts/voice/scenarios.ts`. Every call fi
 - **`name`**: what you pass to `--scenario`
 - **`expect`**: `ends` when the receptionist should hang up after the last line, `continues` when the call should go on
 - **`lines`**: the caller's lines, each with an optional `pauseMs` of silence before it. The phone script rounds pauses to whole seconds.
+- **`mustNotSay`**: optional. The eval fails a run when any of the receptionist's lines matches this pattern. The phone script can't check it.
 
 Add a scenario when you fix a call that went wrong, so the eval catches the same failure next time. Put a scenario that books or changes an appointment in `BOOKING_SCENARIOS`, so it runs only when you name it.
+
+The `ask-for-person` scenario asks for a real person, so it's in `PERSON_SCENARIOS` and runs only by name: on a real phone call, the receptionist can put it through to the business's team. A browser call can't be transferred, so run it with `--browser` to check the receptionist never announces a transfer and gives the business's number or offers a callback instead:
+
+```bash
+OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --browser --scenario ask-for-person
+```

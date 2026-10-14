@@ -6,7 +6,7 @@ This directory documents LobbyStack’s current architecture, operations, provid
 - `adr/`: Architecture decision records
 - `knowledge/`: Knowledge ingestion and retrieval
 - `telemetry/`: Event contracts, key performance indicators, and validation
-- `voice/`: How GPT-Live calls run, and how to set up the phone path
+- `voice/`: How GPT-Live calls run, how to set up the phone path, and how to run and debug the stack on your desktop with Docker
 - `providers/`: Provider configuration and operations
 - `deployment/`: Hosting and deployment procedures
 - `operations/`: Backup, restore, and alert runbooks; restore is separate from traffic rollback, and the [reliability rollout runbook](operations/remediation-rollout.md) covers role checks, OAuth compatibility, and retention gates

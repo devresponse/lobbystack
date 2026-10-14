@@ -59,7 +59,9 @@ Both `http://localhost:13000/api/health/ready` and `http://localhost:13002/healt
 
 Open the dashboard at `http://localhost:13000` exactly. Sign-in only trusts `APP_BASE_URL` unless you list more origins in `AUTH_TRUSTED_ORIGINS`, so `http://127.0.0.1:13000` gets `Invalid origin`.
 
-Sign up, then go through onboarding to create your business. Skip the number step: with `TWILIO_SIP_TRUNK_SID` empty, the local worker can't buy numbers, and [Attach the number to a local business](#attach-the-number-to-a-local-business) adds a test number instead. `pnpm db:seed` only adds a Demo Business that no one owns, so you can't sign in to it.
+Sign up there. The sign-up form then waits for an emailed code, which only arrives once the worker can send email, for example through Mailpit (below). With `REQUIRE_EMAIL_VERIFICATION=false`, as in `.env.example`, you can sign in with the same email and password instead.
+
+Onboarding then creates your business, and the worker publishes its first snapshot. Choose the free plan, which skips the number step. The local worker can't buy numbers without `TWILIO_SIP_TRUNK_SID`, which this setup leaves empty, and [Attach the number to a local business](#attach-the-number-to-a-local-business) adds a test number instead. With `DEPLOYMENT_MODE=self_hosted_standard`, as in `.env.example`, a business created locally has unlimited call minutes. In any other mode it's a cloud business on the free plan, whose minutes run out. `pnpm db:seed` only adds a Demo Business that no one owns, so you can't sign in to it.
 
 To read the emails the worker sends, start Mailpit with `docker compose --profile development up -d mailpit`, set `SMTP_HOST=127.0.0.1` and `SMTP_PORT=1025` in `.env.local`, restart `pnpm dev`, and open `http://localhost:8025`.
 
@@ -224,9 +226,9 @@ insert into phone_numbers (business_id, e164, provider_phone_id, voice_webhook_s
 values ('your_business_id', '+15815550123', 'your_number_sid', 'synced', 'sip-trunk:your_trunk_sid', 'synced', 'https://your-dev-domain.ngrok-free.app/api/webhooks/twilio/sms');
 ```
 
-Then change and save one AI setting for that business in the local dashboard, such as the greeting. Saving rebuilds the business snapshot, which picks up the number. A self-hosted business also texts from it.
+Calls find the business through this row right away. Then change and save one AI setting for that business in the local dashboard, such as the greeting. Saving rebuilds the business snapshot, which then lists the number among the business's contact details. A self-hosted business also texts from this number.
 
-The business needs a published snapshot and minutes left on its plan. Don't release this number from the local dashboard: that releases it from your Twilio account.
+Don't release this number from the local dashboard: that releases it from your Twilio account.
 
 ### Check the path
 
@@ -261,8 +263,8 @@ A phone call keeps running while you're paused:
 | The webhook answers 400 `Invalid signature.` to real calls in the ngrok inspector | `OPENAI_WEBHOOK_SECRET` is your deployment's secret, not the local endpoint's |
 | The check request answers 500 instead of `Invalid signature.` | The admin has no `OPENAI_API_KEY`. Add it and restart `pnpm dev` |
 | The local admin logs `incoming call for a number this deployment doesn't serve` for your test call | The number isn't in the local `phone_numbers` table, or isn't `active` |
-| A busy signal | The local business's plan has no minutes left (SIP 486) |
-| The call never connects, and the local admin logs `no published snapshot for incoming call` | The local business has no published snapshot yet |
+| A busy signal | The local business is a cloud business whose free minutes ran out (SIP 486). Only businesses created with `DEPLOYMENT_MODE=self_hosted_standard` have unlimited minutes |
+| The call never connects, and the local admin logs `no published snapshot for incoming call` | The worker hasn't published the business's snapshot. Check that the worker is running, then save an AI setting |
 | The SMS webhook answers 401 | `TWILIO_SMS_WEBHOOK_URL` doesn't exactly match the number's URL in Twilio, or the auth token belongs to another account |
 | Texts never reach the tunnel although the number's URL is right | The number belongs to a Messaging Service, whose own incoming-message setting applies |
 | ngrok shows `ERR_NGROK_8012` | The admin isn't running on the tunnel's port |

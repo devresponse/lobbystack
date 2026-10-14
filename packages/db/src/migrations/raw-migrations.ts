@@ -101,6 +101,7 @@ export const SCHEMA_MIGRATIONS = [
   "0095_ownership_claims.sql",
   "0096_widget_key_value.sql",
   "0097_contact_passcodes.sql",
+  "0098_deployment_branding.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

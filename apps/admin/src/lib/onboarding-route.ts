@@ -16,12 +16,16 @@ const routeStages: Record<string, OnboardingStage> = {
   "/onboarding/attribution": "attribution",
 };
 
-export async function requireOnboardingStage(pathname: string, options: { allowCreate?: boolean } = {}): Promise<void> {
+export type OnboardingVisit = { userId: string; businessId: string | null; stage: OnboardingStage };
+
+export async function requireOnboardingStage(pathname: string, options: { allowCreate?: boolean } = {}): Promise<OnboardingVisit> {
   const session = await getSession(new Headers(await headers()));
   if (!session) redirect("/login");
   const state = await getActiveOnboardingState(getAppDatabase().db, session.user.id);
+  const visit = { userId: session.user.id, ...state };
   const expected = routeStages[pathname];
   if (!expected) redirect(resolveOnboardingRoute(state.stage));
-  if (options.allowCreate && expected === "create_business" && state.businessId === null) return;
+  if (options.allowCreate && expected === "create_business" && state.businessId === null) return visit;
   if (!canVisitOnboardingStage(state.stage, expected)) redirect(resolveOnboardingRoute(state.stage));
+  return visit;
 }

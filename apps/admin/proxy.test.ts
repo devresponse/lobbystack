@@ -20,6 +20,18 @@ it("rejects cross-origin API mutations even when a dynamic identifier has an ext
   expect(response.headers.get("cache-control")).toBe("private, no-store");
 });
 
+it("lets the logo route cache its versioned image and serves it without script", () => {
+  const logo = proxy(new NextRequest("http://localhost:3210/api/branding/logo?v=abc"));
+  expect(logo.headers.get("cache-control")).toBeNull();
+  expect(logo.headers.get("content-security-policy")).toBe("default-src 'none'; img-src data:; style-src 'unsafe-inline'; sandbox");
+  expect(logo.headers.get("x-content-type-options")).toBe("nosniff");
+  const branding = proxy(new NextRequest("http://localhost:3210/api/branding"));
+  expect(branding.headers.get("cache-control")).toBe("private, no-store");
+  expect(branding.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  const save = proxy(new NextRequest("http://localhost:3210/api/branding/initial", { method: "POST", headers: { origin: "https://untrusted.invalid" } }));
+  expect(save.status).toBe(403);
+});
+
 it("guards the widget-keys admin route while leaving the public widget API open to other origins", () => {
   const adminRoute = proxy(new NextRequest("http://localhost:3210/api/widget-keys", { method: "POST", headers: { origin: "https://untrusted.invalid" } }));
   expect(adminRoute.status).toBe(403);

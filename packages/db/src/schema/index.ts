@@ -8,6 +8,7 @@ import {
   jsonb,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   uniqueIndex,
@@ -34,6 +35,12 @@ const vector = customType<{ data: number[]; driverData: string }>({
   fromDriver(value) {
     const raw = String(value).replace(/^\[/, "").replace(/\]$/, "");
     return raw.length === 0 ? [] : raw.split(",").map(Number);
+  },
+});
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
   },
 });
 
@@ -1350,6 +1357,19 @@ export const platformPartnerBusinesses = pgTable(
   ],
 );
 
+// The app name and logo the deployment shows in place of LobbyStack, chosen
+// once in onboarding. One row at most; BRAND_APP_NAME and BRAND_LOGO_URL win
+// over it. Only app.save_initial_branding writes it.
+export const deploymentBranding = pgTable("deployment_branding", {
+  id: smallint("id").default(1).primaryKey(),
+  appName: text("app_name"),
+  logo: bytea("logo"),
+  logoContentType: varchar("logo_content_type", { length: 32 }),
+  logoVersion: text("logo_version").generatedAlwaysAs(sql`encode(sha256(logo), 'hex')`),
+  savedByUserId: uuid("saved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
 export const webhookEndpoints = pgTable(
   "webhook_endpoints",
   {
@@ -1717,6 +1737,7 @@ export const schema = {
   unitEconomicsRollups,
   apiKeys,
   platformPartnerBusinesses,
+  deploymentBranding,
   webhookEndpoints,
   webhookEvents,
   webhookDeliveries,

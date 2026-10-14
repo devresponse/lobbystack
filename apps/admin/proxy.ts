@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { isMaintenanceMode, normalizeInterfaceLocale } from "@lobbystack/shared";
+import { BRAND_LOGO_PATH, isMaintenanceMode, normalizeInterfaceLocale } from "@lobbystack/shared";
 
 import { configuredAppOrigins } from "@/lib/app-origins";
 import { LOCALE_COOKIE, LOCALE_COOKIE_MAX_AGE_SECONDS, localeTag } from "@/lib/locale";
@@ -20,7 +20,7 @@ import {
   negotiateLocale,
 } from "@/lib/locale-request";
 
-import { embeddableSecurityHeaders, isEmbeddablePath, securityHeaders } from "./security-headers";
+import { brandLogoSecurityHeaders, embeddableSecurityHeaders, isEmbeddablePath, securityHeaders } from "./security-headers";
 
 const stateChangingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // /api/v1 and /api/mcp authenticate with bearer API keys only, never cookies, so they need no CSRF
@@ -80,6 +80,8 @@ function cacheControlForRequest(pathname: string, searchParams: URLSearchParams)
   if (pathname.startsWith("/api/realtime") || pathname.startsWith("/api/widget/chat")) {
     return "private, no-cache, no-store, no-transform";
   }
+  // The logo route caches its own versioned responses for good.
+  if (pathname === BRAND_LOGO_PATH) return undefined;
   if (pathname.startsWith("/api/") || pathname.startsWith("/embed/")) {
     return "private, no-store";
   }
@@ -110,7 +112,7 @@ function hasValidCsrfOrigin(request: NextRequest): boolean {
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const headers = isEmbeddablePath(pathname) ? embeddableSecurityHeaders() : securityHeaders();
+  const headers = isEmbeddablePath(pathname) ? embeddableSecurityHeaders() : pathname === BRAND_LOGO_PATH ? brandLogoSecurityHeaders() : securityHeaders();
 
   const isApiRequest = pathname.startsWith("/api/");
   if (isMaintenanceMode(process.env) && (isWebhookPath(pathname) || (isApiRequest && !isMaintenanceHealthProbe(pathname, request.method)) || stateChangingMethods.has(request.method))) {

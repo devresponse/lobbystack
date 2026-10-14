@@ -34,6 +34,10 @@ ARG S3_FORCE_PATH_STYLE
 RUN pnpm --filter @lobbystack/embed build && node scripts/copy-widget-embed.mjs
 ARG POSTHOG_SOURCEMAP_API_KEY
 ARG POSTHOG_PROJECT_ID=266281
+# The admin reads these at run time. At build time they let the prerendered
+# sign-in pages show the name and logo without asking the server first.
+ARG BRAND_APP_NAME
+ARG BRAND_LOGO_URL
 RUN pnpm --filter @lobbystack/admin... build
 RUN mkdir -p /prod && cp -R /app/apps/admin/.next/static /prod/admin-static && \
     find /prod/admin-static -type f -name '*.map' -delete

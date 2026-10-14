@@ -20,6 +20,17 @@ Utilisez `.env.example` comme source de référence. Stockez les valeurs de prod
 | `ENCRYPTION_KEY` | Chiffre les identifiants d'application stockés. |
 | `OTP_HASH_SECRET` | Hache les codes de vérification à usage unique et les codes PIN des appelants. Définissez la même valeur sur l'admin et le worker. La changer rend inutilisables tous les codes PIN enregistrés. |
 
+## Image de marque
+
+Définissez-les sur l'admin. Chacune l'emporte sur le nom et le logo que le premier propriétaire du déploiement choisit pendant l'intégration : laissez-les vides pour lui laisser ce choix. Passez-les aussi à la compilation de l'admin, comme arguments de compilation Docker du même nom, pour que les pages de connexion prérendues les affichent sans d'abord interroger le serveur.
+
+| Variable | Rôle |
+| --- | --- |
+| `BRAND_APP_NAME` | Le nom que le tableau de bord affiche à la place de LobbyStack, jusqu'à 40 caractères. Il apparaît dans l'onglet du navigateur, en haut des pages de connexion et d'intégration, et dans les textes du tableau de bord. |
+| `BRAND_LOGO_URL` | Le logo affiché à côté du nom et comme icône de l'onglet. Utilisez une URL `https://` ou un chemin sur le tableau de bord, comme `/brand/logo.svg`. Sans logo, un déploiement renommé affiche son nom seul. |
+
+Les e-mails, les SMS et l'API indiquent encore LobbyStack pour l'instant.
+
 ## Services internes
 
 | Variable | Rôle |

@@ -25,6 +25,7 @@ vi.mock("@/i18n", () => ({
   createI18nInstance: () => state.instance,
   missingNamespaces: (...args: unknown[]) => state.missing(...args),
   loadRouteNamespaces: (...args: unknown[]) => state.load(...args),
+  setI18nAppName: () => undefined,
 }));
 vi.mock("@/components/theme-provider", () => ({ ThemeProvider: ({ children }: { children: ReactNode }) => children }));
 vi.mock("@/components/appearance-provider", () => ({ AppearanceProvider: ({ children }: { children: ReactNode }) => children }));

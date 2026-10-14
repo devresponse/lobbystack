@@ -408,7 +408,7 @@
     },
     "telemetry": {
       "label": "Compartir datos de telemetría",
-      "description": "Ayúdenos a mejorar LobbyStack compartiendo datos anónimos de uso y errores.",
+      "description": "Ayúdenos a mejorar {{appName}} compartiendo datos anónimos de uso y errores.",
       "saveFailed": "No pudimos guardar su preferencia de telemetría. Inténtelo de nuevo."
     }
   },
@@ -428,7 +428,7 @@
     "google": {
       "sheetTitle": "Google Calendar",
       "sheetDescription": "Conecte un Google Calendar y elija qué calendario recibe las reservas.",
-      "privacyNoticeText": "Al conectar Google Calendar, LobbyStack puede leer la disponibilidad de su calendario y crear, actualizar o eliminar citas en el calendario que seleccione.",
+      "privacyNoticeText": "Al conectar Google Calendar, {{appName}} puede leer la disponibilidad de su calendario y crear, actualizar o eliminar citas en el calendario que seleccione.",
       "privacyPolicyLinkText": "Política de privacidad",
       "staffLabel": "Miembro del equipo",
       "selectStaff": "Elija un miembro del equipo",
@@ -796,7 +796,7 @@
       },
       "webhookDisabled": {
         "title": "Endpoint de webhook desactivado",
-        "description": "Cuando LobbyStack deja de enviar eventos a un endpoint de webhook porque todas las entregas fallaron durante aproximadamente un día."
+        "description": "Cuando {{appName}} deja de enviar eventos a un endpoint de webhook porque todas las entregas fallaron durante aproximadamente un día."
       }
     },
     "systemIssues": {
@@ -850,7 +850,7 @@
   },
   "apiKeys": {
     "title": "Claves de API",
-    "description": "Conecte herramientas como Zapier o sus propios scripts a LobbyStack. Cada clave funciona solo para este negocio.",
+    "description": "Conecte herramientas como Zapier o sus propios scripts a {{appName}}. Cada clave funciona solo para este negocio.",
     "empty": "Aún no hay claves de API.",
     "neverUsed": "Nunca",
     "createdBy": "{{date}} por {{name}}",
@@ -912,7 +912,7 @@
   },
   "webhooks": {
     "title": "Webhooks",
-    "description": "LobbyStack envía un HTTPS POST a su URL cuando ocurre algo, como una llamada finalizada o una nueva reserva. Cada solicitud está firmada para que pueda comprobar que proviene de nosotros.",
+    "description": "{{appName}} envía un HTTPS POST a su URL cuando ocurre algo, como una llamada finalizada o una nueva reserva. Cada solicitud está firmada para que pueda comprobar que proviene de nosotros.",
     "empty": "Aún no hay endpoints de webhook.",
     "enabledLabel": "Enviar eventos a este endpoint",
     "restricted": {
@@ -946,19 +946,19 @@
     "create": {
       "action": "Agregar endpoint",
       "title": "Agregar un endpoint de webhook",
-      "description": "Elija adónde envía LobbyStack los eventos y qué eventos envía.",
+      "description": "Elija adónde envía {{appName}} los eventos y qué eventos envía.",
       "submit": "Agregar endpoint"
     },
     "edit": {
       "action": "Editar",
       "title": "Editar endpoint de webhook",
-      "description": "Los cambios se aplican al próximo evento que envíe LobbyStack.",
+      "description": "Los cambios se aplican al próximo evento que envíe {{appName}}.",
       "submit": "Guardar"
     },
     "delete": {
       "action": "Eliminar",
       "title": "¿Eliminar este endpoint?",
-      "description": "LobbyStack dejará de enviar eventos a {{url}} y eliminará su registro de entregas.",
+      "description": "{{appName}} dejará de enviar eventos a {{url}} y eliminará su registro de entregas.",
       "confirm": "Eliminar endpoint",
       "done": "Endpoint eliminado"
     },
@@ -1005,8 +1005,8 @@
   },
   "connectedApps": {
     "title": "Aplicaciones conectadas",
-    "description": "Asistentes de IA como Claude o ChatGPT con los que alguien inició sesión en LobbyStack. Cada uno funciona solo para este negocio, con el acceso que se aprobó.",
-    "empty": "Aún no hay aplicaciones conectadas. Para conectar una, agregue LobbyStack en la configuración del asistente e inicie sesión.",
+    "description": "Asistentes de IA como Claude o ChatGPT con los que alguien inició sesión en {{appName}}. Cada uno funciona solo para este negocio, con el acceso que se aprobó.",
+    "empty": "Aún no hay aplicaciones conectadas. Para conectar una, agregue {{appName}} en la configuración del asistente e inicie sesión.",
     "neverUsed": "Nunca",
     "unnamed": "Aplicación sin nombre",
     "grantedBy": "{{date}} por {{name}}",

@@ -20,6 +20,17 @@ Use `.env.example` como fuente de referencia. Guarde los valores de producción 
 | `ENCRYPTION_KEY` | Cifra las credenciales de la aplicación almacenadas. |
 | `OTP_HASH_SECRET` | Genera el hash de los códigos de verificación de un solo uso y de los PIN de quienes llaman. Configure el mismo valor en el servicio de administración y en el worker. Si lo cambia, todos los PIN guardados dejan de funcionar. |
 
+## Imagen de marca
+
+Configúrelas en el servicio de administración. Cada una tiene prioridad sobre el nombre y el logo que elige el primer propietario de la implementación durante la incorporación, así que déjelas vacías para que esa persona elija. Páselas también a la compilación del servicio de administración, como argumentos de compilación de Docker con el mismo nombre, para que las páginas de inicio de sesión prerrenderizadas las muestren sin consultar antes al servidor.
+
+| Variable | Función |
+| --- | --- |
+| `BRAND_APP_NAME` | El nombre que muestra el panel en lugar de LobbyStack, de hasta 40 caracteres. Aparece en la pestaña del navegador, encima de las páginas de inicio de sesión y de incorporación, y en los textos del panel. |
+| `BRAND_LOGO_URL` | El logo que aparece junto al nombre y como icono de la pestaña. Use una URL `https://` o una ruta del panel, como `/brand/logo.svg`. Sin logo, una implementación con otro nombre muestra solo su nombre. |
+
+Los correos electrónicos, los SMS y la API todavía dicen LobbyStack por ahora.
+
 ## Servicios internos
 
 | Variable | Función |

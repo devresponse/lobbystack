@@ -158,6 +158,9 @@ async function main(): Promise<void> {
             ,('lobbystack_worker', 'platform_partner_businesses', 'INSERT')
             ,('lobbystack_worker', 'platform_partner_businesses', 'DELETE')
             ,('lobbystack_app', 'platform_partner_businesses', 'SELECT')
+            ,('lobbystack_app', 'deployment_branding', 'SELECT')
+            ,('lobbystack_worker', 'deployment_branding', 'SELECT')
+            ,('lobbystack_readonly', 'deployment_branding', 'SELECT')
             ,('lobbystack_finance_export', 'businesses', 'SELECT')
             ,('lobbystack_finance_export', 'billing_accounts', 'SELECT')
             ,('lobbystack_finance_export', 'calls', 'SELECT')
@@ -212,6 +215,8 @@ async function main(): Promise<void> {
             ('lobbystack_app', 'app.list_oauth_grantors(uuid)'),
             ('lobbystack_app', 'app.list_business_members(uuid)'),
             ('lobbystack_app', 'app.finish_business_handover(uuid, uuid)'),
+            ('lobbystack_app', 'app.can_save_initial_branding()'),
+            ('lobbystack_app', 'app.save_initial_branding(text, bytea, text)'),
             ('lobbystack_worker', 'app.list_open_live_call_businesses(timestamptz, timestamptz)'),
             ('lobbystack_dispatcher', 'app.list_scheduler_businesses()')
           ) as expected(role_name, function_name)

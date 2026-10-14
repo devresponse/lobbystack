@@ -3,6 +3,7 @@ export * from "./appointmentChanges";
 export * from "./activation";
 export * from "./billing";
 export * from "./billingAccess";
+export * from "./branding";
 export * from "./analytics";
 export * from "./booking";
 export * from "./businessHours";

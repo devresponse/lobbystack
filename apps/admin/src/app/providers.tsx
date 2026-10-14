@@ -8,11 +8,13 @@ import { toast } from "sonner";
 
 import { ProductAnalytics } from "@/components/product-analytics";
 import { AppearanceProvider } from "@/components/appearance-provider";
+import { BrandingProvider } from "@/components/branding-provider";
 import { ThemeProvider } from "@/components/theme-provider";
 import { LocaleProvider } from "@/components/replacement-locale-provider";
 import { Toaster } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { createI18nInstance, loadRouteNamespaces, missingNamespaces, type I18nNamespaceResources } from "@/i18n";
+import { DEFAULT_BRANDING_SNAPSHOT, type BrandingSnapshot } from "@/lib/branding-snapshot";
 import { captureBrowserError } from "@/lib/browser-error-reporting";
 import type { SupportedLocale } from "@/lib/locale";
 import { isTranslationNetworkError } from "@/lib/translation-network-error";
@@ -20,14 +22,15 @@ import type { LocaleSource } from "@/lib/locale-request";
 import { routeNamespaces } from "@/lib/route-namespaces";
 
 type ProvidersProps = {
+  branding?: BrandingSnapshot;
   children: React.ReactNode;
   initialLocale: SupportedLocale;
   initialLocaleSource: LocaleSource;
   initialResources: I18nNamespaceResources;
 };
 
-export function Providers({ children, initialLocale, initialLocaleSource, initialResources }: ProvidersProps) {
-  const [i18n] = useState(() => createI18nInstance({ locale: initialLocale, resources: initialResources }));
+export function Providers({ branding = DEFAULT_BRANDING_SNAPSHOT, children, initialLocale, initialLocaleSource, initialResources }: ProvidersProps) {
+  const [i18n] = useState(() => createI18nInstance({ locale: initialLocale, resources: initialResources, appName: branding.appName }));
   const [queryClient] = useState(() => new QueryClient({
     // A failed action must never end silently. Mutations that report their own
     // failure set onError or meta.inlineError and skip this generic toast.
@@ -81,31 +84,33 @@ export function Providers({ children, initialLocale, initialLocaleSource, initia
   return (
     <QueryClientProvider client={queryClient}>
       <I18nextProvider i18n={i18n}>
-        <ThemeProvider>
-          <AppearanceProvider>
-            <LocaleProvider initialLocale={initialLocale} initialLocaleSource={initialLocaleSource}>
-              <ProductAnalytics>
-              {/* Mount before children so toasts fired from their mount effects reach a subscribed Toaster. */}
-              <Toaster richColors />
-              {loadingKey !== null ? (
-                <div aria-busy="true" className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-primary/15" role="status">
-                  <div className="h-full w-1/2 animate-pulse rounded-full bg-primary" />
-                  <span className="sr-only">{i18n.t("common:loading.title")}</span>
-                </div>
-              ) : null}
-              {failed ? (
-                <div className="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center justify-center gap-3 border-b border-border bg-background/95 px-4 py-2 text-sm text-muted-foreground" role="alert">
-                  <span>{i18n.t("common:loading.failed")}</span>
-                  <Button onClick={() => setRetryToken(token => token + 1)} size="sm" variant="outline">
-                    {i18n.t("common:loading.retry")}
-                  </Button>
-                </div>
-              ) : null}
-              {children}
-              </ProductAnalytics>
-            </LocaleProvider>
-          </AppearanceProvider>
-        </ThemeProvider>
+        <BrandingProvider i18n={i18n} initial={branding}>
+          <ThemeProvider>
+            <AppearanceProvider>
+              <LocaleProvider initialLocale={initialLocale} initialLocaleSource={initialLocaleSource}>
+                <ProductAnalytics>
+                {/* Mount before children so toasts fired from their mount effects reach a subscribed Toaster. */}
+                <Toaster richColors />
+                {loadingKey !== null ? (
+                  <div aria-busy="true" className="fixed inset-x-0 top-0 z-50 h-1 overflow-hidden bg-primary/15" role="status">
+                    <div className="h-full w-1/2 animate-pulse rounded-full bg-primary" />
+                    <span className="sr-only">{i18n.t("common:loading.title")}</span>
+                  </div>
+                ) : null}
+                {failed ? (
+                  <div className="fixed inset-x-0 top-0 z-50 flex flex-wrap items-center justify-center gap-3 border-b border-border bg-background/95 px-4 py-2 text-sm text-muted-foreground" role="alert">
+                    <span>{i18n.t("common:loading.failed")}</span>
+                    <Button onClick={() => setRetryToken(token => token + 1)} size="sm" variant="outline">
+                      {i18n.t("common:loading.retry")}
+                    </Button>
+                  </div>
+                ) : null}
+                {children}
+                </ProductAnalytics>
+              </LocaleProvider>
+            </AppearanceProvider>
+          </ThemeProvider>
+        </BrandingProvider>
       </I18nextProvider>
     </QueryClientProvider>
   );

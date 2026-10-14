@@ -408,7 +408,7 @@
     },
     "telemetry": {
       "label": "Deli podatke telemetrije",
-      "description": "Pomozite nam da poboljšamo LobbyStack deljenjem anonimizovanih podataka o korišćenju i greškama.",
+      "description": "Pomozite nam da poboljšamo {{appName}} deljenjem anonimizovanih podataka o korišćenju i greškama.",
       "saveFailed": "Nismo uspeli da sačuvamo podešavanje telemetrije. Pokušajte ponovo."
     }
   },
@@ -428,7 +428,7 @@
     "google": {
       "sheetTitle": "Google Calendar",
       "sheetDescription": "Povežite Google Calendar i izaberite kalendar u koji stižu zakazivanja.",
-      "privacyNoticeText": "Povezivanjem servisa Google Calendar omogućavate da LobbyStack čita dostupnost u Vašem kalendaru i da kreira, menja ili briše termine u kalendaru koji izaberete.",
+      "privacyNoticeText": "Povezivanjem servisa Google Calendar omogućavate da {{appName}} čita dostupnost u Vašem kalendaru i da kreira, menja ili briše termine u kalendaru koji izaberete.",
       "privacyPolicyLinkText": "Politika privatnosti",
       "staffLabel": "Član tima",
       "selectStaff": "Izaberite člana tima",
@@ -796,7 +796,7 @@
       },
       "webhookDisabled": {
         "title": "Webhook endpoint je isključen",
-        "description": "Kada LobbyStack prestane da šalje događaje na webhook endpoint jer nijedna isporuka nije uspela oko jedan dan."
+        "description": "Kada {{appName}} prestane da šalje događaje na webhook endpoint jer nijedna isporuka nije uspela oko jedan dan."
       }
     },
     "systemIssues": {
@@ -850,7 +850,7 @@
   },
   "apiKeys": {
     "title": "API ključevi",
-    "description": "Povežite LobbyStack sa alatima kao što je Zapier ili sa sopstvenim skriptama. Svaki ključ važi samo za ovu firmu.",
+    "description": "Povežite {{appName}} sa alatima kao što je Zapier ili sa sopstvenim skriptama. Svaki ključ važi samo za ovu firmu.",
     "empty": "Još nema API ključeva.",
     "neverUsed": "Nikad",
     "createdBy": "{{date}}, korisnik {{name}}",
@@ -912,7 +912,7 @@
   },
   "webhooks": {
     "title": "Webhooks",
-    "description": "LobbyStack šalje HTTPS POST zahtev na Vaš URL kada se nešto dogodi, na primer kada se poziv završi ili stigne novo zakazivanje. Svaki zahtev je potpisan, pa možete proveriti da je stigao od nas.",
+    "description": "{{appName}} šalje HTTPS POST zahtev na Vaš URL kada se nešto dogodi, na primer kada se poziv završi ili stigne novo zakazivanje. Svaki zahtev je potpisan, pa možete proveriti da je stigao od nas.",
     "empty": "Još nema webhook endpointa.",
     "enabledLabel": "Šalji događaje na ovaj endpoint",
     "restricted": {
@@ -946,19 +946,19 @@
     "create": {
       "action": "Dodaj endpoint",
       "title": "Dodajte webhook endpoint",
-      "description": "Izaberite gde LobbyStack šalje događaje i koje događaje šalje.",
+      "description": "Izaberite gde {{appName}} šalje događaje i koje događaje šalje.",
       "submit": "Dodaj endpoint"
     },
     "edit": {
       "action": "Izmeni",
       "title": "Izmenite webhook endpoint",
-      "description": "Izmene važe od sledećeg događaja koji LobbyStack pošalje.",
+      "description": "Izmene važe od sledećeg događaja koji {{appName}} pošalje.",
       "submit": "Sačuvaj"
     },
     "delete": {
       "action": "Obriši",
       "title": "Obrisati ovaj endpoint?",
-      "description": "LobbyStack prestaje da šalje događaje na {{url}} i briše njegov dnevnik isporuka.",
+      "description": "{{appName}} prestaje da šalje događaje na {{url}} i briše njegov dnevnik isporuka.",
       "confirm": "Obriši endpoint",
       "done": "Endpoint je obrisan"
     },
@@ -1005,8 +1005,8 @@
   },
   "connectedApps": {
     "title": "Povezane aplikacije",
-    "description": "AI asistenti kao što su Claude ili ChatGPT koje je neko povezao sa LobbyStack nalogom. Svaki radi samo za ovu firmu, sa pristupom koji je odobren pri povezivanju.",
-    "empty": "Još nema povezanih aplikacija. Da biste povezali aplikaciju, dodajte LobbyStack u podešavanjima asistenta i prijavite se.",
+    "description": "AI asistenti kao što su Claude ili ChatGPT koje je neko povezao sa {{appName}} nalogom. Svaki radi samo za ovu firmu, sa pristupom koji je odobren pri povezivanju.",
+    "empty": "Još nema povezanih aplikacija. Da biste povezali aplikaciju, dodajte {{appName}} u podešavanjima asistenta i prijavite se.",
     "neverUsed": "Nikad",
     "unnamed": "Aplikacija bez naziva",
     "grantedBy": "{{date}}, korisnik {{name}}",

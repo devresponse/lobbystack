@@ -7,6 +7,7 @@ import { interfaceLocales, type InterfaceLocale } from "./locales";
 import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
+export * from "./branding";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";

@@ -17,7 +17,7 @@ export function buildWidgetRateLimits(input: {
   widgetKeyId: string;
   ipHash?: string | undefined;
   visitorId?: string | undefined;
-  operation: "config" | "chat" | "lead" | "history" | "session";
+  operation: "config" | "chat" | "lead" | "history" | "session" | "stream";
 }): FixedWindowLimit[] {
   const limits: FixedWindowLimit[] = [];
   if (input.ipHash) {

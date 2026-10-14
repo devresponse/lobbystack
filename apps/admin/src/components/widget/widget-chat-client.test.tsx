@@ -47,6 +47,55 @@ describe("widget chat after a team member takes over", () => {
   });
 });
 
+describe("widget chat live updates", () => {
+  it("shows a team member's reply and the take-over banner as soon as the stream reports them", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const aiReply = { id: "m2", role: "assistant", content: "Let me see who's around." };
+    const joined = { id: "m3", role: "assistant", content: "Hi, this is Yuri. How can I help?" };
+    const history = vi.fn()
+      .mockResolvedValueOnce({ automationState: "ai_active", messages: [visitorMessage, aiReply] })
+      .mockResolvedValueOnce({ automationState: "ai_active", messages: [visitorMessage, aiReply] })
+      .mockResolvedValue({ automationState: "human_handoff", messages: [visitorMessage, aiReply, joined] });
+    const encoder = new TextEncoder();
+    let push: (text: string) => void = () => {};
+    let end: () => void = () => {};
+    const body = new ReadableStream<Uint8Array>({ start(controller) { push = (text) => controller.enqueue(encoder.encode(text)); end = () => controller.close(); } });
+    let streamInit: RequestInit | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      if (String(url).includes("/api/widget/history")) return Response.json(await history());
+      if (String(url).includes("/api/widget/stream")) {
+        streamInit = init;
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      }
+      return Response.json(config);
+    }));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    expect(await screen.findByText(aiReply.content)).toBeTruthy();
+    // The chat has started, so the widget opens its stream with the session.
+    await vi.waitFor(() => expect(streamInit).toBeDefined());
+    expect(streamInit?.headers).toMatchObject({ authorization: "Bearer token", "x-widget-parent-origin": "https://business.test" });
+
+    await act(async () => { push("event: ready\ndata: {}\n\n"); });
+    await vi.waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(joined.content)).toBeNull();
+    expect(screen.queryByText("chat.handoffBanner")).toBeNull();
+
+    await act(async () => { push(": keepalive\n\nevent: message\ndata: {}\n\n"); });
+    expect(await screen.findByText(joined.content)).toBeTruthy();
+    expect(screen.getByText("chat.handoffBanner")).toBeTruthy();
+    expect(history).toHaveBeenCalledTimes(3);
+    end();
+    client.clear();
+  });
+});
+
 describe("widget voice captions", () => {
   it("shows both sides of a live voice call in the chat thread and asks the loader to warn before leaving", async () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });

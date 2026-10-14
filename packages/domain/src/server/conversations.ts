@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
 
-import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction } from "@lobbystack/db";
+import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
 import { requireBusinessMembership } from "../authz";
@@ -124,7 +124,9 @@ export async function appendMessage(
   context: DomainContext,
   input: { businessId: string; conversationId: string; body: string; direction: "inbound" | "outbound"; channel: "sms" | "dashboard" | "web_chat"; providerMessageId?: string; aiGenerated?: boolean; userId?: string; operatorAlert?: { eventKind: OperatorNotificationEventKey; subject: string; body: string } },
 ): Promise<string> {
-  return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
+  // A team member who writes in a website chat takes it over, so the AI stops answering alongside them.
+  const takesOver = input.userId !== undefined && input.direction === "outbound" && input.channel === "web_chat";
+  const { messageId, tookOver } = await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
     if (input.userId) {
       await requireBusinessMembership(tx, { userId: input.userId, businessId: input.businessId, minimumRole: "scheduler" });
     }
@@ -145,7 +147,7 @@ export async function appendMessage(
     if (!message) {
       if (input.providerMessageId) {
         const existing = (await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.providerMessageId, input.providerMessageId))).limit(1))[0];
-        if (existing) return existing.id;
+        if (existing) return { messageId: existing.id, tookOver: false };
       }
       throw new Error("Message could not be persisted.");
     }
@@ -156,7 +158,8 @@ export async function appendMessage(
       aggregateType: "message",
       aggregateId: message.id,
       dedupeKey: `message:${message.id}:created`,
-      payload: { type: "message.upserted", entityId: message.id, conversationId: input.conversationId },
+      // Who wrote it, so the website chat's live updates can pick out a team member's reply.
+      payload: { type: "message.upserted", entityId: message.id, conversationId: input.conversationId, direction: input.direction, aiGenerated: input.aiGenerated ?? false },
     });
     if (input.direction === "outbound" && input.channel === "sms") {
       await enqueueOutbox(tx, {
@@ -169,7 +172,34 @@ export async function appendMessage(
       });
     }
     if (input.operatorAlert) await queueOperatorAlertInTransaction(tx, { businessId: input.businessId, eventKey: `${input.operatorAlert.eventKind}:${message.id}`, ...input.operatorAlert });
-    return message.id;
+    const tookOver = takesOver && await pauseAutomationInTransaction(tx, { businessId: input.businessId, conversationId: input.conversationId, userId: input.userId! });
+    return { messageId: message.id, tookOver };
+  });
+  if (tookOver) await recordAutomationPaused(context, { businessId: input.businessId, conversationId: input.conversationId, channel: input.channel });
+  return messageId;
+}
+
+/** Hands an AI-run conversation to the team. False when a person already has it. */
+async function pauseAutomationInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; userId: string }): Promise<boolean> {
+  const [updated] = await tx.update(conversations).set({ automationState: "human_handoff", automationPausedAt: new Date(), automationPausedByUserId: input.userId, updatedAt: new Date() }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId), eq(conversations.automationState, "ai_active"))).returning({ id: conversations.id });
+  if (!updated) return false;
+  await enqueueOutbox(tx, {
+    topic: "realtime.publish",
+    businessId: input.businessId,
+    aggregateType: "conversation",
+    aggregateId: input.conversationId,
+    dedupeKey: `conversation:${input.conversationId}:automation:human_handoff:${Date.now()}`,
+    payload: { type: "conversation.updated", entityId: input.conversationId },
+  });
+  return true;
+}
+
+async function recordAutomationPaused(context: DomainContext, input: { businessId: string; conversationId: string; channel: string }): Promise<void> {
+  await recordProductEventBestEffort(context, {
+    name: "conversation.automation_paused",
+    businessId: input.businessId,
+    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+    properties: { conversationId: input.conversationId, channel: input.channel },
   });
 }
 
@@ -191,12 +221,7 @@ export async function setAutomationState(
     return updated?.channel ?? null;
   });
   if (input.state !== "human_handoff" || !channel) return;
-  await recordProductEventBestEffort(context, {
-    name: "conversation.automation_paused",
-    businessId: input.businessId,
-    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-    properties: { conversationId: input.conversationId, channel },
-  });
+  await recordAutomationPaused(context, { businessId: input.businessId, conversationId: input.conversationId, channel });
 }
 
 export async function registerWidgetVisitor(
@@ -285,6 +310,17 @@ export async function getOrCreateWidgetConversation(
       throw new Error(existing[0] ? "Widget conversation already exists and is closed." : "Conversation could not be created.");
     }
     return { conversationId, automationState: current[0]?.automationState === "human_handoff" ? "human_handoff" : "ai_active" };
+  });
+}
+
+/** The visitor's open website chat, if they have one. Unlike getOrCreateWidgetConversation, never creates it. */
+export async function findWidgetConversationId(
+  context: DomainContext,
+  input: { businessId: string; widgetVisitorId: string },
+): Promise<string | null> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const [row] = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+    return row?.id ?? null;
   });
 }
 

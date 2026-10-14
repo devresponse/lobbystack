@@ -94,6 +94,35 @@ function localVisitorId(widgetKey: string): string {
   return id;
 }
 
+/** How a live update stream ended: on its own, on an error worth retrying, or for good. */
+type WidgetStreamOutcome = "ended" | "failed" | "stopped";
+
+/** Reads the chat's live updates until the stream ends. Only the event names matter: events carry no text. */
+async function readWidgetStream(input: { token: string; parentOrigin: string; signal: AbortSignal; onEvent: (name: string) => void }): Promise<WidgetStreamOutcome> {
+  const response = await fetch(new URL("/api/widget/stream", window.location.origin), {
+    headers: { authorization: `Bearer ${input.token}`, "x-widget-parent-origin": input.parentOrigin, accept: "text/event-stream" },
+    credentials: "include",
+    cache: "no-store",
+    signal: input.signal,
+  });
+  // A session the server turns down stays turned down until the loader sends a new one.
+  if (!response.ok) return [400, 401, 403].includes(response.status) ? "stopped" : "failed";
+  if (!response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) return "stopped";
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) return "ended";
+    buffer += decoder.decode(value, { stream: true });
+    for (let end = buffer.indexOf("\n\n"); end >= 0; end = buffer.indexOf("\n\n")) {
+      const name = buffer.slice(0, end).split("\n").find((line) => line.startsWith("event: "))?.slice("event: ".length);
+      buffer = buffer.slice(end + 2);
+      if (name) input.onEvent(name);
+    }
+  }
+}
+
 export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: string; initialColor?: string | undefined }) {
   const { t, i18n } = useTranslation("widget");
   const visitorIdRef = useRef<string>("");
@@ -242,6 +271,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   }, [configState, loadHistory, parentVisitorId, widgetKey]);
 
   // Team replies reach the database only, so poll for them while a person has the chat.
+  // The live updates below bring them at once; this is the fallback when those are down.
   useEffect(() => {
     if (!handoff || sending) return;
     // Aborting on send stops an older poll from overwriting the visitor's new message.
@@ -254,6 +284,68 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       controller.abort();
     };
   }, [handoff, loadHistory, sending]);
+
+  // Reloads the history when the team writes or takes the chat over. A reload
+  // mid-reply would replace the streaming answer, so it waits for the reply.
+  const sendingRef = useRef(false);
+  const refreshPendingRef = useRef(false);
+  const refreshRef = useRef<AbortController | null>(null);
+  const refreshHistory = useCallback(() => {
+    if (sendingRef.current) {
+      refreshPendingRef.current = true;
+      return;
+    }
+    refreshRef.current?.abort();
+    const controller = new AbortController();
+    refreshRef.current = controller;
+    void loadHistory(controller.signal);
+  }, [loadHistory]);
+  useEffect(() => {
+    sendingRef.current = sending;
+    if (sending) {
+      refreshRef.current?.abort();
+    } else if (refreshPendingRef.current) {
+      refreshPendingRef.current = false;
+      refreshHistory();
+    }
+  }, [refreshHistory, sending]);
+
+  const [pageVisible, setPageVisible] = useState(true);
+  useEffect(() => {
+    const update = () => setPageVisible(!document.hidden);
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+
+  // Once the visitor has a chat, an open stream tells the widget when a team
+  // member writes or takes over. It pauses while the page is in the background.
+  const chatStarted = messages.length > 0;
+  const configLoaded = configState !== null;
+  useEffect(() => {
+    if (!sessionToken || !parentOrigin || !configLoaded || !chatStarted || !pageVisible) return;
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let failures = 0;
+    const connect = async () => {
+      let outcome: WidgetStreamOutcome;
+      try {
+        // Every event, "ready" included, reloads the history: a new stream may have missed something.
+        outcome = await readWidgetStream({ token: sessionToken, parentOrigin, signal: controller.signal, onEvent: () => { failures = 0; refreshHistory(); } });
+      } catch {
+        outcome = "failed";
+      }
+      if (controller.signal.aborted || outcome === "stopped") return;
+      // A stream that ran its course reopens at once; failures back off, up to a minute.
+      const delay = outcome === "ended" ? 1_000 : Math.min(60_000, 2_000 * 2 ** failures++);
+      timer = window.setTimeout(() => void connect(), delay);
+    };
+    void connect();
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [chatStarted, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken]);
 
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs

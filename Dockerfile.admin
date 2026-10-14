@@ -34,10 +34,12 @@ ARG S3_FORCE_PATH_STYLE
 RUN pnpm --filter @lobbystack/embed build && node scripts/copy-widget-embed.mjs
 ARG POSTHOG_SOURCEMAP_API_KEY
 ARG POSTHOG_PROJECT_ID=266281
-# The admin reads these at run time. At build time they let the prerendered
-# sign-in pages show the name and logo without asking the server first.
-ARG BRAND_APP_NAME
-ARG BRAND_LOGO_URL
+# AlloPlace's name and logo unless the deployment passes its own. The admin
+# reads them at run time. At build time they let the prerendered sign-in pages
+# show the name and logo without asking the server first. Pass an empty value
+# to leave one to the deployment's first owner in onboarding.
+ARG BRAND_APP_NAME=AlloPlace
+ARG BRAND_LOGO_URL=/brand/alloplace/logo.svg
 RUN pnpm --filter @lobbystack/admin... build
 RUN mkdir -p /prod && cp -R /app/apps/admin/.next/static /prod/admin-static && \
     find /prod/admin-static -type f -name '*.map' -delete
@@ -58,6 +60,11 @@ ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
 ENV SERVICE_VERSION=$SERVICE_VERSION
 LABEL org.opencontainers.image.revision=$SERVICE_VERSION
+# The same defaults at run time. A deployment's own variables replace them.
+ARG BRAND_APP_NAME=AlloPlace
+ARG BRAND_LOGO_URL=/brand/alloplace/logo.svg
+ENV BRAND_APP_NAME=$BRAND_APP_NAME
+ENV BRAND_LOGO_URL=$BRAND_LOGO_URL
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 lobbystack && \

@@ -21,9 +21,15 @@ When a variable is set to a value it can't use, the admin logs a warning once an
 
 Set the variables on the admin service. Give them to the admin's Docker build too: `Dockerfile.admin` and `docker-compose.yml` pass build arguments with the same names. On Railway, the admin's service variables reach its Docker build automatically.
 
+### AlloPlace defaults
+
+Out of the box, both variables carry AlloPlace's brand: `BRAND_APP_NAME=AlloPlace` and `BRAND_LOGO_URL=/brand/alloplace/logo.svg`. `Dockerfile.admin` sets them at build and run time, `docker-compose.yml` passes them when they're unset, and `.env.example` carries them for local development. The logo is the yellow tile from AlloPlace's Cadre brand system, in `apps/admin/public/brand/alloplace/logo.svg`. The dashboard sets the name beside it, and the browser tab uses it as its icon, as alloplace.com does.
+
+To rebrand a deployment, set your own values. To let the deployment's first owner choose a field in onboarding instead, set that variable to an empty value. In Docker and Compose, leaving it unset keeps AlloPlace's.
+
 ### The onboarding step
 
-The first owner sees a **Make this app your own** step before naming their business. It asks only for the fields the environment leaves unset, and it doesn't appear at all when both are set. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
+The first owner sees a **Make this app your own** step before naming their business. It asks only for the fields the environment leaves unset, and it doesn't appear at all when both are set, as they are with the AlloPlace defaults. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
 
 The step is shown only when both of these are true. `app.can_save_initial_branding()` checks them in the database, and `app.save_initial_branding()` checks them again when the choice is saved:
 

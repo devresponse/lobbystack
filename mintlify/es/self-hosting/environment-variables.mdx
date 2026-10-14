@@ -22,7 +22,7 @@ Use `.env.example` como fuente de referencia. Guarde los valores de producción 
 
 ## Imagen de marca
 
-Configúrelas en el servicio de administración. Cada una tiene prioridad sobre el nombre y el logo que elige el primer propietario de la implementación durante la incorporación, así que déjelas vacías para que esa persona elija. Páselas también a la compilación del servicio de administración, como argumentos de compilación de Docker con el mismo nombre, para que las páginas de inicio de sesión prerrenderizadas las muestren sin consultar antes al servidor.
+Configúrelas en el servicio de administración. Si no configura las suyas, la imagen del servicio de administración usa el nombre y el logo de AlloPlace: `AlloPlace` y `/brand/alloplace/logo.svg`. Cada una tiene prioridad sobre el nombre y el logo que elige el primer propietario de la implementación durante la incorporación, así que asígnele un valor vacío para que esa persona elija. Páselas también a la compilación del servicio de administración, como argumentos de compilación de Docker con el mismo nombre, para que las páginas de inicio de sesión prerrenderizadas las muestren sin consultar antes al servidor.
 
 | Variable | Función |
 | --- | --- |

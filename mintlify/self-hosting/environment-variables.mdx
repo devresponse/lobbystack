@@ -22,7 +22,7 @@ Use `.env.example` as the source of truth. Store production values in your deplo
 
 ## Branding
 
-Set these on the admin. Each one wins over the name and logo that the deployment's first owner chooses during onboarding, so leave them empty to let that owner choose. Give them to the admin build as well, as Docker build arguments with the same names, so the prerendered sign-in pages show them without first asking the server.
+Set these on the admin. Unless you set your own, the admin image uses AlloPlace's name and logo: `AlloPlace` and `/brand/alloplace/logo.svg`. Each one wins over the name and logo that the deployment's first owner chooses during onboarding, so set one to an empty value to let that owner choose it. Give them to the admin build as well, as Docker build arguments with the same names, so the prerendered sign-in pages show them without first asking the server.
 
 | Variable | Purpose |
 | --- | --- |

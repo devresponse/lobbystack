@@ -3,11 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string }) => (options?.id ? `${key} ${options.id}` : key) }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
-import { readableOn, WidgetChatClient } from "./widget-chat-client";
+import { readableOn, threadEntries, WidgetChatClient } from "./widget-chat-client";
 
 const visitorId = "5ef3b4ef-720d-47a7-8320-e6f4707a64e2";
 const config = { key: "widget-key", business: { id: "business", name: "Acme", defaultLocale: "en" }, config: {}, billing: { chatAllowed: true, plan: "starter" }, snapshotPresent: true };
@@ -44,6 +44,79 @@ describe("widget chat after a team member takes over", () => {
     });
     expect(await screen.findByText(teamReply.content)).toBeTruthy();
     client.clear();
+  });
+});
+
+describe("widget live chat with the team", () => {
+  function openChat(historyPayload: object) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json(historyPayload) : Response.json(config)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    return client;
+  }
+
+  it("tells a visitor who asked for a person that the team was asked to join", async () => {
+    const client = openChat({ automationState: "human_handoff", waitingForTeam: true, teamMemberName: null, messages: [visitorMessage, { id: "m2", role: "assistant", content: "I've let the team know." }] });
+
+    expect(await screen.findByText("chat.waitingForTeam")).toBeTruthy();
+    expect(screen.queryByText("chat.handoffBanner")).toBeNull();
+    expect(screen.queryByText(/chat\.teamJoined/)).toBeNull();
+    client.clear();
+  });
+
+  it("shows who from the team joined, with their name on their messages", async () => {
+    const client = openChat({
+      automationState: "human_handoff",
+      waitingForTeam: false,
+      teamMemberName: "Yuri",
+      messages: [
+        visitorMessage,
+        { id: "m2", role: "assistant", content: "I've let the team know." },
+        { id: "m3", role: "assistant", content: "Hi, this is Yuri.", fromTeam: true, teamMemberName: "Yuri" },
+        { id: "m4", role: "assistant", content: "How can I help?", fromTeam: true, teamMemberName: "Yuri" },
+        { id: "m5", role: "user", content: "About my invoice." },
+        { id: "m6", role: "assistant", content: "Let me check.", fromTeam: true, teamMemberName: "Yuri" },
+      ],
+    });
+
+    expect(await screen.findByText("chat.teamMemberInChat Yuri")).toBeTruthy();
+    expect(screen.getAllByText("chat.teamJoined Yuri")).toHaveLength(1);
+    // Once above each run of Yuri's messages.
+    expect(screen.getAllByText("Yuri")).toHaveLength(2);
+    expect(screen.queryByText("chat.handoffBanner")).toBeNull();
+    client.clear();
+  });
+});
+
+describe("threadEntries", () => {
+  const text = (id: string, role: "user" | "assistant", content: string, metadata?: { fromTeam: true; teamMemberName: string | null }) => ({ id, role, parts: [{ type: "text" as const, text: content }], ...(metadata ? { metadata } : {}) });
+
+  it("notes each time the team takes the chat from the receptionist, and leaves out empty replies", () => {
+    const entries = threadEntries([
+      text("1", "user", "Hello"),
+      text("2", "assistant", "Hi! How can I help?"),
+      text("3", "assistant", "This is the team.", { fromTeam: true, teamMemberName: null }),
+      text("4", "user", "Thanks"),
+      text("5", "assistant", ""),
+      text("6", "assistant", "Back to the receptionist."),
+      text("7", "assistant", "Hi again, Yuri here.", { fromTeam: true, teamMemberName: "Yuri" }),
+    ], null);
+
+    expect(entries.map((entry) => [entry.message.id, entry.joined, entry.showName, entry.teamMemberName])).toEqual([
+      ["1", false, false, null],
+      ["2", false, false, null],
+      ["3", true, true, null],
+      ["4", false, false, null],
+      ["6", false, false, null],
+      ["7", true, true, "Yuri"],
+    ]);
+    // A reply still streaming in stays, even before its first words.
+    expect(threadEntries([text("1", "user", "Hello"), text("2", "assistant", "")], "2").map((entry) => entry.message.id)).toEqual(["1", "2"]);
   });
 });
 

@@ -58,7 +58,9 @@
       "leadEnabled": "Ask visitors for their contact details",
       "requireEmail": "Require email",
       "requirePhone": "Require phone",
-      "showBeforeChat": "Ask before chat"
+      "showBeforeChat": "Ask before chat",
+      "liveChat": "Let visitors chat with your team",
+      "liveChatHint": "During opening hours, a visitor who asks for a person gets someone from your team in the chat. Your team gets an alert and replies from Messages. If nobody replies within 3 minutes, the receptionist offers to take a message."
     },
     "positions": {
       "bottomRight": "Bottom right",
@@ -793,6 +795,10 @@
       "widgetChat": {
         "title": "New website chat message",
         "description": "When a visitor sends a message through your website widget. You get at most one alert per chat each day."
+      },
+      "liveChatRequest": {
+        "title": "Visitor asking for a person",
+        "description": "When a website visitor asks to talk with someone from your team. Reply from Messages within 3 minutes to join the chat."
       },
       "webhookDisabled": {
         "title": "Webhook endpoint turned off",

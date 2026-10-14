@@ -13,6 +13,7 @@ import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisio
 import { issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
+import { expireTeamRequest } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import type { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
@@ -824,6 +825,15 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const generated = await generateCallSummary(dependencies, { businessId, callId });
       const result = await finalizeConversationSession(dependencies.domain, { businessId, callId, ...(generated ? { generated } : {}) });
       return { status: result.finalized ? "completed" : "skipped", entityId: result.sessionId ?? callId };
+    }
+    case "conversation.expireTeamRequest": {
+      // A website visitor asked for a person: hand the chat back to the receptionist if nobody joined.
+      const conversationId = String(job.payload.conversationId ?? "");
+      const requestedAt = new Date(String(job.payload.requestedAt ?? ""));
+      if (!conversationId || !Number.isFinite(requestedAt.getTime())) return { status: "skipped" };
+      const businessId = businessIdOrThrow(job);
+      const result = await expireTeamRequest(dependencies.domain, { businessId, conversationId, requestedAt, locale: job.payload.locale === "fr" ? "fr" : "en" });
+      return { status: result.expired ? "completed" : "skipped", entityId: conversationId };
     }
     case "privacy.scrubMessage": {
       const businessId = businessIdOrThrow(job);

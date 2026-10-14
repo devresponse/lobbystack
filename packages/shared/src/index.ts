@@ -276,6 +276,14 @@ export type WidgetLeadFormConfig = {
   showBeforeChat?: boolean;
 };
 
+/**
+ * Live chat with the team: during opening hours, a visitor who asks for a
+ * person gets someone from the team in the chat, who replies from Messages.
+ */
+export type WidgetLiveChatConfig = {
+  enabled: boolean;
+};
+
 export type WidgetConfig = {
   color?: string;
   position?: WidgetPosition;
@@ -284,12 +292,14 @@ export type WidgetConfig = {
   greeting?: string;
   localeOverride?: InterfaceLocale;
   leadForm?: WidgetLeadFormConfig;
+  liveChat?: WidgetLiveChatConfig;
 };
 
 export const defaultWidgetConfig: WidgetConfig = {
   position: "bottom-right",
   title: "",
   leadForm: { enabled: false, requirePhone: false, requireEmail: false, showBeforeChat: false },
+  liveChat: { enabled: false },
 };
 
 export const widgetLeadFormConfigSchema = z.object({
@@ -307,6 +317,7 @@ export const widgetConfigSchema = z.object({
   greeting: z.string().max(400).optional(),
   localeOverride: z.enum(interfaceLocales).optional(),
   leadForm: widgetLeadFormConfigSchema.optional(),
+  liveChat: z.object({ enabled: z.boolean() }).optional(),
 });
 
 export const widgetSessionRequestSchema = z.object({
@@ -376,7 +387,7 @@ export * from "./product-capabilities";
 export { normalizeAuthEmail } from "./auth";
 export { assertProductionSecrets } from "./productionSecrets";
 
-export { isTransferPermitted, normalizeTransferMode } from "./transferPolicy";
+export { isBusinessOpen, isTransferPermitted, normalizeTransferMode } from "./transferPolicy";
 
 export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEXT, OPERATOR_SMS_DISCLOSURE_VERSION } from "./operatorSmsConsent";
 export { canTextNumber, permanentSmsErrorCode } from "./smsReach";

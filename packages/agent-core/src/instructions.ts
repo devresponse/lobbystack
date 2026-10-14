@@ -90,9 +90,25 @@ function webPersonRule(snapshot: BusinessContextSnapshot, channel: Exclude<Agent
   ].join(" ");
 }
 
+/**
+ * What to do when a visitor asks for a person on a website chat with live
+ * chat on: someone from the team can join the chat itself, during opening
+ * hours. When nobody can, the visitor gets the number to call and the offer
+ * of a callback, as on any website chat.
+ */
+function liveChatPersonRule(snapshot: BusinessContextSnapshot): string {
+  return [
+    "Someone from the team can join this website chat, but the chat can't be transferred to a phone call.",
+    "When the visitor asks for a person, or a rule says to transfer them, call requestTeamMember right away with what they need. It checks whether anyone can join now.",
+    "When it succeeds, tell the visitor you've let the team know, someone will reply here shortly, and they can keep writing meanwhile. Never say or suggest someone has already joined.",
+    `When it says nobody can join, ${personFromWeb(snapshot)}, and offer to take a message so someone from the team calls them back: get their name and the best number to reach them, then save it with takeMessage.`,
+    "Never say or suggest the visitor is being transferred or connected to a phone call.",
+  ].join(" ");
+}
+
 // Instructions for the text agent that does the work. On voice it runs behind
 // GPT-Live, so its reply is spoken to the caller by the live model.
-export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channel: AgentChannel, options: { intakeOnly?: boolean; callerPhone?: string; endsCalls?: boolean; keypad?: boolean } = {}): string {
+export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channel: AgentChannel, options: { intakeOnly?: boolean; callerPhone?: string; endsCalls?: boolean; keypad?: boolean; liveChat?: boolean } = {}): string {
   const now = DateTime.now().setZone(snapshot.timezone);
   const bookingMode = normalizeBookingMode(snapshot.bookingMode);
   const voice = channel !== "web_chat";
@@ -146,7 +162,9 @@ export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channe
       ? "You already have the caller's phone number from the call. Don't ask for it, and leave contactPhone and callbackPhone empty unless the caller gives a different number."
       : "",
     "If you are missing something you need (the service, the caller's name or number), say exactly what to ask the caller.",
-    channel === "voice" ? "Transfer to a person only when the transfer rules allow it; otherwise offer to take a message." : webPersonRule(snapshot, channel),
+    channel === "voice"
+      ? "Transfer to a person only when the transfer rules allow it; otherwise offer to take a message."
+      : channel === "web_chat" && options.liveChat ? liveChatPersonRule(snapshot) : webPersonRule(snapshot, channel),
     // The voice model says goodbye once it hears the call is ending, and a
     // reply here would be a second one.
     voice && options.endsCalls

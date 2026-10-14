@@ -605,6 +605,7 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
       ...(config.greeting !== undefined ? { greeting: config.greeting } : {}),
       ...(config.localeOverride !== undefined ? { locale: config.localeOverride } : {}),
       ...(config.leadForm !== undefined ? { lead_form: { enabled: config.leadForm.enabled, require_phone: config.leadForm.requirePhone ?? false, require_email: config.leadForm.requireEmail ?? false, show_before_chat: config.leadForm.showBeforeChat ?? false } } : {}),
+      ...(config.liveChat !== undefined ? { live_chat: { enabled: config.liveChat.enabled } } : {}),
     },
     last_used_at: isoOrNull(row.lastUsedAt),
     created_at: iso(row.createdAt),

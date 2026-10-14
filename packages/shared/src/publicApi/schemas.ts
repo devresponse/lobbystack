@@ -269,6 +269,9 @@ export const apiWidgetConfigSchema = z.strictObject({
     require_email: z.boolean().optional(),
     show_before_chat: z.boolean().optional(),
   }).optional().describe("Asks visitors for their contact details."),
+  live_chat: z.strictObject({
+    enabled: z.boolean(),
+  }).optional().describe("Live chat with the team. During opening hours, a visitor who asks for a person gets someone from the team in the chat, who replies from Messages. If nobody joins within 3 minutes, the receptionist takes a message."),
 }).describe("How the widget looks and behaves.");
 
 export const apiWidgetKeySchema = z.object({

@@ -446,4 +446,16 @@ describe("asking for a person on a browser call or a website chat", () => {
     expect(phone).toContain("Transfer rule: on_request.");
     expect(phone).not.toMatch(/web browser|website chat|Phone number:/);
   });
+
+  it("has the agent bring the team into a website chat with live chat on, and give the number and a callback when nobody can join", () => {
+    const chat = buildAgentInstructions(onRequest, "web_chat", { liveChat: true });
+    expect(chat).toContain("Someone from the team can join this website chat, but the chat can't be transferred to a phone call. When the visitor asks for a person, or a rule says to transfer them, call requestTeamMember right away with what they need. It checks whether anyone can join now. When it succeeds, tell the visitor you've let the team know, someone will reply here shortly, and they can keep writing meanwhile. Never say or suggest someone has already joined.");
+    expect(chat).toContain(`When it says nobody can join, tell them they can call +14165550000 and ask for a person, ${callBack}: get their name and the best number to reach them, then save it with takeMessage. Never say or suggest the visitor is being transferred or connected to a phone call.`);
+    expect(chat).not.toContain("you can't connect the visitor to a person");
+    // Live chat is only for typed website chats.
+    expect(buildAgentInstructions(onRequest, "web_voice", { endsCalls: true, liveChat: true })).toContain(browserCall);
+    for (const instructions of [buildAgentInstructions(onRequest, "web_voice", { liveChat: true }), buildAgentInstructions(onRequest, "voice", { liveChat: true }), buildAgentInstructions(onRequest, "web_chat")]) {
+      expect(instructions).not.toContain("requestTeamMember");
+    }
+  });
 });

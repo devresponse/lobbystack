@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Phone, PhoneOff, Send } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
@@ -35,8 +35,26 @@ type WidgetConfigPayload = {
 /** What the voice button shares with the chat: whether a call is live, and its captions. */
 type VoiceCaptions = { live: boolean; turns: WebVoiceTranscriptTurn[] };
 
-type WidgetMessageMetadata = { automationState?: "ai_active" | "human_handoff" };
+type WidgetMessageMetadata = {
+  automationState?: "ai_active" | "human_handoff";
+  /** The receptionist asked the team to join, and the chat waits for them. */
+  waitingForTeam?: boolean;
+  /** A team member wrote this message, with their first name when they have one. */
+  fromTeam?: boolean;
+  teamMemberName?: string | null;
+};
 type WidgetMessage = UIMessage<WidgetMessageMetadata>;
+
+/** Who answers the chat: the receptionist, or the team, which was asked to join or is in the chat. */
+type ChatHandling = { handoff: boolean; waitingForTeam: boolean; teamMemberName: string | null };
+const RECEPTIONIST_HANDLING: ChatHandling = { handoff: false, waitingForTeam: false, teamMemberName: null };
+
+type HistoryPayload = {
+  automationState?: string;
+  waitingForTeam?: boolean;
+  teamMemberName?: string | null;
+  messages?: Array<{ id: string; role: "user" | "assistant"; content: string; fromTeam?: boolean; teamMemberName?: string | null }>;
+};
 
 function messageText(message: WidgetMessage): string {
   return message.parts.filter((part): part is Extract<WidgetMessage["parts"][number], { type: "text" }> => part.type === "text").map((part) => part.text).join("");
@@ -139,7 +157,8 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const followThreadRef = useRef(true);
   const [lead, setLead] = useState({ name: "", email: "", phone: "" });
   const [leadSubmitting, setLeadSubmitting] = useState(false);
-  const [handoff, setHandoff] = useState(false);
+  const [handling, setHandling] = useState<ChatHandling>(RECEPTIONIST_HANDLING);
+  const handoff = handling.handoff;
   const [voiceCaptions, setVoiceCaptions] = useState<VoiceCaptions>({ live: false, turns: [] });
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
@@ -178,13 +197,16 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     transport,
     onError: (error) => setSubmitError(chatErrorKey(error)),
     onFinish: ({ message }) => {
-      if (message.metadata?.automationState) setHandoff(message.metadata.automationState === "human_handoff");
+      const metadata = message.metadata;
+      if (metadata?.automationState === "ai_active") setHandling(RECEPTIONIST_HANDLING);
+      if (metadata?.automationState === "human_handoff") setHandling((current) => ({ ...current, handoff: true, waitingForTeam: metadata.waitingForTeam ?? current.waitingForTeam }));
     },
   });
 
   const sending = status === "submitted" || status === "streaming";
   const lastMessage = messages.at(-1);
   const streamingMessageId = status === "streaming" && lastMessage?.role === "assistant" ? lastMessage.id : null;
+  const thread = useMemo(() => threadEntries(messages, streamingMessageId), [messages, streamingMessageId]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -248,14 +270,15 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     try {
       const response = await fetch(url, { headers: { authorization: `Bearer ${sessionToken}`, "x-widget-parent-origin": parentOrigin ?? "" }, credentials: "include", signal: signal ?? null });
       if (!response.ok) return;
-      const data = await response.json() as { automationState?: string; messages?: Array<{ id: string; role: "user" | "assistant"; content: string }> };
+      const data = await response.json() as HistoryPayload;
       if (signal?.aborted) return;
-      setHandoff(data.automationState === "human_handoff");
+      setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
       if (Array.isArray(data.messages)) {
         setMessages(data.messages.map((message) => ({
           id: message.id,
           role: message.role === "assistant" ? "assistant" : "user",
           parts: [{ type: "text", text: message.content }],
+          ...(message.role === "assistant" && message.fromTeam ? { metadata: { fromTeam: true, teamMemberName: message.teamMemberName ?? null } } : {}),
         })));
       }
     } catch {
@@ -448,7 +471,11 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         {voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
       </header>
 
-      {handoff ? <div className="shrink-0 border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800">{t("chat.handoffBanner")}</div> : null}
+      {handoff ? (
+        <div className="shrink-0 border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800" role="status">
+          {handling.waitingForTeam ? t("chat.waitingForTeam") : handling.teamMemberName ? t("chat.teamMemberInChat", { name: handling.teamMemberName }) : t("chat.handoffBanner")}
+        </div>
+      ) : null}
 
       <div
         ref={threadRef}
@@ -473,14 +500,18 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
             {configState?.config?.greeting ? <p className="rounded-xl rounded-bl-sm bg-zinc-100 px-3 py-2 whitespace-pre-wrap">{configState.config.greeting}</p> : null}
           </div>
         ) : null}
-        {messages.map((message) => (
-          <div key={message.id} className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}>
-            <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", message.role === "user" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color, color: onColor } : undefined}>
-              <p><MessageContent content={messageText(message)} pending={streamingMessageId === message.id} /></p>
+        {thread.map(({ message, teamMemberName, joined, showName }) => (
+          <Fragment key={message.id}>
+            {joined ? <p className="text-center text-xs text-zinc-500">{teamMemberName ? t("chat.teamJoined", { name: teamMemberName }) : t("chat.teamJoinedNoName")}</p> : null}
+            <div className={cn("flex flex-col gap-1", message.role === "user" ? "items-end" : "items-start")}>
+              {showName ? <span className="px-1 text-xs font-medium text-zinc-500">{teamMemberName ?? t("chat.teamLabel")}</span> : null}
+              <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", message.role === "user" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color, color: onColor } : undefined}>
+                <p><MessageContent content={messageText(message)} pending={streamingMessageId === message.id} /></p>
+              </div>
             </div>
-          </div>
+          </Fragment>
         ))}
-        {sending && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
+        {sending && !handoff && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
         {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} onColor={onColor} t={t} /> : null}
         {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
       </div>
@@ -511,6 +542,36 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       {leadOpen && !showLeadBeforeChat ? <LeadOverlay lead={lead} setLead={setLead} onSubmit={submitLead} submitting={leadSubmitting} onClose={() => setLeadOpen(false)} t={t} /> : null}
     </main>
   );
+}
+
+type ThreadEntry = {
+  message: WidgetMessage;
+  /** The first name of the team member who wrote the message, when they have one. */
+  teamMemberName: string | null;
+  /** The first team message after the receptionist's: someone from the team joined the chat. */
+  joined: boolean;
+  /** Where the speaker changes to a team member, their name goes above the message. */
+  showName: boolean;
+};
+
+/**
+ * The messages the thread shows, with who from the team wrote them. A reply
+ * with no text, which is all the chat sends back while the team has it, isn't
+ * shown, unless it's still streaming.
+ */
+export function threadEntries(messages: WidgetMessage[], streamingMessageId: string | null): ThreadEntry[] {
+  let teamHasChat = false;
+  let previousSpeaker: string | null = null;
+  return messages.flatMap((message) => {
+    if (message.role === "assistant" && !messageText(message).trim() && message.id !== streamingMessageId) return [];
+    const fromTeam = message.role === "assistant" && message.metadata?.fromTeam === true;
+    const name = fromTeam ? message.metadata?.teamMemberName ?? null : null;
+    const speaker = fromTeam ? `team:${name ?? ""}` : message.role;
+    const entry = { message, teamMemberName: name, joined: fromTeam && !teamHasChat, showName: fromTeam && speaker !== previousSpeaker };
+    if (message.role === "assistant") teamHasChat = fromTeam;
+    previousSpeaker = speaker;
+    return [entry];
+  });
 }
 
 function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentOrigin, onStatusChange, onCaptions }: { className?: string; businessSlug: string; visitorId: string; sessionToken: string | null; parentOrigin: string | null; onStatusChange: (message: string | null) => void; onCaptions: (captions: VoiceCaptions) => void }) {

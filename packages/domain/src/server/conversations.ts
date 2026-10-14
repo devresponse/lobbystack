@@ -120,108 +120,147 @@ export async function getOrCreateConversation(
   });
 }
 
-export async function appendMessage(
-  context: DomainContext,
-  input: { businessId: string; conversationId: string; body: string; direction: "inbound" | "outbound"; channel: "sms" | "dashboard" | "web_chat"; providerMessageId?: string; aiGenerated?: boolean; userId?: string; operatorAlert?: { eventKind: OperatorNotificationEventKey; subject: string; body: string } },
-): Promise<string> {
-  // A team member who writes in a website chat takes it over, so the AI stops answering alongside them.
-  const takesOver = input.userId !== undefined && input.direction === "outbound" && input.channel === "web_chat";
-  const { messageId, tookOver } = await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
-    if (input.userId) {
-      await requireBusinessMembership(tx, { userId: input.userId, businessId: input.businessId, minimumRole: "scheduler" });
-    }
-    const session = (await tx.select({ id: conversationSessions.id }).from(conversationSessions).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, input.conversationId), eq(conversationSessions.status, "open"))).orderBy(desc(conversationSessions.startedAt)).limit(1))[0] ?? (await tx.insert(conversationSessions).values({ businessId: input.businessId, conversationId: input.conversationId, channel: input.channel, status: "open" }).returning({ id: conversationSessions.id }))[0];
-    const retentionPlan = isContentRetentionEnabled() ? await resolveBusinessBillingPlan(tx, input.businessId) : null;
-    const [message] = await tx.insert(messages).values({
-      businessId: input.businessId,
-      conversationId: input.conversationId,
-      conversationSessionId: session?.id,
-      direction: input.direction,
-      channel: input.channel,
-      body: input.body,
-      contentExpiresAt: retentionPlan ? contentExpiryForPlan(retentionPlan, "messages") : null,
-      providerMessageId: input.providerMessageId,
-      aiGenerated: input.aiGenerated ?? false,
-      status: input.direction === "outbound" ? "queued" : "received",
-    }).onConflictDoNothing({ target: messages.providerMessageId }).returning({ id: messages.id });
-    if (!message) {
-      if (input.providerMessageId) {
-        const existing = (await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.providerMessageId, input.providerMessageId))).limit(1))[0];
-        if (existing) return { messageId: existing.id, tookOver: false };
-      }
-      throw new Error("Message could not be persisted.");
-    }
-    await tx.update(conversations).set({ updatedAt: new Date(), revision: conversations.revision }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
+type MessageInput = { businessId: string; conversationId: string; body: string; direction: "inbound" | "outbound"; channel: "sms" | "dashboard" | "web_chat"; providerMessageId?: string; aiGenerated?: boolean; userId?: string };
+
+/**
+ * Saves a message in the caller's transaction and queues its realtime update
+ * and, for an outbound text, its delivery. Null when a message with the same
+ * provider ID is already saved; nothing is queued then.
+ */
+export async function insertMessageInTransaction(tx: DatabaseTransaction, input: MessageInput): Promise<string | null> {
+  const session = (await tx.select({ id: conversationSessions.id }).from(conversationSessions).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, input.conversationId), eq(conversationSessions.status, "open"))).orderBy(desc(conversationSessions.startedAt)).limit(1))[0] ?? (await tx.insert(conversationSessions).values({ businessId: input.businessId, conversationId: input.conversationId, channel: input.channel, status: "open" }).returning({ id: conversationSessions.id }))[0];
+  const retentionPlan = isContentRetentionEnabled() ? await resolveBusinessBillingPlan(tx, input.businessId) : null;
+  const [message] = await tx.insert(messages).values({
+    businessId: input.businessId,
+    conversationId: input.conversationId,
+    conversationSessionId: session?.id,
+    direction: input.direction,
+    channel: input.channel,
+    body: input.body,
+    contentExpiresAt: retentionPlan ? contentExpiryForPlan(retentionPlan, "messages") : null,
+    providerMessageId: input.providerMessageId,
+    ...(input.userId ? { sentByUserId: input.userId } : {}),
+    aiGenerated: input.aiGenerated ?? false,
+    status: input.direction === "outbound" ? "queued" : "received",
+  }).onConflictDoNothing({ target: messages.providerMessageId }).returning({ id: messages.id });
+  if (!message) return null;
+  await tx.update(conversations).set({ updatedAt: new Date(), revision: conversations.revision }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
+  await enqueueOutbox(tx, {
+    topic: "realtime.publish",
+    businessId: input.businessId,
+    aggregateType: "message",
+    aggregateId: message.id,
+    dedupeKey: `message:${message.id}:created`,
+    // Who wrote it, so the website chat's live updates can pick out a team member's reply.
+    payload: { type: "message.upserted", entityId: message.id, conversationId: input.conversationId, direction: input.direction, aiGenerated: input.aiGenerated ?? false },
+  });
+  if (input.direction === "outbound" && input.channel === "sms") {
     await enqueueOutbox(tx, {
-      topic: "realtime.publish",
+      topic: "sms.send",
       businessId: input.businessId,
       aggregateType: "message",
       aggregateId: message.id,
-      dedupeKey: `message:${message.id}:created`,
-      // Who wrote it, so the website chat's live updates can pick out a team member's reply.
-      payload: { type: "message.upserted", entityId: message.id, conversationId: input.conversationId, direction: input.direction, aiGenerated: input.aiGenerated ?? false },
+      dedupeKey: `message:${message.id}:send`,
+      payload: { messageId: message.id },
     });
-    if (input.direction === "outbound" && input.channel === "sms") {
-      await enqueueOutbox(tx, {
-        topic: "sms.send",
-        businessId: input.businessId,
-        aggregateType: "message",
-        aggregateId: message.id,
-        dedupeKey: `message:${message.id}:send`,
-        payload: { messageId: message.id },
-      });
+  }
+  return message.id;
+}
+
+export async function appendMessage(
+  context: DomainContext,
+  input: MessageInput & { operatorAlert?: { eventKind: OperatorNotificationEventKey; subject: string; body: string } },
+): Promise<string> {
+  // A team member who writes in a website chat takes it over, so the AI stops answering alongside them.
+  const takesOver = input.userId !== undefined && input.direction === "outbound" && input.channel === "web_chat";
+  const { messageId, takeOver } = await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
+    if (input.userId) {
+      await requireBusinessMembership(tx, { userId: input.userId, businessId: input.businessId, minimumRole: "scheduler" });
     }
-    if (input.operatorAlert) await queueOperatorAlertInTransaction(tx, { businessId: input.businessId, eventKey: `${input.operatorAlert.eventKind}:${message.id}`, ...input.operatorAlert });
-    const tookOver = takesOver && await pauseAutomationInTransaction(tx, { businessId: input.businessId, conversationId: input.conversationId, userId: input.userId! });
-    return { messageId: message.id, tookOver };
+    const id = await insertMessageInTransaction(tx, input);
+    if (!id) {
+      if (input.providerMessageId) {
+        const existing = (await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.providerMessageId, input.providerMessageId))).limit(1))[0];
+        if (existing) return { messageId: existing.id, takeOver: null };
+      }
+      throw new Error("Message could not be persisted.");
+    }
+    if (input.operatorAlert) await queueOperatorAlertInTransaction(tx, { businessId: input.businessId, eventKey: `${input.operatorAlert.eventKind}:${id}`, ...input.operatorAlert });
+    const takeOver = takesOver ? await takeOverChatInTransaction(tx, { businessId: input.businessId, conversationId: input.conversationId, userId: input.userId! }) : null;
+    return { messageId: id, takeOver };
   });
-  if (tookOver) await recordAutomationPaused(context, { businessId: input.businessId, conversationId: input.conversationId, channel: input.channel });
+  if (takeOver) await recordTakeOver(context, { businessId: input.businessId, conversationId: input.conversationId, channel: input.channel, ...takeOver });
   return messageId;
 }
 
-/** Hands an AI-run conversation to the team. False when a person already has it. */
-async function pauseAutomationInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; userId: string }): Promise<boolean> {
-  const [updated] = await tx.update(conversations).set({ automationState: "human_handoff", automationPausedAt: new Date(), automationPausedByUserId: input.userId, updatedAt: new Date() }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId), eq(conversations.automationState, "ai_active"))).returning({ id: conversations.id });
-  if (!updated) return false;
+/** What changed when a team member took a chat: the AI stopped answering, or a visitor waiting for a person got one. */
+type ChatTakeOver = { pausedAi: boolean; waitedMs: number | null };
+
+/**
+ * Hands a chat to the team member who writes in it: the AI stops answering,
+ * and a visitor waiting for a person has someone. Null when a team member
+ * already has it.
+ */
+async function takeOverChatInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; userId: string }): Promise<ChatTakeOver | null> {
+  const [current] = await tx.select({ automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
+  if (!current) return null;
+  const pausedAi = current.automationState === "ai_active";
+  if (!pausedAi && !current.teamRequestedAt) return null;
+  const now = new Date();
+  await tx.update(conversations).set({ automationState: "human_handoff", automationPausedAt: now, automationPausedByUserId: input.userId, teamRequestedAt: null, updatedAt: now }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
   await enqueueOutbox(tx, {
     topic: "realtime.publish",
     businessId: input.businessId,
     aggregateType: "conversation",
     aggregateId: input.conversationId,
-    dedupeKey: `conversation:${input.conversationId}:automation:human_handoff:${Date.now()}`,
+    dedupeKey: `conversation:${input.conversationId}:automation:human_handoff:${now.getTime()}`,
     payload: { type: "conversation.updated", entityId: input.conversationId },
   });
-  return true;
+  return { pausedAi, waitedMs: current.teamRequestedAt ? Math.max(0, now.getTime() - current.teamRequestedAt.getTime()) : null };
 }
 
-async function recordAutomationPaused(context: DomainContext, input: { businessId: string; conversationId: string; channel: string }): Promise<void> {
-  await recordProductEventBestEffort(context, {
-    name: "conversation.automation_paused",
-    businessId: input.businessId,
-    distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-    properties: { conversationId: input.conversationId, channel: input.channel },
-  });
+async function recordTakeOver(context: DomainContext, input: { businessId: string; conversationId: string; channel: string } & ChatTakeOver): Promise<void> {
+  if (input.pausedAi) {
+    await recordProductEventBestEffort(context, {
+      name: "conversation.automation_paused",
+      businessId: input.businessId,
+      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+      properties: { conversationId: input.conversationId, channel: input.channel },
+    });
+  }
+  if (input.waitedMs !== null) {
+    await recordProductEventBestEffort(context, {
+      name: "conversation.team_joined",
+      businessId: input.businessId,
+      distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+      properties: { conversationId: input.conversationId, channel: input.channel, waitSeconds: Math.round(input.waitedMs / 1000) },
+    });
+  }
 }
 
 export async function setAutomationState(
   context: DomainContext,
   input: { userId: string; businessId: string; conversationId: string; state: "ai_active" | "human_handoff" },
 ): Promise<void> {
-  const channel = await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
+  const change = await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, { ...input, minimumRole: "scheduler" });
-    const [updated] = await tx.update(conversations).set({ automationState: input.state, automationPausedAt: input.state === "human_handoff" ? new Date() : null, automationPausedByUserId: input.state === "human_handoff" ? input.userId : null, updatedAt: new Date() }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).returning({ channel: conversations.channel });
+    const [current] = await tx.select({ channel: conversations.channel, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
+    if (!current) return null;
+    const now = new Date();
+    // Either way, a visitor waiting for a person no longer waits: someone joined, or the AI has the chat back.
+    await tx.update(conversations).set({ automationState: input.state, automationPausedAt: input.state === "human_handoff" ? now : null, automationPausedByUserId: input.state === "human_handoff" ? input.userId : null, teamRequestedAt: null, updatedAt: now }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
     await enqueueOutbox(tx, {
       topic: "realtime.publish",
       businessId: input.businessId,
       aggregateType: "conversation",
       aggregateId: input.conversationId,
-      dedupeKey: `conversation:${input.conversationId}:automation:${input.state}:${Date.now()}`,
+      dedupeKey: `conversation:${input.conversationId}:automation:${input.state}:${now.getTime()}`,
       payload: { type: "conversation.updated", entityId: input.conversationId },
     });
-    return updated?.channel ?? null;
+    return { channel: current.channel, pausedAi: current.automationState === "ai_active", waitedMs: current.teamRequestedAt ? Math.max(0, now.getTime() - current.teamRequestedAt.getTime()) : null };
   });
-  if (input.state !== "human_handoff" || !channel) return;
-  await recordAutomationPaused(context, { businessId: input.businessId, conversationId: input.conversationId, channel });
+  if (input.state !== "human_handoff" || !change) return;
+  await recordTakeOver(context, { businessId: input.businessId, conversationId: input.conversationId, ...change });
 }
 
 export async function registerWidgetVisitor(

@@ -469,6 +469,8 @@ export const conversations = pgTable(
     automationState: varchar("automation_state", { length: 32 }).default("ai_active").notNull(),
     automationPausedAt: timestamp("automation_paused_at", { withTimezone: true }),
     automationPausedByUserId: uuid("automation_paused_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    // A website visitor asked for a person and is waiting for someone from the team to join.
+    teamRequestedAt: timestamp("team_requested_at", { withTimezone: true }),
     summary: text("summary"),
     currentIntent: text("current_intent"),
     locale: varchar("locale", { length: 8 }),
@@ -519,6 +521,8 @@ export const messages = pgTable(
     status: varchar("status", { length: 32 }).default("pending").notNull(),
     providerStatus: varchar("provider_status", { length: 64 }),
     senderRole: varchar("sender_role", { length: 32 }),
+    // The team member who wrote it, so a website chat can show their name.
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, { onDelete: "set null" }),
     aiGenerated: boolean("ai_generated").default(false).notNull(),
     media: jsonb("media").$type<Array<Record<string, unknown>>>(),
     revision: integer("revision").default(0).notNull(),

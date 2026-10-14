@@ -9,7 +9,7 @@ import { createDomainContext } from "@/lib/domain-context";
 
 export const dynamic = "force-dynamic";
 
-const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, automationState: conversations.automationState };
+const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt };
 
 /** Without conversationId: one row per conversation (its latest message), newest first, paged. With it: that thread. */
 export async function GET(request: Request) {

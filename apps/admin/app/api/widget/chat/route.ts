@@ -7,7 +7,7 @@ import { createReceptionistAgent } from "@lobbystack/agent-core/agent";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
 import { appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, registerWidgetVisitor, reserveWidgetChatUsageInTransaction } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
-import { widgetChatRequestSchema, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { widgetChatRequestSchema, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
 
 import { getWorkerDatabase, readJson } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
@@ -87,6 +87,9 @@ export async function POST(request: Request) {
     const assistantMessageId = randomUUID();
     const traceId = randomUUID();
     const generationStartedAt = performance.now();
+    // Set when the receptionist asks the team to join: the chat then waits for them.
+    let teamRequested = false;
+    const replyMetadata = () => teamRequested ? { automationState: "human_handoff", waitingForTeam: true } : { automationState: "ai_active" };
     const stream = createUIMessageStream({
       onError: () => SAFE_CHAT_ERROR,
       execute: async ({ writer }) => {
@@ -100,11 +103,18 @@ export async function POST(request: Request) {
           const snapshot = await getCachedBusinessSnapshot(context, { businessId: session.businessId });
           const activeSnapshot = snapshot ?? fallbackSnapshot(session);
           const history = await loadWidgetChatHistory(context, { businessId: session.businessId, conversationId });
-          const language = body.locale === "fr" || (!body.locale && (session.config.localeOverride === "fr" || session.defaultLocale === "fr")) ? "French" : "English";
+          const locale: RuntimeLocale = body.locale === "fr" || (!body.locale && (session.config.localeOverride === "fr" || session.defaultLocale === "fr")) ? "fr" : "en";
           const agent = createReceptionistAgent({
             model: model!,
-            context: { domain: context, snapshot: activeSnapshot, channel: "web_chat", conversationId },
-            extraInstructions: `Reply in ${language} unless the visitor clearly asks to switch languages.`,
+            context: {
+              domain: context,
+              snapshot: activeSnapshot,
+              channel: "web_chat",
+              conversationId,
+              // With live chat on, a visitor who asks for a person can get someone from the team here.
+              ...(session.config.liveChat?.enabled ? { liveChat: { locale, onTeamRequested: () => { teamRequested = true; } } } : {}),
+            },
+            extraInstructions: `Reply in ${locale === "fr" ? "French" : "English"} unless the visitor clearly asks to switch languages.`,
           });
           writer.write({ type: "text-start", id: assistantMessageId });
           const text: string[] = [];
@@ -132,7 +142,7 @@ export async function POST(request: Request) {
             ...usage,
           }).catch((cause: unknown) => logGenerationFailure(cause));
           writer.write({ type: "text-end", id: assistantMessageId });
-          writer.write({ type: "message-metadata", messageMetadata: { automationState: "ai_active" } });
+          writer.write({ type: "message-metadata", messageMetadata: replyMetadata() });
           writer.write({ type: "finish", finishReason });
         } catch (cause) {
           logGenerationFailure(cause);
@@ -151,7 +161,7 @@ export async function POST(request: Request) {
             error: request.signal.aborted ? "request_aborted" : "generation_failed",
           }).catch((recordingError: unknown) => logGenerationFailure(recordingError));
           writer.write({ type: "error", errorText: request.signal.aborted ? "The chat request was cancelled." : SAFE_CHAT_ERROR });
-          writer.write({ type: "message-metadata", messageMetadata: { automationState: "ai_active" } });
+          writer.write({ type: "message-metadata", messageMetadata: replyMetadata() });
           writer.write({ type: "finish", finishReason: "error" });
         }
       },

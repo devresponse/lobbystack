@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Phone, PhoneOff, Send } from "lucide-react";
+import { Phone, PhoneOff, SendHorizontal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
@@ -530,7 +530,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
             disabled={!config.data || sending || leadOpen}
             aria-label={t("chat.composerPlaceholder")}
           />
-          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><Send /></Button>
+          <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><SendHorizontal /></Button>
         </div>
         {/* This row is always there, so the visitor ID arriving doesn't push the composer up. */}
         <div className="flex min-h-8 items-center gap-2">

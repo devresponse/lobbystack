@@ -71,8 +71,9 @@ function chatErrorKey(error: unknown): string {
 }
 
 
+// The base styles make links look like the text around them, so they get an underline back.
 function MessageContent({ content, pending }: { content: string; pending?: boolean }) {
-  return <span className="widget-message-content" dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(content || (pending ? "…" : "")) }} />;
+  return <span className="widget-message-content [&_a]:underline [&_a]:underline-offset-2" dangerouslySetInnerHTML={{ __html: renderSafeMarkdown(content || (pending ? "…" : "")) }} />;
 }
 
 const DEFAULT_COLOR = "#0f766e";
@@ -505,7 +506,8 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
             {joined ? <p className="text-center text-xs text-zinc-500">{teamMemberName ? t("chat.teamJoined", { name: teamMemberName }) : t("chat.teamJoinedNoName")}</p> : null}
             <div className={cn("flex flex-col gap-1", message.role === "user" ? "items-end" : "items-start")}>
               {showName ? <span className="px-1 text-xs font-medium text-zinc-500">{teamMemberName ?? t("chat.teamLabel")}</span> : null}
-              <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm", message.role === "user" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color, color: onColor } : undefined}>
+              {/* A long web address wraps instead of pushing the thread sideways. */}
+              <div className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm wrap-anywhere", message.role === "user" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={message.role === "user" ? { backgroundColor: color, color: onColor } : undefined}>
                 <p><MessageContent content={messageText(message)} pending={streamingMessageId === message.id} /></p>
               </div>
             </div>

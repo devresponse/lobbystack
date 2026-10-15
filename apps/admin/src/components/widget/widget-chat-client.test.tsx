@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
@@ -300,5 +301,71 @@ describe("widget loading state", () => {
     expect(readableOn("#fff")).toBe("#18181b");
     expect(readableOn("#0f766e")).toBe("#ffffff");
     expect(readableOn("#7c3aed")).toBe("#ffffff");
+  });
+});
+
+describe("links in chat replies", () => {
+  const reply = "Book online at https://acme.example/book. You can also use [our booking page](https://acme.example/book).";
+  const expectedLinks = [
+    { text: "https://acme.example/book", href: "https://acme.example/book", target: "_blank", rel: "noreferrer noopener" },
+    { text: "our booking page", href: "https://acme.example/book", target: "_blank", rel: "noreferrer noopener" },
+  ];
+
+  function openChat(respond: (url: string) => Response | undefined) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => respond(String(url)) ?? (String(url).includes("/api/widget/stream") ? new Response(null, { status: 401 }) : Response.json(config))));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    return client;
+  }
+
+  function shownLinks(startsWith: string) {
+    const content = [...document.querySelectorAll<HTMLElement>(".widget-message-content")].find((element) => element.textContent?.startsWith(startsWith));
+    return content ? [...content.querySelectorAll("a")].map((anchor) => ({ text: anchor.textContent, href: anchor.getAttribute("href"), target: anchor.getAttribute("target"), rel: anchor.getAttribute("rel") })) : [];
+  }
+
+  it("turns web addresses in the receptionist's streamed reply into links", async () => {
+    const client = openChat((url) => {
+      if (url.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [] });
+      if (!url.includes("/api/widget/chat")) return undefined;
+      return createUIMessageStreamResponse({
+        stream: createUIMessageStream({
+          execute: ({ writer }) => {
+            writer.write({ type: "start", messageId: "a1" });
+            writer.write({ type: "text-start", id: "a1" });
+            // In pieces, as a model streams it, so links only complete in later pieces.
+            for (const delta of reply.match(/.{1,12}/g)!) writer.write({ type: "text-delta", id: "a1", delta });
+            writer.write({ type: "text-end", id: "a1" });
+            writer.write({ type: "finish", finishReason: "stop" });
+          },
+        }),
+      });
+    });
+
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: "Can I book online?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+
+    await vi.waitFor(() => expect(shownLinks("Book online")).toEqual(expectedLinks));
+    client.clear();
+  });
+
+  it("turns web addresses in a team member's reply into underlined links that wrap", async () => {
+    const client = openChat((url) => url.includes("/api/widget/history")
+      ? Response.json({ automationState: "human_handoff", teamMemberName: "Yuri", messages: [visitorMessage, { id: "m2", role: "assistant", content: reply, fromTeam: true, teamMemberName: "Yuri" }] })
+      : undefined);
+
+    expect(await screen.findByText("chat.teamJoined Yuri")).toBeTruthy();
+    expect(shownLinks("Book online")).toEqual(expectedLinks);
+    // The base styles take a link's underline away, so the message gives it back.
+    const content = screen.getByText("our booking page").closest(".widget-message-content")!;
+    expect(content.className).toContain("[&_a]:underline");
+    expect(content.closest("div")?.className).toContain("wrap-anywhere");
+    client.clear();
   });
 });

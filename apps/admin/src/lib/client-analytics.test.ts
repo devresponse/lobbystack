@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -5,9 +6,16 @@ const mocks = vi.hoisted(() => ({
     __loaded: false,
     init: vi.fn(),
     has_opted_out_capturing: vi.fn(() => true),
+    captureException: vi.fn(),
   },
 }));
 vi.mock("posthog-js", () => ({ default: mocks.posthog }));
+
+/** Starts analytics the way the dashboard does, with the environment as stubbed. */
+async function start() {
+  const { initializeClientAnalytics } = await import("./client-analytics");
+  initializeClientAnalytics();
+}
 
 function initConfig() {
   return mocks.posthog.init.mock.calls[0]![1] as {
@@ -27,7 +35,7 @@ describe("client analytics initialization", () => {
   it("initializes once with the documented Next.js configuration", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "https://ts.lobbystack.com");
-    await import("./instrumentation-client");
+    await start();
     expect(mocks.posthog.init).toHaveBeenCalledTimes(1);
     const [token, config] = mocks.posthog.init.mock.calls[0]!;
     expect(token).toBe("fixture-key");
@@ -46,16 +54,37 @@ describe("client analytics initialization", () => {
     });
   });
 
+  it("doesn't initialize again once PostHog is loaded", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    mocks.posthog.__loaded = true;
+    await start();
+    expect(mocks.posthog.init).not.toHaveBeenCalled();
+  });
+
   it("falls back to the PostHog host and does not initialize without a token", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "");
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_HOST", "");
-    await import("./instrumentation-client");
+    await start();
     expect(mocks.posthog.init).not.toHaveBeenCalled();
+  });
+
+  it("sends browser errors to PostHog once it has started", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    const { captureBrowserError } = await import("./browser-error-reporting");
+    mocks.posthog.__loaded = true;
+    mocks.posthog.has_opted_out_capturing.mockReturnValue(false);
+
+    captureBrowserError(new Error("before"));
+    expect(mocks.posthog.captureException).not.toHaveBeenCalled();
+
+    await start();
+    captureBrowserError(new Error("after"));
+    expect(mocks.posthog.captureException).toHaveBeenCalledWith(expect.objectContaining({ message: "after" }), expect.anything());
   });
 
   it("drops events while opted out and sanitizes URLs when capturing", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
-    await import("./instrumentation-client");
+    await start();
     const { before_send } = initConfig();
     const event = { properties: { $current_url: "https://example.invalid/demo/private-token?token=secret#secret", $referrer: "https://example.invalid/login?email=private@example.invalid" } };
 
@@ -68,7 +97,7 @@ describe("client analytics initialization", () => {
   it("strips token and query data from initial person properties", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
     mocks.posthog.has_opted_out_capturing.mockReturnValue(false);
-    await import("./instrumentation-client");
+    await start();
     const { before_send } = initConfig();
     const event = { properties: {
       $set: { $current_url: "https://example.invalid/reset-password/private?code=secret", plan: "free_cloud" },
@@ -83,7 +112,7 @@ describe("client analytics initialization", () => {
   it("removes nested web-vitals URLs and DOM attribution", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
     mocks.posthog.has_opted_out_capturing.mockReturnValue(false);
-    await import("./instrumentation-client");
+    await start();
     const { before_send } = initConfig();
     const event = { properties: { $web_vitals_LCP_event: { name: "LCP", value: 123, $current_url: "https://example.invalid/private?token=secret", entries: [{ url: "private" }], attribution: { element: "private" } } } };
     expect(before_send(event)?.properties.$web_vitals_LCP_event).toEqual({ name: "LCP", value: 123 });

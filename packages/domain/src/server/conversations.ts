@@ -334,21 +334,38 @@ export async function registerWidgetVisitor(
   });
 }
 
+/**
+ * A website chat with no message for this long is closed, and the visitor's
+ * next visit starts a new one, which the receptionist answers.
+ */
+export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
+
 export async function getOrCreateWidgetConversation(
   context: DomainContext,
-  input: { businessId: string; widgetVisitorId: string },
+  input: { businessId: string; widgetVisitorId: string; now?: Date },
 ): Promise<{ conversationId: string; automationState: "ai_active" | "human_handoff" }> {
+  const now = input.now ?? new Date();
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    // The share lock makes a concurrent link wait, so a new chat either sees the contact or is claimed by the link.
-    const visitor = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("share"))[0];
+    // Locking the visitor makes a concurrent link wait, so a new chat either sees the contact or is claimed by the link.
+    // It also makes the visitor's concurrent requests agree on one chat when an idle one is replaced.
+    const visitor = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("no key update"))[0];
     if (!visitor) throw new Error("Widget visitor not found.");
-    const current = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
-    const conversationId = current[0]?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
+    let [current] = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+    if (current) {
+      // A chat without messages yet stays, however old.
+      const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, current.id))).orderBy(desc(messages.createdAt)).limit(1);
+      if (lastMessage && now.getTime() - lastMessage.createdAt.getTime() >= WIDGET_CHAT_IDLE_CLOSE_MS) {
+        await tx.update(conversationSessions).set({ status: "closed", closedAt: now, updatedAt: now }).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, current.id), eq(conversationSessions.status, "open")));
+        await tx.update(conversations).set({ status: "closed", updatedAt: now }).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
+        current = undefined;
+      }
+    }
+    const conversationId = current?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
     if (!conversationId) {
       const existing = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"))).orderBy(desc(conversations.updatedAt)).limit(1);
       throw new Error(existing[0] ? "Widget conversation already exists and is closed." : "Conversation could not be created.");
     }
-    return { conversationId, automationState: current[0]?.automationState === "human_handoff" ? "human_handoff" : "ai_active" };
+    return { conversationId, automationState: current?.automationState === "human_handoff" ? "human_handoff" : "ai_active" };
   });
 }
 

@@ -77,6 +77,22 @@ it("serves Spanish and Serbian public pages with their language tags", () => {
   expect(explicit.headers.get("set-cookie")).toContain("lobbystack.locale=es");
 });
 
+it("opens the website widget's chat in the language its loader names, without saving it as the visitor's", () => {
+  const chat = proxy(new NextRequest("http://localhost:3210/embed/wk_live_key?color=%230f766e&locale=fr", { headers: { cookie: "lobbystack.locale=es", "accept-language": "en-US" } }));
+  expect(chat.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");
+  expect(chat.headers.get("set-cookie")).toBeNull();
+
+  // An older loader names no language, and a language the chat doesn't offer
+  // is ignored: the chat starts in the visitor's.
+  for (const url of ["/embed/wk_live_key?color=%230f766e", "/embed/wk_live_key?locale=de"]) {
+    const older = proxy(new NextRequest(`http://localhost:3210${url}`, { headers: { "accept-language": "es-MX" } }));
+    expect(older.headers.get("x-middleware-request-x-lobbystack-locale"), url).toBe("es");
+  }
+  // Only the widget's chat takes the language from its address.
+  const dashboard = proxy(new NextRequest("http://localhost:3210/calls?locale=fr", { headers: { "accept-language": "en-US" } }));
+  expect(dashboard.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("en");
+});
+
 it("redirects legacy public URLs to a canonical locale while preserving safe query values", () => {
   const explicit = proxy(new NextRequest("http://localhost:3210/login?lng=fr&returnTo=%2Fsettings&campaign=fall", {
     headers: { cookie: "lobbystack.locale=en", "accept-language": "en-US" },

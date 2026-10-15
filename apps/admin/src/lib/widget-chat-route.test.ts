@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   requestIpHash: vi.fn(),
   registerWidgetVisitor: vi.fn(),
   getOrCreateWidgetConversation: vi.fn(),
+  returnQuietTeamChat: vi.fn(),
+  announceLateWidgetReply: vi.fn(),
   appendMessage: vi.fn(),
   queueOperatorAlert: vi.fn(),
   getCachedBusinessSnapshot: vi.fn(),
@@ -22,6 +24,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@lobbystack/domain", () => ({
+  announceLateWidgetReply: mocks.announceLateWidgetReply,
   appendMessage: mocks.appendMessage,
   getOrCreateWidgetConversation: mocks.getOrCreateWidgetConversation,
   getCachedBusinessSnapshot: mocks.getCachedBusinessSnapshot,
@@ -29,6 +32,7 @@ vi.mock("@lobbystack/domain", () => ({
   recordAiGenerationEvent: mocks.recordAiGenerationEvent,
   registerWidgetVisitor: mocks.registerWidgetVisitor,
   reserveWidgetChatUsageInTransaction: mocks.reserveWidgetChatUsageInTransaction,
+  returnQuietTeamChat: mocks.returnQuietTeamChat,
   queueOperatorAlert: mocks.queueOperatorAlert,
 }));
 
@@ -47,6 +51,25 @@ vi.mock("@lobbystack/agent-core/agent", () => ({
 
 function agentStreaming(textStream: AsyncIterable<string>, finishReason = "stop") {
   return { stream: vi.fn().mockResolvedValue({ textStream, totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve(finishReason) }) };
+}
+
+/** An agent whose reply streams word by word, each once its gate opens. */
+function agentReplyingIn(words: string[], gates: Array<Promise<void>> = []) {
+  mocks.loadWidgetChatHistory.mockResolvedValue([{ id: "m1", direction: "inbound", body: "Are you open on Sunday?", createdAt: new Date() }]);
+  return {
+    stream: vi.fn(async (options: { abortSignal?: AbortSignal }) => ({
+      textStream: (async function* () {
+        for (const [index, word] of words.entries()) {
+          await gates[index];
+          // Like the request to the model provider, an aborted signal ends the reply.
+          options.abortSignal?.throwIfAborted();
+          yield word;
+        }
+      })(),
+      totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
+      finishReason: Promise.resolve("stop"),
+    })),
+  };
 }
 
 vi.mock("@/lib/api-helpers", () => ({
@@ -91,7 +114,7 @@ const session = {
   visitorId,
 };
 
-function widgetRequest(overrides: Record<string, unknown> = {}): Request {
+function widgetRequest(overrides: Record<string, unknown> = {}, signal?: AbortSignal): Request {
   mocks.readJson.mockResolvedValue({
     visitorId,
     messageId: "00000000-0000-4000-8000-000000000006",
@@ -102,7 +125,12 @@ function widgetRequest(overrides: Record<string, unknown> = {}): Request {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: "{}",
+    ...(signal ? { signal } : {}),
   });
+}
+
+function savedReplies() {
+  return mocks.appendMessage.mock.calls.map(([, message]) => message as { direction: string; body: string }).filter((message) => message.direction === "outbound");
 }
 
 async function readSse(response: Response): Promise<string> {
@@ -115,6 +143,8 @@ beforeEach(() => {
   mocks.enforceWidgetRateLimits.mockResolvedValue({ allowed: true });
   mocks.requestIpHash.mockReturnValue("ip-hash");
   mocks.getOrCreateWidgetConversation.mockResolvedValue({ conversationId, automationState: "ai_active" });
+  mocks.returnQuietTeamChat.mockResolvedValue("human_handoff");
+  mocks.announceLateWidgetReply.mockResolvedValue(undefined);
   mocks.appendMessage.mockResolvedValue(inboundMessageId);
   mocks.queueOperatorAlert.mockResolvedValue(undefined);
   mocks.recordAiGenerationEvent.mockResolvedValue("event-id");
@@ -157,6 +187,60 @@ describe("POST /api/widget/chat", () => {
     expect(mocks.queueOperatorAlert).toHaveBeenCalled();
     expect(mocks.createAgentModel).not.toHaveBeenCalled();
     expect(body).toContain("human_handoff");
+    // The team is still in the chat.
+    expect(mocks.returnQuietTeamChat).toHaveBeenCalledWith(expect.anything(), { businessId, conversationId });
+  });
+
+  it("answers in a chat the team took over and then went quiet in", async () => {
+    mocks.getOrCreateWidgetConversation.mockResolvedValue({ conversationId, automationState: "human_handoff" });
+    mocks.returnQuietTeamChat.mockResolvedValue("ai_active");
+    mocks.createReceptionistAgent.mockReturnValue(agentReplyingIn(["We're open Sunday."]));
+
+    const body = await readSse(await POST(widgetRequest()));
+
+    expect(body).toContain("We're open Sunday.");
+    expect(body).toContain('"messageMetadata":{"automationState":"ai_active"}');
+    expect(savedReplies()).toEqual([expect.objectContaining({ body: "We're open Sunday.", aiGenerated: true })]);
+  });
+
+  it("doesn't check on the team in a chat the receptionist has", async () => {
+    await readSse(await POST(widgetRequest()));
+    expect(mocks.returnQuietTeamChat).not.toHaveBeenCalled();
+  });
+
+  it("finishes and saves the reply when the visitor moves to another page mid-reply", async () => {
+    mocks.appendMessage.mockImplementation(async (_context: unknown, message: { direction: string }) => message.direction === "outbound" ? "reply-1" : inboundMessageId);
+    let openRest!: () => void;
+    const rest = new Promise<void>((resolve) => { openRest = resolve; });
+    mocks.createReceptionistAgent.mockReturnValue(agentReplyingIn(["We're open ", "Sunday 10 to 4."], [Promise.resolve(), rest]));
+    const connection = new AbortController();
+
+    const response = await POST(widgetRequest({}, connection.signal));
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    let received = "";
+    while (!received.includes("We're open")) {
+      const { done, value } = await reader.read();
+      if (done) throw new Error(`The reply ended before its first words: ${received}`);
+      received += decoder.decode(value, { stream: true });
+    }
+
+    // The visitor clicks a link on the site: the browser drops the request.
+    connection.abort();
+    await reader.cancel();
+    openRest();
+
+    await vi.waitFor(() => expect(savedReplies()).toEqual([expect.objectContaining({ body: "We're open Sunday 10 to 4.", aiGenerated: true })]));
+    // The widget on the next page hears about the reply, in case it loaded the chat first.
+    await vi.waitFor(() => expect(mocks.announceLateWidgetReply).toHaveBeenCalledWith(expect.anything(), { businessId, conversationId, messageId: "reply-1" }));
+  });
+
+  it("doesn't announce a reply the visitor stayed for", async () => {
+    mocks.createReceptionistAgent.mockReturnValue(agentReplyingIn(["We're open ", "Sunday 10 to 4."]));
+    const body = await readSse(await POST(widgetRequest()));
+    expect(body).toContain("Sunday 10 to 4.");
+    expect(savedReplies()).toEqual([expect.objectContaining({ body: "We're open Sunday 10 to 4." })]);
+    expect(mocks.announceLateWidgetReply).not.toHaveBeenCalled();
   });
 
   it("queues one operator alert per conversation and day, not one per message", async () => {

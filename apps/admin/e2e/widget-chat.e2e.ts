@@ -56,7 +56,8 @@ for (const locale of ["en", "fr"] as const) for (const viewport of [{ width: 144
       const conversation = (await database.db.select().from(conversations).where(eq(conversations.businessId, businessId)))[0];
       expect(conversation?.channel).toBe("web_chat");
       const before = provider!.requests.length;
-      await database.db.update(conversations).set({ automationState: "human_handoff" }).where(eq(conversations.id, conversation!.id));
+      // As the dashboard's Take over does it: the team took the chat just now.
+      await database.db.update(conversations).set({ automationState: "human_handoff", automationPausedAt: new Date() }).where(eq(conversations.id, conversation!.id));
       await composer.fill("Please ask a person to reply.");
       await frame.getByRole("button", { name: t.chat.send, exact: true }).click();
       await expect(frame.getByText(t.chat.handoffBanner, { exact: true })).toBeVisible();

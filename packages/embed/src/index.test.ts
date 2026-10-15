@@ -226,3 +226,45 @@ it("tells the chat page the bubble's color, so it loads in that color", () => {
   window.LobbyStack!.open();
   expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%23ffd100");
 });
+
+it("opens the chat in the business's language that the dashboard sent with the loader", () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { color: "#ffd100", locale: "fr" } };
+  mountTag({ "data-widget-key": "fixture-key" });
+  window.LobbyStack!.open();
+  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%23ffd100&locale=fr");
+});
+
+it("leaves out a saved language the chat doesn't offer", () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { locale: "de" } };
+  mountTag({ "data-widget-key": "fixture-key" });
+  window.LobbyStack!.open();
+  expect(document.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
+});
+
+it("stacks the panel above the site's own fixed elements, with the bubble above the panel", () => {
+  mountTag({ "data-widget-key": "fixture-key" });
+  const root = document.querySelector<HTMLElement>(".lobby-widget-root")!;
+  // A fixed element is a stacking context. Without a z-index of its own, the
+  // root kept the panel under any fixed element with one, such as a cookie bar.
+  expect(Number(getComputedStyle(root).zIndex)).toBeGreaterThanOrEqual(2147483000);
+  expect(getComputedStyle(root).zIndex).toBe(getComputedStyle(bubble()).zIndex);
+  expect(root.compareDocumentPosition(bubble()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it("waits for the page's body when the snippet runs in the head without defer", () => {
+  const body = document.body;
+  body.remove();
+  try {
+    expect(document.body).toBeNull();
+    mountTag({ "data-widget-key": "fixture-key" });
+    expect(document.querySelector(".lobby-widget-bubble")).toBeNull();
+    document.documentElement.append(body);
+    document.dispatchEvent(new Event("DOMContentLoaded"));
+    expect(body.querySelector(".lobby-widget-bubble")).not.toBeNull();
+    expect(body.querySelector(".lobby-widget-root iframe")).not.toBeNull();
+  } finally {
+    if (!document.body) document.documentElement.append(body);
+  }
+});

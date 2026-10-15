@@ -1,6 +1,8 @@
 // The website chat widget's positions, allowed origins and script tag, which
 // the dashboard and the API share.
 
+import type { InterfaceLocale } from "./locales";
+
 export type WidgetPosition = "bottom-right" | "bottom-left" | "bottom-center";
 
 export const widgetPositions = [
@@ -37,8 +39,11 @@ export function widgetEmbedSnippet(appOrigin: string, key: string): string {
   return `<script src="${appOrigin}/embed.js?key=${encodeURIComponent(key)}" data-widget-key="${key}" defer></script>`;
 }
 
-/** The bubble look the loader takes from the dashboard. Only fields the key's config sets. */
-export type WidgetAppearance = { color?: string; position?: WidgetPosition };
+/**
+ * What the loader takes from the dashboard: the bubble look the key's config
+ * sets, and the language the chat opens in.
+ */
+export type WidgetAppearance = { color?: string; position?: WidgetPosition; locale?: InterfaceLocale };
 
 /** The global the keyed loader fills before its own code runs, one entry per widget key. */
 export const WIDGET_APPEARANCE_GLOBAL = "__lobbyStackWidgetAppearance";

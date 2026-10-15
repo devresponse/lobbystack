@@ -3,7 +3,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { normalizeIP } from "@better-auth/core/utils/ip";
 import { and, eq, sql } from "drizzle-orm";
 
-import { widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
+import { businesses, widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
 import { hashWidgetKey } from "@lobbystack/domain";
 import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
 
@@ -27,19 +27,22 @@ export async function resolveWidgetKeyByHash(keyHash: string): Promise<ResolvedW
 
 /**
  * The bubble color and position an active key's config sets, for the loader to
- * use over its script tag's attributes. Fields the config leaves out stay out,
- * so the tag's own attributes still apply to them. Null for an unknown or
- * inactive key.
+ * use over its script tag's attributes, and the language its chat opens in: the
+ * key's own, or else the business's. Fields the config leaves out stay out, so
+ * the tag's own attributes still apply to them. Null for an unknown or inactive
+ * key.
  */
 export async function loadWidgetAppearance(key: string): Promise<WidgetAppearance | null> {
   const resolved = await resolveWidgetKeyByHash(hashWidgetKey(key));
   if (!resolved) return null;
   const row = await withBusinessTransaction(getWorkerDatabase().db, { businessId: resolved.businessId, actorType: "worker" }, async (tx) => (
-    await tx.select({ config: widgetKeysTable.config }).from(widgetKeysTable).where(and(eq(widgetKeysTable.id, resolved.widgetKeyId), eq(widgetKeysTable.businessId, resolved.businessId))).limit(1)
+    await tx.select({ config: widgetKeysTable.config, defaultLocale: businesses.defaultLocale }).from(widgetKeysTable).innerJoin(businesses, eq(businesses.id, widgetKeysTable.businessId)).where(and(eq(widgetKeysTable.id, resolved.widgetKeyId), eq(widgetKeysTable.businessId, resolved.businessId))).limit(1)
   )[0]);
   const parsed = widgetConfigSchema.safeParse(row?.config ?? {});
   if (!row || !parsed.success) return null;
-  return { ...(parsed.data.color ? { color: parsed.data.color } : {}), ...(parsed.data.position ? { position: parsed.data.position } : {}) };
+  // The same choice the chat makes once its settings load.
+  const locale = parsed.data.localeOverride ?? (row.defaultLocale === "fr" ? "fr" : "en");
+  return { ...(parsed.data.color ? { color: parsed.data.color } : {}), ...(parsed.data.position ? { position: parsed.data.position } : {}), locale };
 }
 
 export function normalizeOrigin(value: string): string {

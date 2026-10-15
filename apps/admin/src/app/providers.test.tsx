@@ -35,6 +35,7 @@ vi.mock("@/components/ui/sonner", () => ({ Toaster: () => null }));
 vi.mock("@/lib/browser-error-reporting", () => ({ captureBrowserError: (...args: unknown[]) => state.capture(...args) }));
 
 import { TranslationNetworkError } from "@/lib/translation-network-error";
+import { BaseProviders } from "./base-providers";
 import { Providers } from "./providers";
 
 function wrap(children: ReactNode) {
@@ -121,4 +122,12 @@ it("offers a retry without reporting when the connection dropped", async () => {
   render(wrap(<div>Affiliate</div>));
   await screen.findByRole("button", { name: "common:loading.retry" });
   expect(state.capture).not.toHaveBeenCalled();
+});
+
+it("keeps the page's language attribute in step with the copy, on the website widget too", () => {
+  render(<BaseProviders initialLocale="en" initialResources={{ common: {} }}><div>Chat</div></BaseProviders>);
+  expect(document.documentElement.lang).toBe("en");
+  const [, onLanguageChanged] = state.instance.on.mock.calls.find(([event]) => event === "languageChanged") as [string, (language: string) => void];
+  act(() => { onLanguageChanged("sr"); });
+  expect(document.documentElement.lang).toBe("sr-Latn");
 });

@@ -138,10 +138,11 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
         await context.close();
       }
     };
-    // The keyed loader carries the saved look and is cached only briefly; the plain loader keeps its long cache.
+    // The keyed loader carries the saved look and the chat's language, here the business's, and is cached only
+    // briefly; the plain loader keeps its long cache.
     const keyedLoader = await request.get(`/embed.js?key=${encodeURIComponent(widgetKey)}`);
     expect(keyedLoader.headers()["cache-control"]).toBe("public, max-age=60, s-maxage=60");
-    expect(await keyedLoader.text()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#0f766e","position":"bottom-left"};`);
+    expect(await keyedLoader.text()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#0f766e","position":"bottom-left","locale":"en"};`);
     expect((await request.get("/embed.js")).headers()["cache-control"]).toContain("max-age=600");
     expect(await bubbleOnSite()).toEqual({ position: "bottom-left", color: "rgb(15, 118, 110)" });
     await editor.getByLabel(new RegExp(`^${settings.widget.fields.color}`)).fill("#112233");

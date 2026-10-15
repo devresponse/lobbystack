@@ -58,7 +58,9 @@
       "leadEnabled": "Demander les coordonnées des visiteurs",
       "requireEmail": "Courriel obligatoire",
       "requirePhone": "Téléphone obligatoire",
-      "showBeforeChat": "Demander avant le clavardage"
+      "showBeforeChat": "Demander avant le clavardage",
+      "liveChat": "Permettre aux visiteurs de clavarder avec votre équipe",
+      "liveChatHint": "Pendant les heures d'ouverture, un visiteur qui demande à parler à une personne retrouve quelqu'un de votre équipe dans le clavardage. Votre équipe reçoit une alerte et répond depuis Messages. Si personne ne répond dans les 3 minutes, la réceptionniste propose de prendre un message."
     },
     "positions": {
       "bottomRight": "Bas à droite",
@@ -793,6 +795,10 @@
       "widgetChat": {
         "title": "Nouveau message sur le clavardage du site",
         "description": "Lorsqu’un visiteur envoie un message via le widget de votre site. Vous recevez au plus une alerte par conversation chaque jour."
+      },
+      "liveChatRequest": {
+        "title": "Visiteur qui demande une personne",
+        "description": "Lorsqu'un visiteur de votre site demande à parler à quelqu'un de votre équipe. Répondez depuis Messages dans les 3 minutes pour rejoindre le clavardage."
       },
       "webhookDisabled": {
         "title": "Point de terminaison webhook désactivé",

@@ -25,7 +25,7 @@ const WIDGET_LOCALE_OPTIONS: Array<{ value: InterfaceLocale; labelKey: string }>
   { value: "es", labelKey: "widget.locales.spanish" },
   { value: "sr", labelKey: "widget.locales.serbian" },
 ];
-type WidgetKeyConfig = { color?: string; position?: "bottom-right" | "bottom-left" | "bottom-center"; title?: string; subtitle?: string; greeting?: string; localeOverride?: InterfaceLocale; leadForm?: { enabled?: boolean; requirePhone?: boolean; requireEmail?: boolean; showBeforeChat?: boolean } };
+type WidgetKeyConfig = { color?: string; position?: "bottom-right" | "bottom-left" | "bottom-center"; title?: string; subtitle?: string; greeting?: string; localeOverride?: InterfaceLocale; leadForm?: { enabled?: boolean; requirePhone?: boolean; requireEmail?: boolean; showBeforeChat?: boolean }; liveChat?: { enabled: boolean } };
 // `key` is null for revoked keys and for keys created before keys were kept.
 type WidgetKeyRecord = { id: string; key: string | null; label: string | null; status: "active" | "disabled" | "revoked"; allowedOrigins: string[]; config: WidgetKeyConfig; lastUsedAt: string | null; createdAt: string };
 type KeysResponse = { keys: WidgetKeyRecord[] };
@@ -52,6 +52,7 @@ export function LiveWidgetSettingsSurface() {
   const [leadRequireEmail, setLeadRequireEmail] = useState(false);
   const [leadRequirePhone, setLeadRequirePhone] = useState(false);
   const [leadShowBeforeChat, setLeadShowBeforeChat] = useState(false);
+  const [liveChatEnabled, setLiveChatEnabled] = useState(false);
   const [title, setTitle] = useState("");
   const [subtitle, setSubtitle] = useState("");
   const [greeting, setGreeting] = useState("");
@@ -66,13 +67,13 @@ export function LiveWidgetSettingsSurface() {
   const create = useMutation({
     mutationFn: async () => await requestJson<{ key: { id: string; key: string } }>(`/api/widget-keys?businessId=${encodeURIComponent(business!.businessId)}`, {
       method: "POST",
-      body: JSON.stringify({ ...(label.trim() ? { label: label.trim() } : {}), allowedOrigins: originsFromText(origins), config: { color, position, ...(title.trim() ? { title: title.trim() } : {}), ...(subtitle.trim() ? { subtitle: subtitle.trim() } : {}), ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(localeOverride ? { localeOverride } : {}), leadForm: { enabled: leadEnabled, requireEmail: leadRequireEmail, requirePhone: leadRequirePhone, showBeforeChat: leadShowBeforeChat } } }),
+      body: JSON.stringify({ ...(label.trim() ? { label: label.trim() } : {}), allowedOrigins: originsFromText(origins), config: { color, position, ...(title.trim() ? { title: title.trim() } : {}), ...(subtitle.trim() ? { subtitle: subtitle.trim() } : {}), ...(greeting.trim() ? { greeting: greeting.trim() } : {}), ...(localeOverride ? { localeOverride } : {}), leadForm: { enabled: leadEnabled, requireEmail: leadRequireEmail, requirePhone: leadRequirePhone, showBeforeChat: leadShowBeforeChat }, liveChat: { enabled: liveChatEnabled } } }),
     }),
     onSuccess: async (result) => {
       setCreatedKey(result.key);
       setLabel(""); setOrigins(""); setCopied(false);
       setColor(DEFAULT_COLOR); setPosition("bottom-right"); setTitle(""); setSubtitle(""); setGreeting(""); setLocaleOverride("");
-      setLeadEnabled(false); setLeadRequireEmail(false); setLeadRequirePhone(false); setLeadShowBeforeChat(false);
+      setLeadEnabled(false); setLeadRequireEmail(false); setLeadRequirePhone(false); setLeadShowBeforeChat(false); setLiveChatEnabled(false);
       await queryClient.invalidateQueries({ queryKey: ["widget-keys", business?.businessId] });
     },
     meta: { inlineError: true },
@@ -129,6 +130,7 @@ export function LiveWidgetSettingsSurface() {
             <label className="space-y-2 text-sm font-medium">{t("widget.fields.localeOverride")}<select className="min-h-11 w-full rounded-xl border border-border bg-background px-3 font-normal" value={localeOverride} onChange={(event) => setLocaleOverride(event.target.value as typeof localeOverride)}><option value="">{t("widget.locales.visitor")}</option>{WIDGET_LOCALE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}</select></label>
             <label className="flex items-center gap-2 text-sm font-medium sm:col-span-2"><input className="size-4" type="checkbox" checked={leadEnabled} onChange={(event) => setLeadEnabled(event.target.checked)} />{t("widget.fields.leadEnabled")}</label>
             {leadEnabled ? <div className="grid gap-2 sm:col-span-2 sm:grid-cols-3"><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadRequireEmail} onChange={(event) => setLeadRequireEmail(event.target.checked)} />{t("widget.fields.requireEmail")}</label><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadRequirePhone} onChange={(event) => setLeadRequirePhone(event.target.checked)} />{t("widget.fields.requirePhone")}</label><label className="flex items-center gap-2 text-sm"><input className="size-4" type="checkbox" checked={leadShowBeforeChat} onChange={(event) => setLeadShowBeforeChat(event.target.checked)} />{t("widget.fields.showBeforeChat")}</label></div> : null}
+            <label className="flex items-start gap-2 text-sm font-medium sm:col-span-2"><input className="mt-0.5 size-4" type="checkbox" checked={liveChatEnabled} onChange={(event) => setLiveChatEnabled(event.target.checked)} /><span>{t("widget.fields.liveChat")}<span className="block text-xs font-normal text-muted-foreground">{t("widget.fields.liveChatHint")}</span></span></label>
             <div className="sm:col-span-2"><Button loading={create.isPending} disabled={!business || !origins.trim()} onClick={() => create.mutate()}>{t("widget.create.action")}</Button>{create.isError ? <p className="mt-2 text-sm text-destructive">{create.error.message}</p> : null}</div>
           </CardContent>
         </Card>
@@ -191,6 +193,7 @@ function WidgetKeyEditor({ row, onSave, onStatus, busy, saved, embedOrigin, loca
         <label className="space-y-1.5 text-sm font-medium">{t("widget.fields.localeOverride")}<select className="min-h-10 w-full rounded-xl border border-border bg-background px-3 font-normal" value={config.localeOverride ?? ""} onChange={(event) => { const next = { ...config }; if (isInterfaceLocale(event.target.value)) next.localeOverride = event.target.value; else delete next.localeOverride; setConfig(next); }}><option value="">{t("widget.locales.visitor")}</option>{WIDGET_LOCALE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{t(option.labelKey)}</option>)}</select></label>
         <p className="text-xs text-muted-foreground sm:col-span-2">{t("widget.keys.appearanceHint")}</p>
         <div className="space-y-2 text-sm sm:col-span-2"><p className="font-medium">{t("widget.leadCapture.title")}</p><div className="flex flex-wrap gap-x-4 gap-y-2"><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.enabled)} onChange={(event) => setConfig({ ...config, leadForm: { ...config.leadForm, enabled: event.target.checked } })} />{t("widget.leadCapture.enabled")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.requireEmail)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, requireEmail: event.target.checked } })} />{t("widget.fields.requireEmail")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.requirePhone)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, requirePhone: event.target.checked } })} />{t("widget.fields.requirePhone")}</label><label className="flex items-center gap-2"><input type="checkbox" checked={Boolean(config.leadForm?.showBeforeChat)} onChange={(event) => setConfig({ ...config, leadForm: { enabled: Boolean(config.leadForm?.enabled), ...config.leadForm, showBeforeChat: event.target.checked } })} />{t("widget.fields.showBeforeChat")}</label></div></div>
+        <label className="flex items-start gap-2 text-sm sm:col-span-2"><input className="mt-0.5" type="checkbox" checked={Boolean(config.liveChat?.enabled)} onChange={(event) => setConfig({ ...config, liveChat: { enabled: event.target.checked } })} /><span className="font-medium">{t("widget.fields.liveChat")}<span className="block text-xs font-normal text-muted-foreground">{t("widget.fields.liveChatHint")}</span></span></label>
       </div>
       {row.status !== "revoked" ? (
         <div className="mt-3 space-y-2">

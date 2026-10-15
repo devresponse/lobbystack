@@ -112,6 +112,11 @@ it("keeps sensitive and dynamic responses private while caching fixed public pag
     expect(response.headers.get("cache-control"), url).toContain("no-store");
   }
 
+  // Streams must reach the browser as they're written, so proxies may not compress or buffer them.
+  for (const url of ["/api/realtime", "/api/widget/chat", "/api/widget/stream"]) {
+    expect(proxy(new NextRequest(`http://localhost:3210${url}`)).headers.get("cache-control"), url).toBe("private, no-cache, no-store, no-transform");
+  }
+
   const publicResponse = proxy(new NextRequest("http://localhost:3210/en/signup?campaign=fall"));
   expect(publicResponse.headers.get("cache-control")).toBe("public, s-maxage=300, stale-while-revalidate=3600");
   expect(publicResponse.headers.get("content-language")).toBe("en");

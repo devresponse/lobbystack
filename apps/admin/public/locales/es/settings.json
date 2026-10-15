@@ -58,7 +58,9 @@
       "leadEnabled": "Pedir a los visitantes sus datos de contacto",
       "requireEmail": "Exigir correo electrónico",
       "requirePhone": "Exigir teléfono",
-      "showBeforeChat": "Pedir antes del chat"
+      "showBeforeChat": "Pedir antes del chat",
+      "liveChat": "Permitir que los visitantes chateen con su equipo",
+      "liveChatHint": "Durante el horario de atención, un visitante que pide hablar con una persona recibe a alguien de su equipo en el chat. Su equipo recibe una alerta y responde desde Mensajes. Si nadie responde en 3 minutos, la recepcionista ofrece tomar un mensaje."
     },
     "positions": {
       "bottomRight": "Abajo a la derecha",
@@ -793,6 +795,10 @@
       "widgetChat": {
         "title": "Nuevo mensaje del chat del sitio web",
         "description": "Cuando un visitante envía un mensaje desde el widget de su sitio web. Recibe como máximo una alerta por conversación al día."
+      },
+      "liveChatRequest": {
+        "title": "Visitante que pide una persona",
+        "description": "Cuando un visitante de su sitio pide hablar con alguien de su equipo. Responda desde Mensajes en 3 minutos para unirse al chat."
       },
       "webhookDisabled": {
         "title": "Endpoint de webhook desactivado",

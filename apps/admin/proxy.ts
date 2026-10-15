@@ -77,7 +77,7 @@ function applyResponsePolicy(
 
 function cacheControlForRequest(pathname: string, searchParams: URLSearchParams): string | undefined {
   if (isTokenBearingRoute(pathname, searchParams)) return "private, no-store";
-  if (pathname.startsWith("/api/realtime") || pathname.startsWith("/api/widget/chat")) {
+  if (pathname.startsWith("/api/realtime") || pathname.startsWith("/api/widget/chat") || pathname.startsWith("/api/widget/stream")) {
     return "private, no-cache, no-store, no-transform";
   }
   // The logo route caches its own versioned responses for good.

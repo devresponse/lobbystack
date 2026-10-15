@@ -2,7 +2,7 @@ import { stepCountIs, ToolLoopAgent, type LanguageModel, type StopCondition, typ
 
 import { buildAgentInstructions } from "./instructions";
 import { directToolAnswer } from "./live/directAnswer";
-import { createReceptionistTools, type AgentToolContext } from "./tools";
+import { createReceptionistTools, offersLiveChat, type AgentToolContext } from "./tools";
 
 export type ReceptionistAgent = ToolLoopAgent<never, ToolSet>;
 
@@ -30,7 +30,7 @@ export function createReceptionistAgent(input: {
   if (input.directToolAnswers) stopWhen.push(({ steps }) => directToolAnswer(steps.at(-1)) !== undefined);
   return new ToolLoopAgent({
     model: input.model,
-    instructions: [buildAgentInstructions(input.context.snapshot, input.context.channel, { intakeOnly: input.context.intakeOnly ?? false, endsCalls: input.context.callControl !== undefined, keypad: input.context.callControl?.collectPasscode !== undefined, ...(input.context.callerPhone ? { callerPhone: input.context.callerPhone } : {}) }), input.extraInstructions].filter(Boolean).join("\n\n"),
+    instructions: [buildAgentInstructions(input.context.snapshot, input.context.channel, { intakeOnly: input.context.intakeOnly ?? false, endsCalls: input.context.callControl !== undefined, keypad: input.context.callControl?.collectPasscode !== undefined, liveChat: offersLiveChat(input.context), ...(input.context.callerPhone ? { callerPhone: input.context.callerPhone } : {}) }), input.extraInstructions].filter(Boolean).join("\n\n"),
     tools: createReceptionistTools(input.context),
     stopWhen,
     ...(input.context.channel === "web_chat" ? { maxOutputTokens: WEB_CHAT_MAX_OUTPUT_TOKENS } : {}),

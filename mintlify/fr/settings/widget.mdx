@@ -39,7 +39,24 @@ Utilisez un site Web en HTTPS en production. Gardez `WIDGET_SESSION_SECRET` et l
 
 ## Quand un visiteur demande à parler à quelqu'un
 
-Les clavardages du site Web et les appels depuis le navigateur ne peuvent pas être transférés à votre équipe. Quand un visiteur demande à parler à quelqu'un, ou qu'une de vos règles dit de le transférer, la réceptionniste IA ne dit jamais qu'elle le met en relation. Elle propose de prendre un message pour que votre équipe le rappelle.
+Les clavardages du site Web et les appels depuis le navigateur ne peuvent pas être transférés vers un appel téléphonique. Quand un visiteur demande à parler à quelqu'un, ou qu'une de vos règles dit de le transférer, la réceptionniste IA ne dit jamais qu'elle le met en relation.
+
+### Clavardage en direct avec votre équipe
+
+Activez **Permettre aux visiteurs de clavarder avec votre équipe** sur une clé de widget, et quelqu'un de votre équipe peut rejoindre le clavardage lui-même. L'option reste désactivée tant que vous ne l'activez pas.
+
+Pendant vos heures d'ouverture, ou en tout temps si vous n'en avez pas défini, un visiteur qui demande à parler à quelqu'un dans le clavardage attend votre équipe :
+
+1. La réceptionniste dit au visiteur qu'elle a prévenu l'équipe, puis cesse de répondre.
+2. Votre équipe reçoit une alerte **Visiteur qui demande une personne**, et le clavardage affiche **Visiteur en attente** dans [Messages](/fr/dashboard/messages).
+3. La première personne qui répond ou clique sur **Rejoindre le clavardage** prend le clavardage. Le visiteur voit le prénom inscrit à son profil.
+4. Si personne ne se joint dans les 3 minutes, la réceptionniste reprend le clavardage et demande au visiteur son nom et son numéro, pour que quelqu'un le rappelle.
+
+Activez ou désactivez cette alerte par courriel et par SMS sous **Réglages** > **Widget de site web**.
+
+### Rappels
+
+En dehors des heures d'ouverture, pendant les appels depuis le navigateur et quand le clavardage en direct est désactivé, la réceptionniste propose de prendre un message pour que votre équipe rappelle le visiteur.
 
 Si vous avez défini un **Numéro de transfert par défaut**, la réceptionniste donne aussi au visiteur le numéro de téléphone de votre entreprise, pour qu'il appelle et demande à parler à quelqu'un. Elle suit votre règle de transfert : par exemple, si les transferts sont réservés aux urgences, elle donne le numéro pour les urgences.
 

@@ -212,6 +212,34 @@ describe("POST /api/widget/chat", () => {
     })));
   });
 
+  it("lets a visitor ask for someone from the team when the widget has live chat on, and tells the widget the chat waits for them", async () => {
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, config: { liveChat: { enabled: true } } } });
+    mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+    mocks.createReceptionistAgent.mockImplementation((input: { context: { liveChat?: { onTeamRequested?: () => void } } }) => ({
+      stream: vi.fn(async () => {
+        input.context.liveChat?.onTeamRequested?.();
+        return { textStream: (async function* () { yield "I've let the team know."; })(), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve("stop") };
+      }),
+    }));
+
+    const body = await readSse(await POST(widgetRequest({ locale: "fr" })));
+
+    expect(mocks.createReceptionistAgent).toHaveBeenCalledWith(expect.objectContaining({ context: expect.objectContaining({ liveChat: expect.objectContaining({ locale: "fr" }) }) }));
+    expect(body).toContain('"messageMetadata":{"automationState":"human_handoff","waitingForTeam":true}');
+    expect(mocks.appendMessage).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ body: "I've let the team know.", direction: "outbound", aiGenerated: true }));
+  });
+
+  it("offers no live chat when the widget has it off", async () => {
+    mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+
+    const body = await readSse(await POST(widgetRequest()));
+
+    expect(mocks.createReceptionistAgent.mock.calls[0]![0].context).not.toHaveProperty("liveChat");
+    expect(body).toContain('"messageMetadata":{"automationState":"ai_active"}');
+  });
+
   it("does not expose provider error details in the UI stream", async () => {
     // eslint-disable-next-line require-yield -- mock generator must throw before yielding.
     mocks.createReceptionistAgent.mockReturnValue(agentStreaming((async function* () { throw new Error("secret provider token"); })(), "error"));

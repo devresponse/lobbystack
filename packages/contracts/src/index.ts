@@ -220,6 +220,7 @@ export const queueForJobType = {
   "notification.dispatch": "default",
   "notification.dailySummary": "maintenance",
   "conversation.finalizeSession": "default",
+  "conversation.expireTeamRequest": "default",
   "privacy.scrubMessage": "maintenance",
   "privacy.deleteRecording": "maintenance",
   "privacy.cleanupPendingUpload": "maintenance",

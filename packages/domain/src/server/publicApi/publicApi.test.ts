@@ -234,9 +234,9 @@ describe("widget keys", () => {
   it("shows the dashboard's configuration in snake_case, with the defaults the widget falls back to", () => {
     const plain = serializeWidgetKey({ ...row, config: {} });
     expect(apiWidgetKeySchema.parse(plain)).toEqual(plain);
-    expect(plain).toMatchObject({ allowed_origins: ["https://example.com", "https://shop.example.com"], config: { position: "bottom-right", title: "", lead_form: { enabled: false, require_phone: false, require_email: false, show_before_chat: false } } });
-    const styled = serializeWidgetKey({ ...row, status: "weird", config: { color: "#112233", localeOverride: "sr", leadForm: { enabled: true, requireEmail: true } } });
-    expect(styled).toMatchObject({ status: "active", config: { color: "#112233", locale: "sr", lead_form: { enabled: true, require_phone: false, require_email: true, show_before_chat: false } } });
+    expect(plain).toMatchObject({ allowed_origins: ["https://example.com", "https://shop.example.com"], config: { position: "bottom-right", title: "", lead_form: { enabled: false, require_phone: false, require_email: false, show_before_chat: false }, live_chat: { enabled: false } } });
+    const styled = serializeWidgetKey({ ...row, status: "weird", config: { color: "#112233", localeOverride: "sr", leadForm: { enabled: true, requireEmail: true }, liveChat: { enabled: true } } });
+    expect(styled).toMatchObject({ status: "active", config: { color: "#112233", locale: "sr", lead_form: { enabled: true, require_phone: false, require_email: true, show_before_chat: false }, live_chat: { enabled: true } } });
   });
 
   it("keeps an origin's scheme, host and port, and reads a bare host as https", () => {

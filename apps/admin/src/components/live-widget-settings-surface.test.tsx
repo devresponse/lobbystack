@@ -94,6 +94,23 @@ describe("website widget issuance restriction", () => {
     expect(await screen.findByText(`widget.keys.lastUsed:${expected}`)).toBeTruthy();
   });
 
+  it("turns live chat with the team on for a new key and for a saved one", async () => {
+    setup(true, [{ id: "widget", label: "Website", status: "active", allowedOrigins: ["https://a.com"], config: { liveChat: { enabled: false } }, lastUsedAt: null, createdAt: "2026-09-23T12:00:00.000Z" }]);
+    const [newKey, savedKey] = await screen.findAllByRole("checkbox", { name: /^widget\.fields\.liveChat/ });
+    expect((savedKey as HTMLInputElement).checked).toBe(false);
+    fireEvent.change(screen.getByPlaceholderText("https://example.com, https://www.example.com"), { target: { value: "https://shop.example" } });
+    fireEvent.click(newKey!);
+    fireEvent.click(screen.getByText("widget.create.action"));
+    fireEvent.click(savedKey!);
+    fireEvent.click(screen.getByText("widget.keys.save"));
+
+    const fetchMock = vi.mocked(fetch);
+    const sent = (method: string) => fetchMock.mock.calls.find(([, init]) => init?.method === method);
+    await waitFor(() => expect(sent("POST") && sent("PATCH")).toBeTruthy());
+    expect(JSON.parse(sent("POST")![1]!.body as string).config.liveChat).toEqual({ enabled: true });
+    expect(JSON.parse(sent("PATCH")![1]!.body as string).config.liveChat).toEqual({ enabled: true });
+  });
+
   it("keeps every saved origin separate when the operator adds another and saves", async () => {
     setup(true, [{ id: "widget", label: "Website", status: "active", allowedOrigins: ["https://a.com", "https://b.com"], config: {}, lastUsedAt: null, createdAt: "2026-09-23T12:00:00.000Z" }]);
     const field = await screen.findByDisplayValue(/a\.com/);

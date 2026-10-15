@@ -808,6 +808,7 @@ function widgetConfigFromApi(config: ApiWidgetConfig): Record<string, unknown> {
     ...(config.greeting !== undefined ? { greeting: config.greeting } : {}),
     ...(config.locale !== undefined ? { localeOverride: config.locale } : {}),
     ...(lead !== undefined ? { leadForm: { enabled: lead.enabled, ...(lead.require_phone !== undefined ? { requirePhone: lead.require_phone } : {}), ...(lead.require_email !== undefined ? { requireEmail: lead.require_email } : {}), ...(lead.show_before_chat !== undefined ? { showBeforeChat: lead.show_before_chat } : {}) } } : {}),
+    ...(config.live_chat !== undefined ? { liveChat: { enabled: config.live_chat.enabled } } : {}),
   };
 }
 

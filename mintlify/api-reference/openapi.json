@@ -13343,6 +13343,19 @@
                   "enabled"
                 ],
                 "additionalProperties": false
+              },
+              "live_chat": {
+                "description": "Live chat with the team. During opening hours, a visitor who asks for a person gets someone from the team in the chat, who replies from Messages. If nobody joins within 3 minutes, the receptionist takes a message.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
               }
             },
             "additionalProperties": false,
@@ -13459,6 +13472,19 @@
                     "type": "boolean"
                   },
                   "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              },
+              "live_chat": {
+                "description": "Live chat with the team. During opening hours, a visitor who asks for a person gets someone from the team in the chat, who replies from Messages. If nobody joins within 3 minutes, the receptionist takes a message.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
                     "type": "boolean"
                   }
                 },
@@ -13587,6 +13613,19 @@
                   "enabled"
                 ],
                 "additionalProperties": false
+              },
+              "live_chat": {
+                "description": "Live chat with the team. During opening hours, a visitor who asks for a person gets someone from the team in the chat, who replies from Messages. If nobody joins within 3 minutes, the receptionist takes a message.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
               }
             },
             "additionalProperties": false,
@@ -13676,6 +13715,19 @@
                     "type": "boolean"
                   },
                   "show_before_chat": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "additionalProperties": false
+              },
+              "live_chat": {
+                "description": "Live chat with the team. During opening hours, a visitor who asks for a person gets someone from the team in the chat, who replies from Messages. If nobody joins within 3 minutes, the receptionist takes a message.",
+                "type": "object",
+                "properties": {
+                  "enabled": {
                     "type": "boolean"
                   }
                 },

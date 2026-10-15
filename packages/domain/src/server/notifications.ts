@@ -403,7 +403,7 @@ export async function saveNotificationPreferencesInTransaction(tx: DatabaseTrans
   if (consentChanged && consentNow && currentUser?.phone) await tx.insert(smsConsentEvents).values({ businessId: input.businessId, phone: currentUser.phone, recipientType: "operator", action: input.smsConsent ? "operator_alert_consent_granted" : "operator_alert_consent_revoked", source: "operator_settings" });
 }
 
-export const operatorNotificationEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "webhookDisabled"] as const;
+export const operatorNotificationEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "liveChatRequest", "webhookDisabled"] as const;
 export type OperatorNotificationEventKey = (typeof operatorNotificationEventKeys)[number];
 export type OperatorNotificationEventPreferences = Record<OperatorNotificationEventKey, { email: boolean; sms: boolean }>;
 
@@ -430,6 +430,7 @@ const dailySummaryLabels: Record<OperatorNotificationEventKey, string> = {
   transferFailed: "Transfer failures",
   aiReplyFailed: "AI reply failures",
   widgetChat: "Website chat messages",
+  liveChatRequest: "Website visitors asking for a person",
   webhookDisabled: "Webhook endpoints turned off",
 };
 

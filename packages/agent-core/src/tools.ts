@@ -13,6 +13,7 @@ import {
   lookupCallerAppointments,
   requestCancellationForCaller,
   recordTextConsentForCaller,
+  requestTeamForWidgetChat,
   rescheduleForCaller,
   searchKnowledgeEvidence,
   takeMessageForStaff,
@@ -23,7 +24,7 @@ import {
   type SmsConsentOnFile,
   type UnavailableReason,
 } from "@lobbystack/domain";
-import { canTextNumber, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { canTextNumber, isBusinessOpen, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
 import { tool, type ToolSet } from "ai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -87,6 +88,13 @@ export type AgentToolContext = {
   callControl?: CallControl;
   /** Prospect demos only answer questions and take messages: no booking, no transfers. */
   intakeOnly?: boolean;
+  /**
+   * Website chats whose widget has live chat on: the visitor can ask for
+   * someone from the team to join. `locale` is the chat's language, for what
+   * the receptionist says if nobody joins in time. `onTeamRequested` hears
+   * when the team was asked.
+   */
+  liveChat?: { locale: RuntimeLocale; onTeamRequested?: () => void };
 };
 
 // A plural always counts ("fee" finds "fees"). Other endings only count for terms of four
@@ -184,6 +192,14 @@ export function verifiesWithKeypadPin(snapshot: BusinessContextSnapshot, context
   if (context.intakeOnly || normalizeBookingMode(snapshot.bookingMode) === "off") return false;
   const policy = normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy);
   return Boolean(context.callerPhone && context.keypad && policy.enabled && policy.verificationMode === "passcode_required");
+}
+
+/**
+ * Whether the visitor on this website chat can ask for someone from the team
+ * to join it. requestTeamMember checks the opening hours when it's used.
+ */
+export function offersLiveChat(context: Pick<AgentToolContext, "channel" | "conversationId" | "intakeOnly" | "liveChat">): boolean {
+  return context.channel === "web_chat" && Boolean(context.liveChat && context.conversationId) && !context.intakeOnly;
 }
 
 export function createReceptionistTools(context: AgentToolContext): ToolSet {
@@ -517,6 +533,27 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
         });
         return { ...saved, cancelled: false, status: "The request is saved for the team. The appointment is still booked until the team cancels it." };
+      },
+    });
+  }
+
+  // A website chat with live chat on brings a person into the chat instead of transferring.
+  const liveChat = context.liveChat;
+  const conversationId = context.conversationId;
+  if (offersLiveChat(context) && liveChat && conversationId) {
+    tools.requestTeamMember = tool({
+      description: "Ask someone from the team to join this chat, when the visitor asks for a person or a rule says to transfer them. The team gets an alert and replies in this chat. Only works during opening hours, or at any time when the business has set none.",
+      inputSchema: z.object({ reason: z.string().optional().describe("What the visitor needs, in a few words, for the team's alert.") }),
+      execute: async ({ reason }) => {
+        if (snapshot.hours.length && !isBusinessOpen(snapshot)) return { ok: false, reason: "It's outside opening hours, so nobody from the team can join the chat now." };
+        const outcome = await requestTeamForWidgetChat(domain, { businessId, conversationId, locale: liveChat.locale, ...(reason?.trim() ? { reason } : {}) });
+        if (outcome.ok) {
+          liveChat.onTeamRequested?.();
+          return { ok: true, status: `The team was alerted. Someone should join this chat within ${outcome.waitMinutes} minutes. If nobody does, the chat comes back to you and the visitor is asked for a name and number for a callback.` };
+        }
+        return outcome.reason === "team_has_chat"
+          ? { ok: false, reason: "The team already has this chat, or was already asked to join it." }
+          : { ok: false, reason: "The team couldn't be asked to join this chat." };
       },
     });
   }

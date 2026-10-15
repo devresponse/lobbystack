@@ -29,6 +29,7 @@ export * from "./phoneVerification";
 export { verificationCodeSmsBody } from "./verificationCode";
 export * from "./phoneNumbers";
 export * from "./widgetKeys";
+export * from "./widgetLiveChat";
 export * from "./privacy";
 export * from "./publicApi";
 export * from "./oauth";

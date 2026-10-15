@@ -58,7 +58,9 @@
       "leadEnabled": "Tražite od posetilaca kontakt podatke",
       "requireEmail": "Obavezan imejl",
       "requirePhone": "Obavezan telefon",
-      "showBeforeChat": "Pitaj pre ćaskanja"
+      "showBeforeChat": "Pitaj pre ćaskanja",
+      "liveChat": "Dozvolite posetiocima da razgovaraju sa Vašim timom",
+      "liveChatHint": "Tokom radnog vremena, posetilac koji traži osobu dobija nekoga iz Vašeg tima u razgovoru. Vaš tim dobija upozorenje i odgovara iz Poruka. Ako niko ne odgovori u roku od 3 minuta, recepcioner nudi da primi poruku."
     },
     "positions": {
       "bottomRight": "Dole desno",
@@ -793,6 +795,10 @@
       "widgetChat": {
         "title": "Nova poruka u ćaskanju na sajtu",
         "description": "Kada posetilac pošalje poruku preko vidžeta na Vašem sajtu. Dobijate najviše jedno upozorenje po razgovoru dnevno."
+      },
+      "liveChatRequest": {
+        "title": "Posetilac traži osobu",
+        "description": "Kada posetilac Vašeg sajta zatraži razgovor sa nekim iz Vašeg tima. Odgovorite iz Poruka u roku od 3 minuta da biste se pridružili razgovoru."
       },
       "webhookDisabled": {
         "title": "Webhook endpoint je isključen",

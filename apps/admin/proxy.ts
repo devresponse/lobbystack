@@ -156,11 +156,18 @@ export function proxy(request: NextRequest) {
     );
   }
 
+  // The website widget's loader names the business's language in the chat's
+  // address, so the chat paints in it from the start. That is the business's
+  // choice, not the visitor's, so unlike ?lng= it is never saved.
+  const widgetLocale = pathname.startsWith("/embed/") ? normalizeInterfaceLocale(request.nextUrl.searchParams.get("locale")) : null;
+
   // Dynamic application roots read these headers. Locale-prefixed public roots
   // derive their first paint directly from the path and remain prerenderable.
-  const locale: NegotiatedLocale = pathLocale && isPublicRoutePath(pathname)
-    ? { locale: pathLocale, source: "path" }
-    : negotiatedLocale;
+  const locale: NegotiatedLocale = widgetLocale
+    ? { locale: widgetLocale, source: "path" }
+    : pathLocale && isPublicRoutePath(pathname)
+      ? { locale: pathLocale, source: "path" }
+      : negotiatedLocale;
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set(LOCALE_HEADER, locale.locale);
   requestHeaders.set(LOCALE_SOURCE_HEADER, locale.source);

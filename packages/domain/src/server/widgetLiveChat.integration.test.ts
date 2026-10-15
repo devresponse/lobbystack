@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { businessMemberships, businesses, conversations, createDatabaseClient, messages, operatorNotificationDeliveries, outboxMessages, productEvents, users, widgetVisitors, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { businessMemberships, businesses, conversations, conversationSessions, createDatabaseClient, messages, operatorNotificationDeliveries, outboxMessages, productEvents, users, widgetVisitors, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
-import { appendMessage, findWidgetConversationId, getOrCreateWidgetConversation, setAutomationState } from "./conversations";
-import { expireTeamRequest, loadWidgetChatView, requestTeamForWidgetChat, TEAM_REQUEST_WAIT_MS } from "./widgetLiveChat";
+import { appendMessage, findWidgetConversationId, getOrCreateWidgetConversation, setAutomationState, WIDGET_CHAT_IDLE_CLOSE_MS } from "./conversations";
+import { expireTeamRequest, loadWidgetChatView, requestTeamForWidgetChat, returnQuietTeamChat, TEAM_CHAT_QUIET_MS, TEAM_REQUEST_WAIT_MS } from "./widgetLiveChat";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -68,7 +68,21 @@ async function seedChat(tx: DatabaseTransaction) {
     expire: (requestedAt: Date) => as(tx, "worker", (db) => expireTeamRequest({ db }, { businessId, conversationId, requestedAt, locale: "fr" })),
     /** A team member presses Join (Take over) or Resume AI in Messages. */
     teamSets: (state: "ai_active" | "human_handoff") => as(tx, "app", (db) => setAutomationState({ db }, { userId, businessId, conversationId, state })),
-    view: () => as(tx, "worker", (db) => loadWidgetChatView({ db }, { businessId, conversationId })),
+    view: (now?: Date) => as(tx, "worker", (db) => loadWidgetChatView({ db }, { businessId, conversationId, ...(now ? { now } : {}) })),
+    /** The visitor writes again, as the widget's chat route checks first. */
+    returnQuiet: (now: Date) => as(tx, "worker", (db) => returnQuietTeamChat({ db }, { businessId, conversationId, now })),
+    /** The widget opens or sends, as its history and chat routes look up the visitor's chat. */
+    openChat: (now: Date) => as(tx, "worker", (db) => getOrCreateWidgetConversation({ db }, { businessId, widgetVisitorId: visitorId, now })),
+    /** Moves a message in time, as if it was written then. */
+    async writtenAt(messageId: string, at: Date) {
+      await tx.update(messages).set({ createdAt: at }).where(eq(messages.id, messageId));
+    },
+    async chats() {
+      return await tx.select({ id: conversations.id, status: conversations.status, state: conversations.automationState }).from(conversations).where(eq(conversations.businessId, businessId));
+    },
+    async sessions(id: string) {
+      return await tx.select({ status: conversationSessions.status, closedAt: conversationSessions.closedAt }).from(conversationSessions).where(eq(conversationSessions.conversationId, id));
+    },
     async automation() {
       const [row] = await tx.select({ state: conversations.automationState, pausedBy: conversations.automationPausedByUserId, pausedAt: conversations.automationPausedAt, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(eq(conversations.id, conversationId));
       return row!;
@@ -216,6 +230,78 @@ describe.skipIf(!testUrl)("live chat with the team against PostgreSQL under prod
       expect(await chat.expire(secondRequest)).toEqual({ expired: false });
       expect((await chat.messageRows()).filter((row) => row.aiGenerated)).toEqual([]);
       expect(await chat.events()).toEqual(["conversation.team_joined", "conversation.team_requested", "conversation.team_requested"]);
+    });
+  });
+});
+
+describe.skipIf(!testUrl)("a website chat the team went quiet in, against PostgreSQL under production logins", () => {
+  it("goes back to the receptionist when the visitor writes after the team left it quiet", async () => {
+    await rollbackTest(async (chat) => {
+      await chat.visitorWrites("Can I talk to someone?");
+      await chat.teamReplies("Hi, this is Yuri. How can I help?");
+      const joined = Date.now();
+      const stillThere = new Date(joined + TEAM_CHAT_QUIET_MS - 60_000);
+      const quiet = new Date(joined + TEAM_CHAT_QUIET_MS + 60_000);
+
+      expect(await chat.returnQuiet(stillThere)).toBe("human_handoff");
+      expect(await chat.view(stillThere)).toMatchObject({ automationState: "human_handoff", waitingForTeam: false, teamMemberName: "Yuri" });
+
+      // The widget shows the receptionist again, and reading the chat changes nothing.
+      expect(await chat.view(quiet)).toMatchObject({ automationState: "ai_active", waitingForTeam: false, teamMemberName: null });
+      expect(await chat.automation()).toMatchObject({ state: "human_handoff", pausedBy: chat.userId });
+
+      expect(await chat.returnQuiet(quiet)).toBe("ai_active");
+      expect(await chat.automation()).toMatchObject({ state: "ai_active", pausedBy: null, pausedAt: null, teamRequestedAt: null });
+      // Messages hears about the take-over and the hand-back.
+      expect((await chat.realtime()).filter((event) => event.type === "conversation.updated")).toHaveLength(2);
+      expect(await chat.returnQuiet(quiet)).toBe("ai_active");
+    });
+  });
+
+  it("counts from the team's last message, not from when they took the chat", async () => {
+    await rollbackTest(async (chat) => {
+      await chat.teamSets("human_handoff");
+      const joined = Date.now();
+      const reply = await chat.teamReplies("Still checking, one moment.");
+      await chat.writtenAt(reply, new Date(joined + 20 * 60_000));
+
+      expect(await chat.returnQuiet(new Date(joined + 20 * 60_000 + TEAM_CHAT_QUIET_MS - 60_000))).toBe("human_handoff");
+      expect(await chat.returnQuiet(new Date(joined + 20 * 60_000 + TEAM_CHAT_QUIET_MS + 60_000))).toBe("ai_active");
+    });
+  });
+
+  it("leaves a visitor waiting for someone to join to that request's own timer", async () => {
+    await rollbackTest(async (chat) => {
+      await chat.asksForPerson();
+      expect(await chat.returnQuiet(new Date(Date.now() + 60 * 60_000))).toBe("human_handoff");
+      expect(await chat.automation()).toMatchObject({ state: "human_handoff", teamRequestedAt: expect.any(Date) });
+    });
+  });
+});
+
+describe.skipIf(!testUrl)("a website chat after a day without messages, against PostgreSQL under production logins", () => {
+  it("is closed, and the visitor's next visit starts a new chat the receptionist answers", async () => {
+    await rollbackTest(async (chat) => {
+      await chat.visitorWrites("Can I talk to someone?");
+      await chat.teamReplies("Hi, this is Yuri.");
+      const lastMessage = Date.now();
+
+      expect(await chat.openChat(new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+
+      const nextDay = new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000);
+      const next = await chat.openChat(nextDay);
+      expect(next.conversationId).not.toBe(chat.conversationId);
+      expect(next.automationState).toBe("ai_active");
+      expect(await chat.chats()).toEqual(expect.arrayContaining([
+        { id: chat.conversationId, status: "closed", state: "human_handoff" },
+        { id: next.conversationId, status: "open", state: "ai_active" },
+      ]));
+      expect(await chat.sessions(chat.conversationId)).toEqual([{ status: "closed", closedAt: nextDay }]);
+      expect(await chat.findChat(chat.visitorId)).toBe(next.conversationId);
+
+      // The new chat has no messages yet, so it stays the visitor's chat however long they take.
+      expect(await chat.openChat(new Date(nextDay.getTime() + 3 * WIDGET_CHAT_IDLE_CLOSE_MS))).toEqual(next);
+      expect(await chat.chats()).toHaveLength(2);
     });
   });
 });

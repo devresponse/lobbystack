@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 
 import { conversations, enqueueOutbox, messages, users, withBusinessTransaction } from "@lobbystack/db";
 import type { RuntimeLocale } from "@lobbystack/shared";
@@ -12,10 +12,26 @@ import { recordProductEventBestEffort } from "./productEvents";
 // Live chat with the team in the website widget. A visitor who asks for a
 // person hands the chat to the team, which gets an alert, and waits. The first
 // team member to reply or press Join in Messages has the chat. If nobody does
-// in time, the receptionist takes it back and offers to take a message.
+// in time, the receptionist takes it back and offers to take a message. A team
+// that goes quiet in a chat it has gives it back the same way, the next time
+// the visitor writes.
 
 /** How long a visitor waits for someone from the team before the receptionist takes the chat back. */
 export const TEAM_REQUEST_WAIT_MS = 3 * 60_000;
+
+/** How long the team can leave a chat it has without a word before the receptionist answers the visitor again. */
+export const TEAM_CHAT_QUIET_MS = 10 * 60_000;
+
+/**
+ * Whether the team has gone quiet in a chat it has: nobody from the team wrote
+ * in it or took it over in TEAM_CHAT_QUIET_MS. A visitor still waiting for
+ * someone to join is left to that request's own timer.
+ */
+export function teamChatWentQuiet(chat: { teamRequestedAt: Date | null; automationPausedAt: Date | null; lastTeamMessageAt: Date | null }, now: Date): boolean {
+  if (chat.teamRequestedAt) return false;
+  const lastActiveAt = Math.max(chat.automationPausedAt?.getTime() ?? 0, chat.lastTeamMessageAt?.getTime() ?? 0);
+  return now.getTime() - lastActiveAt >= TEAM_CHAT_QUIET_MS;
+}
 
 /** What the receptionist says when nobody from the team joined in time. */
 const NOBODY_JOINED: Record<RuntimeLocale, string> = {
@@ -107,6 +123,52 @@ export async function expireTeamRequest(
   return { expired };
 }
 
+/**
+ * A visitor wrote in a chat the team has. When the team has gone quiet in it,
+ * the receptionist takes the chat back and answers, so a visitor who returns
+ * later isn't left waiting for someone who left. Returns who answers now.
+ */
+export async function returnQuietTeamChat(
+  context: DomainContext,
+  input: { businessId: string; conversationId: string; now?: Date },
+): Promise<"ai_active" | "human_handoff"> {
+  const now = input.now ?? new Date();
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const [current] = await tx.select({ automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
+    if (current?.automationState !== "human_handoff") return "ai_active";
+    const [lastTeamMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, input.conversationId), isNotNull(messages.sentByUserId))).orderBy(desc(messages.createdAt)).limit(1);
+    if (!teamChatWentQuiet({ ...current, lastTeamMessageAt: lastTeamMessage?.createdAt ?? null }, now)) return "human_handoff";
+    await tx.update(conversations).set({ automationState: "ai_active", automationPausedAt: null, automationPausedByUserId: null, updatedAt: now }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
+    await enqueueOutbox(tx, {
+      topic: "realtime.publish",
+      businessId: input.businessId,
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      dedupeKey: `conversation:${input.conversationId}:team-quiet:${now.getTime()}`,
+      payload: { type: "conversation.updated", entityId: input.conversationId },
+    });
+    return "ai_active";
+  });
+}
+
+/**
+ * Tells the visitor's open widgets to reload the chat for a receptionist reply
+ * saved after the visitor left the page that asked for it: a widget opened on
+ * the next page may have loaded the chat before the reply was there.
+ */
+export async function announceLateWidgetReply(context: DomainContext, input: { businessId: string; conversationId: string; messageId: string }): Promise<void> {
+  await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    await enqueueOutbox(tx, {
+      topic: "realtime.publish",
+      businessId: input.businessId,
+      aggregateType: "conversation",
+      aggregateId: input.conversationId,
+      dedupeKey: `conversation:${input.conversationId}:late-reply:${input.messageId}`,
+      payload: { type: "conversation.updated", entityId: input.conversationId },
+    });
+  });
+}
+
 // Both run on the worker login (the widget's chat and the worker's job), which reads the business only as the worker.
 async function recordTeamEvent(context: DomainContext, name: "conversation.team_requested" | "conversation.team_request_expired", input: { businessId: string; conversationId: string }): Promise<void> {
   await recordProductEventBestEffort(context, {
@@ -138,9 +200,10 @@ export type WidgetChatView = {
 };
 
 /** What the visitor's widget shows of their chat: its messages and who from the team is in it. */
-export async function loadWidgetChatView(context: DomainContext, input: { businessId: string; conversationId: string }): Promise<WidgetChatView> {
+export async function loadWidgetChatView(context: DomainContext, input: { businessId: string; conversationId: string; now?: Date }): Promise<WidgetChatView> {
+  const now = input.now ?? new Date();
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const [conversation] = await tx.select({ automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt, pausedByName: users.name })
+    const [conversation] = await tx.select({ automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt, teamRequestedAt: conversations.teamRequestedAt, pausedByName: users.name })
       .from(conversations)
       .leftJoin(users, eq(users.id, conversations.automationPausedByUserId))
       .where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)))
@@ -153,10 +216,13 @@ export async function loadWidgetChatView(context: DomainContext, input: { busine
       .limit(200);
     const handoff = conversation?.automationState === "human_handoff";
     const waitingForTeam = handoff && Boolean(conversation.teamRequestedAt);
+    // A team that went quiet no longer has the chat: the receptionist answers the visitor's next message.
+    const lastTeamMessageAt = rows.find((row) => row.direction !== "inbound" && row.sentByUserId !== null)?.createdAt ?? null;
+    const teamHasChat = handoff && !waitingForTeam && !teamChatWentQuiet({ teamRequestedAt: null, automationPausedAt: conversation.automationPausedAt, lastTeamMessageAt }, now);
     return {
-      automationState: handoff ? "human_handoff" : "ai_active",
+      automationState: waitingForTeam || teamHasChat ? "human_handoff" : "ai_active",
       waitingForTeam,
-      teamMemberName: handoff && !waitingForTeam ? teamMemberFirstName(conversation.pausedByName) : null,
+      teamMemberName: teamHasChat ? teamMemberFirstName(conversation.pausedByName) : null,
       messages: rows.reverse().map((row) => ({
         id: row.id,
         direction: row.direction === "inbound" ? "inbound" : "outbound",

@@ -9,9 +9,21 @@ import { resolveWidgetAccess } from "@/lib/widget-access";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function corsHeaders(request: Request): HeadersInit {
+function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get("origin");
   return origin ? { "access-control-allow-origin": origin, "access-control-allow-headers": "content-type", "access-control-allow-methods": "POST, OPTIONS", "cache-control": "no-store", vary: "Origin" } : { "cache-control": "no-store" };
+}
+
+/**
+ * The loader on the customer's site reads the error code to show why the
+ * widget can't load, such as a website missing from the key's list. Without
+ * these headers the browser hides the response, and the visitor gets a
+ * generic error instead.
+ */
+function withCors(response: Response, request: Request): Response {
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(corsHeaders(request))) headers.set(name, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
 export async function OPTIONS(request: Request) {
@@ -25,14 +37,14 @@ export async function POST(request: Request) {
     if (!request.headers.get("origin")) return NextResponse.json({ error: "A browser origin is required to create a widget session.", code: "widget_origin_required" }, { status: 403 });
     const { widgetKey, visitorId } = parsed.data;
     const access = await resolveWidgetAccess(request, widgetKey, { requireOrigin: true, strictOrigin: true });
-    if (!access.ok) return access.response;
+    if (!access.ok) return withCors(access.response, request);
     const allowance = await enforceWidgetRateLimits({ businessId: access.session.businessId, widgetKeyId: access.session.widgetKeyId, visitorId, ipHash: requestIpHash(request), operation: "session" });
     if (!allowance.allowed) return NextResponse.json({ error: "Widget session limit reached.", code: allowance.code }, { status: allowance.status, headers: corsHeaders(request) });
     const token = createWidgetSessionToken({ widgetKeyId: access.session.widgetKeyId, businessId: access.session.businessId, visitorId, origin: access.session.origin! });
     return NextResponse.json(widgetSessionResponseSchema.parse({ token: token.token, expiresAt: token.expiresAt, visitorId }), { headers: corsHeaders(request) });
   } catch (error) {
     if (error instanceof Response) {
-      return error;
+      return withCors(error, request);
     }
     return NextResponse.json({ error: "The widget session could not be created.", code: "widget_session_failed" }, { status: 500, headers: corsHeaders(request) });
   }

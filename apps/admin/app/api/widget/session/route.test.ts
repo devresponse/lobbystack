@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ access: vi.fn(), mint: vi.fn(), limit: vi.fn(), ip: vi.fn() }));
@@ -21,6 +22,28 @@ describe("widget session admission", () => {
     mocks.limit.mockResolvedValue({ allowed: false, status, code: "widget_rate_limited" });
     expect((await POST(request())).status).toBe(status);
     expect(mocks.mint).not.toHaveBeenCalled();
+  });
+  // The loader on the customer's site can only read the code, and tell the
+  // visitor why, when the refusal carries CORS headers.
+  it.each([
+    [403, "widget_origin_denied"],
+    [403, "widget_disabled"],
+    [404, "widget_key_invalid"],
+  ])("lets the customer's site read a %s %s refusal", async (status, code) => {
+    mocks.access.mockResolvedValue({ ok: false, response: NextResponse.json({ error: "Refused.", code }, { status }) });
+    const response = await POST(request());
+    expect(response.status).toBe(status);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://business.test");
+    expect(response.headers.get("vary")).toBe("Origin");
+    expect(await response.json()).toMatchObject({ code });
+    expect(mocks.mint).not.toHaveBeenCalled();
+  });
+  it("lets the customer's site read a refusal thrown while checking access", async () => {
+    mocks.access.mockRejectedValue(NextResponse.json({ error: "Unavailable.", code: "widget_unavailable" }, { status: 503 }));
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(response.headers.get("access-control-allow-origin")).toBe("https://business.test");
+    expect(await response.json()).toMatchObject({ code: "widget_unavailable" });
   });
   it("consumes the tenant, visitor and trusted IP budget before signing", async () => {
     mocks.limit.mockResolvedValue({ allowed: true });

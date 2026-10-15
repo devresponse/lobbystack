@@ -5,7 +5,7 @@ import { NextResponse } from "next/server";
 
 import { createReceptionistAgent } from "@lobbystack/agent-core/agent";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
-import { appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, registerWidgetVisitor, reserveWidgetChatUsageInTransaction } from "@lobbystack/domain";
+import { announceLateWidgetReply, appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, registerWidgetVisitor, reserveWidgetChatUsageInTransaction, returnQuietTeamChat } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
 import { widgetChatRequestSchema, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
 
@@ -65,7 +65,10 @@ export async function POST(request: Request) {
 
     const context = createWorkerDomainContext();
     await registerWidgetVisitor(context, { businessId: session.businessId, visitorId: body.visitorId, metadata: { userAgent: request.headers.get("user-agent") ?? undefined } });
-    const { conversationId, automationState } = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: body.visitorId });
+    const conversation = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: body.visitorId });
+    const { conversationId } = conversation;
+    // A chat the team has, but went quiet in, goes back to the receptionist.
+    const automationState = conversation.automationState === "human_handoff" ? await returnQuietTeamChat(context, { businessId: session.businessId, conversationId }) : conversation.automationState;
     await appendMessage(context, { businessId: session.businessId, conversationId, body: body.content, direction: "inbound", channel: "web_chat" });
     const { queueOperatorAlert } = await import("@lobbystack/domain");
     await queueOperatorAlert(context, {
@@ -118,10 +121,11 @@ export async function POST(request: Request) {
           });
           writer.write({ type: "text-start", id: assistantMessageId });
           const text: string[] = [];
-          // The history already ends with the visitor's new message.
+          // The history already ends with the visitor's new message. The reply
+          // isn't tied to the visitor's connection: one who moves to another
+          // page mid-reply finds it saved in the chat there.
           const generation = await agent.stream({
             messages: history.slice(-20).map((row) => ({ role: row.direction === "inbound" ? "user" as const : "assistant" as const, content: row.body })),
-            abortSignal: request.signal,
           });
           for await (const part of generation.textStream) {
             text.push(part);
@@ -132,6 +136,8 @@ export async function POST(request: Request) {
           const [rawUsage, finishReason] = await Promise.all([generation.totalUsage, generation.finishReason]);
           const usage = describeAgentUsage(rawUsage, performance.now() - generationStartedAt);
           const persistedAssistantMessageId = await appendMessage(context, { businessId: session.businessId, conversationId, body: reply, direction: "outbound", channel: "web_chat", aiGenerated: true });
+          // The widget on the visitor's next page may have loaded the chat before the reply was saved.
+          if (request.signal.aborted) await announceLateWidgetReply(context, { businessId: session.businessId, conversationId, messageId: persistedAssistantMessageId });
           void recordAiGenerationEvent(context, {
             businessId: session.businessId,
             operation: "widget.chat",
@@ -158,9 +164,9 @@ export async function POST(request: Request) {
             latencyMs: performance.now() - generationStartedAt,
             isStreaming: true,
             isError: true,
-            error: request.signal.aborted ? "request_aborted" : "generation_failed",
+            error: "generation_failed",
           }).catch((recordingError: unknown) => logGenerationFailure(recordingError));
-          writer.write({ type: "error", errorText: request.signal.aborted ? "The chat request was cancelled." : SAFE_CHAT_ERROR });
+          writer.write({ type: "error", errorText: SAFE_CHAT_ERROR });
           writer.write({ type: "message-metadata", messageMetadata: replyMetadata() });
           writer.write({ type: "finish", finishReason: "error" });
         }

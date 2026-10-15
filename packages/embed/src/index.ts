@@ -6,8 +6,12 @@ type LobbyStackApi = {
 
 type WidgetMessage = { type: string; [key: string]: unknown };
 
+// The root's z-index lifts the panel above the site's own fixed elements: a
+// fixed element is a stacking context, so the panel's z-index alone only counts
+// inside it. The bubble has the same z-index and comes later in the page, so it
+// stays above the panel's shadow.
 const WIDGET_STYLES = `
-.lobby-widget-root{position:fixed;inset:0;pointer-events:none}
+.lobby-widget-root{position:fixed;inset:0;pointer-events:none;z-index:2147483000}
 .lobby-widget-bubble{position:fixed;bottom:24px;right:24px;width:60px;height:60px;border-radius:9999px;border:0;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.22);pointer-events:auto;transition:transform .15s ease;z-index:2147483000}
 .lobby-widget-bubble:hover{transform:scale(1.06)}
 .lobby-widget-bubble[data-position="bottom-left"]{left:24px;right:auto}
@@ -73,20 +77,23 @@ function currentScriptAttribute(name: string): string | null {
 }
 
 type WidgetPosition = "bottom-left" | "bottom-center" | "bottom-right";
-type WidgetAppearance = { color?: string; position?: WidgetPosition };
+type WidgetLocale = "en" | "fr" | "es" | "sr";
+type WidgetAppearance = { color?: string; position?: WidgetPosition; locale?: WidgetLocale };
 
 // Filled by the dashboard's keyed loader (`/embed.js?key=…`) before this code
 // runs; the name matches WIDGET_APPEARANCE_GLOBAL in @lobbystack/shared.
 const APPEARANCE_GLOBAL = "__lobbyStackWidgetAppearance";
 const POSITIONS: ReadonlyArray<WidgetPosition> = ["bottom-left", "bottom-center", "bottom-right"];
+const LOCALES: ReadonlyArray<WidgetLocale> = ["en", "fr", "es", "sr"];
 const COLOR_PATTERN = /^#[0-9a-fA-F]{3,8}$/;
 
-/** The bubble look the dashboard saved for this key, when the loader carried it. */
+/** The bubble look and chat language the dashboard saved for this key, when the loader carried them. */
 function savedAppearance(widgetKey: string): WidgetAppearance {
   const saved = (window as unknown as Record<string, Record<string, WidgetAppearance> | undefined>)[APPEARANCE_GLOBAL]?.[widgetKey];
   return {
     ...(typeof saved?.color === "string" && COLOR_PATTERN.test(saved.color) ? { color: saved.color } : {}),
     ...(saved?.position && POSITIONS.includes(saved.position) ? { position: saved.position } : {}),
+    ...(saved?.locale && LOCALES.includes(saved.locale) ? { locale: saved.locale } : {}),
   };
 }
 
@@ -129,9 +136,9 @@ export function initWidget(): boolean {
   const labels = loaderLabels(currentScriptAttribute("data-locale") ?? document.documentElement.lang ?? "en");
   const adminOrigin = resolveOrigin();
   let visitorId = makeVisitorId(widgetKey);
-  // The chat page draws itself in the bubble's color from its first paint, instead of a default
-  // that its settings then replace.
-  const frameSrc = `${adminOrigin}/embed/${encodeURIComponent(widgetKey)}?${new URLSearchParams({ color })}`;
+  // The chat page draws itself in the bubble's color and the business's language from its first
+  // paint, instead of defaults that its settings then replace.
+  const frameSrc = `${adminOrigin}/embed/${encodeURIComponent(widgetKey)}?${new URLSearchParams({ color, ...(saved.locale ? { locale: saved.locale } : {}) })}`;
 
   injectStyles();
 
@@ -160,8 +167,11 @@ export function initWidget(): boolean {
 
   holder.appendChild(frame);
   root.appendChild(holder);
-  document.body.appendChild(root);
-  document.body.appendChild(bubble);
+  // A snippet in the page's <head> without defer runs before <body> exists, so
+  // the widget joins the page once it has been read.
+  const attach = () => (document.body ?? document.documentElement).append(root, bubble);
+  if (document.body) attach();
+  else document.addEventListener("DOMContentLoaded", attach, { once: true });
 
   let open = false;
   let started = false;

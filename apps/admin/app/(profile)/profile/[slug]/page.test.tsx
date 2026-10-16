@@ -19,6 +19,11 @@ vi.mock("@lobbystack/domain", () => ({ getPublicBusinessProfile: mocks.getPublic
 vi.mock("@/lib/auth", () => ({ getSession: mocks.getSession }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }) }));
 vi.mock("@/lib/branding", () => ({ loadBranding: async () => ({ appName: "AlloPlace", logoUrl: "/brand/alloplace/logo.svg" }) }));
+// Shows which loading strategy the page gives the widget loader.
+vi.mock("next/script", async () => {
+  const { createElement } = await import("react");
+  return { default: ({ strategy, ...props }: Record<string, unknown>) => createElement("script", { ...props, "data-strategy": strategy }) };
+});
 
 import PublicProfileRoute, { generateMetadata } from "./page";
 
@@ -79,7 +84,8 @@ describe("a published page", () => {
     expect(html).toContain("<strong class=\"font-bold\">Open now</strong>");
     expect(html).toContain("--accent:#ffd100;--on-accent:#000000");
     expect(html).toContain('<section id="profile-chat" aria-label="Chat with Acme Dental"');
-    expect(html).toContain('<script src="/embed.js?key=pk_live_acme" data-inline-target="#profile-chat" defer=""></script>');
+    // The loader changes the page, so it waits until React has hydrated it.
+    expect(html).toContain('<script src="/embed.js?key=pk_live_acme" data-inline-target="#profile-chat" data-strategy="afterInteractive"></script>');
     expect(html).toContain("Tomorrow, 9:00");
     expect(html).toContain("Check-up. Book it in the chat or by phone.");
     expect(html).toContain('href="tel:+14165550123"');

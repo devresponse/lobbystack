@@ -1,5 +1,6 @@
 import { CalendarX, ExternalLink, Globe, Mail, MapPin, Navigation, Phone, Share2 } from "lucide-react";
 import Link from "next/link";
+import Script from "next/script";
 import type { CSSProperties, ReactNode } from "react";
 
 import type { PublicBusinessProfile } from "@lobbystack/domain";
@@ -134,7 +135,10 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
                   </div>
                 )}
               </Brackets>
-              {stage === "chat" ? <script src={`/embed.js?key=${encodeURIComponent(profile.widgetKey!)}`} data-inline-target={`#${PROFILE_CHAT_ID}`} defer /> : null}
+              {/* The loader swaps the chat element's placeholder for the chat, so it runs once React has
+                  hydrated the page: before that, React would find the element changed and render it
+                  again, without the chat. */}
+              {stage === "chat" ? <Script src={`/embed.js?key=${encodeURIComponent(profile.widgetKey!)}`} data-inline-target={`#${PROFILE_CHAT_ID}`} strategy="afterInteractive" /> : null}
             </div>
           ) : null}
 

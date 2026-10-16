@@ -304,6 +304,147 @@ describe("widget loading state", () => {
   });
 });
 
+describe("widget first load", () => {
+  /** A response the test sends when it chooses. */
+  function held() {
+    let send: (response: Response) => void = () => {};
+    const response = new Promise<Response>((resolve) => { send = resolve; });
+    return { response, send: (value: Response) => send(value) };
+  }
+
+  function openChat(respond: (url: string, init?: RequestInit) => Promise<Response>, initialColor?: string) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({ status: "idle", errorKey: null, remoteAudioRef: { current: null }, transcript: [], startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    const fetchMock = vi.fn((url: URL | string, init?: RequestInit) => String(url).includes("/api/widget/stream") ? Promise.resolve(new Response(null, { status: 401 })) : respond(String(url), init));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" initialColor={initialColor} /></QueryClientProvider>);
+    const session = (token: string) => act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token, parentOrigin: "https://business.test", visitorId } }));
+    });
+    session("token");
+    return { client, container: view.container, fetchMock, session };
+  }
+
+  const composer = () => screen.getByRole("textbox", { name: "chat.composerPlaceholder" }) as HTMLInputElement;
+
+  it("asks for the history with the settings and shows a returning visitor's chat once both are in", async () => {
+    const settings = held();
+    const history = held();
+    const { client, container, fetchMock } = openChat((url) => url.includes("/api/widget/history") ? history.response : settings.response);
+
+    // Both requests leave as soon as the session arrives, before either answers.
+    await vi.waitFor(() => expect(fetchMock.mock.calls.map(([url]) => new URL(String(url)).pathname).sort()).toEqual(["/api/widget/config", "/api/widget/history"]));
+
+    await act(async () => {
+      settings.send(Response.json({ ...config, config: { color: "#7c3aed", subtitle: "Open until 6", greeting: "Welcome to Acme!", leadForm: { enabled: true, showBeforeChat: true } }, businessSlug: "acme", voiceEnabled: true }));
+    });
+    const send = screen.getByRole("button", { name: "chat.send" });
+    await vi.waitFor(() => expect(send.style.backgroundColor).toBe("rgb(124, 58, 237)"));
+    // The settings alone show nothing yet, so a returning visitor never sees the greeting or the details form first.
+    expect(screen.getByRole("status").textContent).toContain("chat.loadingTranscript");
+    expect(container.querySelectorAll("header .animate-pulse")).toHaveLength(2);
+    expect(screen.queryByText("Open until 6")).toBeNull();
+    expect(screen.queryByRole("button", { name: "chat.voiceStart" })).toBeNull();
+    expect(screen.queryByText("chat.welcome")).toBeNull();
+    expect(screen.queryByText("Welcome to Acme!")).toBeNull();
+    expect(screen.queryByText("lead.beforeChatHeading")).toBeNull();
+    expect(composer().disabled).toBe(true);
+
+    await act(async () => {
+      history.send(Response.json({ automationState: "ai_active", messages: [visitorMessage, teamReply] }));
+    });
+    expect(await screen.findByText(visitorMessage.content)).toBeTruthy();
+    expect(screen.getByText(teamReply.content)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(container.querySelectorAll(".animate-pulse")).toHaveLength(0);
+    expect(screen.getByText("Open until 6")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "chat.voiceStart" })).toBeTruthy();
+    expect(screen.queryByText("chat.welcome")).toBeNull();
+    expect(screen.queryByText("lead.beforeChatHeading")).toBeNull();
+    expect(composer().disabled).toBe(false);
+    client.clear();
+  });
+
+  it("keeps the history out of sight until the settings arrive", async () => {
+    const settings = held();
+    const historyBody = vi.fn(async () => ({ automationState: "human_handoff", messages: [visitorMessage, teamReply] }));
+    const { client } = openChat((url) => url.includes("/api/widget/history") ? Promise.resolve({ ok: true, json: historyBody } as unknown as Response) : settings.response);
+
+    await vi.waitFor(() => expect(historyBody).toHaveBeenCalled());
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(screen.queryByText(visitorMessage.content)).toBeNull();
+    expect(screen.queryByText("chat.handoffBanner")).toBeNull();
+    expect(screen.getByRole("status").textContent).toContain("chat.loadingTranscript");
+    expect(composer().disabled).toBe(true);
+
+    await act(async () => {
+      settings.send(Response.json({ ...config, config: { color: "#7c3aed" } }));
+    });
+    // The visitor's own messages come in the business's color, never the loading one.
+    const message = await screen.findByText(visitorMessage.content);
+    expect(message.closest<HTMLElement>("[style]")?.style.backgroundColor).toBe("rgb(124, 58, 237)");
+    expect(screen.getByText("chat.handoffBanner")).toBeTruthy();
+    client.clear();
+  });
+
+  it("opens a history that arrived before the settings at its latest message", async () => {
+    // jsdom lays nothing out, so each element in the thread counts as 100px here.
+    const scrollTops = new WeakMap<HTMLElement, number>();
+    Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get(this: HTMLElement) { return this.childElementCount * 100; } });
+    Object.defineProperty(HTMLElement.prototype, "scrollTop", { configurable: true, get(this: HTMLElement) { return scrollTops.get(this) ?? 0; }, set(this: HTMLElement, value: number) { scrollTops.set(this, value); } });
+    try {
+      const settings = held();
+      const historyBody = vi.fn(async () => ({ automationState: "ai_active", messages: [visitorMessage, teamReply] }));
+      const { client, container } = openChat((url) => url.includes("/api/widget/history") ? Promise.resolve({ ok: true, json: historyBody } as unknown as Response) : settings.response);
+      await vi.waitFor(() => expect(historyBody).toHaveBeenCalled());
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+      await act(async () => {
+        settings.send(Response.json(config));
+      });
+      await screen.findByText(teamReply.content);
+      const thread = container.querySelector<HTMLElement>(".overflow-y-auto")!;
+      expect(thread.scrollHeight).toBe(200);
+      expect(thread.scrollTop).toBe(200);
+      client.clear();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollHeight");
+      Reflect.deleteProperty(HTMLElement.prototype, "scrollTop");
+    }
+  });
+
+  it("keeps the chat on screen while a renewed session reloads the settings, without loading the history again", async () => {
+    const renewedSettings = held();
+    const historyRequests = vi.fn();
+    const { client, fetchMock, session } = openChat((url, init) => {
+      if (url.includes("/api/widget/history")) {
+        historyRequests();
+        return Promise.resolve(Response.json({ automationState: "ai_active", messages: [visitorMessage, teamReply] }));
+      }
+      return (init?.headers as Record<string, string>).authorization === "Bearer renewed" ? renewedSettings.response : Promise.resolve(Response.json(config));
+    });
+    expect(await screen.findByText(teamReply.content)).toBeTruthy();
+    await vi.waitFor(() => expect(composer().disabled).toBe(false));
+
+    session("renewed");
+    await vi.waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => String(url).includes("/api/widget/config") && (init?.headers as Record<string, string>).authorization === "Bearer renewed")).toBe(true));
+    expect(composer().disabled).toBe(false);
+    expect(screen.getByText(teamReply.content)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+
+    await act(async () => {
+      renewedSettings.send(Response.json(config));
+    });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // The live updates bring anything new, so the renewal alone doesn't reload the history.
+    expect(historyRequests).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(teamReply.content)).toBeTruthy();
+    client.clear();
+  });
+});
+
 describe("links in chat replies", () => {
   const reply = "Book online at https://acme.example/book. You can also use [our booking page](https://acme.example/book).";
   const expectedLinks = [

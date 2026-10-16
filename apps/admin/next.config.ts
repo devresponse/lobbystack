@@ -34,6 +34,14 @@ const nextConfig: NextConfig = {
     // deployment variable that can stay unchanged across deploys.
     NEXT_PUBLIC_ASSET_VERSION: publicAssetVersion(resolve(process.cwd(), "public"), serviceVersion),
     NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV ?? "development",
+    // Where the dashboard's outside links go (packages/shared/src/brandLinks.ts),
+    // fixed at build even when unset, so a value set only at run time can't make
+    // the server render a link the browser then disagrees with.
+    NEXT_PUBLIC_LANDING_SITE_URL: process.env.NEXT_PUBLIC_LANDING_SITE_URL ?? "",
+    NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL ?? "",
+    NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL ?? "",
+    NEXT_PUBLIC_DOCS_SITE_URL: process.env.NEXT_PUBLIC_DOCS_SITE_URL ?? "",
+    NEXT_PUBLIC_CONTACT_EMAIL: process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "",
     // No NEXT_PUBLIC_DEPLOYMENT_MODE: browser telemetry gets the mode from the
     // server at runtime (src/lib/deployment-mode.ts).
   },

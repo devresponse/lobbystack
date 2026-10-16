@@ -29,6 +29,16 @@ Configúrelas en el servicio de administración. Si no configura las suyas, la i
 | `BRAND_APP_NAME` | El nombre que muestra el panel en lugar de LobbyStack, de hasta 40 caracteres. Aparece en la pestaña del navegador, encima de las páginas de inicio de sesión y de incorporación, y en los textos del panel. |
 | `BRAND_LOGO_URL` | El logo que aparece junto al nombre y como icono de la pestaña. Use una URL `https://` o una ruta del panel, como `/brand/logo.svg`. Sin logo, una implementación con otro nombre muestra solo su nombre. |
 
+Los enlaces del panel a páginas externas vienen de cinco variables más. Next.js las escribe en la compilación del servicio de administración, así que páselas como argumentos de compilación de Docker con el mismo nombre y vuelva a compilar después de cambiar una. Si no configura las suyas, la imagen del servicio de administración enlaza a alloplace.com. Un valor vacío enlaza en su lugar a la página de LobbyStack.
+
+| Variable | Función |
+| --- | --- |
+| `NEXT_PUBLIC_LANDING_SITE_URL` | Su sitio web, como `https://example.com`. La página de demostración pública enlaza a él, y la respuesta SMS a HELP lo indica. Sin sus propias variables, los enlaces a los términos y a la privacidad abren `/terms` y `/privacy` en ese sitio. |
+| `NEXT_PUBLIC_TERMS_URL` | Sus términos del servicio, enlazados debajo del formulario de registro, al pie de la incorporación y desde el programa de afiliados. |
+| `NEXT_PUBLIC_PRIVACY_URL` | Su política de privacidad, enlazada debajo del formulario de registro y al pie de la incorporación. |
+| `NEXT_PUBLIC_DOCS_SITE_URL` | Su documentación, enlazada desde el panel Comentarios y desde los metadatos del servidor MCP. |
+| `NEXT_PUBLIC_CONTACT_EMAIL` | La única dirección a la que se le escribe: el enlace de contacto del panel Comentarios, el botón de contacto del plan Enterprise y las respuestas SMS a HELP. |
+
 Los correos electrónicos, los SMS y la API todavía dicen LobbyStack por ahora.
 
 ## Servicios internos

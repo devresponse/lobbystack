@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword } from "./sms";
+import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword, sharedSenderHelpReply } from "./sms";
 
 describe("SMS consent classifiers", () => {
   it("normalizes keywords to alphanumeric uppercase", () => {
@@ -24,5 +24,23 @@ describe("SMS consent classifiers", () => {
     expect(classifySmsKeywordReply({ body: "start" })?.kind).toBe("start");
     expect(classifySmsKeywordReply({ body: "stop" })).toBeNull();
     expect(classifySmsKeywordReply({ body: "hello" })).toBeNull();
+  });
+});
+
+describe("SMS HELP replies", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("keep LobbyStack's registered wording when the deployment sets no links", () => {
+    expect(classifySmsKeywordReply({ body: "help" })?.body).toBe("LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.");
+    expect(sharedSenderHelpReply()).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.");
+  });
+
+  it("give the deployment's own address and website", () => {
+    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com");
+    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "support@alloplace.com");
+    expect(classifySmsKeywordReply({ body: "HELP" })?.body).toBe("LobbyStack: For help, contact support@alloplace.com or visit https://alloplace.com. Reply STOP to opt out.");
+    expect(sharedSenderHelpReply()).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email support@alloplace.com. Reply STOP to opt out.");
   });
 });

@@ -1,6 +1,6 @@
 # Brand a deployment
 
-A deployment can show its own app name and logo instead of LobbyStack. This page covers how to set them, how the admin picks which to show, and where the LobbyStack brand still appears, with the variable proposed for each of those places.
+A deployment can show its own app name and logo instead of LobbyStack, and send its outside links to its own website. This page covers how to set them, how the admin picks which to show, and where the LobbyStack brand still appears, with the variable proposed for each of those places.
 
 ## Set the name and logo
 
@@ -60,6 +60,51 @@ The admin caches the branding for 30 seconds, so other admin replicas pick up a 
 
 A deployment still named LobbyStack with no logo of its own shows LobbyStack's mark. A renamed deployment with no logo shows its name on its own, so LobbyStack's mark never appears beside another name.
 
+## Send the outside links to your own site
+
+The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. Five variables point them at a deployment's own site and inbox.
+
+| Link | Environment variable | Accepted values | When unset |
+| --- | --- | --- | --- |
+| Website | `NEXT_PUBLIC_LANDING_SITE_URL` | An `http://` or `https://` URL without credentials, a query, or a fragment. | `https://lobbystack.com` |
+| Terms of service | `NEXT_PUBLIC_TERMS_URL` | An `http://` or `https://` URL without credentials. | `/terms` on the website |
+| Privacy policy | `NEXT_PUBLIC_PRIVACY_URL` | An `http://` or `https://` URL without credentials. | `/privacy` on the website |
+| Docs | `NEXT_PUBLIC_DOCS_SITE_URL` | Like the website. | `https://docs.lobbystack.com` |
+| Contact address | `NEXT_PUBLIC_CONTACT_EMAIL` | A plain address, such as `support@example.com`. | LobbyStack's address for each place: `support@lobbystack.com` in the feedback panel, `hello@lobbystack.ai` for Enterprise plans, and `hello@lobbystack.com` in text messages. |
+
+An empty variable counts as unset. When a variable holds a value it can't use, the admin logs a warning at startup and uses LobbyStack's link in its place.
+
+Where each one appears:
+
+- **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when their own variables are unset. On lobbystack.com the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
+- **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `NEXT_PUBLIC_TERMS_URL` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
+- **Docs**: the "see docs" and Help Center links in the dashboard's feedback panel, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`.
+- **Contact address**: the feedback panel's "Contact us" link, the Enterprise plan's contact button in onboarding and billing, and both SMS HELP replies. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when the address or the website changes.
+
+### Set them for the build
+
+Next.js writes `NEXT_PUBLIC_` variables into the admin's build, both the browser's code and the server's, so a change takes a rebuild. `next.config.ts` fixes all five at build time, even the unset ones, so a value set only when the admin starts can't make the server render one link and the browser another.
+
+`Dockerfile.admin` and `docker-compose.yml` pass build arguments with the same names. On Railway, the admin's service variables reach its Docker build automatically.
+
+### AlloPlace defaults
+
+Out of the box, the links go to alloplace.com:
+
+```bash
+NEXT_PUBLIC_LANDING_SITE_URL=https://alloplace.com
+NEXT_PUBLIC_TERMS_URL=https://alloplace.com/legal/terms
+NEXT_PUBLIC_PRIVACY_URL=https://alloplace.com/legal/privacy
+NEXT_PUBLIC_DOCS_SITE_URL=https://alloplace.com
+NEXT_PUBLIC_CONTACT_EMAIL=support@alloplace.com
+```
+
+`Dockerfile.admin` sets them for the build, `docker-compose.yml` passes them when they're unset, and `.env.example` carries them for local development. alloplace.com has no docs yet, so the docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
+
+To link to LobbyStack's page for one of them instead, set that variable to an empty value. In Docker and Compose, leaving it unset keeps alloplace.com's.
+
+`packages/shared/src/brandLinks.ts` holds the variable names, the checks, and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
+
 ## How it works
 
 - `packages/shared/src/branding.ts`: the variable names, the limits, the order of precedence (`resolveBranding`), and the logo type check (`brandLogoContentType`).
@@ -96,16 +141,13 @@ These places still say LobbyStack or link to lobbystack.com. Variables marked "p
 | Email subjects and bodies | `apps/admin/src/lib/auth.ts` (verification, password reset, email change, existing account); `packages/providers/src/email/smtp.ts` (templates, the inline 48×48 logo, founder sign-offs); `packages/domain/src/server/onboarding.ts`, `publicApi/users.ts`, `feedback.ts`; the worker's default subject "LobbyStack notification", which invitations use | The worker reads the same branding as the admin. The email header uses the logo at `APP_BASE_URL` + `/api/branding/logo`. |
 | Email sender | `EMAIL_FROM` (an existing variable; defaults to `LobbyStack <no-reply@…>`) | Already configurable. Default the display name to the app name. |
 | Operator alert emails | `packages/domain/src/server/calendar.ts`, `publicApi/webhooks.ts` | The app name. |
-| SMS | HELP and START replies in `packages/domain/src/server/sms.ts`; the verification code text in `verificationCode.ts`, which is also sent to callers who change an appointment, in English only | The app name, plus `BRAND_SUPPORT_EMAIL` and `BRAND_SITE_URL` (proposed). The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when it changes. |
-| Contact addresses | `support@lobbystack.com` in the feedback widget; `hello@lobbystack.ai` for Enterprise plans (`live-upgrade-plan-provider.tsx`, `onboarding-plan-surface.tsx`); `hello@lobbystack.com` in the SMS HELP reply | `BRAND_SUPPORT_EMAIL` and `BRAND_SALES_EMAIL` (proposed). |
-| Help and docs links | `docs.lobbystack.com` in the feedback widget, the MCP OAuth metadata, the CLI, and Zapier | `BRAND_DOCS_URL` (proposed). |
-| Marketing, terms, and privacy links | `NEXT_PUBLIC_LANDING_SITE_URL`, which defaults to `https://lobbystack.com` | Already a variable, but it's read at build time and isn't passed to the Docker build. An empty value would break the links, so it needs a guarded build argument. |
+| SMS | The "LobbyStack:" opening of the HELP and START replies in `packages/domain/src/server/sms.ts` (the HELP replies take their address and website from the [outside links](#send-the-outside-links-to-your-own-site)); the verification code text in `verificationCode.ts`, which is also sent to callers who change an appointment, in English only | The app name. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when it changes. |
 | Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
 | AI and voice text | The prospect demo instructions (`packages/domain/src/server/demos.ts`); the placeholder summary "… uses LobbyStack to answer calls." (`tenancy.ts`, `businessSummary.ts`), which `agent-core/src/businessFacts.ts` and migration 0074 detect by its wording; the MCP server's title and instructions (`apps/admin/src/lib/mcp/server.ts`) | The app name. The placeholder detection has to keep matching the old wording. |
 | API and OAuth | The OpenAPI title "LobbyStack API" and descriptions such as "LobbyStack Cloud" (`packages/shared/src/publicApi/`); API error messages; the webhook test event; the `LobbyStack-Webhooks` and `LobbyStack-OAuth` user agents; the OAuth resource name and realm (`apps/admin/src/lib/mcp/oauth-config.ts`, `oauth-provider.ts`) | The app name, except the user agents. |
 | Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack` as an alias, because customers' sites may call it. `BRAND_ACCENT_COLOR` (proposed) for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
-| CLI and Zapier | The `lobbystack` command, its config path, and its help text (`packages/cli`); the Zapier app's labels and errors, plus its name and logo in Zapier's dashboard (`integrations/zapier`) | Separate distributions, so they're renamed by publishing a renamed copy rather than with a variable. |
+| CLI and Zapier | The `lobbystack` command, its config path, and its help text, which links to `docs.lobbystack.com` (`packages/cli`); the Zapier app's labels, errors, and docs link, plus its name and logo in Zapier's dashboard (`integrations/zapier`) | Separate distributions, so they're renamed by publishing a renamed copy rather than with a variable. |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |
 

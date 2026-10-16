@@ -287,12 +287,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     }
   }, [parentOrigin, sessionToken, setMessages]);
 
+  // The history loads at the same time as the settings, as soon as the loader's
+  // session arrives. After that the live updates and the reloads below keep it
+  // current, so a renewed session doesn't load it again.
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const historyRequestedRef = useRef(false);
   useEffect(() => {
-    if (!configState) return;
-    const id = visitorIdRef.current || parentVisitorId || localVisitorId(widgetKey);
-    visitorIdRef.current = id;
-    void loadHistory();
-  }, [configState, loadHistory, parentVisitorId, widgetKey]);
+    if (!sessionToken || historyRequestedRef.current) return;
+    historyRequestedRef.current = true;
+    visitorIdRef.current = visitorIdRef.current || parentVisitorId || localVisitorId(widgetKey);
+    void loadHistory().then(() => setHistoryLoaded(true));
+  }, [loadHistory, parentVisitorId, sessionToken, widgetKey]);
+  // The chat shows once the settings and the history are both in. A renewed
+  // session reloads the settings, and the chat stays on screen meanwhile.
+  const chatLoaded = configState !== null && historyLoaded;
 
   // Team replies reach the database only, so poll for them while a person has the chat.
   // The live updates below bring them at once; this is the fallback when those are down.
@@ -374,10 +382,12 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs
   // before the browser paints, so new text never shows below the fold first.
+  // A history that arrived before the settings shows once they load, and
+  // opens at its latest message too.
   useLayoutEffect(() => {
     const thread = threadRef.current;
     if (thread && followThreadRef.current) thread.scrollTop = thread.scrollHeight;
-  }, [messages, status, voiceCaptions, submitError]);
+  }, [chatLoaded, messages, status, voiceCaptions, submitError]);
 
   // A live voice call or its captions are on screen. Typed messages come back
   // from history after a reload; these don't, so the loader asks the visitor
@@ -443,16 +453,16 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     }
   }
 
-  const showLeadBeforeChat = Boolean(configState?.config?.leadForm?.showBeforeChat) && !leadDone && messages.length === 0;
+  const showLeadBeforeChat = chatLoaded && Boolean(configState?.config?.leadForm?.showBeforeChat) && !leadDone && messages.length === 0;
   const showLeadButton = !leadDone && messages.length > 0 && Boolean(configState?.config?.leadForm?.enabled);
   // The id the loader keeps for this visitor, so the same chat comes back on every visit. Only its
   // start is shown: with the widget key, the full id is enough to open this visitor's chat.
   const shortVisitorId = parentVisitorId?.slice(0, 8) ?? "";
   const voiceEnabled = Boolean(configState?.voiceEnabled) && Boolean(configState?.businessSlug);
   const configErrorCode = config.error instanceof Error && ["originDenied", "invalidKey", "configLoad"].includes(config.error.message) ? config.error.message : null;
-  // Until the settings load, placeholders hold the place of the name, the call button, the greeting
-  // and the visitor ID, so nothing moves when they arrive.
-  const settingsPending = !config.data && !config.isError && !submitError?.startsWith("errors.");
+  // Until the settings and the history load, placeholders hold the place of the name, the call
+  // button, the chat and the visitor ID, so nothing moves when they arrive.
+  const chatPending = !chatLoaded && !config.isError && !submitError?.startsWith("errors.");
 
   return (
     // The chat fills the frame at a fixed height and only the thread scrolls, so new messages never
@@ -461,18 +471,18 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       <header className="flex shrink-0 flex-col gap-3 border-b px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="flex size-9 shrink-0 items-center justify-center rounded-full text-sm font-bold" style={{ backgroundColor: color, color: onColor }} aria-hidden="true">
-            {settingsPending ? null : (title || "?")[0]?.toUpperCase()}
+            {chatPending ? null : (title || "?")[0]?.toUpperCase()}
           </div>
           <div className="min-w-0">
-            {settingsPending ? <div className="my-0.5 h-4 w-32 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : <p className="truncate text-sm font-semibold">{title}</p>}
-            {configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
+            {chatPending ? <div className="my-0.5 h-4 w-32 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : <p className="truncate text-sm font-semibold">{title}</p>}
+            {chatLoaded && configState?.config?.subtitle ? <p className="truncate text-xs text-zinc-500">{configState.config.subtitle}</p> : null}
           </div>
         </div>
-        {settingsPending ? <div className="h-10 w-full animate-pulse rounded-4xl bg-zinc-100" aria-hidden="true" /> : null}
-        {voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
+        {chatPending ? <div className="h-10 w-full animate-pulse rounded-4xl bg-zinc-100" aria-hidden="true" /> : null}
+        {chatLoaded && voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
       </header>
 
-      {handoff ? (
+      {chatLoaded && handoff ? (
         <div className="shrink-0 border-b bg-amber-50 px-4 py-2 text-xs font-medium text-amber-800" role="status">
           {handling.waitingForTeam ? t("chat.waitingForTeam") : handling.teamMemberName ? t("chat.teamMemberInChat", { name: handling.teamMemberName }) : t("chat.handoffBanner")}
         </div>
@@ -488,20 +498,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       >
         {configErrorCode ? <p className="text-center text-sm text-zinc-500">{t(`errors.${configErrorCode}` as never)}</p> : null}
         {config.isError ? <p className="text-center text-sm text-zinc-500">{t("errors.configLoad")}</p> : null}
-        {settingsPending ? (
+        {chatPending ? (
           <div className="flex flex-col gap-1" role="status">
             <span className="sr-only">{t("chat.loadingTranscript")}</span>
             <div className="my-0.5 h-4 w-44 animate-pulse rounded bg-zinc-100" aria-hidden="true" />
             <div className="h-14 w-4/5 animate-pulse rounded-xl rounded-bl-sm bg-zinc-100" aria-hidden="true" />
           </div>
         ) : null}
-        {config.data && messages.length === 0 && !showLeadBeforeChat ? (
+        {chatLoaded && messages.length === 0 && !showLeadBeforeChat ? (
           <div className="flex flex-col gap-1 text-sm text-zinc-600">
             <p className="font-medium text-zinc-800">{t("chat.welcome")}</p>
             {configState?.config?.greeting ? <p className="rounded-xl rounded-bl-sm bg-zinc-100 px-3 py-2 whitespace-pre-wrap">{configState.config.greeting}</p> : null}
           </div>
         ) : null}
-        {thread.map(({ message, teamMemberName, joined, showName }) => (
+        {chatLoaded ? thread.map(({ message, teamMemberName, joined, showName }) => (
           <Fragment key={message.id}>
             {joined ? <p className="text-center text-xs text-zinc-500">{teamMemberName ? t("chat.teamJoined", { name: teamMemberName }) : t("chat.teamJoinedNoName")}</p> : null}
             <div className={cn("flex flex-col gap-1", message.role === "user" ? "items-end" : "items-start")}>
@@ -512,7 +522,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
               </div>
             </div>
           </Fragment>
-        ))}
+        )) : null}
         {sending && !handoff && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
         {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} onColor={onColor} t={t} /> : null}
         {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
@@ -529,7 +539,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
             placeholder={t("chat.composerPlaceholder")}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
-            disabled={!config.data || sending || leadOpen}
+            disabled={!chatLoaded || sending || leadOpen}
             aria-label={t("chat.composerPlaceholder")}
           />
           <Button aria-label={t("chat.send")} disabled={!draft.trim() || sending || leadOpen} loading={sending} size="icon-lg" type="submit" style={{ backgroundColor: color, color: onColor }}><SendHorizontal /></Button>
@@ -537,7 +547,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         {/* This row is always there, so the visitor ID arriving doesn't push the composer up. */}
         <div className="flex min-h-8 items-center gap-2">
           {showLeadButton ? <Button type="button" onClick={() => setLeadOpen(true)} variant="outline" size="sm" className="shrink-0 text-xs" disabled={leadOpen}>{t("chat.leaveDetails")}</Button> : null}
-          {shortVisitorId ? <p className="ml-auto truncate text-xs text-zinc-400 tabular-nums">{t("chat.visitorId", { id: shortVisitorId })}</p> : settingsPending ? <div className="ml-auto h-3 w-24 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : null}
+          {shortVisitorId ? <p className="ml-auto truncate text-xs text-zinc-400 tabular-nums">{t("chat.visitorId", { id: shortVisitorId })}</p> : chatPending ? <div className="ml-auto h-3 w-24 animate-pulse rounded bg-zinc-100" aria-hidden="true" /> : null}
         </div>
       </form>
 

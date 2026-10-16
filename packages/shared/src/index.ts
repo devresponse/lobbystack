@@ -8,6 +8,7 @@ import { appointmentChangeVerificationModes, bookingModes, transferModes } from 
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
 export * from "./branding";
+export * from "./brandLinks";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";

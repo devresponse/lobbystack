@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 import { contacts, conversationSessions, conversations, enqueueOutbox, messages, phoneNumbers, providerEvents, smsConsentEvents, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition } from "@lobbystack/shared";
 
 import { findOrCreateContactByPhone } from "./contacts";
 import type { DomainContext } from "./context";
@@ -14,7 +14,6 @@ import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 const SMS_STOP_KEYWORDS = new Set(["STOP", "STOPALL", "UNSUBSCRIBE", "END", "QUIT", "CANCEL"]);
 const SMS_START_KEYWORDS = new Set(["START", "UNSTOP", "SUBSCRIBE"]);
 const SMS_HELP_KEYWORDS = new Set(["HELP"]);
-const SMS_HELP_REPLY = "LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.";
 const SMS_START_REPLY = "LobbyStack: You are subscribed again. Reply HELP for help or STOP to opt out.";
 
 export type SmsConsentUpdate = { status: "subscribed" | "opted_out"; source: string };
@@ -36,18 +35,27 @@ export function classifySmsConsentUpdate(input: { body: string; optOutType?: str
   return null;
 }
 
+/** The HELP reply, with the deployment's own address and website when it sets them (see docs/branding.md). */
+export function smsHelpReply(): string {
+  const links = brandLinks();
+  return `LobbyStack: For help, contact ${contactEmailFor(links, "sms")} or visit ${links.siteUrl}. Reply STOP to opt out.`;
+}
+
 export function classifySmsKeywordReply(input: { body: string; optOutType?: string }): SmsKeywordReply | null {
   const normalizedOptOutType = input.optOutType?.trim().toUpperCase();
   const normalizedBody = normalizeSmsKeyword(input.body ?? "");
   const keyword = normalizedOptOutType || normalizedBody;
-  if (SMS_HELP_KEYWORDS.has(keyword)) return { body: SMS_HELP_REPLY, kind: "help" };
+  if (SMS_HELP_KEYWORDS.has(keyword)) return { body: smsHelpReply(), kind: "help" };
   if (SMS_START_KEYWORDS.has(keyword)) return { body: SMS_START_REPLY, kind: "start" };
   return null;
 }
 
 /** Marks a contact's consent status as set by a text to the shared sender: "shared_sender:STOP". */
 const SHARED_SENDER_SOURCE = "shared_sender";
-export const SHARED_SENDER_HELP_REPLY = "LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.";
+/** The shared sender's HELP reply, with the deployment's own address when it sets one. */
+export function sharedSenderHelpReply(): string {
+  return `LobbyStack: For help with an appointment, call the business you booked with. For anything else, email ${contactEmailFor(brandLinks(), "sms")}. Reply STOP to opt out.`;
+}
 export const SHARED_SENDER_START_REPLY = "LobbyStack: You can get texts from this number again. Reply HELP for help or STOP to opt out.";
 
 /**
@@ -70,7 +78,7 @@ export async function receiveSharedSenderSms(
 ): Promise<{ reply: string | null; contactsChanged: number }> {
   const consentUpdate = classifySmsConsentUpdate(input);
   const keywordReply = classifySmsKeywordReply(input);
-  const reply = keywordReply?.kind === "help" ? SHARED_SENDER_HELP_REPLY : keywordReply?.kind === "start" ? SHARED_SENDER_START_REPLY : null;
+  const reply = keywordReply?.kind === "help" ? sharedSenderHelpReply() : keywordReply?.kind === "start" ? SHARED_SENDER_START_REPLY : null;
   if (!consentUpdate) return { reply, contactsChanged: 0 };
   // "keyword:STOP" or "twilio_opt_out:STOP" becomes "shared_sender:STOP".
   const source = `${SHARED_SENDER_SOURCE}:${consentUpdate.source.slice(consentUpdate.source.indexOf(":") + 1)}`;

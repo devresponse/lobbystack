@@ -47,11 +47,54 @@ describe("admin build release", () => {
   });
 
   it("passes Railway's commit SHA into the Docker build that runs next build", () => {
-    // A Windows checkout with core.autocrlf has CRLF line endings.
-    const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-    const buildStage = dockerfile.slice(0, dockerfile.indexOf(" AS runtime"));
+    const buildStage = dockerBuildStage();
     const commitArg = buildStage.indexOf("ARG RAILWAY_GIT_COMMIT_SHA\n");
     expect(commitArg).toBeGreaterThan(-1);
     expect(commitArg).toBeLessThan(buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build"));
   });
 });
+
+const BRAND_LINK_VARIABLES = ["NEXT_PUBLIC_LANDING_SITE_URL", "NEXT_PUBLIC_TERMS_URL", "NEXT_PUBLIC_PRIVACY_URL", "NEXT_PUBLIC_DOCS_SITE_URL", "NEXT_PUBLIC_CONTACT_EMAIL"];
+
+describe("admin build links", () => {
+  it("writes the deployment's links into the build", async () => {
+    const config = await loadConfig({
+      NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms",
+      NEXT_PUBLIC_PRIVACY_URL: "https://alloplace.com/legal/privacy",
+      NEXT_PUBLIC_DOCS_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_CONTACT_EMAIL: "support@alloplace.com",
+    }) as NextConfig;
+    expect(config.env).toMatchObject({
+      NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms",
+      NEXT_PUBLIC_PRIVACY_URL: "https://alloplace.com/legal/privacy",
+      NEXT_PUBLIC_DOCS_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_CONTACT_EMAIL: "support@alloplace.com",
+    });
+  });
+
+  it("fixes unset links as empty, so a value added at run time can't split the server from the browser", async () => {
+    for (const name of BRAND_LINK_VARIABLES) vi.stubEnv(name, undefined);
+    const config = await loadConfig({}) as NextConfig;
+    for (const name of BRAND_LINK_VARIABLES) expect(config.env?.[name]).toBe("");
+  });
+
+  it("gives the Docker build that runs next build alloplace.com's links", () => {
+    const buildStage = dockerBuildStage();
+    const adminBuild = buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build");
+    for (const name of BRAND_LINK_VARIABLES) {
+      const linkArg = buildStage.indexOf(`ARG ${name}=`);
+      expect(linkArg, name).toBeGreaterThan(-1);
+      expect(linkArg, name).toBeLessThan(adminBuild);
+    }
+    expect(buildStage).toContain("ARG NEXT_PUBLIC_TERMS_URL=https://alloplace.com/legal/terms\n");
+    expect(buildStage).toContain("ARG NEXT_PUBLIC_CONTACT_EMAIL=support@alloplace.com\n");
+  });
+});
+
+function dockerBuildStage() {
+  // A Windows checkout with core.autocrlf has CRLF line endings.
+  const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  return dockerfile.slice(0, dockerfile.indexOf(" AS runtime"));
+}

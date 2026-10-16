@@ -21,6 +21,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** A response the test sends when it chooses. */
+function held() {
+  let send: (response: Response) => void = () => {};
+  const response = new Promise<Response>((resolve) => { send = resolve; });
+  return { response, send: (value: Response) => send(value) };
+}
+
+/** The chat route's answer, streamed as the receptionist writes it. */
+function streamedReply(text: string) {
+  return createUIMessageStreamResponse({
+    stream: createUIMessageStream({
+      execute: ({ writer }) => {
+        writer.write({ type: "start", messageId: "a1" });
+        writer.write({ type: "text-start", id: "a1" });
+        writer.write({ type: "text-delta", id: "a1", delta: text });
+        writer.write({ type: "text-end", id: "a1" });
+        writer.write({ type: "finish", finishReason: "stop" });
+      },
+    }),
+  });
+}
+
 describe("widget chat after a team member takes over", () => {
   it("shows the banner from history and picks up the team's reply without a reload", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
@@ -170,6 +192,74 @@ describe("widget chat live updates", () => {
     end();
     client.clear();
   });
+
+  function openChat(respond: (url: string) => Promise<Response>) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const streamRequests = vi.fn();
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => {
+      if (String(url).includes("/api/widget/stream")) streamRequests();
+      return await respond(String(url));
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    return { client, streamRequests };
+  }
+
+  async function send(text: string) {
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: text } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+  }
+
+  it("waits for the server to answer a new visitor's first message, which starts their chat, before opening the stream", async () => {
+    const reply = held();
+    const { client, streamRequests } = openChat(async (url) => {
+      if (url.includes("/api/widget/history")) return Response.json({ messages: [] });
+      if (url.includes("/api/widget/chat")) return await reply.response;
+      if (url.includes("/api/widget/stream")) return new Response(null, { status: 401 });
+      return Response.json(config);
+    });
+
+    await send("Do you open on Sundays?");
+    expect(await screen.findByText("Do you open on Sundays?")).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    // The server has no chat for the visitor until it takes their message.
+    expect(streamRequests).not.toHaveBeenCalled();
+
+    await act(async () => { reply.send(streamedReply("We open at ten on Sundays.")); });
+    expect(await screen.findByText("We open at ten on Sundays.")).toBeTruthy();
+    await vi.waitFor(() => expect(streamRequests).toHaveBeenCalledTimes(1));
+    client.clear();
+  });
+
+  it("stops the stream when the visitor has no open chat, until the server answers their next message", async () => {
+    const firstStream = held();
+    const { client, streamRequests } = openChat(async (url) => {
+      if (url.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [visitorMessage, teamReply] });
+      if (url.includes("/api/widget/chat")) return streamedReply("We open at ten on Sundays.");
+      if (url.includes("/api/widget/stream")) return streamRequests.mock.calls.length === 1 ? await firstStream.response : new Response(null, { status: 401 });
+      return Response.json(config);
+    });
+    await vi.waitFor(() => expect(streamRequests).toHaveBeenCalledTimes(1));
+
+    // The team closed the chat after it loaded: the stream finds none and doesn't keep asking.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => { firstStream.send(Response.json({ code: "widget_conversation_not_found" }, { status: 404 })); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000); });
+    expect(streamRequests).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+
+    // The visitor's next message starts a new chat, and the stream opens again for it.
+    await send("Do you open on Sundays?");
+    expect(await screen.findByText("We open at ten on Sundays.")).toBeTruthy();
+    await vi.waitFor(() => expect(streamRequests).toHaveBeenCalledTimes(2));
+    client.clear();
+  });
 });
 
 describe("widget voice captions", () => {
@@ -307,13 +397,6 @@ describe("widget loading state", () => {
 });
 
 describe("widget first load", () => {
-  /** A response the test sends when it chooses. */
-  function held() {
-    let send: (response: Response) => void = () => {};
-    const response = new Promise<Response>((resolve) => { send = resolve; });
-    return { response, send: (value: Response) => send(value) };
-  }
-
   function openChat(respond: (url: string, init?: RequestInit) => Promise<Response>, initialColor?: string) {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     Element.prototype.scrollTo = () => {};

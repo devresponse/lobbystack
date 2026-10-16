@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getOrCreateWidgetConversation, loadWidgetChatView } from "@lobbystack/domain";
+import { findCurrentWidgetConversationId, loadWidgetChatView } from "@lobbystack/domain";
 import { isUuid } from "@lobbystack/shared";
 
 import { asApiResponse } from "@/lib/api-helpers";
@@ -23,7 +23,9 @@ export async function GET(request: Request) {
 
     const context = createWorkerDomainContext();
     if (!isUuid(visitorId)) return NextResponse.json({ messages: [] });
-    const { conversationId } = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: visitorId });
+    // Reading never starts a chat: the visitor's first message does, so one who only looks leaves none behind.
+    const conversationId = await findCurrentWidgetConversationId(context, { businessId: session.businessId, widgetVisitorId: visitorId });
+    if (!conversationId) return NextResponse.json({ messages: [] });
     const view = await loadWidgetChatView(context, { businessId: session.businessId, conversationId });
     return NextResponse.json({
       conversationId,

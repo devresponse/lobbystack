@@ -337,10 +337,19 @@ export async function registerWidgetVisitor(
 }
 
 /**
- * A website chat with no message for this long is closed, and the visitor's
- * next visit starts a new one, which the receptionist answers.
+ * A website chat with no message for this long is over: the visitor's next
+ * visit shows an empty chat, and their next message closes the old one and
+ * starts a new one, which the receptionist answers.
  */
 export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
+
+/** The visitor's open website chat, and whether it went a day without messages. A chat without messages yet stays, however old. */
+async function openWidgetChat(tx: DatabaseTransaction, input: { businessId: string; widgetVisitorId: string; now: Date }) {
+  const [chat] = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+  if (!chat) return undefined;
+  const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, chat.id))).orderBy(desc(messages.createdAt)).limit(1);
+  return { ...chat, wentIdle: lastMessage !== undefined && input.now.getTime() - lastMessage.createdAt.getTime() >= WIDGET_CHAT_IDLE_CLOSE_MS };
+}
 
 export async function getOrCreateWidgetConversation(
   context: DomainContext,
@@ -359,15 +368,11 @@ export async function getOrCreateWidgetConversation(
       visitor = await lockVisitor();
     }
     if (!visitor) throw new Error("Widget visitor not found.");
-    let [current] = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
-    if (current) {
-      // A chat without messages yet stays, however old.
-      const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, current.id))).orderBy(desc(messages.createdAt)).limit(1);
-      if (lastMessage && now.getTime() - lastMessage.createdAt.getTime() >= WIDGET_CHAT_IDLE_CLOSE_MS) {
-        await tx.update(conversationSessions).set({ status: "closed", closedAt: now, updatedAt: now }).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, current.id), eq(conversationSessions.status, "open")));
-        await tx.update(conversations).set({ status: "closed", updatedAt: now }).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
-        current = undefined;
-      }
+    let current = await openWidgetChat(tx, { ...input, now });
+    if (current?.wentIdle) {
+      await tx.update(conversationSessions).set({ status: "closed", closedAt: now, updatedAt: now }).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, current.id), eq(conversationSessions.status, "open")));
+      await tx.update(conversations).set({ status: "closed", updatedAt: now }).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
+      current = undefined;
     }
     const conversationId = current?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
     if (!conversationId) {
@@ -378,7 +383,27 @@ export async function getOrCreateWidgetConversation(
   });
 }
 
-/** The visitor's open website chat, if they have one. Unlike getOrCreateWidgetConversation, never creates it. */
+/**
+ * The chat the visitor's widget shows: their open website chat, unless it went
+ * a day without messages, since their next message starts a new one then.
+ * Unlike getOrCreateWidgetConversation, never creates or closes a chat, so a
+ * visitor who only looks leaves nothing behind.
+ */
+export async function findCurrentWidgetConversationId(
+  context: DomainContext,
+  input: { businessId: string; widgetVisitorId: string; now?: Date },
+): Promise<string | null> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const chat = await openWidgetChat(tx, { ...input, now: input.now ?? new Date() });
+    return chat && !chat.wentIdle ? chat.id : null;
+  });
+}
+
+/**
+ * The visitor's open website chat, if they have one, however long it went
+ * without messages: the widget's live updates follow it, so a team member's
+ * late reply still reaches a page left open. Never creates a chat.
+ */
 export async function findWidgetConversationId(
   context: DomainContext,
   input: { businessId: string; widgetVisitorId: string },

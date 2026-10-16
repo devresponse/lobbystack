@@ -113,8 +113,8 @@ function localVisitorId(widgetKey: string): string {
   return id;
 }
 
-/** How a live update stream ended: on its own, on an error worth retrying, or for good. */
-type WidgetStreamOutcome = "ended" | "failed" | "stopped";
+/** How a live update stream ended: on its own, on an error worth retrying, for good, or because the visitor has no open chat. */
+type WidgetStreamOutcome = "ended" | "failed" | "stopped" | "no_chat";
 
 /** Reads the chat's live updates until the stream ends. Only the event names matter: events carry no text. */
 async function readWidgetStream(input: { token: string; parentOrigin: string; signal: AbortSignal; onEvent: (name: string) => void }): Promise<WidgetStreamOutcome> {
@@ -124,6 +124,7 @@ async function readWidgetStream(input: { token: string; parentOrigin: string; si
     cache: "no-store",
     signal: input.signal,
   });
+  if (response.status === 404) return "no_chat";
   // A session the server turns down stays turned down until the loader sends a new one.
   if (!response.ok) return [400, 401, 403].includes(response.status) ? "stopped" : "failed";
   if (!response.body || !response.headers.get("content-type")?.startsWith("text/event-stream")) return "stopped";
@@ -161,6 +162,10 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const [handling, setHandling] = useState<ChatHandling>(RECEPTIONIST_HANDLING);
   const handoff = handling.handoff;
   const [voiceCaptions, setVoiceCaptions] = useState<VoiceCaptions>({ live: false, turns: [] });
+  // Whether the server has the visitor's chat, which their first message
+  // starts. The history says whether they have one; once the server answers a
+  // message they most likely do, and the live updates stop if they don't.
+  const [chatSaved, setChatSaved] = useState(false);
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
@@ -198,6 +203,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     transport,
     onError: (error) => setSubmitError(chatErrorKey(error)),
     onFinish: ({ message }) => {
+      setChatSaved(true);
       const metadata = message.metadata;
       if (metadata?.automationState === "ai_active") setHandling(RECEPTIONIST_HANDLING);
       if (metadata?.automationState === "human_handoff") setHandling((current) => ({ ...current, handoff: true, waitingForTeam: metadata.waitingForTeam ?? current.waitingForTeam }));
@@ -275,6 +281,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       if (signal?.aborted) return;
       setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
       if (Array.isArray(data.messages)) {
+        setChatSaved(data.messages.length > 0);
         setMessages(data.messages.map((message) => ({
           id: message.id,
           role: message.role === "assistant" ? "assistant" : "user",
@@ -352,10 +359,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
 
   // Once the visitor has a chat, an open stream tells the widget when a team
   // member writes or takes over. It pauses while the page is in the background.
-  const chatStarted = messages.length > 0;
   const configLoaded = configState !== null;
   useEffect(() => {
-    if (!sessionToken || !parentOrigin || !configLoaded || !chatStarted || !pageVisible) return;
+    if (!sessionToken || !parentOrigin || !configLoaded || !chatSaved || !pageVisible) return;
     const controller = new AbortController();
     let timer: number | undefined;
     let failures = 0;
@@ -368,6 +374,11 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         outcome = "failed";
       }
       if (controller.signal.aborted || outcome === "stopped") return;
+      if (outcome === "no_chat") {
+        // The visitor's next answered message opens the stream again.
+        setChatSaved(false);
+        return;
+      }
       // A stream that ran its course reopens at once; failures back off, up to a minute.
       const delay = outcome === "ended" ? 1_000 : Math.min(60_000, 2_000 * 2 ** failures++);
       timer = window.setTimeout(() => void connect(), delay);
@@ -377,7 +388,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [chatStarted, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken]);
+  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken]);
 
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs

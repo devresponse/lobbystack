@@ -8,7 +8,7 @@ import type { DomainContext } from "./context";
 import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
 import { requireBusinessAdmin } from "../authz";
-import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, reserveUsageInTransaction } from "./usage";
+import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
 export type BillingCheckoutTarget = "starter" | "pro";
 export type BillingInterval = "monthly" | "annual";
@@ -25,12 +25,8 @@ export function normalizeWebCallMaxDurationMs(value: number | undefined): number
   return Math.min(Math.floor(value), MAX_WEB_CALL_MAX_DURATION_MS);
 }
 
-async function loadWebVoiceBillingAllowance(
-  tx: DatabaseTransaction,
-  input: { businessId: string; maxDurationMs?: number },
-): Promise<WebVoiceBillingAllowance> {
-  const status = await getUsageStatusInTransaction(tx, { businessId: input.businessId });
-  const requested = normalizeWebCallMaxDurationMs(input.maxDurationMs);
+function webVoiceBillingAllowance(status: UsageStatus, maxDurationMs: number | undefined): WebVoiceBillingAllowance {
+  const requested = normalizeWebCallMaxDurationMs(maxDurationMs);
   const entitlement = billingPlanCatalog[status.plan];
   const includedRemaining = status.voiceSecondsIncluded === null
     ? Number.POSITIVE_INFINITY
@@ -56,14 +52,15 @@ export async function getWebVoiceBillingAllowance(
   context: DomainContext,
   input: { businessId: string; maxDurationMs?: number },
 ): Promise<WebVoiceBillingAllowance> {
-  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => await loadWebVoiceBillingAllowance(tx, input));
+  // Decides whether to offer a call without writing; the call's reservation counts again.
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => webVoiceBillingAllowance(await readUsageStatusInTransaction(tx, { businessId: input.businessId }), input.maxDurationMs));
 }
 
 export async function reserveWebVoiceUsageInTransaction(
   tx: DatabaseTransaction,
   input: { businessId: string; callId: string; maxDurationMs?: number },
 ): Promise<WebVoiceBillingAllowance> {
-  const allowance = await loadWebVoiceBillingAllowance(tx, input);
+  const allowance = webVoiceBillingAllowance(await getUsageStatusInTransaction(tx, { businessId: input.businessId }), input.maxDurationMs);
   if (!allowance.allowed) return allowance;
   if (allowance.plan === "self_host") return allowance;
   const reservation = await reserveUsageInTransaction(tx, { businessId: input.businessId, usageKind: "voice_seconds", sourceKey: `voice:${input.callId}`, quantity: allowance.maxDurationMs / 1_000 });
@@ -94,7 +91,8 @@ export async function getWidgetChatAllowance(
   input: { businessId: string },
 ): Promise<WidgetChatBillingAllowance> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const status = await getUsageStatusInTransaction(tx, { businessId: input.businessId });
+    // Decides whether to offer the chat without writing; each chat's reservation counts again.
+    const status = await readUsageStatusInTransaction(tx, { businessId: input.businessId });
     const entitlement = billingPlanCatalog[status.plan];
     if (entitlement.chatAiTokensIncluded === null || entitlement.overagesBillable) {
       return { allowed: true, errorCode: null, plan: status.plan };

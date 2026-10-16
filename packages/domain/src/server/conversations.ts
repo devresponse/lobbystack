@@ -350,7 +350,14 @@ export async function getOrCreateWidgetConversation(
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     // Locking the visitor makes a concurrent link wait, so a new chat either sees the contact or is claimed by the link.
     // It also makes the visitor's concurrent requests agree on one chat when an idle one is replaced.
-    const visitor = (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("no key update"))[0];
+    const lockVisitor = async () => (await tx.select({ id: widgetVisitors.id, contactId: widgetVisitors.contactId }).from(widgetVisitors).where(and(eq(widgetVisitors.id, input.widgetVisitorId), eq(widgetVisitors.businessId, input.businessId))).limit(1).for("no key update"))[0];
+    let visitor = await lockVisitor();
+    if (!visitor) {
+      // The widget's session request registers its visitor, but a session
+      // issued by the previous version during a deploy didn't.
+      await tx.insert(widgetVisitors).values({ id: input.widgetVisitorId, businessId: input.businessId }).onConflictDoNothing();
+      visitor = await lockVisitor();
+    }
     if (!visitor) throw new Error("Widget visitor not found.");
     let [current] = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
     if (current) {

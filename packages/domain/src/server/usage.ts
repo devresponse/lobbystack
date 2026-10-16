@@ -178,13 +178,13 @@ async function ensureUsageMonth(tx: DatabaseTransaction, businessId: string, per
   await tx.insert(billingUsageMonths).values({ businessId, periodKey, planAtSnapshot: plan }).onConflictDoNothing({ target: [billingUsageMonths.businessId, billingUsageMonths.periodKey] });
 }
 
-async function refreshUsageMonth(tx: DatabaseTransaction, input: { businessId: string; periodKey: string; plan: BillingPlanSlug; capCents: number | null; events?: ReplayEvent[] }): Promise<UsageStatus> {
-  const events = input.events ?? await loadEvents(tx, input.businessId, input.periodKey);
+function usageStatusFrom(input: { periodKey: string; plan: BillingPlanSlug; capCents: number | null; events: ReplayEvent[] }): UsageStatus {
+  const { events } = input;
   const replay = replayEvents(events, input.plan);
   const config = billingPlanCatalog[input.plan];
   const overageSpendCents = Math.max(0, Math.ceil(replay.rawSpendCents - 1e-9));
   const capReached = input.capCents !== null && replay.rawSpendCents > 0 && overageSpendCents >= input.capCents;
-  const status: UsageStatus = {
+  return {
     periodKey: input.periodKey,
     plan: input.plan,
     voiceSecondsUsed: replay.usage.voice_seconds,
@@ -204,6 +204,11 @@ async function refreshUsageMonth(tx: DatabaseTransaction, input: { businessId: s
     overageSpendingCapReached: capReached,
     usageComplete: events.every((event) => event.isFinal),
   };
+}
+
+async function refreshUsageMonth(tx: DatabaseTransaction, input: { businessId: string; periodKey: string; plan: BillingPlanSlug; capCents: number | null; events?: ReplayEvent[] }): Promise<UsageStatus> {
+  const events = input.events ?? await loadEvents(tx, input.businessId, input.periodKey);
+  const status = usageStatusFrom({ periodKey: input.periodKey, plan: input.plan, capCents: input.capCents, events });
   await ensureUsageMonth(tx, input.businessId, input.periodKey, input.plan);
   await tx.update(billingUsageMonths).set({
     planAtSnapshot: input.plan,
@@ -229,6 +234,17 @@ export async function getUsageStatusInTransaction(tx: DatabaseTransaction, input
   await lockUsagePeriod(tx, input.businessId, periodKey);
   const billing = await loadBillingContext(tx, input.businessId);
   return await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, plan: billing.plan, capCents: billing.capCents });
+}
+
+// The same count without the period lock or saving the month's row, for checks
+// that only decide what to offer, such as the website chat's settings: they
+// don't wait behind a call reserving its minutes. Using an allowance reserves
+// it, and the reservation locks and counts again.
+export async function readUsageStatusInTransaction(tx: DatabaseTransaction, input: { businessId: string; periodKey?: string }): Promise<UsageStatus> {
+  const periodKey = input.periodKey ?? periodKeyFor();
+  const billing = await loadBillingContext(tx, input.businessId);
+  const events = await loadEvents(tx, input.businessId, periodKey);
+  return usageStatusFrom({ periodKey, plan: billing.plan, capCents: billing.capCents, events });
 }
 
 export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: { businessId: string; usageKind: NonAiBillingUsageKind; sourceKey: string; quantity?: number | undefined; recordedAt?: Date | undefined }): Promise<UsageReservationResult> {

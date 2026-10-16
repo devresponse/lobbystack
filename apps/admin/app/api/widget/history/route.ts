@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getOrCreateWidgetConversation, loadWidgetChatView, registerWidgetVisitor } from "@lobbystack/domain";
+import { getOrCreateWidgetConversation, loadWidgetChatView } from "@lobbystack/domain";
 import { isUuid } from "@lobbystack/shared";
 
 import { asApiResponse } from "@/lib/api-helpers";
@@ -23,7 +23,6 @@ export async function GET(request: Request) {
 
     const context = createWorkerDomainContext();
     if (!isUuid(visitorId)) return NextResponse.json({ messages: [] });
-    await registerWidgetVisitor(context, { businessId: session.businessId, visitorId, metadata: { userAgent: request.headers.get("user-agent") ?? undefined } });
     const { conversationId } = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: visitorId });
     const view = await loadWidgetChatView(context, { businessId: session.businessId, conversationId });
     return NextResponse.json({

@@ -302,10 +302,10 @@ export async function registerWidgetVisitor(
       }
     } else {
       // A concurrent first registration can insert the visitor between our read
-      // and this insert, as when the widget asks for its settings and its
-      // history at once. The conflict update then links the contact itself, so
-      // an anonymous insert winning the race can't drop the link, and adds to
-      // the other registration's metadata instead of replacing it.
+      // and this insert, as when the chat opens in two tabs at once. The
+      // conflict update then links the contact itself, so an anonymous insert
+      // winning the race can't drop the link, and adds to the other
+      // registration's metadata instead of replacing it.
       const [visitor] = await tx.insert(widgetVisitors).values({ id: input.visitorId, businessId: input.businessId, ...(input.name ? { name: input.name } : {}), email: input.email, metadata: mergedMetadata, ...(contactId ? { contactId, contactLinkedAt: sql`now()` } : {}), lastSeenAt: new Date(), updatedAt: new Date() }).onConflictDoUpdate({
         target: widgetVisitors.id,
         set: {

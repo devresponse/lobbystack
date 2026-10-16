@@ -123,9 +123,9 @@ describe.skipIf(!testUrl)("call summaries against PostgreSQL under worker RLS", 
 });
 
 describe.skipIf(!testUrl)("website visitors against PostgreSQL under worker RLS", () => {
-  it("keeps the page a new visitor came from when the widget's settings and history register it at once", async () => {
-    // The settings request inserts the visitor with its page while the history
-    // request, which found no visitor yet, waits to insert it too.
+  it("keeps the page a new visitor came from when two requests register it at once", async () => {
+    // One request inserts the visitor with its page while the other, which
+    // found no visitor yet, waits to insert it too.
     const businessId = randomUUID();
     const visitorId = randomUUID();
     const blocker = await client!.pool.connect();

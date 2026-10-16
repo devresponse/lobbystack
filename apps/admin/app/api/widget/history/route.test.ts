@@ -6,6 +6,7 @@ const conversationId = "00000000-0000-4000-8000-000000000003";
 
 const mocks = vi.hoisted(() => ({
   loadWidgetChatView: vi.fn(),
+  registerWidgetVisitor: vi.fn(),
 }));
 
 vi.mock("@/lib/widget-access", () => ({
@@ -16,7 +17,7 @@ vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash" }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/api-helpers", () => ({ asApiResponse: (error: unknown) => { throw error; } }));
 vi.mock("@lobbystack/domain", () => ({
-  registerWidgetVisitor: async () => ({ visitorId, contactId: null }),
+  registerWidgetVisitor: mocks.registerWidgetVisitor,
   getOrCreateWidgetConversation: async () => ({ conversationId, automationState: "human_handoff" }),
   loadWidgetChatView: mocks.loadWidgetChatView,
 }));
@@ -27,6 +28,7 @@ const at = new Date("2026-10-14T21:00:00.000Z");
 
 beforeEach(() => {
   mocks.loadWidgetChatView.mockReset();
+  mocks.registerWidgetVisitor.mockReset();
 });
 
 describe("GET /api/widget/history", () => {
@@ -58,5 +60,14 @@ describe("GET /api/widget/history", () => {
       ],
     });
     expect(mocks.loadWidgetChatView).toHaveBeenCalledWith({}, { businessId, conversationId });
+  });
+
+  it("reads the chat without saving the visitor, which its session did", async () => {
+    mocks.loadWidgetChatView.mockResolvedValue({ automationState: "ai_active", waitingForTeam: false, teamMemberName: null, messages: [] });
+
+    const response = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.registerWidgetVisitor).not.toHaveBeenCalled();
   });
 });

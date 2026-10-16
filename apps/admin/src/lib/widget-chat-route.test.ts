@@ -148,7 +148,6 @@ beforeEach(() => {
   mocks.appendMessage.mockResolvedValue(inboundMessageId);
   mocks.queueOperatorAlert.mockResolvedValue(undefined);
   mocks.recordAiGenerationEvent.mockResolvedValue("event-id");
-  mocks.registerWidgetVisitor.mockResolvedValue({ visitorId, contactId: null });
   mocks.getWorkerDatabase.mockReturnValue({ db: {} });
   mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => await callback({}));
   mocks.reserveWidgetChatUsageInTransaction.mockResolvedValue({ allowed: true, plan: "scale" });
@@ -206,6 +205,12 @@ describe("POST /api/widget/chat", () => {
   it("doesn't check on the team in a chat the receptionist has", async () => {
     await readSse(await POST(widgetRequest()));
     expect(mocks.returnQuietTeamChat).not.toHaveBeenCalled();
+  });
+
+  it("saves the visitor's message without saving the visitor, which its session did", async () => {
+    await readSse(await POST(widgetRequest()));
+    expect(mocks.appendMessage).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ conversationId, direction: "inbound", channel: "web_chat" }));
+    expect(mocks.registerWidgetVisitor).not.toHaveBeenCalled();
   });
 
   it("finishes and saves the reply when the visitor moves to another page mid-reply", async () => {

@@ -39,6 +39,8 @@ describe("widget chat after a team member takes over", () => {
 
     expect(await screen.findByText("chat.handoffBanner")).toBeTruthy();
     expect(screen.queryByText(teamReply.content)).toBeNull();
+    // The poll starts in an effect, which can run just after the banner shows.
+    await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
 
     await act(async () => {
       vi.advanceTimersByTime(45_000);
@@ -198,7 +200,7 @@ describe("widget voice captions", () => {
     expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
     expect(screen.getByText("chat.voiceLive")).toBeTruthy();
     expect(screen.getByRole("button", { name: "chat.voiceEnd" })).toBeTruthy();
-    expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*");
+    await vi.waitFor(() => expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*"));
     postMessage.mockRestore();
     client.clear();
   });

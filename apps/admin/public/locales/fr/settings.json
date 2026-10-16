@@ -18,6 +18,7 @@
     "usage": "Utilisation",
     "notifications": "Notifications",
     "widget": "Widget de site web",
+    "publicPage": "Profil public",
     "apiKeys": "Clés API",
     "connectedApps": "Applications connectées"
   },
@@ -102,6 +103,76 @@
       "snippetCopied": "Code copié",
       "noSnippet": "Ce widget a été créé avant l'enregistrement des codes d'intégration, son code ne peut donc pas être affiché. Créez un nouveau widget pour obtenir un code à copier en tout temps.",
       "lastUsed": "Dernière utilisation {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Profil public",
+    "loading": "Chargement du profil public…",
+    "unavailable": "Le profil public ne peut pas être chargé pour le moment.",
+    "readOnly": "Seuls les propriétaires et les administrateurs peuvent modifier le profil public.",
+    "publish": {
+      "title": "Votre page",
+      "description": "{{business}} a une page à cette adresse, avec vos heures d'ouverture, vos services, votre adresse et le clavardage.",
+      "label": "Publiée",
+      "on": "Toute personne qui a le lien peut voir la page, et les moteurs de recherche peuvent la répertorier.",
+      "off": "Seule votre équipe peut voir la page jusqu'à ce que vous la publiiez.",
+      "since": "Publiée le {{date}}",
+      "copy": "Copier le lien",
+      "copied": "Lien copié",
+      "open": "Ouvrir la page",
+      "preview": "Aperçu"
+    },
+    "details": {
+      "title": "Renseignements",
+      "description": "Le nom de votre entreprise et votre numéro de téléphone viennent de vos autres réglages.",
+      "category": "Catégorie",
+      "categoryPlaceholder": "Clinique dentaire",
+      "about": "Description",
+      "aboutPlaceholder": "Ce que vous faites et pour qui, en quelques phrases.",
+      "aboutCount": "{{count}} caractères sur {{max}}",
+      "email": "Courriel public",
+      "emailPlaceholder": "bonjour@exemple.com",
+      "address": "Adresse",
+      "line1": "Adresse municipale",
+      "line2": "Bureau, unité ou étage",
+      "city": "Ville",
+      "region": "Province ou État",
+      "postalCode": "Code postal",
+      "country": "Pays",
+      "noCountry": "Aucun pays"
+    },
+    "sections": {
+      "title": "Ce que la page affiche",
+      "description": "Une section sans contenu reste masquée.",
+      "phone": "Numéro de téléphone",
+      "phoneHint": "Le numéro auquel les appelants joignent votre réceptionniste.",
+      "hours": "Heures d'ouverture",
+      "hoursHint": "Avec l'indication ouvert ou fermé en ce moment.",
+      "editHours": "Modifier les heures",
+      "services": "Services",
+      "servicesHint": "Avec la durée de chacun.",
+      "editServices": "Modifier les services",
+      "map": "Carte",
+      "mapHint": "Votre adresse sur une carte, avec l'itinéraire."
+    },
+    "chat": {
+      "title": "Clavardage",
+      "description": "Sur la page, les visiteurs clavardent avec votre réceptionniste ou l'appellent depuis leur navigateur, grâce à l'un de vos widgets de site web.",
+      "widget": "Widget de site web",
+      "none": "Pas de clavardage",
+      "untitled": "Widget sans nom",
+      "lastUsed": "{{label}} · utilisé le {{date}}",
+      "empty": "Vous n'avez pas encore de widget de site web actif.",
+      "manage": "Réglages du widget de site web",
+      "unavailable": "Le widget que cette page affichait est en pause ou révoqué, donc la page n'affiche aucun clavardage."
+    },
+    "save": "Enregistrer",
+    "saved": "Enregistré",
+    "errors": {
+      "email": "Entrez une adresse courriel comme bonjour@exemple.com.",
+      "invalid": "Certains renseignements ne peuvent pas être enregistrés. Vérifiez-les et réessayez.",
+      "widgetUnavailable": "Ce widget est en pause ou révoqué. Choisissez-en un autre, ou aucun clavardage.",
+      "saveFailed": "Le profil public n'a pas pu être enregistré. Réessayez."
     }
   },
   "billing": {

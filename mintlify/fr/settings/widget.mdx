@@ -31,6 +31,21 @@ La page **Réglages** > **Widget de site web** crée et gère les clés du widge
   </Step>
 </Steps>
 
+## Afficher le clavardage dans votre page
+
+Le widget est une bulle de clavardage dans un coin de votre site Web. Pour afficher plutôt le clavardage dans votre page, par exemple sur une page de contact, ajoutez `data-inline-target` à l'extrait avec un sélecteur CSS pour l'élément qui le contient :
+
+```html
+<div id="chat" style="height: 600px"></div>
+<script src="https://app.example.com/embed.js?key=VOTRE_CLE_DE_WIDGET" data-widget-key="VOTRE_CLE_DE_WIDGET" data-inline-target="#chat" defer></script>
+```
+
+- Donnez une hauteur à l'élément. Le clavardage le remplit.
+- Le clavardage démarre quand l'élément approche de l'écran, donc un visiteur qui ne fait jamais défiler la page jusqu'à lui ne lance pas de clavardage.
+- Si aucun élément de la page ne correspond au sélecteur, le widget affiche la bulle à la place.
+
+Votre [profil public](/fr/settings/public-profile) affiche son clavardage de cette façon.
+
 ## Protéger les appels Web
 
 LobbyStack signe les sessions du widget et compare l'origine de la page parente du visiteur aux origines autorisées pour la clé du widget avant de lancer un appel.

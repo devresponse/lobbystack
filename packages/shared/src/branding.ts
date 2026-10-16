@@ -93,6 +93,42 @@ export function readBrandingEnvironment(environment: Record<string, string | und
   return { appName, logoUrl, invalid };
 }
 
+/**
+ * The variable that colours the deployment's public pages: the field behind a
+ * business's chat on its profile page, today's row in its hours and the logo
+ * tile. Text on it is black or white, whichever reads better.
+ */
+export const BRAND_ACCENT_VARIABLE = "BRAND_ACCENT_COLOR";
+
+/** The accent without BRAND_ACCENT_COLOR: the website widget's default colour. */
+export const DEFAULT_BRAND_ACCENT_COLOR = "#0f766e";
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** A colour as #rrggbb in lowercase, or null when the value isn't a #rgb or #rrggbb colour. */
+export function normalizeAccentColor(value: unknown): string | null {
+  if (typeof value !== "string" || !HEX_COLOR.test(value.trim())) return null;
+  const digits = value.trim().slice(1).toLowerCase();
+  return `#${digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits}`;
+}
+
+/** The deployment's accent colour from its environment, else the default. */
+export function brandAccentColor(environment: Record<string, string | undefined>): string {
+  return normalizeAccentColor(environment[BRAND_ACCENT_VARIABLE]) ?? DEFAULT_BRAND_ACCENT_COLOR;
+}
+
+/** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
+export function readableTextOn(color: string): "#000000" | "#ffffff" {
+  const digits = normalizeAccentColor(color)?.slice(1) ?? "000000";
+  const [red, green, blue] = [0, 2, 4].map((start) => {
+    const channel = Number.parseInt(digits.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  // Contrast ratios against black (luminance 0) and against white (luminance 1).
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+}
+
 /** The URL of a logo saved in the database, versioned so browsers may cache it for good. */
 export function savedBrandLogoUrl(logoVersion: string): string {
   return `${BRAND_LOGO_PATH}?v=${encodeURIComponent(logoVersion)}`;

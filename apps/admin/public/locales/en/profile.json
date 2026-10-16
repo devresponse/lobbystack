@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "title": "{{name}} · {{category}} in {{city}}",
+    "titleNoCity": "{{name}} · {{category}}",
+    "titleNoCategory": "{{name}} · {{city}}",
+    "description": "Hours, services and contact details for {{name}}."
+  },
+  "preview": {
+    "banner": "This page isn't published. Only your team can see it.",
+    "settings": "Publish it in Settings",
+    "chat": "The chat shows here once the page is published."
+  },
+  "status": {
+    "open": "Open now",
+    "closed": "Closed",
+    "closesToday": "Closes {{time}}",
+    "closesTomorrow": "Closes tomorrow at {{time}}",
+    "closesOn": "Closes {{day}} at {{time}}",
+    "opensToday": "Opens {{time}}",
+    "opensTomorrow": "Opens tomorrow at {{time}}",
+    "opensOn": "Opens {{day}} at {{time}}"
+  },
+  "actions": {
+    "label": "Contact {{name}}",
+    "call": "Call {{phone}}",
+    "callNow": "Call now",
+    "directions": "Directions",
+    "website": "Website",
+    "share": "Share",
+    "linkCopied": "Link copied",
+    "copyAddress": "Copy address",
+    "addressCopied": "Address copied"
+  },
+  "nextOpening": {
+    "label": "Next opening",
+    "today": "Today, {{time}}",
+    "tomorrow": "Tomorrow, {{time}}",
+    "on": "{{day}}, {{time}}",
+    "service": "{{service}}.",
+    "bookChatOrPhone": "Book it in the chat or by phone.",
+    "bookChat": "Book it in the chat.",
+    "bookPhone": "Book it by phone."
+  },
+  "stage": {
+    "chat": "Chat with {{name}}",
+    "chatLoading": "Opening the chat…",
+    "call": "Call {{name}}",
+    "callNote": "An AI receptionist answers, day and night."
+  },
+  "details": "Hours, services and location",
+  "hours": {
+    "title": "Hours",
+    "today": "Today",
+    "closed": "Closed",
+    "allDay": "Open 24 hours",
+    "range": "{{start}} – {{end}}"
+  },
+  "closures": {
+    "day": "Closed {{date}}",
+    "days": "Closed {{start}} to {{end}}",
+    "partOfDay": "Closed {{date}}, {{start}} to {{end}}",
+    "span": "Closed {{startDate}}, {{startTime}} to {{endDate}}, {{endTime}}"
+  },
+  "services": {
+    "title": "Services",
+    "minutes": "{{count}} min"
+  },
+  "location": {
+    "title": "Location and contact",
+    "contactTitle": "Contact",
+    "openInMaps": "Open in Maps",
+    "map": "Map of {{address}}"
+  },
+  "footer": {
+    "disclosure": "{{name}}'s calls and chats are answered by an AI receptionist.",
+    "personAnyTime": "Ask for a person at any time.",
+    "personDuringHours": "Ask for a person during opening hours.",
+    "answeredBy": "Answered by",
+    "languages": "Languages"
+  },
+  "notFound": {
+    "title": "This page doesn't exist",
+    "body": "The business may have taken its page down, or the link may be mistyped."
+  }
+}

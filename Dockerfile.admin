@@ -74,6 +74,10 @@ ARG BRAND_APP_NAME=AlloPlace
 ARG BRAND_LOGO_URL=/brand/alloplace/logo.svg
 ENV BRAND_APP_NAME=$BRAND_APP_NAME
 ENV BRAND_LOGO_URL=$BRAND_LOGO_URL
+# The colour behind a business's chat on its public profile page, AlloPlace's
+# yellow by default. Read at run time.
+ARG BRAND_ACCENT_COLOR=#FFD100
+ENV BRAND_ACCENT_COLOR=$BRAND_ACCENT_COLOR
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 lobbystack && \

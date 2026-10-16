@@ -41,6 +41,13 @@ The dashboard's links to pages outside it come from five more variables. Next.js
 
 Emails, text messages, and the API still say LobbyStack for now.
 
+[Public profile](/settings/public-profile) pages read two more variables when they load, so restarting the admin is enough after changing one.
+
+| Variable | Purpose |
+| --- | --- |
+| `BRAND_ACCENT_COLOR` | The color behind the chat and today's opening hours, as `#rrggbb`. Text on it turns black or white, whichever reads better. The admin image uses AlloPlace's yellow, `#FFD100`. Without a valid color, the pages use the website widget's default teal. In a `.env` file, quote the value, such as `BRAND_ACCENT_COLOR="#FFD100"`, because `#` starts a comment there. |
+| `GOOGLE_MAPS_EMBED_API_KEY` | A Google Maps Embed API key, for an interactive map of the business's address. Without it, the pages show a drawn map that opens Google Maps. Restrict the key to the Maps Embed API and to your dashboard's address. |
+
 ## Internal services
 
 | Variable | Purpose |

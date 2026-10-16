@@ -18,6 +18,7 @@
     "usage": "Potrošnja",
     "notifications": "Obaveštenja",
     "widget": "Vidžet za sajt",
+    "publicPage": "Javni profil",
     "apiKeys": "API ključevi",
     "connectedApps": "Povezane aplikacije"
   },
@@ -102,6 +103,76 @@
       "snippetCopied": "Kod je kopiran",
       "noSnippet": "Ovaj vidžet je napravljen pre nego što su kodovi za ugradnju počeli da se čuvaju, pa njegov kod ne može da se prikaže. Napravite novi vidžet da biste dobili kod koji možete kopirati bilo kada.",
       "lastUsed": "Poslednja upotreba: {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Javni profil",
+    "loading": "Učitava se javni profil…",
+    "unavailable": "Javni profil trenutno ne može da se učita.",
+    "readOnly": "Samo vlasnici i administratori mogu da menjaju javni profil.",
+    "publish": {
+      "title": "Vaša stranica",
+      "description": "{{business}} dobija stranicu na ovoj adresi, sa radnim vremenom, uslugama, lokacijom i četom.",
+      "label": "Objavljena",
+      "on": "Svako ko ima link može da vidi stranicu, a pretraživači mogu da je prikažu.",
+      "off": "Samo Vaš tim vidi stranicu dok je ne objavite.",
+      "since": "Objavljena {{date}}",
+      "copy": "Kopiraj link",
+      "copied": "Link je kopiran",
+      "open": "Otvori stranicu",
+      "preview": "Pregled"
+    },
+    "details": {
+      "title": "Podaci",
+      "description": "Naziv firme i broj telefona preuzimaju se iz ostalih podešavanja.",
+      "category": "Kategorija",
+      "categoryPlaceholder": "Stomatološka ordinacija",
+      "about": "Opis",
+      "aboutPlaceholder": "Čime se bavite i kome pomažete, u nekoliko rečenica.",
+      "aboutCount": "{{count}} od {{max}} znakova",
+      "email": "Javna imejl adresa",
+      "emailPlaceholder": "zdravo@primer.com",
+      "address": "Adresa",
+      "line1": "Ulica i broj",
+      "line2": "Kancelarija, stan ili sprat",
+      "city": "Grad",
+      "region": "Pokrajina ili država",
+      "postalCode": "Poštanski broj",
+      "country": "Zemlja",
+      "noCountry": "Bez zemlje"
+    },
+    "sections": {
+      "title": "Šta stranica prikazuje",
+      "description": "Odeljak bez sadržaja ostaje skriven.",
+      "phone": "Broj telefona",
+      "phoneHint": "Broj na koji pozivaoci dobijaju Vašeg recepcionera.",
+      "hours": "Radno vreme",
+      "hoursHint": "Uz podatak da li ste trenutno otvoreni.",
+      "editHours": "Izmeni radno vreme",
+      "services": "Usluge",
+      "servicesHint": "Uz trajanje svake usluge.",
+      "editServices": "Izmeni usluge",
+      "map": "Mapa",
+      "mapHint": "Vaša adresa na mapi, sa uputstvima za dolazak."
+    },
+    "chat": {
+      "title": "Čet",
+      "description": "Na stranici posetioci razgovaraju sa Vašim recepcionerom u četu ili ga pozivaju iz pregledača, preko jednog od Vaših vidžeta za sajt.",
+      "widget": "Vidžet za sajt",
+      "none": "Bez četa",
+      "untitled": "Vidžet bez naziva",
+      "lastUsed": "{{label}} · poslednji put korišćen {{date}}",
+      "empty": "Još nemate aktivan vidžet za sajt.",
+      "manage": "Podešavanja vidžeta za sajt",
+      "unavailable": "Vidžet koji je ova stranica prikazivala je pauziran ili opozvan, pa stranica nema čet."
+    },
+    "save": "Sačuvaj",
+    "saved": "Sačuvano",
+    "errors": {
+      "email": "Unesite imejl adresu, na primer zdravo@primer.com.",
+      "invalid": "Neki podaci ne mogu da se sačuvaju. Proverite ih i pokušajte ponovo.",
+      "widgetUnavailable": "Taj vidžet je pauziran ili opozvan. Izaberite drugi ili bez četa.",
+      "saveFailed": "Javni profil nije sačuvan. Pokušajte ponovo."
     }
   },
   "billing": {

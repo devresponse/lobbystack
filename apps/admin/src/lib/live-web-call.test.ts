@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   withOperatorTransaction: vi.fn(),
   resolveWebVoiceAccess: vi.fn(),
   verifyWidgetSessionToken: vi.fn(),
-  widgetKey: { status: "active", allowedOrigins: ["https://client.example"] } as { status: string; allowedOrigins: string[] } | undefined,
+  widgetKey: { status: "active", allowedOrigins: ["https://client.example"] } as { status: string; allowedOrigins: string[]; profilePublished?: boolean | null; profileWidgetKeyId?: string | null } | undefined,
 }));
 
 vi.mock("./api-helpers", () => ({
@@ -80,6 +80,29 @@ describe("resolveLiveWebCallAccess", () => {
     mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: "https://client.example" });
     mocks.widgetKey = { status: "revoked", allowedOrigins: ["https://client.example"] };
     await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": "https://client.example" }), { sdp: "v=0", widgetId: "lobbystack-widget" })).resolves.toEqual({ status: 403, code: "widget_origin_denied" });
+  });
+
+  it("accepts the widget on its business's published profile page, on the dashboard's domain", async () => {
+    mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: app });
+    mocks.widgetKey = { status: "active", allowedOrigins: [], profilePublished: true, profileWidgetKeyId: "key_1" };
+    await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": app }), { sdp: "v=0", widgetId: "lobbystack-widget", visitorId: "visitor_1" }))
+      .resolves.toMatchObject({ businessId: "biz_2", origin: app, widgetId: "lobbystack-widget", dashboardTestCall: false });
+  });
+
+  it.each([
+    ["the page isn't published", { profilePublished: false, profileWidgetKeyId: "key_1" }],
+    ["the page shows another widget", { profilePublished: true, profileWidgetKeyId: "key_9" }],
+    ["the business has no page", { profilePublished: null, profileWidgetKeyId: null }],
+  ])("refuses a widget on the dashboard's domain when %s", async (_case, profile) => {
+    mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: app });
+    mocks.widgetKey = { status: "active", allowedOrigins: [], ...profile };
+    await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": app }), { sdp: "v=0", widgetId: "lobbystack-widget" })).resolves.toEqual({ status: 403, code: "widget_origin_denied" });
+  });
+
+  it("refuses a paused widget on its business's profile page", async () => {
+    mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: app });
+    mocks.widgetKey = { status: "disabled", allowedOrigins: [], profilePublished: true, profileWidgetKeyId: "key_1" };
+    await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": app }), { sdp: "v=0", widgetId: "lobbystack-widget" })).resolves.toEqual({ status: 403, code: "widget_origin_denied" });
   });
 
   it("runs prospect demos under their demo", async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from "vitest";
-import { initWidget, loaderLabels } from "./index";
+import { iconColorOn, initWidget, loaderLabels } from "./index";
 
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = ""; delete (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance; });
 
@@ -267,4 +267,91 @@ it("waits for the page's body when the snippet runs in the head without defer", 
   } finally {
     if (!document.body) document.documentElement.append(body);
   }
+});
+
+it("draws the bubble's icon dark on a light color and white on a dark one", () => {
+  expect(iconColorOn("#ffd100")).toBe("#18181b");
+  expect(iconColorOn("#FD0")).toBe("#18181b");
+  expect(iconColorOn("#0f766e")).toBe("#ffffff");
+  expect(iconColorOn("#000000ff")).toBe("#ffffff");
+  expect(iconColorOn("red")).toBe("#ffffff");
+  (window as unknown as Record<string, unknown>).__lobbyStackWidgetAppearance = { "fixture-key": { color: "#ffd100" } };
+  mountTag({ "data-widget-key": "fixture-key" });
+  expect(bubble().querySelector("svg")!.getAttribute("stroke")).toBe("#18181b");
+});
+
+function inlineContainer(): HTMLElement {
+  const container = document.createElement("div");
+  container.id = "profile-chat";
+  container.textContent = "The chat opens here.";
+  document.body.append(container);
+  return container;
+}
+
+it("shows the chat in the page's own element, without a bubble", async () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  vi.stubGlobal("fetch", fetchMock);
+  const container = inlineContainer();
+  mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "#profile-chat" });
+  // jsdom has no IntersectionObserver, so the chat starts at once.
+  expect(document.querySelector(".lobby-widget-bubble")).toBeNull();
+  expect(container.textContent).toBe("");
+  const frame = container.querySelector("iframe")!;
+  expect(frame.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
+  expect(frame.getAttribute("allow")).toBe("microphone");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  // The chat can't close itself out of the page, and opening it again asks for no new session.
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "close" } }));
+  window.LobbyStack!.close();
+  window.LobbyStack!.open();
+  await flush();
+  expect(container.querySelector("iframe")).toBe(frame);
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("starts the chat in the page's element only once it comes near the screen", () => {
+  vi.useFakeTimers();
+  const fetchMock = vi.fn().mockResolvedValue(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
+  vi.stubGlobal("fetch", fetchMock);
+  let notify!: (entries: Array<{ isIntersecting: boolean }>) => void;
+  const observeSpy = vi.fn();
+  const disconnectSpy = vi.fn();
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) {
+      notify = callback;
+    }
+    observe = observeSpy;
+    disconnect = disconnectSpy;
+  });
+  const container = inlineContainer();
+  mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "#profile-chat" });
+  expect(observeSpy).toHaveBeenCalledWith(container);
+  expect(container.textContent).toBe("The chat opens here.");
+  notify([{ isIntersecting: false }]);
+  expect(fetchMock).not.toHaveBeenCalled();
+  notify([{ isIntersecting: true }]);
+  expect(disconnectSpy).toHaveBeenCalled();
+  expect(container.querySelector("iframe")!.getAttribute("src")).toBe("https://admin.example.test/embed/fixture-key?color=%230f766e");
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it("waits for the chat's element when the snippet runs before the page is read", () => {
+  vi.useFakeTimers();
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(Response.json({ token: "fixture-session" })));
+  vi.spyOn(document, "readyState", "get").mockReturnValue("loading");
+  mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "#profile-chat" });
+  expect(document.querySelector(".lobby-widget-bubble")).toBeNull();
+  const container = inlineContainer();
+  document.dispatchEvent(new Event("DOMContentLoaded"));
+  expect(container.querySelector("iframe")).not.toBeNull();
+  expect(document.querySelector(".lobby-widget-bubble")).toBeNull();
+});
+
+it("gives the chat a bubble when the page has no element for it", () => {
+  mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "#missing" });
+  expect(bubble()).not.toBeNull();
+  document.body.innerHTML = "";
+  mountTag({ "data-widget-key": "fixture-key", "data-inline-target": "[not a selector" });
+  expect(bubble()).not.toBeNull();
 });

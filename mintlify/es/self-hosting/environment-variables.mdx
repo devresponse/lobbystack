@@ -41,6 +41,13 @@ Los enlaces del panel a páginas externas vienen de cinco variables más. Next.j
 
 Los correos electrónicos, los SMS y la API todavía dicen LobbyStack por ahora.
 
+Las páginas de [perfil público](/es/settings/public-profile) leen dos variables más al cargarse, así que basta con reiniciar el servicio de administración después de cambiar una.
+
+| Variable | Función |
+| --- | --- |
+| `BRAND_ACCENT_COLOR` | El color detrás del chat y del horario del día, como `#rrggbb`. El texto sobre él se vuelve negro o blanco, según lo que mejor se lea. La imagen del servicio de administración usa el amarillo de AlloPlace, `#FFD100`. Sin un color válido, las páginas usan el verde azulado predeterminado del widget del sitio web. En un archivo `.env`, ponga el valor entre comillas, como `BRAND_ACCENT_COLOR="#FFD100"`, porque `#` inicia un comentario allí. |
+| `GOOGLE_MAPS_EMBED_API_KEY` | Una clave de la API Maps Embed de Google, para un mapa interactivo de la dirección del negocio. Sin ella, las páginas muestran un mapa dibujado que abre Google Maps. Restrinja la clave a la API Maps Embed y a la dirección de su panel. |
+
 ## Servicios internos
 
 | Variable | Función |

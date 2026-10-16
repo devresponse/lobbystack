@@ -18,6 +18,7 @@
     "usage": "Uso",
     "notifications": "Notificaciones",
     "widget": "Widget del sitio web",
+    "publicPage": "Perfil público",
     "apiKeys": "Claves de API",
     "connectedApps": "Aplicaciones conectadas"
   },
@@ -102,6 +103,76 @@
       "snippetCopied": "Código copiado",
       "noSnippet": "Este widget se creó antes de que se guardaran los códigos de inserción, por lo que no se puede mostrar su código. Cree un widget nuevo para obtener uno que pueda copiar en cualquier momento.",
       "lastUsed": "Último uso: {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Perfil público",
+    "loading": "Cargando el perfil público…",
+    "unavailable": "El perfil público no se puede cargar en este momento.",
+    "readOnly": "Solo los propietarios y administradores pueden cambiar el perfil público.",
+    "publish": {
+      "title": "Su página",
+      "description": "{{business}} tiene una página en esta dirección, con su horario, servicios, ubicación y chat.",
+      "label": "Publicada",
+      "on": "Cualquier persona con el enlace puede ver la página, y los buscadores pueden mostrarla.",
+      "off": "Solo su equipo puede ver la página hasta que la publique.",
+      "since": "Publicada el {{date}}",
+      "copy": "Copiar enlace",
+      "copied": "Enlace copiado",
+      "open": "Abrir página",
+      "preview": "Vista previa"
+    },
+    "details": {
+      "title": "Datos",
+      "description": "El nombre de su negocio y su número de teléfono vienen del resto de su configuración.",
+      "category": "Categoría",
+      "categoryPlaceholder": "Clínica dental",
+      "about": "Descripción",
+      "aboutPlaceholder": "Qué hace y a quién ayuda, en pocas frases.",
+      "aboutCount": "{{count}} de {{max}} caracteres",
+      "email": "Correo público",
+      "emailPlaceholder": "hola@ejemplo.com",
+      "address": "Dirección",
+      "line1": "Calle y número",
+      "line2": "Oficina, local o piso",
+      "city": "Ciudad",
+      "region": "Provincia o estado",
+      "postalCode": "Código postal",
+      "country": "País",
+      "noCountry": "Sin país"
+    },
+    "sections": {
+      "title": "Qué muestra la página",
+      "description": "Una sección sin nada que mostrar queda oculta.",
+      "phone": "Número de teléfono",
+      "phoneHint": "El número con el que las personas llaman a su recepcionista.",
+      "hours": "Horario",
+      "hoursHint": "Indica si está abierto ahora.",
+      "editHours": "Editar horario",
+      "services": "Servicios",
+      "servicesHint": "Con la duración de cada uno.",
+      "editServices": "Editar servicios",
+      "map": "Mapa",
+      "mapHint": "Su dirección en un mapa, con indicaciones."
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "En la página, los visitantes chatean con su recepcionista o la llaman desde el navegador, a través de uno de sus widgets del sitio web.",
+      "widget": "Widget del sitio web",
+      "none": "Sin chat",
+      "untitled": "Widget sin nombre",
+      "lastUsed": "{{label}} · último uso el {{date}}",
+      "empty": "Aún no tiene un widget del sitio web activo.",
+      "manage": "Configuración del widget del sitio web",
+      "unavailable": "El widget que mostraba esta página está en pausa o revocado, así que la página no muestra chat."
+    },
+    "save": "Guardar",
+    "saved": "Guardado",
+    "errors": {
+      "email": "Escriba un correo como hola@ejemplo.com.",
+      "invalid": "Algunos datos no se pueden guardar. Revíselos e inténtelo de nuevo.",
+      "widgetUnavailable": "Ese widget está en pausa o revocado. Elija otro, o sin chat.",
+      "saveFailed": "No se pudo guardar el perfil público. Inténtelo de nuevo."
     }
   },
   "billing": {

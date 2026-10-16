@@ -32,6 +32,7 @@ export * from "./widgetKeys";
 export * from "./widgetLiveChat";
 export * from "./privacy";
 export * from "./publicApi";
+export * from "./publicProfiles";
 export * from "./oauth";
 export * from "./receptionistActions";
 export * from "./receptionistProfile";

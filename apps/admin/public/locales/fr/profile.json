@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "title": "{{name}} · {{category}} à {{city}}",
+    "titleNoCity": "{{name}} · {{category}}",
+    "titleNoCategory": "{{name}} · {{city}}",
+    "description": "Heures d'ouverture, services et coordonnées de {{name}}."
+  },
+  "preview": {
+    "banner": "Cette page n'est pas publiée. Seule votre équipe peut la voir.",
+    "settings": "La publier dans les paramètres",
+    "chat": "La discussion s'affichera ici une fois la page publiée."
+  },
+  "status": {
+    "open": "Ouvert",
+    "closed": "Fermé",
+    "closesToday": "Ferme à {{time}}",
+    "closesTomorrow": "Ferme demain à {{time}}",
+    "closesOn": "Ferme {{day}} à {{time}}",
+    "opensToday": "Ouvre à {{time}}",
+    "opensTomorrow": "Ouvre demain à {{time}}",
+    "opensOn": "Ouvre {{day}} à {{time}}"
+  },
+  "actions": {
+    "label": "Joindre {{name}}",
+    "call": "Appeler le {{phone}}",
+    "callNow": "Appeler",
+    "directions": "Itinéraire",
+    "website": "Site web",
+    "share": "Partager",
+    "linkCopied": "Lien copié",
+    "copyAddress": "Copier l'adresse",
+    "addressCopied": "Adresse copiée"
+  },
+  "nextOpening": {
+    "label": "Prochaine disponibilité",
+    "today": "Aujourd'hui, {{time}}",
+    "tomorrow": "Demain, {{time}}",
+    "on": "{{day}}, {{time}}",
+    "service": "{{service}}.",
+    "bookChatOrPhone": "Réservez-la dans la discussion ou par téléphone.",
+    "bookChat": "Réservez-la dans la discussion.",
+    "bookPhone": "Réservez-la par téléphone."
+  },
+  "stage": {
+    "chat": "Discuter avec {{name}}",
+    "chatLoading": "Ouverture de la discussion…",
+    "call": "Appeler {{name}}",
+    "callNote": "Une réceptionniste IA répond, jour et nuit."
+  },
+  "details": "Heures, services et adresse",
+  "hours": {
+    "title": "Heures d'ouverture",
+    "today": "Aujourd'hui",
+    "closed": "Fermé",
+    "allDay": "Ouvert 24 h sur 24",
+    "range": "{{start}} – {{end}}"
+  },
+  "closures": {
+    "day": "Fermé le {{date}}",
+    "days": "Fermé du {{start}} au {{end}}",
+    "partOfDay": "Fermé le {{date}}, de {{start}} à {{end}}",
+    "span": "Fermé du {{startDate}}, {{startTime}}, au {{endDate}}, {{endTime}}"
+  },
+  "services": {
+    "title": "Services",
+    "minutes": "{{count}} min"
+  },
+  "location": {
+    "title": "Adresse et coordonnées",
+    "contactTitle": "Coordonnées",
+    "openInMaps": "Ouvrir dans Maps",
+    "map": "Carte : {{address}}"
+  },
+  "footer": {
+    "disclosure": "Les appels et les discussions de {{name}} sont pris en charge par une réceptionniste IA.",
+    "personAnyTime": "Vous pouvez demander à parler à une personne à tout moment.",
+    "personDuringHours": "Vous pouvez demander à parler à une personne pendant les heures d'ouverture.",
+    "answeredBy": "Réponses par",
+    "languages": "Langues"
+  },
+  "notFound": {
+    "title": "Cette page n'existe pas",
+    "body": "L'entreprise a peut-être retiré sa page, ou le lien contient une erreur."
+  }
+}

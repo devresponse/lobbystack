@@ -1,6 +1,8 @@
 import { expect, it } from "vitest";
 
-import { EMBED_PATH_PREFIXES, embeddableSecurityHeaders, isEmbeddablePath, securityHeaders, toNextHeaderList } from "./security-headers";
+import { publicProfilePath } from "@lobbystack/shared";
+
+import { EMBED_PATH_PREFIXES, embeddableSecurityHeaders, isEmbeddablePath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
 const env = { NODE_ENV: "production" } as Record<string, string | undefined>;
 
@@ -31,4 +33,17 @@ it("classifies only the embed surfaces as embeddable", () => {
 
 it("converts header records into the next.config header list shape", () => {
   expect(toNextHeaderList({ "X-Frame-Options": "DENY" })).toEqual([{ key: "X-Frame-Options", value: "DENY" }]);
+});
+
+it("lets a business's public page frame its chat and a Google map, and nothing else new", () => {
+  const headers = publicProfileSecurityHeaders(env);
+  const csp = headers["Content-Security-Policy"] ?? "";
+  expect(csp).toContain("frame-src 'self' https://challenges.cloudflare.com https://www.google.com");
+  expect(csp.replace(" https://www.google.com", "")).toBe(securityHeaders(env)["Content-Security-Policy"]);
+  // The page itself still can't be framed.
+  expect(headers["X-Frame-Options"]).toBe("DENY");
+  expect(csp).toContain("frame-ancestors 'none'");
+  expect(isPublicProfilePath(publicProfilePath("acme-dental"))).toBe(true);
+  expect(isPublicProfilePath("/profile")).toBe(false);
+  expect(isPublicProfilePath("/settings/profile")).toBe(false);
 });

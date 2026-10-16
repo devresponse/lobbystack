@@ -41,6 +41,13 @@ Les liens du tableau de bord vers des pages extérieures viennent de cinq autres
 
 Les e-mails, les SMS et l'API indiquent encore LobbyStack pour l'instant.
 
+Les pages de [profil public](/fr/settings/public-profile) lisent deux autres variables à leur chargement : un redémarrage de l'admin suffit après en avoir changé une.
+
+| Variable | Rôle |
+| --- | --- |
+| `BRAND_ACCENT_COLOR` | La couleur derrière le clavardage et les heures d'ouverture du jour, au format `#rrggbb`. Le texte posé dessus passe en noir ou en blanc, selon ce qui se lit le mieux. L'image de l'admin utilise le jaune d'AlloPlace, `#FFD100`. Sans couleur valide, les pages utilisent la sarcelle par défaut du widget de site Web. Dans un fichier `.env`, mettez la valeur entre guillemets, comme `BRAND_ACCENT_COLOR="#FFD100"`, car `#` y commence un commentaire. |
+| `GOOGLE_MAPS_EMBED_API_KEY` | Une clé de l'API Maps Embed de Google, pour une carte interactive de l'adresse de l'entreprise. Sans elle, les pages affichent une carte dessinée qui ouvre Google Maps. Limitez la clé à l'API Maps Embed et à l'adresse de votre tableau de bord. |
+
 ## Services internes
 
 | Variable | Rôle |

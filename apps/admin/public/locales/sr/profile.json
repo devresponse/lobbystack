@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "title": "{{name}} · {{category}}, {{city}}",
+    "titleNoCity": "{{name}} · {{category}}",
+    "titleNoCategory": "{{name}} · {{city}}",
+    "description": "Radno vreme, usluge i kontakt podaci za {{name}}."
+  },
+  "preview": {
+    "banner": "Ova stranica nije objavljena. Vidi je samo Vaš tim.",
+    "settings": "Objavite je u podešavanjima",
+    "chat": "Čet će se pojaviti ovde kada stranica bude objavljena."
+  },
+  "status": {
+    "open": "Otvoreno",
+    "closed": "Zatvoreno",
+    "closesToday": "Zatvara se u {{time}}",
+    "closesTomorrow": "Zatvara se sutra u {{time}}",
+    "closesOn": "Zatvara se: {{day}}, {{time}}",
+    "opensToday": "Otvara se u {{time}}",
+    "opensTomorrow": "Otvara se sutra u {{time}}",
+    "opensOn": "Otvara se: {{day}}, {{time}}"
+  },
+  "actions": {
+    "label": "Kontakt: {{name}}",
+    "call": "Pozovite {{phone}}",
+    "callNow": "Pozovite",
+    "directions": "Uputstva za put",
+    "website": "Veb-sajt",
+    "share": "Podeli",
+    "linkCopied": "Link je kopiran",
+    "copyAddress": "Kopiraj adresu",
+    "addressCopied": "Adresa je kopirana"
+  },
+  "nextOpening": {
+    "label": "Prvi slobodan termin",
+    "today": "Danas, {{time}}",
+    "tomorrow": "Sutra, {{time}}",
+    "on": "{{day}}, {{time}}",
+    "service": "{{service}}.",
+    "bookChatOrPhone": "Zakažite ga u četu ili telefonom.",
+    "bookChat": "Zakažite ga u četu.",
+    "bookPhone": "Zakažite ga telefonom."
+  },
+  "stage": {
+    "chat": "Čet: {{name}}",
+    "chatLoading": "Otvaranje četa…",
+    "call": "Pozovite: {{name}}",
+    "callNote": "Odgovara AI recepcioner, danju i noću."
+  },
+  "details": "Radno vreme, usluge i lokacija",
+  "hours": {
+    "title": "Radno vreme",
+    "today": "Danas",
+    "closed": "Zatvoreno",
+    "allDay": "Otvoreno 24 sata",
+    "range": "{{start}} – {{end}}"
+  },
+  "closures": {
+    "day": "Zatvoreno: {{date}}",
+    "days": "Zatvoreno: {{start}} – {{end}}",
+    "partOfDay": "Zatvoreno: {{date}}, {{start}} – {{end}}",
+    "span": "Zatvoreno: {{startDate}}, {{startTime}} – {{endDate}}, {{endTime}}"
+  },
+  "services": {
+    "title": "Usluge",
+    "minutes": "{{count}} min"
+  },
+  "location": {
+    "title": "Lokacija i kontakt",
+    "contactTitle": "Kontakt",
+    "openInMaps": "Otvori u Mapama",
+    "map": "Mapa: {{address}}"
+  },
+  "footer": {
+    "disclosure": "Na pozive i poruke za {{name}} odgovara AI recepcioner.",
+    "personAnyTime": "U svakom trenutku možete tražiti da razgovarate sa osobom.",
+    "personDuringHours": "Tokom radnog vremena možete tražiti da razgovarate sa osobom.",
+    "answeredBy": "Odgovara",
+    "languages": "Jezici"
+  },
+  "notFound": {
+    "title": "Ova stranica ne postoji",
+    "body": "Firma je možda uklonila svoju stranicu, ili je link pogrešno upisan."
+  }
+}

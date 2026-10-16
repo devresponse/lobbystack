@@ -139,6 +139,22 @@ it("keeps sensitive and dynamic responses private while caching fixed public pag
   expect(publicResponse.headers.get("vary")).toBe("Accept-Encoding");
 });
 
+it("serves a business's public page privately in the visitor's language, with a policy that allows its map", () => {
+  const page = proxy(new NextRequest("http://localhost:3210/profile/acme-dental", { headers: { "accept-language": "es-MX,es;q=0.9" } }));
+  expect(page.status).toBe(200);
+  expect(page.headers.get("cache-control")).toBe("private, no-store");
+  expect(page.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("es");
+  expect(page.headers.get("content-security-policy")).toContain("https://www.google.com");
+  expect(page.headers.get("x-frame-options")).toBe("DENY");
+  expect(proxy(new NextRequest("http://localhost:3210/settings/profile")).headers.get("content-security-policy")).not.toContain("https://www.google.com");
+
+  // Its language links save the visitor's pick, as ?lng= does everywhere else.
+  const french = proxy(new NextRequest("http://localhost:3210/profile/acme-dental?lng=fr"));
+  expect(french.status).toBe(200);
+  expect(french.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");
+  expect(french.cookies.get("lobbystack.locale")?.value).toBe("fr");
+});
+
 it("fails closed for API requests during maintenance while leaving health reads available", () => {
   vi.stubEnv("LOBBYSTACK_MAINTENANCE_MODE", "true");
 

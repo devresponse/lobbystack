@@ -1,4 +1,5 @@
 import { demoSnapshot, type BookingMode, type BusinessContextSnapshot, type KnowledgeSnippet } from "@lobbystack/shared";
+import { DateTime } from "luxon";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/domain", async () => ({
@@ -200,6 +201,51 @@ describe("bookAppointment", () => {
     vi.mocked(bookForCaller).mockClear();
     await expect(book("tomorrow at ten")).resolves.toMatchObject({ ok: false });
     expect(bookForCaller).not.toHaveBeenCalled();
+  });
+});
+
+describe("getBusinessHours", () => {
+  // The rule the tool used before it moved onto the shared helper, kept to show its answers didn't change.
+  function earlierOpenNow(snapshot: BusinessContextSnapshot, at: Date): boolean {
+    const now = DateTime.fromJSDate(at).setZone(snapshot.timezone);
+    const minutesNow = now.hour * 60 + now.minute;
+    const today = now.weekday % 7;
+    return snapshot.hours.some((window) => window.dayOfWeek === today && minutesNow >= window.openMinutes && minutesNow < window.closeMinutes)
+      && !snapshot.closures.some((closure) => now >= DateTime.fromISO(closure.startsAt) && now < DateTime.fromISO(closure.endsAt));
+  }
+
+  async function hoursAt(snapshot: BusinessContextSnapshot, at: Date) {
+    vi.setSystemTime(at);
+    try {
+      const execute = createReceptionistTools({ domain: { db: {} as never }, channel: "voice", snapshot }).getBusinessHours!.execute! as (input: object, options: object) => Promise<Record<string, unknown>>;
+      return await execute({}, { toolCallId: "1", messages: [] });
+    } finally {
+      vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
+    }
+  }
+
+  const snapshot: BusinessContextSnapshot = {
+    ...demoSnapshot,
+    hours: [...demoSnapshot.hours, { dayOfWeek: 6, openMinutes: 600, closeMinutes: 720 }, { dayOfWeek: 6, openMinutes: 780, closeMinutes: 900 }],
+    closures: [{ startsAt: "2026-10-12T04:00:00.000Z", endsAt: "2026-10-13T04:00:00.000Z", reason: "Thanksgiving" }],
+  };
+
+  it("answers as it did before, open or closed, every quarter hour of a week with a closure", async () => {
+    for (let at = Date.parse("2026-10-10T00:00:00Z"); at < Date.parse("2026-10-17T00:00:00Z"); at += 15 * 60_000) {
+      expect((await hoursAt(snapshot, new Date(at))).openNow, new Date(at).toISOString()).toBe(earlierOpenNow(snapshot, new Date(at)));
+    }
+  });
+
+  it("keeps the rest of its answer", async () => {
+    await expect(hoursAt(snapshot, new Date("2026-10-13T14:30:00Z"))).resolves.toEqual({
+      timezone: "America/Toronto",
+      now: "Tuesday 10:30 AM",
+      openNow: true,
+      configured: true,
+      weekly: ["Sunday: closed", "Monday: 9:00 AM to 5:00 PM", "Tuesday: 9:00 AM to 5:00 PM", "Wednesday: 9:00 AM to 5:00 PM", "Thursday: 9:00 AM to 5:00 PM", "Friday: 9:00 AM to 4:00 PM", "Saturday: 10:00 AM to 12:00 PM, 1:00 PM to 3:00 PM"],
+      upcomingClosures: [],
+    });
+    expect((await hoursAt(snapshot, new Date("2026-10-12T14:30:00Z"))).openNow).toBe(false);
   });
 });
 

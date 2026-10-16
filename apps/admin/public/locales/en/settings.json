@@ -18,6 +18,7 @@
     "usage": "Usage",
     "notifications": "Notifications",
     "widget": "Website widget",
+    "publicPage": "Public profile",
     "apiKeys": "API keys",
     "connectedApps": "Connected apps"
   },
@@ -102,6 +103,76 @@
       "snippetCopied": "Snippet copied",
       "noSnippet": "This widget was created before snippets were saved, so its snippet can't be shown. Create a new widget to get one you can copy any time.",
       "lastUsed": "Last used {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Public profile",
+    "loading": "Loading the public profile…",
+    "unavailable": "The public profile can't be loaded right now.",
+    "readOnly": "Only owners and admins can change the public profile.",
+    "publish": {
+      "title": "Your page",
+      "description": "{{business}} gets a page at this address, with your hours, services, location and chat.",
+      "label": "Published",
+      "on": "Anyone with the link can see the page, and search engines can list it.",
+      "off": "Only your team can see the page until you publish it.",
+      "since": "Published {{date}}",
+      "copy": "Copy link",
+      "copied": "Link copied",
+      "open": "Open page",
+      "preview": "Preview"
+    },
+    "details": {
+      "title": "Details",
+      "description": "Your business name and phone number come from the rest of your settings.",
+      "category": "Category",
+      "categoryPlaceholder": "Dental clinic",
+      "about": "Description",
+      "aboutPlaceholder": "What you do and who you help, in a few sentences.",
+      "aboutCount": "{{count}} of {{max}} characters",
+      "email": "Public email",
+      "emailPlaceholder": "hello@example.com",
+      "address": "Address",
+      "line1": "Street address",
+      "line2": "Suite, unit or floor",
+      "city": "City",
+      "region": "Province or state",
+      "postalCode": "Postal code",
+      "country": "Country",
+      "noCountry": "No country"
+    },
+    "sections": {
+      "title": "What the page shows",
+      "description": "A section with nothing to show stays hidden.",
+      "phone": "Phone number",
+      "phoneHint": "The number callers reach your receptionist on.",
+      "hours": "Opening hours",
+      "hoursHint": "With whether you're open now.",
+      "editHours": "Edit hours",
+      "services": "Services",
+      "servicesHint": "With how long each one takes.",
+      "editServices": "Edit services",
+      "map": "Map",
+      "mapHint": "Your address on a map, with directions."
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "Visitors chat with your receptionist on the page, or call it from their browser, through one of your website widgets.",
+      "widget": "Website widget",
+      "none": "No chat",
+      "untitled": "Untitled widget",
+      "lastUsed": "{{label}} · last used {{date}}",
+      "empty": "You don't have an active website widget yet.",
+      "manage": "Website widget settings",
+      "unavailable": "The widget this page showed is paused or revoked, so the page shows no chat."
+    },
+    "save": "Save",
+    "saved": "Saved",
+    "errors": {
+      "email": "Enter an email address such as hello@example.com.",
+      "invalid": "Some details can't be saved. Check them and try again.",
+      "widgetUnavailable": "That widget is paused or revoked. Choose another one, or no chat.",
+      "saveFailed": "The public profile couldn't be saved. Try again."
     }
   },
   "billing": {

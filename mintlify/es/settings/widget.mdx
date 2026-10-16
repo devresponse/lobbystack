@@ -31,6 +31,21 @@ La página **Configuración** > **Widget del sitio web** crea y gestiona las cla
   </Step>
 </Steps>
 
+## Muestre el chat dentro de su página
+
+El widget es una burbuja de chat en una esquina de su sitio web. Para mostrar el chat dentro de su página, por ejemplo en una página de contacto, agregue `data-inline-target` al fragmento con un selector CSS del elemento que lo contiene:
+
+```html
+<div id="chat" style="height: 600px"></div>
+<script src="https://app.example.com/embed.js?key=SU_CLAVE_DE_WIDGET" data-widget-key="SU_CLAVE_DE_WIDGET" data-inline-target="#chat" defer></script>
+```
+
+- Dé una altura al elemento. El chat lo llena.
+- El chat se inicia cuando el elemento se acerca a la pantalla, así que un visitante que nunca se desplaza hasta él no inicia un chat.
+- Si ningún elemento de la página coincide con el selector, el widget muestra la burbuja en su lugar.
+
+Su [perfil público](/es/settings/public-profile) muestra su chat de esta forma.
+
 ## Proteja las llamadas web
 
 LobbyStack firma las sesiones del widget y, antes de iniciar una llamada, comprueba que el origen de la página principal del visitante esté entre los orígenes permitidos de la clave del widget.

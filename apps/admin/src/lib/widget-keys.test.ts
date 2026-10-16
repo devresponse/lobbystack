@@ -19,7 +19,7 @@ vi.mock("@lobbystack/db", async (importOriginal) => {
   };
 });
 
-import { createWidgetSessionToken, hashWidgetKey, isAllowedWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyWidgetSessionToken } from "./widget-keys";
+import { createWidgetSessionToken, hashWidgetKey, isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, loadWidgetAppearance, normalizeOrigin, normalizeAllowedOrigins, requestIpHash, serializeWidgetKeyConfig, verifyWidgetSessionToken } from "./widget-keys";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -54,6 +54,24 @@ describe("widget key hashing and origin policy", () => {
     expect(isAllowedWidgetOrigin("https://evil.com", allowed)).toBe(false);
     expect(isAllowedWidgetOrigin("http://localhost:3000", allowed)).toBe(true);
     expect(isAllowedWidgetOrigin("https://app.lobbystack.com", allowed)).toBe(true);
+  });
+
+  it("lets a widget run on its business's published profile page, on the deployment's own domain", () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.alloplace.com");
+    const published = { published: true, widgetKeyId: "key_1" };
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com", published, "key_1")).toBe(true);
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com/", published, "key_1")).toBe(true);
+    // Another widget, a page that isn't published or doesn't exist, or another site.
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com", published, "key_2")).toBe(false);
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com", { published: false, widgetKeyId: "key_1" }, "key_1")).toBe(false);
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com", { published: null, widgetKeyId: null }, "key_1")).toBe(false);
+    expect(isPublicProfileWidgetOrigin("https://app.alloplace.com", null, "key_1")).toBe(false);
+    expect(isPublicProfileWidgetOrigin("https://evil.example", published, "key_1")).toBe(false);
+    // A sandboxed page sends the origin "null", which must never match.
+    vi.stubEnv("APP_BASE_URL", "localhost:3000");
+    expect(isPublicProfileWidgetOrigin("null", published, "key_1")).toBe(false);
+    vi.stubEnv("APP_BASE_URL", "");
+    expect(isPublicProfileWidgetOrigin("", published, "key_1")).toBe(false);
   });
 
   it("serializes config with defaults and strict schema output", () => {

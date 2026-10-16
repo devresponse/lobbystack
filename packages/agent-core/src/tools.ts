@@ -24,7 +24,7 @@ import {
   type SmsConsentOnFile,
   type UnavailableReason,
 } from "@lobbystack/domain";
-import { canTextNumber, isBusinessOpen, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
+import { canTextNumber, isBusinessOpen, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, openStatus, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
 import { tool, type ToolSet } from "ai";
 import { DateTime } from "luxon";
 import { z } from "zod";
@@ -244,14 +244,11 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
       inputSchema: z.object({}),
       execute: async () => {
         const now = DateTime.now().setZone(timezone);
-        const minutesNow = now.hour * 60 + now.minute;
-        const today = now.weekday % 7;
-        const openNow = snapshot.hours.some((window) => window.dayOfWeek === today && minutesNow >= window.openMinutes && minutesNow < window.closeMinutes)
-          && !snapshot.closures.some((closure) => now >= DateTime.fromISO(closure.startsAt) && now < DateTime.fromISO(closure.endsAt));
         return {
           timezone,
           now: now.toFormat("cccc h:mm a"),
-          openNow,
+          // The same rule the business's public profile page shows.
+          openNow: openStatus(snapshot.hours, snapshot.closures, timezone, now.toJSDate()).openNow,
           configured: snapshot.hours.length > 0,
           weekly: weeklyHours(snapshot),
           upcomingClosures: upcomingClosures(snapshot, now),

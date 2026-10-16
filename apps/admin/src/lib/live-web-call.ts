@@ -2,14 +2,14 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 import { eq } from "drizzle-orm";
 
-import { widgetKeys, withBusinessTransaction } from "@lobbystack/db";
+import { businessPublicProfiles, widgetKeys, withBusinessTransaction } from "@lobbystack/db";
 import { bearerToken } from "@lobbystack/domain";
 import { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 
 import { getWorkerDatabase, withOperatorTransaction } from "./api-helpers";
 import { configuredAppOrigins } from "./app-origins";
 import { resolveWebVoiceAccess } from "./prospect-demo";
-import { isAllowedWidgetOrigin, normalizeOrigin, verifyWidgetSessionToken } from "./widget-keys";
+import { isAllowedWidgetOrigin, isPublicProfileWidgetOrigin, normalizeOrigin, verifyWidgetSessionToken } from "./widget-keys";
 
 function endTokenSecret(): string {
   const secret = process.env.INTERNAL_SERVICE_SECRET;
@@ -103,8 +103,16 @@ export async function resolveLiveWebCallAccess(request: Request, body: LiveWebCa
     const token = verifyWidgetSessionToken(bearer);
     const parentOrigin = request.headers.get("x-widget-parent-origin");
     if (!token || !parentOrigin || token.origin !== normalizeOrigin(parentOrigin) || (body.visitorId && token.visitorId !== body.visitorId)) return { status: 403, code: "widget_session_invalid" };
-    const key = await withBusinessTransaction(getWorkerDatabase().db, { businessId: token.businessId, actorType: "worker" }, async (tx) => (await tx.select({ status: widgetKeys.status, allowedOrigins: widgetKeys.allowedOrigins }).from(widgetKeys).where(eq(widgetKeys.id, token.widgetKeyId)).limit(1))[0]);
-    if (!key || key.status !== "active" || !isAllowedWidgetOrigin(token.origin, key.allowedOrigins, { allowAdminOrigin: false, allowLocalhost: false })) return { status: 403, code: "widget_origin_denied" };
+    const key = await withBusinessTransaction(getWorkerDatabase().db, { businessId: token.businessId, actorType: "worker" }, async (tx) => (
+      await tx.select({ status: widgetKeys.status, allowedOrigins: widgetKeys.allowedOrigins, profilePublished: businessPublicProfiles.published, profileWidgetKeyId: businessPublicProfiles.widgetKeyId })
+        .from(widgetKeys)
+        .leftJoin(businessPublicProfiles, eq(businessPublicProfiles.businessId, widgetKeys.businessId))
+        .where(eq(widgetKeys.id, token.widgetKeyId)).limit(1)
+    )[0]);
+    const allowed = key && (isAllowedWidgetOrigin(token.origin, key.allowedOrigins, { allowAdminOrigin: false, allowLocalhost: false })
+      // The business's own profile page, on this deployment's domain.
+      || isPublicProfileWidgetOrigin(token.origin, { published: key.profilePublished ?? null, widgetKeyId: key.profileWidgetKeyId ?? null }, token.widgetKeyId));
+    if (!key || key.status !== "active" || !allowed) return { status: 403, code: "widget_origin_denied" };
     return { businessId: token.businessId, origin: token.origin, widgetId: WIDGET_VOICE_ID, visitorId: token.visitorId, dashboardTestCall: false };
   }
 

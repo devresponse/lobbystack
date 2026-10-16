@@ -56,6 +56,7 @@ The admin caches the branding for 30 seconds, so other admin replicas pick up a 
 - The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.
+- The foot of each business's [public profile page](../mintlify/settings/public-profile.mdx) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
 - Every dashboard string in all four languages that used to say LobbyStack: 21 strings, which now use the `{{appName}}` i18n variable.
 
 A deployment still named LobbyStack with no logo of its own shows LobbyStack's mark. A renamed deployment with no logo shows its name on its own, so LobbyStack's mark never appears beside another name.
@@ -105,9 +106,17 @@ To link to LobbyStack's page for one of them instead, set that variable to an em
 
 `packages/shared/src/brandLinks.ts` holds the variable names, the checks, and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
 
+## Color the public pages
+
+Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. `BRAND_ACCENT_COLOR` sets it, as `#rgb` or `#rrggbb`. Text on it is black or white, whichever contrasts more, so a yellow gets black text.
+
+Out of the box it's AlloPlace's yellow, `#FFD100`. `Dockerfile.admin` sets it at run time, `docker-compose.yml` passes it when it's unset, and `.env.example` carries it in quotes, because an unquoted `#` starts a comment in `.env` files. Without a valid color, the pages use the website widget's default teal, `#0f766e`.
+
+The pages are rendered for each request, so a change only needs a restart, not a rebuild.
+
 ## How it works
 
-- `packages/shared/src/branding.ts`: the variable names, the limits, the order of precedence (`resolveBranding`), and the logo type check (`brandLogoContentType`).
+- `packages/shared/src/branding.ts`: the variable names, the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
 - `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. If the database can't be read, pages fall back to the environment and the default, and the error is reported at most once a minute.
@@ -145,7 +154,7 @@ These places still say LobbyStack or link to lobbystack.com. Variables marked "p
 | Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
 | AI and voice text | The prospect demo instructions (`packages/domain/src/server/demos.ts`); the placeholder summary "… uses LobbyStack to answer calls." (`tenancy.ts`, `businessSummary.ts`), which `agent-core/src/businessFacts.ts` and migration 0074 detect by its wording; the MCP server's title and instructions (`apps/admin/src/lib/mcp/server.ts`) | The app name. The placeholder detection has to keep matching the old wording. |
 | API and OAuth | The OpenAPI title "LobbyStack API" and descriptions such as "LobbyStack Cloud" (`packages/shared/src/publicApi/`); API error messages; the webhook test event; the `LobbyStack-Webhooks` and `LobbyStack-OAuth` user agents; the OAuth resource name and realm (`apps/admin/src/lib/mcp/oauth-config.ts`, `oauth-provider.ts`) | The app name, except the user agents. |
-| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack` as an alias, because customers' sites may call it. `BRAND_ACCENT_COLOR` (proposed) for the default color. |
+| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack` as an alias, because customers' sites may call it. Use `BRAND_ACCENT_COLOR`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
 | CLI and Zapier | The `lobbystack` command, its config path, and its help text, which links to `docs.lobbystack.com` (`packages/cli`); the Zapier app's labels, errors, and docs link, plus its name and logo in Zapier's dashboard (`integrations/zapier`) | Separate distributions, so they're renamed by publishing a renamed copy rather than with a variable. |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |

@@ -24,6 +24,8 @@ const WIDGET_STYLES = `
 .lobby-widget-frame-holder.lobby-widget-open{opacity:1;pointer-events:auto}
 .lobby-widget-frame{width:100%;height:100%;border:0;border-radius:16px;background:#fff;box-shadow:0 24px 64px rgba(0,0,0,.24)}
 .lobby-widget-hidden{display:none!important}
+.lobby-widget-inline{width:100%;height:100%;border-radius:inherit;overflow:hidden}
+.lobby-widget-inline .lobby-widget-frame{display:block;border-radius:inherit;box-shadow:none}
 `;
 
 function injectStyles(): void {
@@ -97,6 +99,24 @@ function savedAppearance(widgetKey: string): WidgetAppearance {
   };
 }
 
+/**
+ * Near-black or white for the bubble's icon, whichever reads better on its
+ * color, as the chat itself chooses (a yellow gets a dark icon). White for a
+ * color that isn't written in hex.
+ */
+export function iconColorOn(color: string): string {
+  const hex = /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(color.trim())?.[1];
+  if (!hex) return "#ffffff";
+  const value = hex.length <= 4 ? [...hex.slice(0, 3)].map((digit) => digit + digit).join("") : hex.slice(0, 6);
+  const [red, green, blue] = [0, 2, 4].map((start) => {
+    const channel = Number.parseInt(value.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  // Contrast ratios against white and against zinc-900 (luminance 0.0097).
+  return (luminance + 0.05) / 0.0597 > 1.05 / (luminance + 0.05) ? "#18181b" : "#ffffff";
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // crypto.randomUUID only exists on https pages; getRandomValues also works on http ones.
@@ -134,6 +154,8 @@ export function initWidget(): boolean {
   const position = saved.position ?? (currentScriptAttribute("data-position") as WidgetPosition | null) ?? "bottom-right";
   const color = saved.color ?? currentScriptAttribute("data-color") ?? "#0f766e";
   const labels = loaderLabels(currentScriptAttribute("data-locale") ?? document.documentElement.lang ?? "en");
+  // A selector for an element on the page that shows the chat itself, instead of a bubble.
+  const inlineTarget = currentScriptAttribute("data-inline-target")?.trim() ?? "";
   const adminOrigin = resolveOrigin();
   let visitorId = makeVisitorId(widgetKey);
   // The chat page draws itself in the bubble's color and the business's language from its first
@@ -161,17 +183,60 @@ export function initWidget(): boolean {
   holder.inert = true;
   bubble.setAttribute("data-position", position);
   bubble.style.backgroundColor = color;
-  const chatSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
-  const closeSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
+  const iconColor = iconColorOn(color);
+  const chatSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`;
+  const closeSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`;
   bubble.innerHTML = chatSvg;
 
-  holder.appendChild(frame);
-  root.appendChild(holder);
-  // A snippet in the page's <head> without defer runs before <body> exists, so
-  // the widget joins the page once it has been read.
-  const attach = () => (document.body ?? document.documentElement).append(root, bubble);
-  if (document.body) attach();
-  else document.addEventListener("DOMContentLoaded", attach, { once: true });
+  // The page's element the chat shows in, once it's mounted there.
+  let inlineContainer: Element | null = null;
+
+  function findInlineTarget(): Element | null {
+    if (!inlineTarget) return null;
+    try {
+      return document.querySelector(inlineTarget);
+    } catch {
+      return null;
+    }
+  }
+
+  /** The bubble in the page's corner, with the chat in a panel above it. */
+  function mountBubble(): void {
+    holder.appendChild(frame);
+    root.appendChild(holder);
+    (document.body ?? document.documentElement).append(root, bubble);
+  }
+
+  /**
+   * The chat in the page's own element, such as a business's profile page. It
+   * starts once the element comes near the screen, so a visitor who never
+   * scrolls to it opens no session.
+   */
+  function mountInline(container: Element): void {
+    inlineContainer = container;
+    if (typeof IntersectionObserver !== "function") {
+      startInline();
+      return;
+    }
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      startInline();
+    }, { rootMargin: "200px" });
+    observer.observe(container);
+  }
+
+  function startInline(): void {
+    if (!inlineContainer) return;
+    if (!inlineContainer.contains(frame)) {
+      const wrapper = document.createElement("div");
+      wrapper.className = "lobby-widget-inline";
+      wrapper.appendChild(frame);
+      // The page's own placeholder makes way for the chat.
+      inlineContainer.replaceChildren(wrapper);
+    }
+    start();
+  }
 
   let open = false;
   let started = false;
@@ -213,16 +278,21 @@ export function initWidget(): boolean {
     bubble.innerHTML = open ? closeSvg : chatSvg;
   }
 
-  function setOpen(next: boolean): void {
-    open = next;
-    holder.inert = !open;
-    if (open && !started) {
+  /** Loads the chat once, and asks for a session unless it has one or is getting one. */
+  function start(): void {
+    if (!started) {
       started = true;
       frame.setAttribute("src", frameSrc);
     }
-    if (open && (sessionState === "idle" || sessionState === "error")) {
+    if (sessionState === "idle" || sessionState === "error") {
       void refreshSession(visitorId);
     }
+  }
+
+  function setOpen(next: boolean): void {
+    open = next;
+    holder.inert = !open;
+    if (open) start();
     holder.classList.toggle("lobby-widget-open", open);
     // The panel keeps one height whatever the chat holds, so new messages never move the page.
     if (open && !holder.style.height) holder.style.height = "min(640px, calc(100vh - 120px))";
@@ -275,14 +345,32 @@ export function initWidget(): boolean {
     const data = event.data as Partial<WidgetMessage>;
     if (!data || typeof data !== "object") return;
     if (data.type === "ready") onFrameReady();
-    if (data.type === "close") setOpen(false);
+    // A chat in the page's own element stays where it is.
+    if (data.type === "close" && !inlineContainer) setOpen(false);
     if (data.type === "leave-warning") setWarnOnLeave(data.enabled === true);
   });
 
+  // A snippet in the page's <head> without defer runs before <body> exists, and
+  // a chat's element may not be read yet either, so the widget joins the page
+  // once it has been read. Without its element, the chat gets a bubble.
+  const attach = () => {
+    const container = findInlineTarget();
+    if (container) mountInline(container);
+    else mountBubble();
+  };
+  if (document.body && (!inlineTarget || findInlineTarget() || document.readyState !== "loading")) attach();
+  else document.addEventListener("DOMContentLoaded", attach, { once: true });
+
   window.LobbyStack = {
-    open: () => setOpen(true),
-    close: () => setOpen(false),
-    toggle: () => setOpen(!open),
+    open: () => {
+      if (!inlineContainer) return setOpen(true);
+      startInline();
+      inlineContainer.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    },
+    close: () => {
+      if (!inlineContainer) setOpen(false);
+    },
+    toggle: () => (inlineContainer ? startInline() : setOpen(!open)),
   };
 
   return true;

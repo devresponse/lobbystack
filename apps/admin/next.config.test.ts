@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
+import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const withPostHogConfig = vi.hoisted(() => vi.fn((config: NextConfig, options: unknown) => ({ config, options })));
@@ -90,6 +91,18 @@ describe("admin build links", () => {
     }
     expect(buildStage).toContain("ARG NEXT_PUBLIC_TERMS_URL=https://alloplace.com/legal/terms\n");
     expect(buildStage).toContain("ARG NEXT_PUBLIC_CONTACT_EMAIL=support@alloplace.com\n");
+  });
+});
+
+describe("admin security headers", () => {
+  it("lets a business's public page frame a Google map, and no other page", async () => {
+    const config = await loadConfig({}) as NextConfig;
+    const policy = async (path: string) => (await unstable_getResponseFromNextConfig({ url: `https://admin.example.com${path}`, nextConfig: config })).headers.get("content-security-policy") ?? "";
+    expect(await policy("/profile/acme-dental")).toContain("frame-src 'self' https://challenges.cloudflare.com https://www.google.com;");
+    expect(await policy("/profile/acme-dental")).toContain("frame-ancestors 'none'");
+    for (const path of ["/settings/profile", "/profiles", "/"]) {
+      expect(await policy(path), path).toContain("frame-src 'self' https://challenges.cloudflare.com;");
+    }
   });
 });
 

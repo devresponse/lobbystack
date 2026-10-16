@@ -1,0 +1,85 @@
+{
+  "meta": {
+    "title": "{{name}} · {{category}} en {{city}}",
+    "titleNoCity": "{{name}} · {{category}}",
+    "titleNoCategory": "{{name}} · {{city}}",
+    "description": "Horario, servicios y datos de contacto de {{name}}."
+  },
+  "preview": {
+    "banner": "Esta página no está publicada. Solo su equipo puede verla.",
+    "settings": "Publicarla en Configuración",
+    "chat": "El chat aparecerá aquí cuando la página esté publicada."
+  },
+  "status": {
+    "open": "Abierto ahora",
+    "closed": "Cerrado",
+    "closesToday": "Cierra a las {{time}}",
+    "closesTomorrow": "Cierra mañana a las {{time}}",
+    "closesOn": "Cierra el {{day}} a las {{time}}",
+    "opensToday": "Abre a las {{time}}",
+    "opensTomorrow": "Abre mañana a las {{time}}",
+    "opensOn": "Abre el {{day}} a las {{time}}"
+  },
+  "actions": {
+    "label": "Contactar con {{name}}",
+    "call": "Llamar al {{phone}}",
+    "callNow": "Llamar",
+    "directions": "Cómo llegar",
+    "website": "Sitio web",
+    "share": "Compartir",
+    "linkCopied": "Enlace copiado",
+    "copyAddress": "Copiar la dirección",
+    "addressCopied": "Dirección copiada"
+  },
+  "nextOpening": {
+    "label": "Próximo hueco libre",
+    "today": "Hoy, {{time}}",
+    "tomorrow": "Mañana, {{time}}",
+    "on": "{{day}}, {{time}}",
+    "service": "{{service}}.",
+    "bookChatOrPhone": "Resérvelo en el chat o por teléfono.",
+    "bookChat": "Resérvelo en el chat.",
+    "bookPhone": "Resérvelo por teléfono."
+  },
+  "stage": {
+    "chat": "Chatear con {{name}}",
+    "chatLoading": "Abriendo el chat…",
+    "call": "Llamar a {{name}}",
+    "callNote": "Responde una recepcionista con IA, de día y de noche."
+  },
+  "details": "Horario, servicios y ubicación",
+  "hours": {
+    "title": "Horario",
+    "today": "Hoy",
+    "closed": "Cerrado",
+    "allDay": "Abierto 24 horas",
+    "range": "{{start}} – {{end}}"
+  },
+  "closures": {
+    "day": "Cerrado el {{date}}",
+    "days": "Cerrado del {{start}} al {{end}}",
+    "partOfDay": "Cerrado el {{date}}, de {{start}} a {{end}}",
+    "span": "Cerrado desde el {{startDate}}, {{startTime}}, hasta el {{endDate}}, {{endTime}}"
+  },
+  "services": {
+    "title": "Servicios",
+    "minutes": "{{count}} min"
+  },
+  "location": {
+    "title": "Ubicación y contacto",
+    "contactTitle": "Contacto",
+    "openInMaps": "Abrir en Maps",
+    "map": "Mapa: {{address}}"
+  },
+  "footer": {
+    "disclosure": "Las llamadas y los chats de {{name}} los atiende una recepcionista con IA.",
+    "personAnyTime": "Puede pedir hablar con una persona en cualquier momento.",
+    "personDuringHours": "Puede pedir hablar con una persona durante el horario de atención.",
+    "answeredBy": "Atendido por",
+    "languages": "Idiomas"
+  },
+  "notFound": {
+    "title": "Esta página no existe",
+    "body": "Puede que la empresa haya retirado su página o que el enlace tenga un error."
+  }
+}

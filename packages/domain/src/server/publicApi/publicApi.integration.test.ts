@@ -933,6 +933,8 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await getPhoneNumberClaimForApi(context, caller, claimed.id)).toMatchObject({ status: "provisioning" });
       const numberId = await completeNumberProvisioning(context, { businessId, claimId: claimed.id, e164: firstNumber, providerPhoneId: `PN${randomUUID().replaceAll("-", "")}`, voiceUrl: "sip-trunk:TK0", smsUrl: "https://app.example.com/api/webhooks/twilio/sms" });
       expect(await getPhoneNumberClaimForApi(context, caller, claimed.id)).toMatchObject({ status: "claimed", phone_number_id: numberId });
+      // The receptionist's snapshot picks up the number, so the website widget offers calls.
+      expect(await queued("snapshot.refresh", numberId)).toBe(1);
       const listed = await listPhoneNumbersForApi(context, caller);
       expect(listed).toEqual([expect.objectContaining({ id: numberId, phone_number: firstNumber, status: "active", release_scheduled_at: null })]);
       expect(apiPhoneNumberSchema.safeParse(listed[0]).success).toBe(true);
@@ -955,6 +957,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       // Once the new number is live, the old one keeps working for 30 days.
       await claimNumberProvisioning(context, { businessId, claimId: replacing.id });
       const newNumberId = await completeNumberProvisioning(context, { businessId, claimId: replacing.id, e164: secondNumber, providerPhoneId: `PN${randomUUID().replaceAll("-", "")}`, voiceUrl: "sip-trunk:TK0", smsUrl: "https://app.example.com/api/webhooks/twilio/sms" });
+      expect(await queued("snapshot.refresh", newNumberId)).toBe(1);
       const both = await listPhoneNumbersForApi(context, caller);
       expect(both).toEqual(expect.arrayContaining([expect.objectContaining({ id: newNumberId, status: "active", release_scheduled_at: null }), expect.objectContaining({ id: numberId, status: "active", release_scheduled_at: expect.any(String) })]));
       expect(Date.parse(both.find((number) => number.id === numberId)!.release_scheduled_at!)).toBeGreaterThan(Date.now() + 29 * 24 * 60 * 60_000);

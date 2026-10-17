@@ -821,6 +821,34 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(apiBusinessSchema.safeParse(business).success).toBe(true);
   });
 
+  it("shows the onboarding stage the dashboard shows, the same as GET /onboarding", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-stage-${businessId}`, name: "Stage test", timezone: "UTC", businessType: "test", onboardingStage: "verify_phone" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const store = async (stage: string) => await admin!.db.update(businesses).set({ onboardingStage: stage }).where(eq(businesses.id, businessId));
+    const stages = async () => {
+      const business = await getBusinessForApi(context, caller);
+      expect(apiBusinessSchema.safeParse(business).success).toBe(true);
+      return [business.onboarding_stage, (await getOnboardingForApi(context, caller)).stage];
+    };
+    try {
+      // A verification step onboarding no longer has resumes at the plan.
+      expect(await stages()).toEqual(["plan", "plan"]);
+      // The free plan goes back from the number steps to its plan, and a paid one stays on them.
+      await store("phone_number_claiming");
+      await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "free_cloud" });
+      expect(await stages()).toEqual(["plan", "plan"]);
+      await admin!.db.update(billingAccounts).set({ plan: "pro", subscriptionState: "active", billingInterval: "monthly" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await stages()).toEqual(["phone_number_claiming", "phone_number_claiming"]);
+      // A value the dashboard doesn't know starts over.
+      await store("retired_step");
+      expect(await stages()).toEqual(["create_business", "create_business"]);
+    } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
   it("reads billing, keeps a managed plan apart from Polar, and makes checkouts out to the business's own owner", async () => {
     const context = { db: worker!.db };
     // A business of its own, owned at first by the operator, as a platform key's businesses start out.

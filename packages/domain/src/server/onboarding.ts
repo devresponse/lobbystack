@@ -80,8 +80,22 @@ export function resolveOnboardingRoute(stage: string | null | undefined): string
   return stageRoutes[normalizeOnboardingStage(stage ?? "create_business")];
 }
 
+// The steps a business on the free plan can't take, so the dashboard sends it back to its plan.
+const numberStages: ReadonlySet<OnboardingStage> = new Set(["phone_number", "phone_number_claiming"]);
+
 export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: string | null): OnboardingStage {
-  return (stage === "phone_number" || stage === "phone_number_claiming") && plan === "free_cloud" ? "plan" : stage;
+  return numberStages.has(stage) && plan === "free_cloud" ? "plan" : stage;
+}
+
+// The step the dashboard shows for a business's stored stage. Only the number
+// steps depend on the plan, so only there does this read it, first scoping the
+// transaction to the business.
+export async function resolveOnboardingStageInTransaction(tx: DatabaseTransaction, businessId: string, storedStage: string): Promise<OnboardingStage> {
+  const stage = normalizeOnboardingStage(storedStage);
+  if (!numberStages.has(stage)) return stage;
+  await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
+  const billing = (await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
+  return resolveOnboardingStageForPlan(stage, billing?.plan ?? null);
 }
 
 export function isValidOnboardingTransition(from: OnboardingStage, to: OnboardingStage): boolean {
@@ -104,11 +118,7 @@ async function onboardingStateForBusiness(
   await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
   const business = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
   if (!business) return null;
-  const billing = (await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
-  return {
-    businessId,
-    stage: resolveOnboardingStageForPlan(normalizeOnboardingStage(business.onboardingStage), billing?.plan ?? null),
-  };
+  return { businessId, stage: await resolveOnboardingStageInTransaction(tx, businessId, business.onboardingStage) };
 }
 
 export async function getActiveOnboardingState(

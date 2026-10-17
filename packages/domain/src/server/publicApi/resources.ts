@@ -43,6 +43,7 @@ import {
 import { resolveCallOutcome } from "../callOutcome";
 import type { NotificationPreferences, OperatorNotificationEventKey } from "../notifications";
 import { EXPIRED_FOLLOW_UP_TITLE } from "../followUpRetention";
+import { resolveOnboardingStageInTransaction } from "../onboarding";
 import type { PublicProfileSettingsView } from "../publicProfiles";
 import { recordingState } from "../recordingState";
 import { invalidRequest } from "./errors";
@@ -129,7 +130,7 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
     locale: business.defaultLocale,
     website_url: business.websiteUrl,
     business_type: business.businessType,
-    onboarding_stage: business.onboardingStage,
+    onboarding_stage: await resolveOnboardingStageInTransaction(tx, businessId, business.onboardingStage),
     booking_mode: normalizeBookingMode(profile?.bookingMode),
     hours: hours.flatMap((row): ApiHoursWindow[] => {
       const day = weekdays[row.dayOfWeek];

@@ -78,6 +78,7 @@ export const apiMeSchema = z.object({
 }).describe("The API key making the request and the business it acts on.");
 
 const businessHoursSources = ["none", "generated", "operator"] as const;
+const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 
 export const apiBusinessSchema = z.object({
   id,
@@ -87,7 +88,7 @@ export const apiBusinessSchema = z.object({
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
   business_type: z.string().describe("What kind of business it is. The dashboard uses service_company."),
-  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
+  onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
   booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
   hours_source: z.enum(businessHoursSources).describe("Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."),
@@ -480,7 +481,6 @@ export const apiClaimLinkSchema = z.object({
   url: z.string().describe("The link that claims the business. LobbyStack emails it to the new owner; you can also send it yourself."),
 }).describe("A link that hands the business over to its owner.");
 
-const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 const onboardingItems = ["business_details", "knowledge", "greeting", "plan", "phone_number", "full_site_read", "test_call"] as const;
 const onboardingSkippableSteps = ["knowledge", "phone_number", "full_site_read", "test_call"] as const;
 
@@ -520,7 +520,7 @@ export const apiBusinessSummarySchema = z.object({
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
-  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
+  onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
   created_at: timestamp,
 }).describe("A business the platform key's partner onboarded.");
 

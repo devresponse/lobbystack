@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listSchedulerBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
-import { assertProductionSecrets, brandStartupReport, currentBrand, isMaintenanceMode, readBrandingEnvironment } from "@lobbystack/shared";
+import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, isKnownJobType, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -31,6 +31,7 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     console.warn("SMTP_HOST is missing. Authentication email jobs will fail until email delivery is configured.");
     return undefined;
   }
+  const logo = brandEmailLogo(process.env);
   return new SmtpEmailProvider({
     host,
     // A deploy template can leave optional inputs blank, so "" counts as unset.
@@ -38,8 +39,9 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     secure: process.env.SMTP_SECURE === "true",
     username: process.env.SMTP_USERNAME ?? "",
     password: process.env.SMTP_PASSWORD ?? "",
-    from: process.env.EMAIL_FROM || `${readBrandingEnvironment(process.env).appName ?? currentBrand().appName} <no-reply@localhost>`,
+    from: emailSender(process.env),
     ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}),
+    ...(logo ? { logo } : {}),
   });
 }
 

@@ -1,4 +1,5 @@
-import { brandFileMatched, currentBrand, type ResolvedBrand } from "./brands/resolve";
+import { brandFileMatched, brandImage, currentBrand, type ResolvedBrand } from "./brands/resolve";
+import type { BrandImage } from "./brands/types";
 
 // The name and logo a deployment shows in place of LobbyStack.
 //
@@ -94,6 +95,33 @@ export function readBrandingEnvironment(environment: Record<string, string | und
   if (rawName?.trim() && !appName) invalid.push(BRANDING_ENVIRONMENT.appName);
   if (rawLogo?.trim() && !logoUrl) invalid.push(BRANDING_ENVIRONMENT.logoUrl);
   return { appName, logoUrl, invalid };
+}
+
+/**
+ * Who the deployment's emails come from: EMAIL_FROM, with the deployment's
+ * name in front when it holds only an address. The name is BRAND_APP_NAME
+ * while it lasts, else a matched brand file's. Onboarding's saved name is in
+ * the database, so a deployment with neither keeps EMAIL_FROM as it is.
+ */
+export function emailSender(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): string {
+  const name = readBrandingEnvironment(environment).appName ?? (brandFileMatched(brand) ? brand.appName : null);
+  const from = environment.EMAIL_FROM?.trim();
+  if (!from) return namedSender(name ?? brand.appName, "no-reply@localhost");
+  return name && !from.includes("<") ? namedSender(name, from) : from;
+}
+
+// Quoted, so a name such as "AlloPlace (dev)" isn't read as an address comment.
+function namedSender(name: string, address: string): string {
+  return `"${name.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}" <${address}>`;
+}
+
+/**
+ * The logo emails show above the deployment's name: the brand file's email
+ * logo under the deployment's address. None while BRAND_LOGO_URL sets a
+ * different logo, or without an address to load it from.
+ */
+export function brandEmailLogo(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): BrandImage | null {
+  return readBrandingEnvironment(environment).logoUrl ? null : brandImage(brand, brand.emailLogo);
 }
 
 /**

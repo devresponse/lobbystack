@@ -1,5 +1,5 @@
 import { BRAND_INDEX, BRANDS } from "./generated";
-import type { BrandDefinition, BrandIndex } from "./types";
+import type { BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // Which brand a deployment shows. A deployment knows its own address
 // (APP_BASE_URL), and the domain it sits under picks the brand from
@@ -15,6 +15,8 @@ export type ResolvedBrand = Omit<BrandDefinition, "environments"> & {
   source: BrandSource;
   /** The host of APP_BASE_URL, or null when it isn't a URL. */
   host: string | null;
+  /** The scheme, host and port of APP_BASE_URL, for absolute links such as an email's logo. */
+  origin: string | null;
   /** The claimed domain the host sits under, when a brand claims it. */
   domain: string | null;
   /** False on a host whose environment settings keep search engines away. */
@@ -29,14 +31,23 @@ export type BrandData = { index: BrandIndex; brands: Record<string, BrandDefinit
 
 const GENERATED: BrandData = { index: BRAND_INDEX, brands: BRANDS };
 
-/** The lowercase host of a URL, without a trailing dot, or null when the value isn't a URL. */
-export function brandHost(appBaseUrl: string | null | undefined): string | null {
+function parseBaseUrl(appBaseUrl: string | null | undefined): URL | null {
   if (!appBaseUrl?.trim()) return null;
   try {
-    return new URL(appBaseUrl.trim()).hostname.toLowerCase().replace(/\.$/, "") || null;
+    return new URL(appBaseUrl.trim());
   } catch {
     return null;
   }
+}
+
+/** The lowercase host of a URL, without a trailing dot, or null when the value isn't a URL. */
+export function brandHost(appBaseUrl: string | null | undefined): string | null {
+  return parseBaseUrl(appBaseUrl)?.hostname.toLowerCase().replace(/\.$/, "") || null;
+}
+
+function brandOrigin(appBaseUrl: string | null | undefined): string | null {
+  const url = parseBaseUrl(appBaseUrl);
+  return url && (url.protocol === "https:" || url.protocol === "http:") ? url.origin : null;
 }
 
 /**
@@ -79,11 +90,20 @@ export function resolveBrand(input: { appBaseUrl?: string | null | undefined; pr
     appName: environment?.appNameSuffix ? `${brand.appName}${environment.appNameSuffix}` : brand.appName,
     source,
     host,
+    origin: brandOrigin(input.appBaseUrl),
     domain,
     indexing: environment?.indexing ?? true,
     ignoredPreset: domain && preset ? preset : null,
     unknownPreset: !domain && preset && source !== "preset" ? preset : null,
   };
+}
+
+/**
+ * One of the brand's images with an absolute URL under the deployment's
+ * address, as emails and link previews need, or null when either is missing.
+ */
+export function brandImage(brand: Pick<ResolvedBrand, "origin">, image: BrandImage | null): BrandImage | null {
+  return image && brand.origin ? { ...image, url: new URL(image.url, brand.origin).toString() } : null;
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */
@@ -114,11 +134,24 @@ export function currentBrand(): ResolvedBrand {
   return current;
 }
 
+/** Variables that still override the brand file for one more release, then go away. */
+export const DEPRECATED_BRAND_VARIABLES = [
+  "BRAND_APP_NAME",
+  "BRAND_LOGO_URL",
+  "BRAND_ACCENT_COLOR",
+  "NEXT_PUBLIC_LANDING_SITE_URL",
+  "NEXT_PUBLIC_TERMS_URL",
+  "NEXT_PUBLIC_PRIVACY_URL",
+  "NEXT_PUBLIC_DOCS_SITE_URL",
+  "NEXT_PUBLIC_CONTACT_EMAIL",
+] as const;
+
 /**
  * What a deployment should hear about its brand at start: a preset the
- * domain overrides, a preset that names no brand, or an address no brand
- * claims. `error` is set when BRAND_REQUIRED=true and no brand file matched,
- * and the process should refuse to start.
+ * domain overrides, a preset that names no brand, an address no brand
+ * claims, or a variable that will go away. `error` is set when
+ * BRAND_REQUIRED=true and no brand file matched, and the process should
+ * refuse to start.
  */
 export function brandStartupReport(brand: ResolvedBrand, environment: Record<string, string | undefined> = process.env): { info: string; warnings: string[]; error: string | null } {
   const warnings: string[] = [];
@@ -126,6 +159,10 @@ export function brandStartupReport(brand: ResolvedBrand, environment: Record<str
   if (brand.unknownPreset) warnings.push(`[brand] brand.preset_unknown: BRAND_PRESET=${brand.unknownPreset} names no folder under brands/, so the ${brand.id} brand stands in.`);
   if (brand.source === "default" && brand.host && environment.NODE_ENV === "production") {
     warnings.push(`[brand] brand.unmatched: no brand in brands/index.json claims ${brand.host}, so the default ${brand.id} brand stands in.`);
+  }
+  const deprecated = DEPRECATED_BRAND_VARIABLES.filter((name) => environment[name]?.trim());
+  if (deprecated.length) {
+    warnings.push(`[brand] brand.deprecated_variables: ${deprecated.join(", ")} still override the brand file, but will be removed in a later release. Put the values in a folder under brands/ instead.`);
   }
   const required = environment.BRAND_REQUIRED === "true" && !brandFileMatched(brand);
   return {

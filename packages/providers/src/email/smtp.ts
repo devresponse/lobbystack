@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import nodemailer, { type Transporter } from "nodemailer";
-import { assertCertificationRecipient } from "@lobbystack/shared";
+import { assertCertificationRecipient, type BrandImage } from "@lobbystack/shared";
 
 export type SmtpConfig = {
   host: string;
@@ -11,6 +11,8 @@ export type SmtpConfig = {
   password: string;
   from: string;
   replyTo?: string;
+  /** The brand's email logo, at an absolute URL, shown above the deployment's name. */
+  logo?: BrandImage;
 };
 
 type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup";
@@ -32,7 +34,7 @@ export class SmtpEmailProvider {
   /** `appName` is the deployment's name, which the email calls the app by (see docs/branding.md). */
   async sendTemplate(input: { template: TemplateName; to: string; subject: string; variables: Record<string, string>; appName: string; idempotencyKey?: string; from?: string; replyTo?: string }): Promise<{ messageId: string }> {
     assertCertificationRecipient("email", input.to);
-    const email = renderTemplate(input.template, input.subject, input.variables, input.appName);
+    const email = renderTemplate(input.template, input.subject, input.variables, input.appName, this.config.logo);
     // A per-message sender (the founder check-in) replaces the default reply-to
     // too, so replies reach that sender rather than the shared inbox.
     const replyTo = input.from ? input.replyTo : input.replyTo ?? this.config.replyTo;
@@ -49,7 +51,7 @@ export class SmtpEmailProvider {
   }
 }
 
-function renderTemplate(template: TemplateName, subject: string, variables: Record<string, string>, appName: string): { text: string; html?: string } {
+function renderTemplate(template: TemplateName, subject: string, variables: Record<string, string>, appName: string, logo?: BrandImage): { text: string; html?: string } {
   const text = templateBody(template, variables, appName);
 
   if (template !== "verify_email" || !variables.code) {
@@ -61,6 +63,7 @@ function renderTemplate(template: TemplateName, subject: string, variables: Reco
     text,
     html: renderEmailLayout({
       appName,
+      logo,
       previewText: subject,
       content: [
         '<h1 style="margin:0 0 24px;font-size:28px;font-weight:600;line-height:1.25;color:#0B0B0D;text-align:center;">Verify your email address</h1>',
@@ -210,10 +213,18 @@ function onboardingFollowupBody(variables: Record<string, string>, appName: stri
   ].join("\n");
 }
 
-function renderEmailLayout({ appName, previewText, content }: { appName: string; previewText: string; content: string }): string {
+const EMAIL_LOGO_HEIGHT = 48;
+
+function renderEmailLayout({ appName, logo, previewText, content }: { appName: string; logo: BrandImage | undefined; previewText: string; content: string }): string {
   const escapedPreviewText = escapeHtml(previewText);
-  // The deployment's name as a wordmark: mail clients such as Gmail and
-  // Outlook don't show inline or remote SVG logos, so no logo stands in for it.
+  // The deployment's name as a wordmark, under the brand's PNG email logo when
+  // it has one: mail clients such as Gmail and Outlook don't show SVG, and
+  // some hide remote images until asked, so the name stays in text and the
+  // logo needs no alt text of its own.
+  const logoWidth = logo ? Math.round((logo.width * EMAIL_LOGO_HEIGHT) / logo.height) : 0;
+  const logoImage = logo
+    ? `<img src="${escapeHtml(logo.url)}" width="${logoWidth}" height="${EMAIL_LOGO_HEIGHT}" alt="" style="display:block;margin:0 auto 12px;border:0;outline:none;text-decoration:none;width:${logoWidth}px;height:${EMAIL_LOGO_HEIGHT}px;" />`
+    : "";
   const wordmark = `<p style="margin:0;font-size:22px;font-weight:700;line-height:1.2;color:#0B0B0D;text-align:center;">${escapeHtml(appName)}</p>`;
 
   return `<!doctype html>
@@ -238,7 +249,7 @@ function renderEmailLayout({ appName, previewText, content }: { appName: string;
           <table role="presentation" class="email-container" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;max-width:600px;background-color:#FFFFFF;border-radius:24px;padding:48px;">
             <tr>
               <td align="center" style="padding-bottom:32px;">
-                ${wordmark}
+                ${logoImage}${wordmark}
               </td>
             </tr>
             <tr>

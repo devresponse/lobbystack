@@ -2,6 +2,8 @@
   "$schema": "../brand.schema.json",
   "appName": "AlloPlace",
   "logo": "logo.svg",
+  "emailLogo": "logo-email.png",
+  "ogImage": "og.png",
   "accentColor": "#FFD100",
   "links": {
     "site": "https://alloplace.com",

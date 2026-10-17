@@ -79,12 +79,23 @@ describe("SMTP delivery", () => {
     expect(sendMail.mock.calls[0]?.[0].html).toContain(">AlloPlace</p>");
     expect(sendMail.mock.calls[0]?.[0].html).toContain("finish setting up your AlloPlace account.");
     expect(sendMail.mock.calls[0]?.[0].html).not.toContain("<svg");
+    expect(sendMail.mock.calls[0]?.[0].html).not.toContain("<img");
     expect(sendMail.mock.calls[0]?.[0].html).toContain("Verify your email address");
     expect(sendMail.mock.calls[0]?.[0].html).toContain(">123456</p>");
     await provider.sendTemplate({ template: "verify_email", appName: "AlloPlace", to: "recipient@example.test", subject: "Verify", variables: { url: "https://example.test/verify" } });
     expect(sendMail.mock.calls[1]?.[0].text).toContain("using this link: https://example.test/verify");
     expect(sendMail.mock.calls[1]?.[0].html).toBeUndefined();
   });
+  it("shows the brand's email logo above the name, scaled to 48 pixels tall", async () => {
+    const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
+    const logo = { url: "https://demo.alloplace.com/brand/alloplace/logo-email.png?v=1&x=<", width: 192, height: 96 };
+    const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test", logo }, { sendMail } as never);
+    await provider.sendTemplate({ template: "verify_email", appName: "AlloPlace", to: "recipient@example.test", subject: "Verify", variables: { code: "123456" } });
+    const html: string = sendMail.mock.calls[0]?.[0].html;
+    expect(html).toContain('<img src="https://demo.alloplace.com/brand/alloplace/logo-email.png?v=1&amp;x=&lt;" width="96" height="48" alt=""');
+    expect(html.indexOf("<img")).toBeLessThan(html.indexOf(">AlloPlace</p>"));
+  });
+
   it("escapes verification email content before rendering branded HTML", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
     const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test" }, { sendMail } as never);

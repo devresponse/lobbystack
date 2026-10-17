@@ -20,7 +20,7 @@ import {
   negotiateLocale,
 } from "@/lib/locale-request";
 
-import { brandLogoSecurityHeaders, embeddableSecurityHeaders, isEmbeddablePath, securityHeaders } from "./security-headers";
+import { brandLogoSecurityHeaders, embeddableSecurityHeaders, isEmbeddablePath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders } from "./security-headers";
 
 const stateChangingMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 // /api/v1 and /api/mcp authenticate with bearer API keys only, never cookies, so they need no CSRF
@@ -112,7 +112,11 @@ function hasValidCsrfOrigin(request: NextRequest): boolean {
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const headers = isEmbeddablePath(pathname) ? embeddableSecurityHeaders() : pathname === BRAND_LOGO_PATH ? brandLogoSecurityHeaders() : securityHeaders();
+  const headers = isEmbeddablePath(pathname)
+    ? embeddableSecurityHeaders()
+    : pathname === BRAND_LOGO_PATH
+      ? brandLogoSecurityHeaders()
+      : isPublicProfilePath(pathname) ? publicProfileSecurityHeaders() : securityHeaders();
 
   const isApiRequest = pathname.startsWith("/api/");
   if (isMaintenanceMode(process.env) && (isWebhookPath(pathname) || (isApiRequest && !isMaintenanceHealthProbe(pathname, request.method)) || stateChangingMethods.has(request.method))) {

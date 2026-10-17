@@ -6,12 +6,15 @@ import { billingAccounts, businesses, enqueueOutbox, users, withBusinessTransact
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
+import { deploymentAppName } from "./branding";
 
-const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, string> = {
-  en: "How'd you like LobbyStack?",
-  fr: "Qu'avez-vous pensé de LobbyStack ?",
-  es: "¿Qué le pareció LobbyStack?",
-  sr: "Kako Vam se dopao LobbyStack?",
+// French puts no "de" before the name and Serbian never declines it, because
+// the name is configured (see docs/branding.md).
+const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, (appName: string) => string> = {
+  en: (appName) => `How'd you like ${appName}?`,
+  fr: (appName) => `Votre avis sur ${appName} ?`,
+  es: (appName) => `¿Qué le pareció ${appName}?`,
+  sr: (appName) => `Kako Vam se dopao servis ${appName}?`,
 };
 
 export type OnboardingStage =
@@ -80,8 +83,22 @@ export function resolveOnboardingRoute(stage: string | null | undefined): string
   return stageRoutes[normalizeOnboardingStage(stage ?? "create_business")];
 }
 
+// The steps a business on the free plan can't take, so the dashboard sends it back to its plan.
+const numberStages: ReadonlySet<OnboardingStage> = new Set(["phone_number", "phone_number_claiming"]);
+
 export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: string | null): OnboardingStage {
-  return (stage === "phone_number" || stage === "phone_number_claiming") && plan === "free_cloud" ? "plan" : stage;
+  return numberStages.has(stage) && plan === "free_cloud" ? "plan" : stage;
+}
+
+// The step the dashboard shows for a business's stored stage. Only the number
+// steps depend on the plan, so only there does this read it, first scoping the
+// transaction to the business.
+export async function resolveOnboardingStageInTransaction(tx: DatabaseTransaction, businessId: string, storedStage: string): Promise<OnboardingStage> {
+  const stage = normalizeOnboardingStage(storedStage);
+  if (!numberStages.has(stage)) return stage;
+  await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
+  const billing = (await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
+  return resolveOnboardingStageForPlan(stage, billing?.plan ?? null);
 }
 
 export function isValidOnboardingTransition(from: OnboardingStage, to: OnboardingStage): boolean {
@@ -104,11 +121,7 @@ async function onboardingStateForBusiness(
   await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
   const business = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
   if (!business) return null;
-  const billing = (await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
-  return {
-    businessId,
-    stage: resolveOnboardingStageForPlan(normalizeOnboardingStage(business.onboardingStage), billing?.plan ?? null),
-  };
+  return { businessId, stage: await resolveOnboardingStageInTransaction(tx, businessId, business.onboardingStage) };
 }
 
 export async function getActiveOnboardingState(
@@ -238,7 +251,7 @@ export async function scheduleOnboardingFollowupInTransaction(tx: DatabaseTransa
 export const ONBOARDING_FOLLOWUP_DELAY_MS = 24 * 60 * 60_000;
 
 export type OnboardingFollowupSender = {
-  /** RFC 5322 sender, e.g. `Raphael from LobbyStack <raphael@lobbystack.com>`. Replies go here. */
+  /** RFC 5322 sender, e.g. `Yuri from AlloPlace <yuri@alloplace.com>`. Replies go here. */
   from: string;
   /** First name used in the greeting and signature. */
   name: string;
@@ -253,6 +266,7 @@ export async function queueOnboardingFollowupEmail(
   context: DomainContext,
   input: { businessId: string; completedAt: Date; sender: OnboardingFollowupSender },
 ): Promise<boolean> {
+  const appName = await deploymentAppName(context.db);
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const result = await tx.execute<{ user_id: string; email: string; name: string | null; preferred_locale: string; business_name: string }>(
       sql`select user_id, email, name, preferred_locale, business_name from app.resolve_onboarding_followup_recipient(${input.businessId}::uuid, ${input.completedAt.toISOString()}::timestamptz)`,
@@ -273,7 +287,7 @@ export async function queueOnboardingFollowupEmail(
         template: "onboarding_followup",
         to: recipient.email,
         from: input.sender.from,
-        subject: ONBOARDING_FOLLOWUP_SUBJECTS[locale],
+        subject: ONBOARDING_FOLLOWUP_SUBJECTS[locale](appName),
         variables: { locale, firstName, businessName: recipient.business_name, senderName: input.sender.name },
       },
     });

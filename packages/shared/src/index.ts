@@ -8,6 +8,9 @@ import { appointmentChangeVerificationModes, bookingModes, transferModes } from 
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
 export * from "./branding";
+export * from "./brandLinks";
+export * from "./brands/resolve";
+export type { BrandDefinition, BrandEnvironment, BrandImage, BrandIndex } from "./brands/types";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";
@@ -388,8 +391,10 @@ export { normalizeAuthEmail } from "./auth";
 export { assertProductionSecrets } from "./productionSecrets";
 
 export { isBusinessOpen, isTransferPermitted, normalizeTransferMode } from "./transferPolicy";
+export { openStatus, type OpenStatus } from "./openStatus";
+export * from "./publicProfile";
 
-export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEXT, OPERATOR_SMS_DISCLOSURE_VERSION } from "./operatorSmsConsent";
+export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEMPLATE, OPERATOR_SMS_DISCLOSURE_VERSION, operatorSmsDisclosureText } from "./operatorSmsConsent";
 export { canTextNumber, permanentSmsErrorCode } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";

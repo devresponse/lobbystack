@@ -8,6 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, eq, isNotNull, sql } from "drizzle-orm";
 
 import { assertDatabaseRole, enqueueOutbox, withBusinessTransaction } from "@lobbystack/db";
+import { deploymentAppName } from "@lobbystack/domain";
 import { accounts, sessions, users, verifications } from "@lobbystack/db";
 
 import { configuredAppOrigins } from "./app-origins";
@@ -39,12 +40,17 @@ function assertAuthDatabaseRoles(): Promise<void> {
   return databaseRolesReady;
 }
 
-const EXISTING_ACCOUNT_SUBJECTS: Record<SupportedLocale, string> = {
-  en: "You already have a LobbyStack account",
-  fr: "Votre compte LobbyStack existe déjà",
-  es: "Ya tiene una cuenta de LobbyStack",
-  sr: "Već imate LobbyStack nalog",
+const EXISTING_ACCOUNT_SUBJECTS: Record<SupportedLocale, (appName: string) => string> = {
+  en: (appName) => `You already have an account on ${appName}`,
+  fr: (appName) => `Votre compte ${appName} existe déjà`,
+  es: (appName) => `Ya tiene una cuenta de ${appName}`,
+  sr: (appName) => `Već imate ${appName} nalog`,
 };
+
+/** The deployment's name, as auth emails call it (see docs/branding.md). */
+async function authEmailAppName(): Promise<string> {
+  return await deploymentAppName(getEmailDatabase().db);
+}
 
 const enabledEmailOtpPaths = new Set([
   "/email-otp/request-password-reset",
@@ -112,11 +118,12 @@ async function enqueueAuthEmail(input: {
   url: string;
 }): Promise<void> {
   const urlHash = createHash("sha256").update(input.url).digest("hex");
+  const appName = await authEmailAppName();
   const subject = input.purpose === "verification"
-    ? "Verify your LobbyStack email"
+    ? `Verify your ${appName} email`
     : input.purpose === "password_reset"
-      ? "Reset your LobbyStack password"
-      : "Confirm your LobbyStack email change";
+      ? `Reset your ${appName} password`
+      : `Confirm your ${appName} email change`;
   await enqueueAuthEmailOutbox({
     userId: input.userId,
     dedupeKey: `auth-email:${input.purpose}:${input.userId}:${urlHash}`,
@@ -136,7 +143,7 @@ async function enqueueEmailVerificationCode(input: { userId: string; email: stri
     payload: {
       template: "verify_email",
       to: input.email,
-      subject: "Your LobbyStack verification code",
+      subject: `Your ${await authEmailAppName()} verification code`,
       variables: { code: input.otp },
     },
   });
@@ -240,7 +247,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         await enqueueAuthEmailOutbox({
           userId: user.id,
           dedupeKey: `auth-reset-code:${user.id}:${randomUUID()}`,
-          payload: { template: "password_reset", to: email, subject: "Reset your LobbyStack password", variables: { code: otp } },
+          payload: { template: "password_reset", to: email, subject: `Reset your ${await authEmailAppName()} password`, variables: { code: otp } },
         });
       },
     })],
@@ -264,7 +271,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
             userId: user.id,
             dedupeKey: `auth-existing-account:${user.id}:${randomUUID()}`,
             payload: { template: "existing_account", to: user.email,
-              subject: EXISTING_ACCOUNT_SUBJECTS[locale],
+              subject: EXISTING_ACCOUNT_SUBJECTS[locale](await authEmailAppName()),
               variables: { locale, signInUrl: new URL(`/${locale}/login`, base).href, resetUrl: new URL(`/${locale}/forgot-password`, base).href } },
           });
         } catch (error) {

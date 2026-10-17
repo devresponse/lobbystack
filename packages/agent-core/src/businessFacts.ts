@@ -33,9 +33,11 @@ export function describeClosure(closure: UpcomingClosure, timezone: string): str
   return `${format(closure.from)} to ${format(closure.to)}${closure.reason ? ` (${closure.reason})` : ""}`;
 }
 
-// New businesses start with a summary like "Acme uses LobbyStack to answer
-// calls." (older ones: "...to handle calls and SMS."). It says nothing about
-// the business, and GPT-Live would repeat it, so callers never hear it.
+// Businesses made before 2026-10-17 started with a summary like "Acme uses
+// LobbyStack to answer calls." (older ones: "...to handle calls and SMS.").
+// Migration 0102 replaced it and snapshots drop placeholders, but a snapshot
+// cached before then may still hold it. It says nothing about the business,
+// and GPT-Live would repeat it, so callers never hear it.
 const PLACEHOLDER_SUMMARY = /\buses LobbyStack to (?:answer calls|handle calls and SMS)\.?$/i;
 
 /** The business's own summary, or undefined while it's still the placeholder. */

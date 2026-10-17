@@ -98,7 +98,7 @@ export async function loadBusinessSummaryInput(context: DomainContext, input: { 
 export async function resetGeneratedBusinessSummary(context: DomainContext, input: { businessId: string; businessName: string }): Promise<boolean> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const updated = await tx.update(receptionistProfiles)
-      .set({ summary: `${input.businessName.trim()} uses LobbyStack to answer calls.`, summarySource: "placeholder", summaryFingerprint: null, summaryGeneratedAt: null, updatedAt: new Date() })
+      .set({ summary: input.businessName.trim(), summarySource: "placeholder", summaryFingerprint: null, summaryGeneratedAt: null, updatedAt: new Date() })
       .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.summarySource, "generated")))
       .returning({ id: receptionistProfiles.id });
     if (!updated[0]) return false;

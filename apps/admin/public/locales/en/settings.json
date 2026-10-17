@@ -18,6 +18,8 @@
     "usage": "Usage",
     "notifications": "Notifications",
     "widget": "Website widget",
+    "publicPage": "Public profile",
+    "qrCode": "QR code",
     "apiKeys": "API keys",
     "connectedApps": "Connected apps"
   },
@@ -102,6 +104,142 @@
       "snippetCopied": "Snippet copied",
       "noSnippet": "This widget was created before snippets were saved, so its snippet can't be shown. Create a new widget to get one you can copy any time.",
       "lastUsed": "Last used {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Public profile",
+    "loading": "Loading the public profile…",
+    "unavailable": "The public profile can't be loaded right now.",
+    "readOnly": "Only owners and admins can change the public profile.",
+    "publish": {
+      "title": "Your page",
+      "description": "{{business}} gets a page at this address, with your hours, services, location and chat.",
+      "label": "Published",
+      "on": "Anyone with the link can see the page, and search engines can list it.",
+      "off": "Only your team can see the page until you publish it.",
+      "since": "Published {{date}}",
+      "copy": "Copy link",
+      "copied": "Link copied",
+      "open": "Open page",
+      "preview": "Preview"
+    },
+    "details": {
+      "title": "Details",
+      "description": "Your business name and phone number come from the rest of your settings.",
+      "category": "Category",
+      "categoryPlaceholder": "Dental clinic",
+      "about": "Description",
+      "aboutPlaceholder": "What you do and who you help, in a few sentences.",
+      "aboutCount": "{{count}} of {{max}} characters",
+      "email": "Public email",
+      "emailPlaceholder": "hello@example.com",
+      "address": "Address",
+      "line1": "Street address",
+      "line2": "Suite, unit or floor",
+      "city": "City",
+      "region": "Province or state",
+      "postalCode": "Postal code",
+      "country": "Country",
+      "noCountry": "No country"
+    },
+    "sections": {
+      "title": "What the page shows",
+      "description": "A section with nothing to show stays hidden.",
+      "phone": "Phone number",
+      "phoneHint": "The number callers reach your receptionist on.",
+      "hours": "Opening hours",
+      "hoursHint": "With whether you're open now.",
+      "editHours": "Edit hours",
+      "services": "Services",
+      "servicesHint": "With how long each one takes.",
+      "editServices": "Edit services",
+      "map": "Map",
+      "mapHint": "Your address on a map, with directions."
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "Visitors chat with your receptionist on the page, or call it from their browser, through one of your website widgets.",
+      "widget": "Website widget",
+      "none": "No chat",
+      "untitled": "Untitled widget",
+      "lastUsed": "{{label}} · last used {{date}}",
+      "empty": "You don't have an active website widget yet.",
+      "manage": "Website widget settings",
+      "unavailable": "The widget this page showed is paused or revoked, so the page shows no chat."
+    },
+    "save": "Save",
+    "saved": "Saved",
+    "errors": {
+      "email": "Enter an email address such as hello@example.com.",
+      "invalid": "Some details can't be saved. Check them and try again.",
+      "widgetUnavailable": "That widget is paused or revoked. Choose another one, or no chat.",
+      "saveFailed": "The public profile couldn't be saved. Try again."
+    }
+  },
+  "qrCode": {
+    "title": "QR code",
+    "loading": "Loading your QR code…",
+    "unavailable": "Your QR code can't be loaded right now.",
+    "card": {
+      "title": "Your QR code",
+      "description": "Put it on your door, counter or tables. Anyone who scans it lands on your public profile."
+    },
+    "opens": "Opens",
+    "open": "Open page",
+    "preview": "Preview",
+    "unpublished": {
+      "title": "Your public profile isn't published yet",
+      "description": "Anyone who scans this code sees a page-not-found message until the page is published. You can still print it now.",
+      "link": "Publish it in Public profile",
+      "askAdmin": "An owner or admin can publish it in Public profile."
+    },
+    "template": {
+      "label": "Template",
+      "signal": "Signal",
+      "signalHint": "Yellow sign",
+      "frontDesk": "Front desk",
+      "frontDeskHint": "White, uses less toner",
+      "night": "Night",
+      "nightHint": "Black, for dim rooms"
+    },
+    "message": {
+      "label": "Message",
+      "hint": "Printed as the headline. Type anything; Enter starts a new line.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Size",
+      "a4": "Full page · A4",
+      "a5": "Half page · A5",
+      "a6": "Quarter page · A6",
+      "a7": "Cards · A7",
+      "hint": "{{count}} per sheet · code {{code}} cm, scans from about {{distance}}"
+    },
+    "mark": {
+      "label": "Inside the code",
+      "name": "Name",
+      "logo": "Logo",
+      "none": "Nothing",
+      "tooLong": "This address is too long for a name or logo inside the code, so the code is plain."
+    },
+    "language": {
+      "label": "Language",
+      "hint": "The language of the words printed on the sign."
+    },
+    "print": "Print",
+    "png": "Code as PNG",
+    "svg": "Code as SVG",
+    "printHint": "Print at actual size (100%), not Fit to page, on A4 paper. Matte paper scans best. For a PDF, choose Save as PDF in the print window. Scan the print with two phones before you put it up.",
+    "downloadFailed": "The file couldn't be made. Try again, or use Print.",
+    "previewLabel": "Preview of the {{template}} template, {{size}}",
+    "caption": "A4 paper · {{count}} per sheet · each {{width}} × {{height}} cm",
+    "codeLabel": "QR code that opens {{url}}",
+    "noCode": "This address can't be made into a QR code.",
+    "sign": {
+      "defaultMessage": "Questions?\nAsk us any time.",
+      "scanChat": "Scan to chat with us",
+      "scanPage": "Scan to visit our page",
+      "answeredBy": "Answered by <brand>{{appName}}</brand>"
     }
   },
   "billing": {
@@ -377,7 +515,26 @@
       "loadFailed": "We couldn't load numbers right now.",
       "searchFailed": "We couldn't search numbers right now.",
       "claimFailed": "We couldn't replace the phone number. Please try again.",
+      "getNumberFailed": "We couldn't get that number. Please try again.",
       "unavailable": "That number was just taken. Pick another one from the refreshed list."
+    },
+    "errors": {
+      "offerExpired": "This list of numbers has expired. Search again, then pick a number.",
+      "claimInProgress": "Another number for this workspace is still being set up. Wait a few minutes, then try again.",
+      "claimRateLimited": "You've tried 3 numbers in the last hour, which is the limit. Try again later.",
+      "dailyClaimQuota": "You've gotten 2 numbers in the last 24 hours, which is the limit. Try again tomorrow.",
+      "monthlyClaimQuota": "You've gotten 5 numbers in the last 30 days, which is the limit. Try again later.",
+      "numberExists": "This workspace already has a phone number. Reload the page to see it.",
+      "invalidStage": "Finish the earlier setup steps before you pick a number.",
+      "paidPlanRequired": "A dedicated business number needs a paid plan.",
+      "replacementUsed": "This workspace has already used its one number change.",
+      "activeNumberRequired": "Your current number is no longer active, so it can't be changed.",
+      "replacementMustDiffer": "Pick a number other than your current one.",
+      "unsupportedCountry": "Phone numbers are available in the US, Canada, the UK and Australia.",
+      "searchRateLimited": "Too many searches. Wait a few minutes, then try again.",
+      "searchInvalid": "The phone carrier couldn't search with that area code. Check it and try again.",
+      "searchUnsupported": "The phone carrier has no numbers of this kind in this country.",
+      "withErrorId": "{{message}} Error ID: {{errorId}}"
     },
     "toast": {
       "changed": "Phone number changed. Your previous number will stay active for 30 days.",
@@ -811,11 +968,11 @@
     "phoneVerification": {
       "phone": {
         "title": "Your mobile number",
-        "consent": "By sending the code, you agree to get LobbyStack alerts by text. Frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help."
+        "consent": "By sending the code, you agree to get {{appName}} alerts by text. Frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help."
       },
       "confirm": {
         "title": "Turn on SMS alerts",
-        "consent": "By turning them on, you agree to get LobbyStack alerts by text at your verified number. Frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.",
+        "consent": "By turning them on, you agree to get {{appName}} alerts by text at your verified number. Frequency varies. Msg & data rates may apply. Reply STOP to opt out, HELP for help.",
         "turnOn": "Turn on"
       },
       "fields": {
@@ -861,6 +1018,12 @@
     "neverUsed": "Never",
     "createdBy": "{{date}} by {{name}}",
     "revoked": "Revoked {{date}}",
+    "businessId": {
+      "title": "Business ID",
+      "description": "The API and the lobbystack command identify {{business}} by this ID. Use it in the {{header}} header, with --business, or under business.id in a lobbystack onboard manifest.",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
     "restricted": {
       "title": "Only owners and admins can manage API keys",
       "description": "Ask an owner or admin of this business to create a key for you."

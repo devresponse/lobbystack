@@ -55,6 +55,8 @@ const domain = vi.hoisted(() => ({
   reorderRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   getReceptionistForApi: vi.fn(),
   updateReceptionistForApi: vi.fn(),
+  getPublicProfileForApi: vi.fn(),
+  updatePublicProfileForApi: vi.fn(),
   listKnowledgeEntriesForApi: vi.fn(),
   getKnowledgeEntryForApi: vi.fn(),
   updateKnowledgeEntryForApi: vi.fn(),
@@ -919,20 +921,21 @@ describe("calendars", () => {
 
 describe("widget keys", () => {
   const keyId = "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e";
-  const widgetKey = { id: keyId, label: "Site", status: "active", allowed_origins: ["https://example.com"], config: { position: "bottom-right", title: "" }, last_used_at: null, created_at: "2026-10-11T12:00:00.000Z" };
+  const widgetKey = { id: keyId, label: "Site", status: "active", allowed_origins: ["https://example.com"], config: { position: "bottom-right", title: "" }, key: "wk_live_x", embed_snippet: '<script src="https://app.lobbystack.example/embed.js?key=wk_live_x" data-widget-key="wk_live_x" defer></script>', last_used_at: null, created_at: "2026-10-11T12:00:00.000Z" };
   const create = (body: unknown) => v1.createWidgetKey(call("/widget-keys", { method: "POST", body: JSON.stringify(body) }));
   const update = (body: unknown, id = keyId) => v1.updateWidgetKey(call(`/widget-keys/${id}`, { method: "PATCH", body: JSON.stringify(body) }), { params: Promise.resolve({ widget_key_id: id }) });
 
   it("lists keys and creates one with the script tag served from the dashboard", async () => {
-    domain.listWidgetKeysForApi.mockResolvedValue([widgetKey]);
-    expect(await (await v1.listWidgetKeys(call("/widget-keys"))).json()).toEqual({ data: [widgetKey], next_cursor: null, has_more: false });
-    // Website chat is a restricted capability, so issuing keys needs the deployment to turn it on.
-    const response403 = await create({ allowed_origins: [] });
-    expect(response403.status).toBe(403);
     vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.example/dashboard");
-    vi.stubEnv("WIDGET_KEY_ISSUANCE_ENABLED", "true");
     try {
-      domain.createWidgetKeyForApi.mockResolvedValue({ ...widgetKey, key: "wk_live_x", embed_snippet: "<script></script>" });
+      domain.listWidgetKeysForApi.mockResolvedValue([widgetKey]);
+      expect(await (await v1.listWidgetKeys(call("/widget-keys"))).json()).toEqual({ data: [widgetKey], next_cursor: null, has_more: false });
+      expect(domain.listWidgetKeysForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { appOrigin: "https://app.lobbystack.example" });
+      // Website chat is a restricted capability, so issuing keys needs the deployment to turn it on.
+      const response403 = await create({ allowed_origins: [] });
+      expect(response403.status).toBe(403);
+      vi.stubEnv("WIDGET_KEY_ISSUANCE_ENABLED", "true");
+      domain.createWidgetKeyForApi.mockResolvedValue(widgetKey);
       const response = await create({ label: "Site", allowed_origins: ["https://example.com/contact"], config: { color: "#0f766e", lead_form: { enabled: true, require_email: true } } });
       expect(response.status).toBe(201);
       expect(domain.createWidgetKeyForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { label: "Site", allowed_origins: ["https://example.com/contact"], config: { color: "#0f766e", lead_form: { enabled: true, require_email: true } } }, { appOrigin: "https://app.lobbystack.example" });
@@ -946,13 +949,19 @@ describe("widget keys", () => {
   });
 
   it("checks a key's changes before the domain sees them", async () => {
-    domain.updateWidgetKeyForApi.mockResolvedValue({ ...widgetKey, status: "disabled" });
-    expect((await update({ status: "disabled", label: null })).status).toBe(200);
-    expect(domain.updateWidgetKeyForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), keyId, { status: "disabled", label: null });
-    for (const bad of [{ status: "deleted" }, { label: "" }, { allowed_origins: ["ftp://example.com"] }, { config: { position: "top" } }]) {
-      expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+    // Without APP_BASE_URL, the script tag is served from the origin the request came to.
+    vi.stubEnv("APP_BASE_URL", "");
+    try {
+      domain.updateWidgetKeyForApi.mockResolvedValue({ ...widgetKey, status: "disabled" });
+      expect((await update({ status: "disabled", label: null })).status).toBe(200);
+      expect(domain.updateWidgetKeyForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), keyId, { status: "disabled", label: null }, { appOrigin: "https://app.example.com" });
+      for (const bad of [{ status: "deleted" }, { label: "" }, { allowed_origins: ["ftp://example.com"] }, { config: { position: "top" } }]) {
+        expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+      }
+      expect((await update({ status: "active" }, "x")).status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
     }
-    expect((await update({ status: "active" }, "x")).status).toBe(400);
     expect(domain.updateWidgetKeyForApi).toHaveBeenCalledTimes(1);
   });
 
@@ -1047,6 +1056,59 @@ describe("receptionist settings", () => {
     expect((await v1.getReceptionist(call("/receptionist"))).status).toBe(403);
     expect(domain.updateReceptionistForApi).not.toHaveBeenCalled();
     expect(domain.getReceptionistForApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("public profile page", () => {
+  const profile = {
+    slug: "maple-salon",
+    url: "https://app.lobbystack.example/profile/maple-salon",
+    published: true,
+    published_at: "2026-10-16T20:00:00.000Z",
+    category: "Hair salon",
+    description: "Cuts and colour.",
+    address: { line1: "12 King St W", line2: null, city: "Toronto", region: "ON", postal_code: "M5H 1A1", country_code: "CA" },
+    public_email: "hello@maple.example",
+    show_phone: true,
+    show_hours: true,
+    show_services: true,
+    show_map: true,
+    widget_key_id: null,
+    updated_at: "2026-10-16T20:00:00.000Z",
+  };
+  const update = (body: unknown) => v1.updatePublicProfile(call("/public-profile", { method: "PATCH", body: JSON.stringify(body) }));
+
+  it("reads the page with its address on the dashboard's domain", async () => {
+    vi.stubEnv("APP_BASE_URL", "https://app.lobbystack.example/dashboard");
+    try {
+      domain.getPublicProfileForApi.mockResolvedValue(profile);
+      const response = await v1.getPublicProfile(call("/public-profile"));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ data: profile });
+      expect(domain.getPublicProfileForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { appOrigin: "https://app.lobbystack.example" });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("tidies text as the dashboard does and refuses what it would refuse", async () => {
+    domain.updatePublicProfileForApi.mockResolvedValue(profile);
+    const response = await update({ published: true, category: "  Hair   salon ", address: { city: " Toronto ", country_code: "ca", line2: "" }, public_email: null });
+    expect(response.status).toBe(200);
+    expect(domain.updatePublicProfileForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), { published: true, category: "Hair salon", address: { city: "Toronto", country_code: "CA", line2: null }, public_email: null }, { appOrigin: "https://app.example.com" });
+    for (const bad of [{ category: "a".repeat(81) }, { description: "a".repeat(751) }, { public_email: "not an email" }, { category: "Hair\u202esalon" }, { address: { country_code: "CAN" } }, { address: { postalCode: "M5H" } }, { widget_key_id: "not-a-uuid" }, { slug: "someone-else" }, { show_map: "yes" }]) {
+      expect((await update(bad)).status, JSON.stringify(bad)).toBe(400);
+    }
+    expect(domain.updatePublicProfileForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("needs business:read to read and business:write to change", async () => {
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await update({ published: false })).status).toBe(403);
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:write"] });
+    expect((await v1.getPublicProfile(call("/public-profile"))).status).toBe(403);
+    expect(domain.updatePublicProfileForApi).not.toHaveBeenCalled();
+    expect(domain.getPublicProfileForApi).not.toHaveBeenCalled();
   });
 });
 

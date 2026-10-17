@@ -1,9 +1,13 @@
+import { brandFileMatched, brandImage, currentBrand, type ResolvedBrand } from "./brands/resolve";
+import type { BrandImage } from "./brands/types";
+
 // The name and logo a deployment shows in place of LobbyStack.
 //
-// A deployment sets them with BRAND_APP_NAME and BRAND_LOGO_URL, or its first
-// owner picks them in onboarding and the database keeps them. For each field
-// the environment variable wins over the saved value, and LobbyStack fills in
-// whatever neither sets.
+// A brand file under brands/ sets them when the deployment's domain or
+// BRAND_PRESET picks one (brands/resolve.ts). Otherwise the deployment's first
+// owner picks them in onboarding and the database keeps them, and LobbyStack
+// fills in whatever nobody chose. BRAND_APP_NAME and BRAND_LOGO_URL still win
+// over both, field by field, until they are removed.
 
 export const DEFAULT_APP_NAME = "LobbyStack";
 
@@ -15,7 +19,7 @@ export const BRANDING_ENVIRONMENT = {
 
 export type BrandingField = keyof typeof BRANDING_ENVIRONMENT;
 
-export type BrandingSource = "environment" | "database" | "default";
+export type BrandingSource = "environment" | "file" | "database" | "default";
 
 export const MAX_APP_NAME_LENGTH = 40;
 
@@ -93,21 +97,92 @@ export function readBrandingEnvironment(environment: Record<string, string | und
   return { appName, logoUrl, invalid };
 }
 
+/**
+ * Who the deployment's emails come from: EMAIL_FROM, with the deployment's
+ * name in front when it holds only an address. The name is BRAND_APP_NAME
+ * while it lasts, else a matched brand file's. Onboarding's saved name is in
+ * the database, so a deployment with neither keeps EMAIL_FROM as it is.
+ */
+export function emailSender(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): string {
+  const name = readBrandingEnvironment(environment).appName ?? (brandFileMatched(brand) ? brand.appName : null);
+  const from = environment.EMAIL_FROM?.trim();
+  if (!from) return namedSender(name ?? brand.appName, "no-reply@localhost");
+  return name && !from.includes("<") ? namedSender(name, from) : from;
+}
+
+// Quoted, so a name such as "AlloPlace (dev)" isn't read as an address comment.
+function namedSender(name: string, address: string): string {
+  return `"${name.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}" <${address}>`;
+}
+
+/**
+ * The logo emails show above the deployment's name: the brand file's email
+ * logo under the deployment's address. None while BRAND_LOGO_URL sets a
+ * different logo, or without an address to load it from.
+ */
+export function brandEmailLogo(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): BrandImage | null {
+  return readBrandingEnvironment(environment).logoUrl ? null : brandImage(brand, brand.emailLogo);
+}
+
+/**
+ * The variable that colours the deployment's public pages: the field behind a
+ * business's chat on its profile page, today's row in its hours and the logo
+ * tile. Text on it is black or white, whichever reads better.
+ */
+export const BRAND_ACCENT_VARIABLE = "BRAND_ACCENT_COLOR";
+
+/** The accent without BRAND_ACCENT_COLOR: the website widget's default colour. */
+export const DEFAULT_BRAND_ACCENT_COLOR = "#0f766e";
+
+const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
+
+/** A colour as #rrggbb in lowercase, or null when the value isn't a #rgb or #rrggbb colour. */
+export function normalizeAccentColor(value: unknown): string | null {
+  if (typeof value !== "string" || !HEX_COLOR.test(value.trim())) return null;
+  const digits = value.trim().slice(1).toLowerCase();
+  return `#${digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits}`;
+}
+
+/** The deployment's accent colour from its environment, else its brand's, else the default. */
+export function brandAccentColor(environment: Record<string, string | undefined>, brand: Pick<ResolvedBrand, "accentColor"> = currentBrand()): string {
+  return normalizeAccentColor(environment[BRAND_ACCENT_VARIABLE]) ?? brand.accentColor ?? DEFAULT_BRAND_ACCENT_COLOR;
+}
+
+/** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
+export function readableTextOn(color: string): "#000000" | "#ffffff" {
+  const digits = normalizeAccentColor(color)?.slice(1) ?? "000000";
+  const [red, green, blue] = [0, 2, 4].map((start) => {
+    const channel = Number.parseInt(digits.slice(start, start + 2), 16) / 255;
+    return channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+  // Contrast ratios against black (luminance 0) and against white (luminance 1).
+  return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05) ? "#000000" : "#ffffff";
+}
+
 /** The URL of a logo saved in the database, versioned so browsers may cache it for good. */
 export function savedBrandLogoUrl(logoVersion: string): string {
   return `${BRAND_LOGO_PATH}?v=${encodeURIComponent(logoVersion)}`;
 }
 
-/** Each field from the environment, else the saved choice, else LobbyStack. */
-export function resolveBranding(input: { environment: Pick<BrandingEnvironment, "appName" | "logoUrl">; saved: SavedBranding | null }): Branding {
-  const savedName = normalizeAppName(input.saved?.appName);
-  const savedLogo = input.saved?.logoVersion ? savedBrandLogoUrl(input.saved.logoVersion) : null;
+type BrandForBranding = Pick<ResolvedBrand, "source" | "appName" | "logoUrl">;
+
+/**
+ * Each field from the environment, else a matched brand file, else the saved
+ * choice, else the default brand. Without a brand, the default is LobbyStack.
+ */
+export function resolveBranding(input: { environment: Pick<BrandingEnvironment, "appName" | "logoUrl">; saved: SavedBranding | null; brand?: BrandForBranding }): Branding {
+  const file = input.brand && brandFileMatched(input.brand) ? input.brand : null;
+  const savedName = file ? null : normalizeAppName(input.saved?.appName);
+  const savedLogo = !file && input.saved?.logoVersion ? savedBrandLogoUrl(input.saved.logoVersion) : null;
+  const fallbackName = input.brand?.appName ?? DEFAULT_APP_NAME;
+  const fallbackLogo = input.brand?.logoUrl ?? null;
   return {
-    appName: input.environment.appName ?? savedName ?? DEFAULT_APP_NAME,
-    logoUrl: input.environment.logoUrl ?? savedLogo,
+    appName: input.environment.appName ?? file?.appName ?? savedName ?? fallbackName,
+    logoUrl: input.environment.logoUrl ?? (file ? file.logoUrl : savedLogo ?? fallbackLogo),
     sources: {
-      appName: input.environment.appName ? "environment" : savedName ? "database" : "default",
-      logoUrl: input.environment.logoUrl ? "environment" : savedLogo ? "database" : "default",
+      appName: input.environment.appName ? "environment" : file ? "file" : savedName ? "database" : "default",
+      logoUrl: input.environment.logoUrl ? "environment" : file ? "file" : savedLogo ? "database" : "default",
     },
   };
 }

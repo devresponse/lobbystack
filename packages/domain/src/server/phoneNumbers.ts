@@ -1,7 +1,7 @@
 import { isPaidSubscription } from "@lobbystack/shared";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
-import { and, eq, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 
 import { billingAccounts, businesses, enqueueOutbox, onboardingNumberClaimEvents, phoneNumbers, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
@@ -17,15 +17,68 @@ export type NumberClaimPurpose = "onboarding" | "replacement";
 export type NumberOffer = { v: 1; purpose: NumberClaimPurpose; businessId: string; userId: string; e164: string; countryCode: string; kind: "local" | "toll_free"; capabilities: { sms: true; voice: true }; selection: NumberSelection; exp: number };
 export type NumberSelectionRefusal = "stage" | "replacement_used" | "active_number_required" | "paid_plan_required" | "unsupported_country";
 
-/** Why a business can't pick a number now. The API answers each reason with its own status. */
+/** A refused number search or claim, with the status and code the dashboard answers it with, so the chooser can say why. */
+type NumberRequestError = Error & { status: number; code: string };
+
+function numberRequestError(status: number, code: string, message: string, cause?: unknown): NumberRequestError {
+  return Object.assign(new Error(message, cause === undefined ? undefined : { cause }), { status, code });
+}
+
+/**
+ * Why a business can't pick a number now. The API answers each reason with
+ * its own status; the dashboard answers with `status` and `code`.
+ */
 export class NumberSelectionError extends Error {
   readonly reason: NumberSelectionRefusal;
+  readonly status: number;
+  readonly code: string;
 
   constructor(message: string, reason: NumberSelectionRefusal) {
     super(message);
     this.name = "NumberSelectionError";
     this.reason = reason;
+    this.status = reason === "unsupported_country" ? 400 : 409;
+    this.code = reason === "stage" ? "invalid_onboarding_stage" : reason;
   }
+}
+
+// What the claim functions raise, as the dashboard answers it. The limits count
+// the person's claims in every workspace, failed ones too.
+const numberClaimRefusals: Record<string, [status: number, code: string, message: string]> = {
+  number_claim_in_progress: [409, "number_claim_in_progress", "Another number for this workspace is still being set up. Wait for it to finish, then try again."],
+  replacement_already_reserved: [409, "number_claim_in_progress", "A replacement for this workspace's number is still being set up. Wait for it to finish, then try again."],
+  business_number_exists: [409, "business_number_exists", "This workspace already has a phone number."],
+  invalid_onboarding_stage: [409, "invalid_onboarding_stage", "Business number selection is not available at this onboarding stage."],
+  dedicated_number_requires_paid_plan: [409, "paid_plan_required", "A paid plan is required for a dedicated business number."],
+  replacement_already_used: [409, "replacement_used", "This workspace has already used its number replacement."],
+  active_number_required: [409, "active_number_required", "An active phone number is required before choosing a replacement."],
+  replacement_number_must_differ: [400, "replacement_number_must_differ", "Pick a number other than the one being replaced."],
+  number_claim_rate_limited: [429, "number_claim_rate_limited", "You tried 3 numbers in the last hour. Try again later."],
+  daily_claim_quota_reached: [429, "daily_claim_quota_reached", "You got 2 numbers in the last 24 hours. Try again tomorrow."],
+  monthly_claim_quota_reached: [429, "monthly_claim_quota_reached", "You got 5 numbers in the last 30 days. Try again later."],
+};
+
+// Drizzle wraps the PostgreSQL error, and its message lists the query
+// parameters. Keep the raised error, which names only the reason, as the cause.
+function numberClaimRefusal(error: unknown): NumberRequestError | undefined {
+  for (let current: unknown = error, depth = 0; current && typeof current === "object" && depth < 4; current = (current as { cause?: unknown }).cause, depth += 1) {
+    const message = (current as { message?: unknown }).message;
+    if (typeof message === "string" && Object.hasOwn(numberClaimRefusals, message)) {
+      const [status, code, text] = numberClaimRefusals[message]!;
+      return numberRequestError(status, code, text, current);
+    }
+  }
+  return undefined;
+}
+
+// The carrier's own 401 or 403 would read as the person's session, so only its
+// refusal of the filters is the person's to fix. Anything else is our failure,
+// logged with the carrier's error as the cause.
+function numberSearchError(error: unknown): unknown {
+  const status = typeof error === "object" && error !== null && "status" in error ? (error as { status: unknown }).status : undefined;
+  if (status === 400) return numberRequestError(400, "number_search_invalid", "The carrier can't search with these filters. Check the area code.", error);
+  if (status === 404) return numberRequestError(400, "number_search_unsupported", "The carrier has no numbers of this kind in this country.", error);
+  return new Error("The carrier's number search failed.", { cause: error });
 }
 
 const offerLifetimeMs = 5 * 60_000;
@@ -36,10 +89,13 @@ function issueOffer(payload: NumberOffer, secret: string): string { const encode
 
 /** Reads a signed offer. Throws when the token was not signed with this secret, or has expired. */
 export function readNumberOffer(token: string, secret: string): NumberOffer {
-  const [encoded, signature, extra] = token.split("."); if (!encoded || !signature || extra) throw new Error("Invalid number claim token.");
-  const expected = Buffer.from(sign(encoded, secret)); const actual = Buffer.from(signature); if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw new Error("Invalid number claim token.");
+  const invalid = () => numberRequestError(400, "number_offer_invalid", "Invalid number claim token.");
+  const [encoded, signature, extra] = token.split("."); if (!encoded || !signature || extra) throw invalid();
+  const expected = Buffer.from(sign(encoded, secret)); const actual = Buffer.from(signature); if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) throw invalid();
   const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as NumberOffer;
-  if (payload.v !== 1 || !["onboarding", "replacement"].includes(payload.purpose) || payload.exp < Date.now() || !/^\+[1-9]\d{7,14}$/.test(payload.e164) || !payload.capabilities.sms || !payload.capabilities.voice) throw new Error("Number claim token has expired or is invalid.");
+  if (payload.v !== 1 || !["onboarding", "replacement"].includes(payload.purpose) || !/^\+[1-9]\d{7,14}$/.test(payload.e164) || !payload.capabilities.sms || !payload.capabilities.voice) throw invalid();
+  // Offers last five minutes, so a list left open longer has to be searched again.
+  if (payload.exp < Date.now()) throw numberRequestError(400, "number_offer_expired", "Number claim token has expired. Search again.");
   return payload;
 }
 
@@ -91,7 +147,12 @@ export async function searchBusinessNumberInventory(context: DomainContext, inpu
     await requireBusinessAdmin(tx, input);
     return await numberMarketInTransaction(tx, { businessId: input.businessId, purpose, selection: input.selection, enforceStage: true });
   });
-  const numbers = await offerBusinessNumbers({ businessId: input.businessId, userId: input.userId, purpose, market, selection: input.selection, limit: input.limit, claimTokenSecret: input.claimTokenSecret }, provider);
+  let numbers: Awaited<ReturnType<typeof offerBusinessNumbers>>;
+  try {
+    numbers = await offerBusinessNumbers({ businessId: input.businessId, userId: input.userId, purpose, market, selection: input.selection, limit: input.limit, claimTokenSecret: input.claimTokenSecret }, provider);
+  } catch (error) {
+    throw numberSearchError(error);
+  }
   return { market, numbers };
 }
 
@@ -101,7 +162,7 @@ export async function searchAvailableBusinessNumbers(...args: Parameters<typeof 
 
 export async function reserveOnboardingNumberClaim(context: DomainContext, input: { userId: string; businessId: string; claimToken: string; claimTokenSecret: string; idempotencyKey: string }): Promise<string> {
   const offer = readNumberOffer(input.claimToken, input.claimTokenSecret);
-  if (offer.purpose !== "onboarding" || offer.businessId !== input.businessId || offer.userId !== input.userId) throw new Error("Number claim token does not belong to this onboarding flow.");
+  if (offer.purpose !== "onboarding" || offer.businessId !== input.businessId || offer.userId !== input.userId) throw numberRequestError(400, "number_offer_mismatch", "Number claim token does not belong to this onboarding flow.");
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
     const tokenHash = createHash("sha256").update(input.claimToken).digest("hex");
@@ -109,12 +170,12 @@ export async function reserveOnboardingNumberClaim(context: DomainContext, input
     const claimId = String((result.rows[0] as { id?: unknown } | undefined)?.id ?? ""); if (!claimId) throw new Error("Number claim could not be reserved.");
     await enqueueOutbox(tx, { topic: "phoneNumber.provision", businessId: input.businessId, aggregateType: "number_claim", aggregateId: claimId, dedupeKey: `phone-claim:${claimId}:provision`, payload: { claimId } });
     return claimId;
-  });
+  }).catch((error: unknown) => { throw numberClaimRefusal(error) ?? error; });
 }
 
 export async function reserveReplacementNumberClaim(context: DomainContext, input: { userId: string; businessId: string; claimToken: string; claimTokenSecret: string; idempotencyKey: string }): Promise<string> {
   const offer = readNumberOffer(input.claimToken, input.claimTokenSecret);
-  if (offer.purpose !== "replacement" || offer.businessId !== input.businessId || offer.userId !== input.userId) throw new Error("Number claim token does not belong to this replacement flow.");
+  if (offer.purpose !== "replacement" || offer.businessId !== input.businessId || offer.userId !== input.userId) throw numberRequestError(400, "number_offer_mismatch", "Number claim token does not belong to this replacement flow.");
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
     const tokenHash = createHash("sha256").update(input.claimToken).digest("hex");
@@ -123,7 +184,7 @@ export async function reserveReplacementNumberClaim(context: DomainContext, inpu
     if (!claimId) throw new Error("Number replacement could not be reserved.");
     await enqueueOutbox(tx, { topic: "phoneNumber.provision", businessId: input.businessId, aggregateType: "number_claim", aggregateId: claimId, dedupeKey: `phone-claim:${claimId}:provision`, payload: { claimId } });
     return claimId;
-  });
+  }).catch((error: unknown) => { throw numberClaimRefusal(error) ?? error; });
 }
 
 /** The lock every number claim for the business takes, so claims and releases take turns. Keyed as the claim functions key it. */
@@ -203,13 +264,16 @@ export async function completeNumberProvisioning(context: DomainContext, input: 
     } else {
       await tx.update(businesses).set({ onboardingStage: sql`CASE WHEN ${businesses.onboardingStage} = 'complete' THEN 'complete' ELSE 'attribution' END`, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
     }
+    // The receptionist's snapshot names the number it gives out, and the website widget offers calls from the browser only while it names one.
+    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "phone_number", aggregateId: number.id, dedupeKey: `phone-number:${number.id}:snapshot:added`, payload: { businessId: input.businessId, reason: "phone_number_added" } });
     return number.id;
   });
 }
 
-export async function failNumberProvisioning(context: DomainContext, input: { businessId: string; claimId: string; unavailable: boolean }): Promise<void> {
+/** Ends a claim no attempt will finish. A claim already claimed, failed or unavailable stays as it is. */
+export async function failNumberProvisioning(context: DomainContext, input: { businessId: string; claimId: string; unavailable: boolean; error?: string }): Promise<void> {
   await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const claim = (await tx.update(onboardingNumberClaimEvents).set({ status: input.unavailable ? "unavailable" : "failed", lastError: input.unavailable ? "The selected number is no longer available." : "Number provisioning failed.", completedAt: new Date(), updatedAt: new Date() }).where(and(eq(onboardingNumberClaimEvents.id, input.claimId), eq(onboardingNumberClaimEvents.businessId, input.businessId))).returning({ purpose: onboardingNumberClaimEvents.purpose }))[0];
+    const claim = (await tx.update(onboardingNumberClaimEvents).set({ status: input.unavailable ? "unavailable" : "failed", lastError: input.error ?? (input.unavailable ? "The selected number is no longer available." : "Number provisioning failed."), completedAt: new Date(), updatedAt: new Date() }).where(and(eq(onboardingNumberClaimEvents.id, input.claimId), eq(onboardingNumberClaimEvents.businessId, input.businessId), inArray(onboardingNumberClaimEvents.status, ["reserved", "provisioning"]))).returning({ purpose: onboardingNumberClaimEvents.purpose }))[0];
     if (claim?.purpose === "replacement") await tx.update(businesses).set({ phoneNumberReplacementReservedAt: null, updatedAt: new Date() }).where(and(eq(businesses.id, input.businessId), sql`${businesses.phoneNumberReplacementReservedAt} = (SELECT reserved_at FROM onboarding_number_claim_events WHERE id = ${input.claimId}::uuid)`));
     else if (claim) await tx.update(businesses).set({ onboardingStage: sql`CASE WHEN ${businesses.onboardingStage} IN ('attribution', 'complete') THEN ${businesses.onboardingStage} ELSE 'phone_number' END`, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
   });

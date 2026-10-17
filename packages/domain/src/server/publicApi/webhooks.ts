@@ -20,6 +20,7 @@ import {
 import { getMeter, recordException } from "@lobbystack/telemetry/node";
 
 import { requireBusinessAdmin } from "../../authz";
+import { deploymentAppName } from "../branding";
 import type { DomainContext } from "../context";
 import { queueOperatorAlertInTransaction } from "../notifications";
 import { conflict, invalidRequest, notFound } from "./errors";
@@ -206,12 +207,13 @@ export async function emitWebhookEventInTransaction(tx: DatabaseTransaction, inp
 
 /** Queues a webhook.test event to one endpoint, whether or not it is subscribed or enabled. */
 export async function sendWebhookTestEvent(context: DomainContext, input: { businessId: string; manager: WebhookManager; endpointId: string }): Promise<{ event_id: string; delivery_id: string }> {
+  const appName = await deploymentAppName(context.db);
   return await asManager(context, input.businessId, input.manager, async (tx) => {
     const [endpoint] = await tx.select({ id: webhookEndpoints.id }).from(webhookEndpoints).where(and(eq(webhookEndpoints.businessId, input.businessId), eq(webhookEndpoints.id, input.endpointId))).limit(1);
     if (!endpoint) throw notFound("Webhook endpoint");
     const eventId = randomUUID();
     const createdAt = new Date();
-    await tx.insert(webhookEvents).values({ id: eventId, businessId: input.businessId, type: WEBHOOK_TEST_EVENT_TYPE, payload: buildEventPayload({ id: eventId, type: WEBHOOK_TEST_EVENT_TYPE, businessId: input.businessId, createdAt, data: { endpoint_id: endpoint.id, message: "This is a test event from LobbyStack." } }), createdAt });
+    await tx.insert(webhookEvents).values({ id: eventId, businessId: input.businessId, type: WEBHOOK_TEST_EVENT_TYPE, payload: buildEventPayload({ id: eventId, type: WEBHOOK_TEST_EVENT_TYPE, businessId: input.businessId, createdAt, data: { endpoint_id: endpoint.id, message: `This is a test event from ${appName}.` } }), createdAt });
     const deliveryId = await queueDelivery(tx, { businessId: input.businessId, endpointId: endpoint.id, eventId });
     return { event_id: eventId, delivery_id: deliveryId };
   });
@@ -341,7 +343,7 @@ export async function processWebhookDelivery(
       eventKind: "webhookDisabled",
       eventKey: `webhookDisabled:${endpoint.id}:${at.getTime()}`,
       subject: "A webhook endpoint was turned off",
-      body: `LobbyStack stopped sending events to ${new URL(endpoint.url).host} after every delivery failed for about a day. Fix the endpoint, then turn it back on in Integrations > Webhooks.`,
+      body: `We stopped sending events to ${new URL(endpoint.url).host} after every delivery failed for about a day. Fix the endpoint, then turn it back on in Integrations > Webhooks.`,
     });
     endpointsDisabled.add(1);
     return { outcome: "failed" as const, endpointDisabled: true };

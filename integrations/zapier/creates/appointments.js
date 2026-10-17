@@ -54,14 +54,14 @@ const bookAppointment = {
         helpText: 'Used when no contact is chosen. Use international format, for example `+14165550134`.',
       },
       { key: 'contact_name', label: 'Contact name', type: 'string', required: false },
-      { ...staffField, helpText: 'Book with this staff member. Leave blank to let LobbyStack pick someone free.' },
+      { ...staffField, helpText: 'Book with this staff member. Leave blank to have someone free picked.' },
       {
         key: 'sms_consent',
         label: 'Customer agreed to texts',
         type: 'boolean',
         required: false,
         default: 'false',
-        helpText: 'Set to true only if the customer agreed to receive confirmation and reminder text messages. Self-hosted LobbyStack only: on LobbyStack Cloud, only the receptionist collects text consent, on a call.',
+        helpText: 'Set to true only if the customer agreed to receive confirmation and reminder text messages. Ignored on a cloud deployment, where only the receptionist collects text consent, on a call.',
       },
     ],
     perform: async (z, bundle) => {

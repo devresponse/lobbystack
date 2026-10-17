@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { PhoneNumberChooser, phoneNumberChooserApi } from "./phone-number-chooser";
 import { getSafeOnboardingErrorMessage } from "@/lib/onboarding-errors";
+import { phoneNumberErrorMessage } from "@/lib/phone-number-errors";
 import { requestJson } from "@/lib/request-json";
 import { formatPhoneNumberDisplay } from "@/lib/phone";
 import { useTelemetry } from "@/components/product-analytics";
@@ -19,6 +20,7 @@ const onboardingNumbers = phoneNumberChooserApi(false);
 
 export function OnboardingNumberSurface() {
   const { t } = useTranslation("onboarding");
+  const { t: settingsT } = useTranslation("settings");
   const router = useRouter();
   const telemetry = useTelemetry();
   const [claiming, setClaiming] = useState(false);
@@ -31,7 +33,7 @@ export function OnboardingNumberSurface() {
     setClaiming(true);
     try { return await onboardingNumbers.claimNumber(args); } finally { setClaiming(false); }
   }, []);
-  const getErrorMessage = useCallback((error: unknown, fallback: string) => getSafeOnboardingErrorMessage(error, t, fallback), [t]);
+  const getErrorMessage = useCallback((error: unknown, fallback: string) => phoneNumberErrorMessage(error, settingsT, t(fallback)) ?? getSafeOnboardingErrorMessage(error, t, fallback), [settingsT, t]);
   const skip = useMutation({ mutationFn: () => requestJson(`/api/onboarding/phone-numbers/skip?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST" }), onSuccess: () => router.push(business?.onboardingStage === "complete" ? "/" : "/onboarding/attribution"), meta: { inlineError: true } });
   if (!phones.data || (!claiming && phones.data.activeClaim) || (primary && !reachedAttribution)) return <Surface className="flex justify-center p-6"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></Surface>;
   if (primary) return <Surface className="flex flex-col gap-5 p-6 text-center"><div className="flex flex-col gap-2"><p className="text-sm font-medium text-muted-foreground">{t("number.selectedNumberLabel")}</p><p className="text-2xl font-semibold text-foreground">{formatPhoneNumberDisplay(primary.e164)}</p></div><Button onClick={() => router.push("/onboarding/attribution")} type="button">{t("number.continue")}</Button></Surface>;

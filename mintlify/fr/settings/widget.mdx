@@ -5,7 +5,7 @@ sidebarTitle: "Widget de site Web"
 contentType: "How-to"
 ---
 
-La page **Réglages** > **Widget de site web** crée et gère les clés du widget de réceptionniste. Depuis le widget, les visiteurs peuvent clavarder, laisser leurs coordonnées et lancer un appel depuis leur navigateur.
+La page **Réglages** > **Widget de site web** crée et gère les clés du widget de réceptionniste. Depuis le widget, les visiteurs peuvent clavarder, laisser leurs coordonnées et lancer un appel depuis leur navigateur. Le bouton d'appel **Dites Allo !** s'affiche dès que votre entreprise a un numéro de téléphone LobbyStack.
 
 <Note>
   Le clavardage sur le site Web est restreint et ne fait pas partie des forfaits hébergés. La création de nouvelles clés de widget est désactivée par défaut. Sur un déploiement auto-hébergé, définissez `WIDGET_KEY_ISSUANCE_ENABLED=true` pour en créer. Les clés existantes continuent de fonctionner.
@@ -30,6 +30,21 @@ La page **Réglages** > **Widget de site web** crée et gère les clés du widge
     Copiez l'extrait de chargement généré et ajoutez-le avant la balise de fermeture `</body>` de votre site Web.
   </Step>
 </Steps>
+
+## Afficher le clavardage dans votre page
+
+Le widget est une bulle de clavardage dans un coin de votre site Web. Pour afficher plutôt le clavardage dans votre page, par exemple sur une page de contact, ajoutez `data-inline-target` à l'extrait avec un sélecteur CSS pour l'élément qui le contient :
+
+```html
+<div id="chat" style="height: 600px"></div>
+<script src="https://app.example.com/embed.js?key=VOTRE_CLE_DE_WIDGET" data-widget-key="VOTRE_CLE_DE_WIDGET" data-inline-target="#chat" defer></script>
+```
+
+- Donnez une hauteur à l'élément. Le clavardage le remplit.
+- Le clavardage démarre quand l'élément approche de l'écran, donc un visiteur qui ne fait jamais défiler la page jusqu'à lui ne lance pas de clavardage.
+- Si aucun élément de la page ne correspond au sélecteur, le widget affiche la bulle à la place.
+
+Votre [profil public](/fr/settings/public-profile) affiche son clavardage de cette façon.
 
 ## Protéger les appels Web
 

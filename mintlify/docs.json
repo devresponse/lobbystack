@@ -122,7 +122,9 @@
                   "settings/team",
                   "settings/notifications",
                   "settings/phone-number",
-                  "settings/widget"
+                  "settings/widget",
+                  "settings/public-profile",
+                  "settings/qr-code"
                 ]
               },
               {
@@ -247,7 +249,9 @@
                   "fr/settings/team",
                   "fr/settings/notifications",
                   "fr/settings/phone-number",
-                  "fr/settings/widget"
+                  "fr/settings/widget",
+                  "fr/settings/public-profile",
+                  "fr/settings/qr-code"
                 ]
               },
               {
@@ -375,7 +379,9 @@
                   "es/settings/team",
                   "es/settings/notifications",
                   "es/settings/phone-number",
-                  "es/settings/widget"
+                  "es/settings/widget",
+                  "es/settings/public-profile",
+                  "es/settings/qr-code"
                 ]
               },
               {

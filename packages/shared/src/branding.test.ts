@@ -4,12 +4,16 @@ import {
   BRAND_LOGO_PATH,
   DEFAULT_APP_NAME,
   MAX_BRAND_LOGO_BYTES,
+  brandAccentColor,
+  brandEmailLogo,
   brandLogoContentType,
+  emailSender,
   normalizeAppName,
   normalizeLogoUrl,
   readBrandingEnvironment,
   resolveBranding,
 } from "./branding";
+import { resolveBrand } from "./brands/resolve";
 
 const svg = (body: string, prologue = "") => new TextEncoder().encode(`${prologue}<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${body}</svg>`);
 
@@ -83,6 +87,71 @@ describe("resolveBranding", () => {
       logoUrl: "https://cdn.example.com/a.png",
       sources: { appName: "default", logoUrl: "environment" },
     });
+  });
+});
+
+describe("resolveBranding with a brand", () => {
+  const none = { appName: null, logoUrl: null };
+  const saved = { appName: "Saved Name", logoVersion: "abc123" };
+
+  it("takes a matched brand file over what onboarding saved", () => {
+    const alloplace = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" });
+    expect(resolveBranding({ environment: none, saved, brand: alloplace })).toEqual({
+      appName: "AlloPlace",
+      logoUrl: alloplace.logoUrl,
+      sources: { appName: "file", logoUrl: "file" },
+    });
+    expect(resolveBranding({ environment: { appName: "Override", logoUrl: null }, saved, brand: alloplace })).toMatchObject({
+      appName: "Override",
+      sources: { appName: "environment", logoUrl: "file" },
+    });
+  });
+
+  it("keeps onboarding's choice over the default brand", () => {
+    const fallback = resolveBrand({ appBaseUrl: "http://localhost" });
+    expect(resolveBranding({ environment: none, saved, brand: fallback })).toMatchObject({ appName: "Saved Name", sources: { appName: "database", logoUrl: "database" } });
+    expect(resolveBranding({ environment: none, saved: null, brand: fallback })).toEqual({ appName: "LobbyStack", logoUrl: null, sources: { appName: "default", logoUrl: "default" } });
+  });
+});
+
+describe("brandAccentColor", () => {
+  it("takes the variable, then the brand's colour, then the widget's teal", () => {
+    expect(brandAccentColor({ BRAND_ACCENT_COLOR: "#123456" }, { accentColor: "#ffd100" })).toBe("#123456");
+    expect(brandAccentColor({}, { accentColor: "#ffd100" })).toBe("#ffd100");
+    expect(brandAccentColor({}, { accentColor: null })).toBe("#0f766e");
+  });
+});
+
+describe("emailSender", () => {
+  const matched = resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" });
+  const unmatched = resolveBrand({ appBaseUrl: "https://app.example.com" });
+
+  it("puts a matched brand's name in front of an address on its own", () => {
+    expect(emailSender({ EMAIL_FROM: " no-reply@alloplace.com " }, matched)).toBe('"AlloPlace (dev)" <no-reply@alloplace.com>');
+    expect(emailSender({ EMAIL_FROM: "no-reply@alloplace.com", BRAND_APP_NAME: 'Allo "Place"' }, unmatched)).toBe('"Allo \\"Place\\"" <no-reply@alloplace.com>');
+  });
+
+  it("keeps a name EMAIL_FROM already has, and an address when no file or variable names the deployment", () => {
+    expect(emailSender({ EMAIL_FROM: "AlloPlace Support <support@alloplace.com>" }, matched)).toBe("AlloPlace Support <support@alloplace.com>");
+    expect(emailSender({ EMAIL_FROM: "no-reply@example.com" }, unmatched)).toBe("no-reply@example.com");
+  });
+
+  it("falls back to a local address without EMAIL_FROM", () => {
+    expect(emailSender({}, matched)).toBe('"AlloPlace (dev)" <no-reply@localhost>');
+    expect(emailSender({ EMAIL_FROM: "" }, unmatched)).toBe('"LobbyStack" <no-reply@localhost>');
+  });
+});
+
+describe("brandEmailLogo", () => {
+  const brand = { ...resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }), emailLogo: { url: "/brand/alloplace/logo-email.png?v=1", width: 96, height: 96 } };
+
+  it("gives the brand's email logo under the deployment's address", () => {
+    expect(brandEmailLogo({}, brand)).toEqual({ url: "https://demo.alloplace.com/brand/alloplace/logo-email.png?v=1", width: 96, height: 96 });
+  });
+
+  it("shows none while BRAND_LOGO_URL sets another logo, or without one", () => {
+    expect(brandEmailLogo({ BRAND_LOGO_URL: "https://cdn.example.com/logo.png" }, brand)).toBeNull();
+    expect(brandEmailLogo({}, resolveBrand({ appBaseUrl: "http://localhost:3000" }))).toBeNull();
   });
 });
 

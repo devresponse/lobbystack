@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import Redis from "ioredis";
+import { UnrecoverableError } from "bullmq";
 import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
 import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
@@ -10,7 +11,7 @@ import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSum
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
-import { issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
+import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
@@ -283,7 +284,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: "Alert SMS delivery is not configured." });
         return { status: "skipped", entityId: attemptId };
       }
-      const body = verificationCodeSmsBody(target.code, normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
+      const body = verificationCodeSmsBody(target.code, await deploymentAppName(dependencies.domain.db), normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
       // The code goes out from the alert sender, so it counts against the alert SMS quota.
       const usageSourceKey = `alert_sms:phone_verification:${attemptId}`;
       let usageEventId: string | undefined;
@@ -464,12 +465,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           ? Object.fromEntries(Object.entries(job.payload.variables).map(([key, value]) => [key, String(value)]))
           : { message: String(job.payload.message ?? ""), url: String(job.payload.url ?? "") };
         const feedbackSubmissionId = typeof job.payload.feedbackSubmissionId === "string" ? job.payload.feedbackSubmissionId : undefined;
+        const appName = await deploymentAppName(dependencies.domain.db);
         try {
           const sent = await dependencies.email.sendTemplate({
             template,
             to: String(job.payload.to ?? job.payload.email ?? ""),
-            subject: String(job.payload.subject ?? "LobbyStack notification"),
+            subject: String(job.payload.subject ?? (template === "invitation" ? `You're invited to join ${appName}` : `${appName} notification`)),
             variables,
+            appName,
             idempotencyKey: job.idempotencyKey,
             ...(typeof job.payload.from === "string" && job.payload.from ? { from: job.payload.from } : {}),
           });
@@ -523,7 +526,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         return { status: "skipped", entityId: verificationId };
       }
       try {
-        await sender.sendSms({ to: target.to, from: target.from, body: verificationCodeSmsBody(target.code) });
+        await sender.sendSms({ to: target.to, from: target.from, body: verificationCodeSmsBody(target.code, target.businessName.trim() || await deploymentAppName(dependencies.domain.db)) });
         await markAppointmentChangeOtpSent(dependencies.domain, { businessId, verificationId });
         return { status: "completed", entityId: verificationId };
       } catch (error) {
@@ -736,7 +739,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
           } else {
             if (!dependencies.email) throw new Error("Operator email delivery is not configured.");
-            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables: { message: delivery.body }, idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
+            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables: { message: delivery.body }, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           }
           await markOperatorNotificationSent(dependencies.domain, { businessId, deliveryId: delivery.id, providerMessageId });
           if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
@@ -795,7 +798,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
             return { status: "skipped", entityId: delivery.notificationId };
           }
-          const sent = await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.to, subject: delivery.subject, variables: { message: delivery.body }, idempotencyKey: `notification:${delivery.notificationId}` });
+          const sent = await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.to, subject: delivery.subject, variables: { message: delivery.body }, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `notification:${delivery.notificationId}` });
           providerMessageId = sent.messageId;
         }
         await markNotificationSent(dependencies.domain, { businessId: delivery.businessId, notificationId: delivery.notificationId, providerMessageId });
@@ -894,13 +897,20 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     }
     case "phoneNumber.provision": {
       const businessId = businessIdOrThrow(job); const claimId = String(job.payload.claimId ?? "");
-      if (!claimId || !dependencies.twilio?.findOwnedPhoneNumber || !dependencies.twilio.purchasePhoneNumber) return { status: "skipped", entityId: claimId };
+      if (!claimId) return { status: "skipped", entityId: claimId };
       // Calls reach GPT-Live only through the Twilio SIP trunk. A number off the
       // trunk has nothing to answer it, so refuse to buy one without a trunk.
       const sipTrunkSid = process.env.TWILIO_SIP_TRUNK_SID?.trim();
-      if (!sipTrunkSid) throw new Error("TWILIO_SIP_TRUNK_SID is required to provision a phone number. See docs/voice/runtime.md.");
-      if (!dependencies.twilio.addNumberToSipTrunk) throw new Error("The Twilio provider can't assign numbers to a SIP trunk.");
-      const addNumberToSipTrunk = dependencies.twilio.addNumberToSipTrunk.bind(dependencies.twilio);
+      const twilio = dependencies.twilio;
+      if (!twilio?.findOwnedPhoneNumber || !twilio.purchasePhoneNumber || !twilio.addNumberToSipTrunk || !sipTrunkSid) {
+        // No attempt can buy the number, so end the claim now and don't retry.
+        // Left reserved, it would refuse the business's next pick for 15 minutes.
+        await failNumberProvisioning(dependencies.domain, { businessId, claimId, unavailable: false, error: "This server isn't set up to buy phone numbers." });
+        throw new UnrecoverableError(!twilio?.findOwnedPhoneNumber || !twilio.purchasePhoneNumber
+          ? "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required to provision a phone number."
+          : !sipTrunkSid ? "TWILIO_SIP_TRUNK_SID is required to provision a phone number. See docs/voice/runtime.md." : "The Twilio provider can't assign numbers to a SIP trunk.");
+      }
+      const addNumberToSipTrunk = twilio.addNumberToSipTrunk.bind(twilio);
       const claim = await claimNumberProvisioning(dependencies.domain, { businessId, claimId });
       // A worker killed mid-purchase leaves the claim provisioning. Retry once its lease ends instead of leaving it stuck.
       if (!claim) return retryAfterLease(await numberProvisioningLeaseEndsAt(dependencies.domain, { businessId, claimId }), claimId);
@@ -908,14 +918,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const smsUrl = `${baseUrl}/api/webhooks/twilio/sms`; const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/status`;
       let purchased = false; let providerPhoneId: string | undefined;
       try {
-        const owned = await dependencies.twilio.findOwnedPhoneNumber({ e164: claim.e164 });
+        const owned = await twilio.findOwnedPhoneNumber({ e164: claim.e164 });
         if (owned) providerPhoneId = owned.providerPhoneId;
-        else { const result = await dependencies.twilio.purchasePhoneNumber({ e164: claim.e164, friendlyName: `LobbyStack ${businessId}`, smsUrl, statusCallbackUrl }); providerPhoneId = result.providerPhoneId; purchased = true; }
+        else { const result = await twilio.purchasePhoneNumber({ e164: claim.e164, friendlyName: `LobbyStack ${businessId}`, smsUrl, statusCallbackUrl }); providerPhoneId = result.providerPhoneId; purchased = true; }
         await addNumberToSipTrunk({ trunkSid: sipTrunkSid, providerPhoneId });
         const phoneNumberId = await completeNumberProvisioning(dependencies.domain, { businessId, claimId, e164: claim.e164, providerPhoneId, voiceUrl: `sip-trunk:${sipTrunkSid}`, smsUrl });
         return { status: "completed", entityId: phoneNumberId };
       } catch (error) {
-        if (purchased && providerPhoneId && dependencies.twilio.releasePhoneNumber) await dependencies.twilio.releasePhoneNumber({ providerPhoneId }).catch(() => undefined);
+        if (purchased && providerPhoneId && twilio.releasePhoneNumber) await twilio.releasePhoneNumber({ providerPhoneId }).catch(() => undefined);
         const { getTwilioProviderErrorCode } = await import("@lobbystack/providers/twilio/twilioProvider");
         await failNumberProvisioning(dependencies.domain, { businessId, claimId, unavailable: getTwilioProviderErrorCode(error) === 21422 });
         throw error;
@@ -949,7 +959,9 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           await dependencies.twilio.releasePhoneNumber({ providerPhoneId: claimed.providerPhoneId });
         }
         await withBusinessTransaction(dependencies.domain.db, { businessId, actorType: "worker" }, async (tx) => {
-          await tx.update(phoneNumbers).set({ status: "reclaimed", voiceEnabled: false, smsEnabled: false, reclaimScheduledAt: null, updatedAt: new Date() }).where(and(eq(phoneNumbers.id, claimed.id), eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "reclaiming")));
+          const released = await tx.update(phoneNumbers).set({ status: "reclaimed", voiceEnabled: false, smsEnabled: false, reclaimScheduledAt: null, updatedAt: new Date() }).where(and(eq(phoneNumbers.id, claimed.id), eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "reclaiming"))).returning({ id: phoneNumbers.id });
+          // The receptionist's snapshot names the number it gives out, so it drops this one.
+          if (released.length) await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId, aggregateType: "phone_number", aggregateId: claimed.id, dedupeKey: `phone-number:${claimed.id}:snapshot:released`, payload: { businessId, reason: "phone_number_released" } });
         });
         return { status: "completed", entityId: phoneNumberId };
       } catch (error) {

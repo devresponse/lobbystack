@@ -1,6 +1,7 @@
 'use strict';
 
 const { apiUrl, listPage } = require('../lib/client');
+const { APP_NAME } = require('../lib/brand');
 const { verifyDelivery } = require('../lib/signature');
 const { outputFields, samples } = require('../lib/resources');
 
@@ -33,7 +34,7 @@ const createHookTrigger = ({ key, noun, label, description, event, resource, lis
       method: 'DELETE',
       skipThrowForStatus: true,
     });
-    // The endpoint may already be gone if someone deleted it in LobbyStack.
+    // The endpoint may already be gone if someone deleted it in the dashboard.
     if (response.status === 404) return { id, deleted: true };
     if (response.status >= 400) response.throwForStatus();
     return response.data.data;
@@ -48,7 +49,7 @@ const createHookTrigger = ({ key, noun, label, description, event, resource, lis
     if (secret && process.env.LOBBYSTACK_SKIP_WEBHOOK_SIGNATURE !== '1') {
       const result = verifyDelivery(secret, bundle.rawRequest);
       if (!result.ok) {
-        throw new z.errors.Error(`Ignored a webhook delivery that LobbyStack did not sign (${result.reason}).`, 'invalid_signature', 401);
+        throw new z.errors.Error(`Ignored a webhook delivery that ${APP_NAME} did not sign (${result.reason}).`, 'invalid_signature', 401);
       }
       // Read the event from the exact bytes that were verified.
       payload = JSON.parse(bundle.rawRequest.content);

@@ -418,6 +418,30 @@ export const widgetKeys = pgTable(
   ],
 );
 
+// A business's public page at /profile/<slug>. It is opt-in: no row, or
+// published false, means no page. Its widget key may chat from the
+// deployment's own domain only while the page is published.
+export const businessPublicProfiles = pgTable("business_public_profiles", {
+  businessId: uuid("business_id").primaryKey().references(() => businesses.id, { onDelete: "cascade" }),
+  published: boolean("published").default(false).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }),
+  category: varchar("category", { length: 80 }),
+  description: text("description"),
+  addressLine1: text("address_line1"),
+  addressLine2: text("address_line2"),
+  city: text("city"),
+  region: text("region"),
+  postalCode: text("postal_code"),
+  countryCode: varchar("country_code", { length: 2 }),
+  publicEmail: text("public_email"),
+  showPhone: boolean("show_phone").default(true).notNull(),
+  showHours: boolean("show_hours").default(true).notNull(),
+  showServices: boolean("show_services").default(true).notNull(),
+  showMap: boolean("show_map").default(true).notNull(),
+  widgetKeyId: uuid("widget_key_id").references(() => widgetKeys.id, { onDelete: "set null" }),
+  ...timestamps,
+});
+
 export const widgetVisitors = pgTable(
   "widget_visitors",
   {
@@ -1630,6 +1654,7 @@ export const allTenantTables = [
   receptionistProfiles,
   contacts,
   widgetKeys,
+  businessPublicProfiles,
   widgetVisitors,
   smsConsentEvents,
   conversations,
@@ -1696,6 +1721,7 @@ export const schema = {
   receptionistProfiles,
   contacts,
   widgetKeys,
+  businessPublicProfiles,
   widgetVisitors,
   smsConsentEvents,
   conversations,

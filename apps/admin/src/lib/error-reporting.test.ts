@@ -57,6 +57,22 @@ describe("server exception reporting", () => {
     const [, , properties] = mocks.capture.mock.calls[0]!;
     expect(properties.cause).toEqual({ name: "Error", message: "invalid input syntax for type uuid: \"[value]\"", code: "22P02" });
   });
+  it("logs one JSON line that leads with the error, for the deploy log viewer", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    await reportServerError(new Error("Failed query: select app.reserve_onboarding_number_claim($1)\nparams: biz-1"), { operation: "api_response", errorId: "reference-123", route: "/api/onboarding/phone-numbers/claim" });
+    expect(logged).toHaveBeenCalledOnce();
+    const [line] = logged.mock.calls[0]!;
+    expect(typeof line).toBe("string");
+    expect(String(line).split("\n")).toHaveLength(1);
+    expect(JSON.parse(String(line))).toMatchObject({ message: expect.stringMatching(/^\[admin\] exception: Failed query: select app\.reserve_onboarding_number_claim/), operation: "api_response", errorId: "reference-123", route: "/api/onboarding/phone-numbers/claim", service: "lobbystack-admin", stack: expect.stringContaining("error-reporting.test.ts") });
+    expect(String(line)).not.toContain("biz-1");
+  });
+  it("keeps a provider's numeric status and error code from the cause", async () => {
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    const cause = Object.assign(new Error("Authenticate"), { status: 401, code: 20003, moreInfo: "https://www.twilio.com/docs/errors/20003" });
+    await reportServerError(new Error("The carrier's number search failed.", { cause }), { operation: "api_response" });
+    expect(JSON.parse(String(logged.mock.calls[0]![0])).cause).toEqual({ name: "Error", message: "Authenticate", code: 20003, status: 401 });
+  });
   it("does not replace application failures when delivery fails", async () => {
     vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture");
     vi.spyOn(console, "error").mockImplementation(() => {});

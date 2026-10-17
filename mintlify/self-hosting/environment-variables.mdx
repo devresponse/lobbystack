@@ -22,14 +22,23 @@ Use `.env.example` as the source of truth. Store production values in your deplo
 
 ## Branding
 
-Set these on the admin. Unless you set your own, the admin image uses AlloPlace's name and logo: `AlloPlace` and `/brand/alloplace/logo.svg`. Each one wins over the name and logo that the deployment's first owner chooses during onboarding, so set one to an empty value to let that owner choose it. Give them to the admin build as well, as Docker build arguments with the same names, so the prerendered sign-in pages show them without first asking the server.
+The name, logo, colour and outside links come from a brand folder under `brands/` in the repository, picked by the domain of `APP_BASE_URL`: `alloplace.com` and its subdomains get AlloPlace's. To add your own brand, add a folder, claim your domain in `brands/index.json`, and run `pnpm brands:build`. The repository's `docs/branding.md` lists the fields.
 
 | Variable | Purpose |
 | --- | --- |
-| `BRAND_APP_NAME` | The name the dashboard shows instead of LobbyStack, up to 40 characters. It appears in the browser tab, above the sign-in and onboarding pages, and in dashboard text. |
-| `BRAND_LOGO_URL` | The logo shown beside the name and as the browser tab icon. Use an `https://` URL or a path on the dashboard, such as `/brand/logo.svg`. Without a logo, a renamed deployment shows its name on its own. |
+| `APP_BASE_URL` | Set it on the admin and the worker, and pass it to the admin build as a Docker build argument, so the prerendered sign-in pages show the brand without first asking the server. |
+| `BRAND_PRESET` | The brand folder to use where no brand claims the domain, such as `alloplace` on `localhost` or a platform address. On a claimed domain it has no effect. Pass it to the admin build too. |
+| `BRAND_REQUIRED` | `true` makes the admin and worker refuse to start when no brand file matches. |
 
-Emails, text messages, and the API still say LobbyStack for now.
+Where no brand claims the domain and `BRAND_PRESET` is unset, the deployment shows LobbyStack, and its first owner picks a name and logo during onboarding.
+
+`BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` and `NEXT_PUBLIC_CONTACT_EMAIL` still override the brand file for one more release, then go away. While any of them is set, the admin and worker log `brand.deprecated_variables` at start.
+
+[Public profile](/settings/public-profile) pages read one more variable when they load, so restarting the admin is enough after changing it.
+
+| Variable | Purpose |
+| --- | --- |
+| `GOOGLE_MAPS_EMBED_API_KEY` | A Google Maps Embed API key, for an interactive map of the business's address. Without it, the pages show a drawn map that opens Google Maps. Restrict the key to the Maps Embed API and to your dashboard's address. |
 
 ## Internal services
 

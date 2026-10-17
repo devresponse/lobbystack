@@ -18,6 +18,8 @@
     "usage": "Potrošnja",
     "notifications": "Obaveštenja",
     "widget": "Vidžet za sajt",
+    "publicPage": "Javni profil",
+    "qrCode": "QR kod",
     "apiKeys": "API ključevi",
     "connectedApps": "Povezane aplikacije"
   },
@@ -102,6 +104,142 @@
       "snippetCopied": "Kod je kopiran",
       "noSnippet": "Ovaj vidžet je napravljen pre nego što su kodovi za ugradnju počeli da se čuvaju, pa njegov kod ne može da se prikaže. Napravite novi vidžet da biste dobili kod koji možete kopirati bilo kada.",
       "lastUsed": "Poslednja upotreba: {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Javni profil",
+    "loading": "Učitava se javni profil…",
+    "unavailable": "Javni profil trenutno ne može da se učita.",
+    "readOnly": "Samo vlasnici i administratori mogu da menjaju javni profil.",
+    "publish": {
+      "title": "Vaša stranica",
+      "description": "{{business}} dobija stranicu na ovoj adresi, sa radnim vremenom, uslugama, lokacijom i četom.",
+      "label": "Objavljena",
+      "on": "Svako ko ima link može da vidi stranicu, a pretraživači mogu da je prikažu.",
+      "off": "Samo Vaš tim vidi stranicu dok je ne objavite.",
+      "since": "Objavljena {{date}}",
+      "copy": "Kopiraj link",
+      "copied": "Link je kopiran",
+      "open": "Otvori stranicu",
+      "preview": "Pregled"
+    },
+    "details": {
+      "title": "Podaci",
+      "description": "Naziv firme i broj telefona preuzimaju se iz ostalih podešavanja.",
+      "category": "Kategorija",
+      "categoryPlaceholder": "Stomatološka ordinacija",
+      "about": "Opis",
+      "aboutPlaceholder": "Čime se bavite i kome pomažete, u nekoliko rečenica.",
+      "aboutCount": "{{count}} od {{max}} znakova",
+      "email": "Javna imejl adresa",
+      "emailPlaceholder": "zdravo@primer.com",
+      "address": "Adresa",
+      "line1": "Ulica i broj",
+      "line2": "Kancelarija, stan ili sprat",
+      "city": "Grad",
+      "region": "Pokrajina ili država",
+      "postalCode": "Poštanski broj",
+      "country": "Zemlja",
+      "noCountry": "Bez zemlje"
+    },
+    "sections": {
+      "title": "Šta stranica prikazuje",
+      "description": "Odeljak bez sadržaja ostaje skriven.",
+      "phone": "Broj telefona",
+      "phoneHint": "Broj na koji pozivaoci dobijaju Vašeg recepcionera.",
+      "hours": "Radno vreme",
+      "hoursHint": "Uz podatak da li ste trenutno otvoreni.",
+      "editHours": "Izmeni radno vreme",
+      "services": "Usluge",
+      "servicesHint": "Uz trajanje svake usluge.",
+      "editServices": "Izmeni usluge",
+      "map": "Mapa",
+      "mapHint": "Vaša adresa na mapi, sa uputstvima za dolazak."
+    },
+    "chat": {
+      "title": "Čet",
+      "description": "Na stranici posetioci razgovaraju sa Vašim recepcionerom u četu ili ga pozivaju iz pregledača, preko jednog od Vaših vidžeta za sajt.",
+      "widget": "Vidžet za sajt",
+      "none": "Bez četa",
+      "untitled": "Vidžet bez naziva",
+      "lastUsed": "{{label}} · poslednji put korišćen {{date}}",
+      "empty": "Još nemate aktivan vidžet za sajt.",
+      "manage": "Podešavanja vidžeta za sajt",
+      "unavailable": "Vidžet koji je ova stranica prikazivala je pauziran ili opozvan, pa stranica nema čet."
+    },
+    "save": "Sačuvaj",
+    "saved": "Sačuvano",
+    "errors": {
+      "email": "Unesite imejl adresu, na primer zdravo@primer.com.",
+      "invalid": "Neki podaci ne mogu da se sačuvaju. Proverite ih i pokušajte ponovo.",
+      "widgetUnavailable": "Taj vidžet je pauziran ili opozvan. Izaberite drugi ili bez četa.",
+      "saveFailed": "Javni profil nije sačuvan. Pokušajte ponovo."
+    }
+  },
+  "qrCode": {
+    "title": "QR kod",
+    "loading": "Učitava se Vaš QR kod…",
+    "unavailable": "Vaš QR kod trenutno ne može da se učita.",
+    "card": {
+      "title": "Vaš QR kod",
+      "description": "Stavite ga na vrata, pult ili stolove. Svako ko ga skenira stiže na Vaš javni profil."
+    },
+    "opens": "Otvara",
+    "open": "Otvori stranicu",
+    "preview": "Pregled",
+    "unpublished": {
+      "title": "Vaš javni profil još nije objavljen",
+      "description": "Svako ko skenira ovaj kod videće poruku da stranica nije pronađena dok stranica ne bude objavljena. Ipak, možete ga odmah odštampati.",
+      "link": "Objavite ga u Javnom profilu",
+      "askAdmin": "Vlasnik ili administrator može da ga objavi u Javnom profilu."
+    },
+    "template": {
+      "label": "Šablon",
+      "signal": "Signal",
+      "signalHint": "Žuti natpis",
+      "frontDesk": "Recepcija",
+      "frontDeskHint": "Belo, troši manje tonera",
+      "night": "Noć",
+      "nightHint": "Crno, za slabo osvetljene prostore"
+    },
+    "message": {
+      "label": "Poruka",
+      "hint": "Štampa se kao naslov. Upišite šta god želite; Enter počinje novi red.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Veličina",
+      "a4": "Cela strana · A4",
+      "a5": "Pola strane · A5",
+      "a6": "Četvrtina strane · A6",
+      "a7": "Kartice · A7",
+      "hint": "{{count}} po listu · kod od {{code}} cm, skenira se sa oko {{distance}}"
+    },
+    "mark": {
+      "label": "U sredini koda",
+      "name": "Naziv",
+      "logo": "Logo",
+      "none": "Ništa",
+      "tooLong": "Ova adresa je predugačka za naziv ili logo u sredini koda, pa je kod običan."
+    },
+    "language": {
+      "label": "Jezik",
+      "hint": "Jezik reči odštampanih na natpisu."
+    },
+    "print": "Štampaj",
+    "png": "Kod kao PNG",
+    "svg": "Kod kao SVG",
+    "printHint": "Štampajte u stvarnoj veličini (100%), a ne „Prilagodi stranici”, na A4 papiru. Mat papir se najbolje skenira. Za PDF izaberite Sačuvaj kao PDF u prozoru za štampu. Pre nego što ga postavite, skenirajte otisak sa dva telefona.",
+    "downloadFailed": "Datoteka nije mogla da se napravi. Pokušajte ponovo ili koristite Štampaj.",
+    "previewLabel": "Pregled šablona {{template}}, {{size}}",
+    "caption": "A4 papir · {{count}} po listu · svaki {{width}} × {{height}} cm",
+    "codeLabel": "QR kod koji otvara {{url}}",
+    "noCode": "Od ove adrese ne može da se napravi QR kod.",
+    "sign": {
+      "defaultMessage": "Imate pitanja?\nPitajte nas bilo kada.",
+      "scanChat": "Skenirajte i pišite nam",
+      "scanPage": "Skenirajte i posetite našu stranicu",
+      "answeredBy": "Odgovara <brand>{{appName}}</brand>"
     }
   },
   "billing": {
@@ -377,7 +515,26 @@
       "loadFailed": "Trenutno ne možemo da učitamo brojeve.",
       "searchFailed": "Trenutno ne možemo da pretražimo brojeve.",
       "claimFailed": "Nismo uspeli da zamenimo broj telefona. Pokušajte ponovo.",
+      "getNumberFailed": "Nismo uspeli da dobijemo taj broj. Pokušajte ponovo.",
       "unavailable": "Taj broj je upravo zauzet. Izaberite drugi sa osvežene liste."
+    },
+    "errors": {
+      "offerExpired": "Ova lista brojeva je istekla. Pretražite ponovo, pa izaberite broj.",
+      "claimInProgress": "Drugi broj za ovaj radni prostor se još podešava. Sačekajte nekoliko minuta, pa pokušajte ponovo.",
+      "claimRateLimited": "Probali ste 3 broja u poslednjih sat vremena, što je ograničenje. Pokušajte ponovo kasnije.",
+      "dailyClaimQuota": "Dobili ste 2 broja u poslednja 24 sata, što je ograničenje. Pokušajte ponovo sutra.",
+      "monthlyClaimQuota": "Dobili ste 5 brojeva u poslednjih 30 dana, što je ograničenje. Pokušajte ponovo kasnije.",
+      "numberExists": "Ovaj radni prostor već ima broj telefona. Ponovo učitajte stranicu da biste ga videli.",
+      "invalidStage": "Završite prethodne korake podešavanja pre nego što izaberete broj.",
+      "paidPlanRequired": "Za namenski poslovni broj potreban je plaćeni paket.",
+      "replacementUsed": "Ovaj radni prostor je već iskoristio svoju jedinu promenu broja.",
+      "activeNumberRequired": "Vaš trenutni broj više nije aktivan, pa ne može da se promeni.",
+      "replacementMustDiffer": "Izaberite broj koji se razlikuje od trenutnog.",
+      "unsupportedCountry": "Brojevi telefona su dostupni u SAD, Kanadi, Ujedinjenom Kraljevstvu i Australiji.",
+      "searchRateLimited": "Previše pretraga. Sačekajte nekoliko minuta, pa pokušajte ponovo.",
+      "searchInvalid": "Operater nije mogao da pretraži sa tim pozivnim brojem. Proverite ga i pokušajte ponovo.",
+      "searchUnsupported": "Operater nema brojeve ove vrste u ovoj zemlji.",
+      "withErrorId": "{{message}} ID greške: {{errorId}}"
     },
     "toast": {
       "changed": "Broj telefona je promenjen. Prethodni broj ostaje aktivan još 30 dana.",
@@ -811,11 +968,11 @@
     "phoneVerification": {
       "phone": {
         "title": "Vaš broj mobilnog telefona",
-        "consent": "Slanjem koda pristajete da primate LobbyStack upozorenja putem SMS-a. Učestalost varira. Mogu se naplatiti troškovi poruka i podataka. Odgovorite STOP da biste se odjavili, HELP za pomoć."
+        "consent": "Slanjem koda pristajete da primate {{appName}} upozorenja putem SMS-a. Učestalost varira. Mogu se naplatiti troškovi poruka i podataka. Odgovorite STOP da biste se odjavili, HELP za pomoć."
       },
       "confirm": {
         "title": "Uključite SMS upozorenja",
-        "consent": "Uključivanjem pristajete da primate LobbyStack upozorenja putem SMS-a na Vaš potvrđeni broj. Učestalost varira. Mogu se naplatiti troškovi poruka i podataka. Odgovorite STOP da biste se odjavili, HELP za pomoć.",
+        "consent": "Uključivanjem pristajete da primate {{appName}} upozorenja putem SMS-a na Vaš potvrđeni broj. Učestalost varira. Mogu se naplatiti troškovi poruka i podataka. Odgovorite STOP da biste se odjavili, HELP za pomoć.",
         "turnOn": "Uključi"
       },
       "fields": {
@@ -861,6 +1018,12 @@
     "neverUsed": "Nikad",
     "createdBy": "{{date}}, korisnik {{name}}",
     "revoked": "Opozvan {{date}}",
+    "businessId": {
+      "title": "ID firme",
+      "description": "API i komanda lobbystack prepoznaju firmu {{business}} po ovom ID-u. Koristite ga u zaglavlju {{header}}, uz --business ili pod business.id u manifestu za lobbystack onboard.",
+      "copy": "Kopiraj",
+      "copied": "Kopirano"
+    },
     "restricted": {
       "title": "Samo vlasnici i administratori mogu da upravljaju API ključevima",
       "description": "Zamolite vlasnika ili administratora ove firme da kreira ključ za Vas."

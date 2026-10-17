@@ -46,6 +46,25 @@ export function embeddableSecurityHeaders(env: Record<string, string | undefined
   };
 }
 
+/** A business's public page, /profile/<slug> (publicProfilePath in @lobbystack/shared). */
+export function isPublicProfilePath(pathname: string): boolean {
+  return pathname.startsWith("/profile/");
+}
+
+/**
+ * A business's public page frames its own chat, which is same-origin, and the
+ * map of its address from Google Maps. The map's origin is allowed whether or
+ * not the deployment has a Maps key, because next.config.ts fixes its headers
+ * at build time.
+ */
+export function publicProfileSecurityHeaders(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  const base = securityHeaders(env);
+  return {
+    ...base,
+    "Content-Security-Policy": (base["Content-Security-Policy"] ?? "").replace("frame-src 'self' https://challenges.cloudflare.com", "frame-src 'self' https://challenges.cloudflare.com https://www.google.com"),
+  };
+}
+
 /**
  * The logo onboarding saved may be an SVG, and an SVG opened on its own is a
  * document. Serve it with no script, no requests and a sandbox, whichever of

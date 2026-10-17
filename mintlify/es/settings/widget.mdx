@@ -5,7 +5,7 @@ sidebarTitle: "Widget del sitio web"
 contentType: "How-to"
 ---
 
-La página **Configuración** > **Widget del sitio web** crea y gestiona las claves del widget de la recepcionista. Desde el widget, los visitantes pueden chatear, dejar sus datos de contacto e iniciar una llamada desde el navegador.
+La página **Configuración** > **Widget del sitio web** crea y gestiona las claves del widget de la recepcionista. Desde el widget, los visitantes pueden chatear, dejar sus datos de contacto e iniciar una llamada desde el navegador. El botón de llamada **¡Diga Allo!** aparece en cuanto su empresa tiene un número de teléfono de LobbyStack.
 
 <Note>
   El chat del sitio web tiene acceso restringido y no forma parte de los planes alojados. Las nuevas claves del widget están desactivadas de forma predeterminada. En una implementación autoalojada, defina `WIDGET_KEY_ISSUANCE_ENABLED=true` para crearlas. Las claves existentes siguen funcionando.
@@ -30,6 +30,21 @@ La página **Configuración** > **Widget del sitio web** crea y gestiona las cla
     Copie el fragmento de carga generado y agréguelo antes de la etiqueta de cierre `</body>` de su sitio web.
   </Step>
 </Steps>
+
+## Muestre el chat dentro de su página
+
+El widget es una burbuja de chat en una esquina de su sitio web. Para mostrar el chat dentro de su página, por ejemplo en una página de contacto, agregue `data-inline-target` al fragmento con un selector CSS del elemento que lo contiene:
+
+```html
+<div id="chat" style="height: 600px"></div>
+<script src="https://app.example.com/embed.js?key=SU_CLAVE_DE_WIDGET" data-widget-key="SU_CLAVE_DE_WIDGET" data-inline-target="#chat" defer></script>
+```
+
+- Dé una altura al elemento. El chat lo llena.
+- El chat se inicia cuando el elemento se acerca a la pantalla, así que un visitante que nunca se desplaza hasta él no inicia un chat.
+- Si ningún elemento de la página coincide con el selector, el widget muestra la burbuja en su lugar.
+
+Su [perfil público](/es/settings/public-profile) muestra su chat de esta forma.
 
 ## Proteja las llamadas web
 

@@ -1,11 +1,11 @@
 ---
 title: "Onboard a business from the command line"
-description: "Describe a business in one file, and let the lobbystack command set up its knowledge, receptionist, plan, phone number and owner."
+description: "Describe a business in one file, and let the lobbystack command set up its knowledge, receptionist, public page, plan, phone number and owner."
 sidebarTitle: "Command line"
 contentType: "How-to"
 ---
 
-The `lobbystack` command works with LobbyStack through the [API](/api/overview). `lobbystack onboard` reads one file that describes a business and makes the business match it. It creates the business, adds its knowledge, sets up the receptionist and services, picks a plan, claims a phone number, and sends the owner a link to take over. When you change the file and run it again, it changes only what differs.
+The `lobbystack` command works with LobbyStack through the [API](/api/overview). `lobbystack onboard` reads one file that describes a business and makes the business match it. It creates the business, adds its knowledge, sets up the receptionist, services and public page, picks a plan, claims a phone number, and sends the owner a link to take over. When you change the file and run it again, it changes only what differs.
 
 ## Install the command
 
@@ -75,6 +75,15 @@ services:
 rules:
   - title: Gas leaks
     content: If a caller smells gas, tell them to leave the building and call the gas company.
+public_profile:
+  published: true
+  category: Plumber
+  address:
+    line1: 25 King Street West
+    city: Toronto
+    region: ON
+    postal_code: M5H 1A1
+    country_code: CA
 plan:
   checkout: { plan: pro, interval: monthly }
 phone_number: { country: CA, area_code: "416" }
@@ -97,6 +106,7 @@ owner:
 | `knowledge.files` | PDF, Word, text, Markdown, JPEG, PNG, WebP or TIFF files up to 10 MB, as paths inside the manifest's folder. Give an entry `path`, `title` and `tags` to name it. |
 | `knowledge.faqs` | Questions and answers. An FAQ with the same question gets the new answer. |
 | `knowledge.texts` | Notes with a `title` and `content`. A note with the same title gets the new content. |
+| `public_profile` | The fields of `PATCH /public-profile`, which sets up the business's [public page](/settings/public-profile) at `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` and `widget_key_id`. `published: true` publishes the page. Address parts the file leaves out keep what they have. |
 | `plan` | `checkout` with a `plan` (`starter` or `pro`) and an `interval` (`monthly` or `annual`). Or `managed: true` for a plan billed outside Polar, which only an operator's platform key can set. |
 | `phone_number` | The fields of `POST /phone-numbers/search`: `country`, `kind`, `area_code`, `city`, `region` and `postal_code`. The command claims the first number the search offers. |
 | `onboarding` | Onboarding finishes once nothing it needs is missing, except with a partner's key, which leaves it open for the owner. `skip_number: true` finishes it without a number, `complete` sets whether it finishes, and `source` records where the business came from. |
@@ -118,6 +128,7 @@ receptionist   would set up
 services       would set up
 rules          would set up
 knowledge      would set up
+public profile would set up
 plan           would set up
 phone number   would set up
 owner          would set up
@@ -146,7 +157,7 @@ files          uploaded     docs/price-list.pdf
 
 A checkout and a phone number cost money, so the command asks before it starts either one. Pass `--yes` to skip the questions, which a script needs: without a terminal to ask in, the command stops instead.
 
-To set up a business that already exists, put its ID in `business.id`. `--business <id>` works too when the business already has the manifest's name. The command ignores `LOBBYSTACK_BUSINESS` and a profile's saved business, so a new manifest never lands on one by mistake.
+To set up a business that already exists, put its ID in `business.id`. Its owners and admins can copy the ID from the top of **Settings** > **API keys**. `--business <id>` works too when the business already has the manifest's name. The command ignores `LOBBYSTACK_BUSINESS` and a profile's saved business, so a new manifest never lands on one by mistake.
 
 The claim link goes out once everything else is done, or before the checkout when an operator's key sets up a plan the owner pays for. When the owner accepts it, a partner's key and the API key that sent it can't reach the business any more, and a rerun says so. An operator's key still can.
 
@@ -186,4 +197,4 @@ Without a state file, a platform key won't create a business when you already on
 
 ## Other commands
 
-`lobbystack` has a command for every API endpoint, grouped like the API: `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack numbers search`, and so on. `lobbystack --help` lists the groups, and `--help` after any command lists its options.
+`lobbystack` has a command for every API endpoint, grouped like the API: `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, and so on. `lobbystack --help` lists the groups, and `--help` after any command lists its options.

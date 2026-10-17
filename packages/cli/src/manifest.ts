@@ -1,7 +1,7 @@
 import { readFile, realpath } from "node:fs/promises";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 
-import { apiBusinessCreateSchema, apiPhoneNumberSearchSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
+import { apiBusinessCreateSchema, apiPhoneNumberSearchSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, apiRuleCreateSchema, apiServiceCreateSchema, weekdays } from "@lobbystack/shared";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -58,6 +58,7 @@ export const manifestSchema = z.strictObject({
     faqs: z.array(z.strictObject({ question: z.string().trim().min(1).max(300), answer: z.string().trim().min(1).max(20_000) })).optional(),
     texts: z.array(z.strictObject({ title: z.string().trim().min(1).max(300), content: z.string().trim().min(1).max(20_000) })).optional(),
   }).optional(),
+  public_profile: apiPublicProfileUpdateSchema.optional(),
   plan: z.union([
     z.strictObject({ managed: z.literal(true) }),
     z.strictObject({ checkout: z.strictObject({ plan: z.enum(["starter", "pro"]), interval: z.enum(["monthly", "annual"]) }) }),

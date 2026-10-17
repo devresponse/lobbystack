@@ -162,3 +162,60 @@ describe("contact PINs", () => {
     expect(api.sent).toHaveLength(0);
   });
 });
+
+describe("widget", () => {
+  const key = "wk_live_abcdefghijklmnopqrstuvwxyz012345";
+  const snippet = `<script src="https://app.example.com/embed.js?key=${key}" data-widget-key="${key}" defer></script>`;
+  const widget = { id: "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e", label: "Main site", status: "active", allowed_origins: ["https://example.com"], config: { position: "bottom-right", title: "" }, key, embed_snippet: snippet, last_used_at: null, created_at: "2026-10-17T09:00:00.000Z" };
+
+  it("lists each key, and shows a new key's script tag", async () => {
+    const api = fakeApi({
+      "GET /api/v1/widget-keys": { body: { data: [widget], next_cursor: null, has_more: false } },
+      "POST /api/v1/widget-keys": { status: 201, body: { data: widget } },
+    });
+    const list = await runCli(["widget", "list"], { fetch: api.fetch });
+    expect(list.code).toBe(exitCodes.ok);
+    expect(list.out).toMatch(new RegExp(`Main site\\s+active\\s+${key}`));
+    expect(await runCli(["widget", "create", "--allowed-origins", '["https://example.com"]'], { fetch: api.fetch })).toMatchObject({ code: exitCodes.ok, out: `Key: ${key}\n\nPaste this into the website's HTML:\n${snippet}` });
+  });
+});
+
+describe("public profile", () => {
+  const profile = { slug: "acme-dental", url: "https://app.example.com/profile/acme-dental", published: false, published_at: null, category: "Dental clinic", description: null, address: { line1: "418 Larkspur Street", line2: null, city: "Vancouver", region: "BC", postal_code: "V5T 1A1", country_code: "CA" }, public_email: null, show_phone: true, show_hours: true, show_services: true, show_map: true, widget_key_id: null, updated_at: null };
+
+  it("shows the address on one line, and says when the page isn't published", async () => {
+    const api = fakeApi({ "GET /api/v1/public-profile": { body: { data: profile } } });
+    const result = await runCli(["public-profile", "get"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(result.out).toMatch(/Address:\s+418 Larkspur Street, Vancouver, BC V5T 1A1, CA/);
+    expect(result.out).toContain("The page isn't published, so its address answers 404. Publish it with lobbystack public-profile publish.");
+  });
+
+  it("changes the fields named, takes the description from a file, and publishes or takes the page down", async () => {
+    const dir = await tempDir();
+    try {
+      const file = join(dir.path, "about.txt");
+      await writeFile(file, "Family dental clinic.\n\nSame-week emergency visits.\n");
+      const api = fakeApi({ "PATCH /api/v1/public-profile": (request) => ({ body: { data: { ...profile, ...(request.body as object) } } }) });
+      expect((await runCli(["public-profile", "set", "--category", "null", "--description-file", file, "--no-show-map"], { fetch: api.fetch })).code).toBe(exitCodes.ok);
+      expect(api.sent[0]!.body).toEqual({ category: null, description: "Family dental clinic.\n\nSame-week emergency visits.\n", show_map: false });
+      expect(await runCli(["public-profile", "publish"], { fetch: api.fetch })).toMatchObject({ code: exitCodes.ok, out: "Published. Anyone can open https://app.example.com/profile/acme-dental." });
+      expect(api.sent[1]!.body).toEqual({ published: true });
+      expect(await runCli(["public-profile", "unpublish"], { fetch: api.fetch })).toMatchObject({ code: exitCodes.ok, out: "Taken down. https://app.example.com/profile/acme-dental answers 404 until the page is published again." });
+      expect(api.sent[2]!.body).toEqual({ published: false });
+    } finally {
+      await dir.remove();
+    }
+  });
+
+  it("changes the address parts named and keeps the rest", async () => {
+    const api = fakeApi({ "PATCH /api/v1/public-profile": (request) => ({ body: { data: { ...profile, published: true, address: { ...profile.address, ...(request.body as { address: object }).address } } } }) });
+    const result = await runCli(["public-profile", "address", "--line1", "12 Main Street", "--line2", "null", "--postal-code", "V5T 2B2"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]!.body).toEqual({ address: { line1: "12 Main Street", line2: null, postal_code: "V5T 2B2" } });
+    expect(result.out).toMatch(/Address:\s+12 Main Street, Vancouver, BC V5T 2B2, CA/);
+    expect(result.out).not.toContain("isn't published");
+    expect(await runCli(["public-profile", "address"], { fetch: api.fetch })).toMatchObject({ code: exitCodes.invalid, err: expect.stringContaining("Name at least one part of the address.") });
+    expect(api.sent).toHaveLength(1);
+  });
+});

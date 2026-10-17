@@ -1,0 +1,19 @@
+{
+  "$schema": "../brand.schema.json",
+  "appName": "AlloPlace",
+  "logo": "logo.svg",
+  "emailLogo": "logo-email.png",
+  "ogImage": "og.png",
+  "accentColor": "#FFD100",
+  "links": {
+    "site": "https://alloplace.com",
+    "terms": "https://alloplace.com/legal/terms",
+    "privacy": "https://alloplace.com/legal/privacy",
+    "docs": "https://alloplace.com"
+  },
+  "contactEmail": "support@alloplace.com",
+  "environments": {
+    "dev*": { "appNameSuffix": " (dev)", "indexing": false },
+    "test*": { "appNameSuffix": " (test)", "indexing": false }
+  }
+}

@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listSchedulerBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
-import { assertProductionSecrets, isMaintenanceMode } from "@lobbystack/shared";
+import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, isKnownJobType, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -11,6 +11,7 @@ import { PolarBillingProvider } from "@lobbystack/providers/polar/polarBilling";
 import { createStorageProvider } from "@lobbystack/providers/storage/provider";
 import { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import { getMeter, initializeTelemetry, redactOtelExceptionText, shutdownTelemetry, withSpan } from "@lobbystack/telemetry/node";
+import { jobFailureLogLine } from "./jobFailureLog";
 import { redactJobError } from "./redactJobError";
 import { DelayedError, Worker } from "bullmq";
 import { and, eq, isNull } from "drizzle-orm";
@@ -30,6 +31,7 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     console.warn("SMTP_HOST is missing. Authentication email jobs will fail until email delivery is configured.");
     return undefined;
   }
+  const logo = brandEmailLogo(process.env);
   return new SmtpEmailProvider({
     host,
     // A deploy template can leave optional inputs blank, so "" counts as unset.
@@ -37,8 +39,9 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     secure: process.env.SMTP_SECURE === "true",
     username: process.env.SMTP_USERNAME ?? "",
     password: process.env.SMTP_PASSWORD ?? "",
-    from: process.env.EMAIL_FROM || "LobbyStack <no-reply@localhost>",
+    from: emailSender(process.env),
     ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}),
+    ...(logo ? { logo } : {}),
   });
 }
 
@@ -118,6 +121,11 @@ async function main(): Promise<void> {
     "OTP_HASH_SECRET",
     ...(process.env.STORAGE_PROVIDER === "s3" ? [] : ["LOCAL_STORAGE_SIGNING_SECRET"]),
   ]);
+  // The brand emails and texts go out under, from APP_BASE_URL like the admin's.
+  const brand = brandStartupReport(currentBrand());
+  console.info(brand.info);
+  for (const warning of brand.warnings) console.warn(warning);
+  if (brand.error) throw new Error(brand.error);
   await initializeTelemetry({ serviceName: "lobbystack-worker" });
   const database = createDatabaseClient("lobbystack_worker");
   const dispatcherDatabase = createDatabaseClient("lobbystack_dispatcher");
@@ -229,10 +237,13 @@ async function main(): Promise<void> {
     // Node treats one as fatal.
     worker.on("error", (error) => console.error(JSON.stringify({ event: "worker.error", queue: queueName, message: redactOtelExceptionText(error.message) })));
     const failedJobs = getMeter("lobbystack-worker").createCounter("lobbystack.worker.jobs.failed");
-    worker.on("failed", (job) => failedJobs.add(1, {
-      "messaging.destination.name": queueName,
-      ...(job?.data.type ? { "lobbystack.job_type": job.data.type } : {}),
-    }));
+    worker.on("failed", (job, error) => {
+      failedJobs.add(1, {
+        "messaging.destination.name": queueName,
+        ...(job?.data.type ? { "lobbystack.job_type": job.data.type } : {}),
+      });
+      console.error(jobFailureLogLine(queueName, job, error));
+    });
     return worker;
   });
   const dispatcher = new OutboxDispatcher(dispatcherDatabase.db, new Map(queues));

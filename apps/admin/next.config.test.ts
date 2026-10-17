@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
+import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const withPostHogConfig = vi.hoisted(() => vi.fn((config: NextConfig, options: unknown) => ({ config, options })));
@@ -47,11 +48,74 @@ describe("admin build release", () => {
   });
 
   it("passes Railway's commit SHA into the Docker build that runs next build", () => {
-    // A Windows checkout with core.autocrlf has CRLF line endings.
-    const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8").replace(/\r\n/g, "\n");
-    const buildStage = dockerfile.slice(0, dockerfile.indexOf(" AS runtime"));
+    const buildStage = dockerBuildStage();
     const commitArg = buildStage.indexOf("ARG RAILWAY_GIT_COMMIT_SHA\n");
     expect(commitArg).toBeGreaterThan(-1);
     expect(commitArg).toBeLessThan(buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build"));
   });
 });
+
+const BRAND_LINK_VARIABLES = ["NEXT_PUBLIC_LANDING_SITE_URL", "NEXT_PUBLIC_TERMS_URL", "NEXT_PUBLIC_PRIVACY_URL", "NEXT_PUBLIC_DOCS_SITE_URL", "NEXT_PUBLIC_CONTACT_EMAIL"];
+
+describe("admin build links", () => {
+  it("writes the deployment's links into the build", async () => {
+    const config = await loadConfig({
+      NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms",
+      NEXT_PUBLIC_PRIVACY_URL: "https://alloplace.com/legal/privacy",
+      NEXT_PUBLIC_DOCS_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_CONTACT_EMAIL: "support@alloplace.com",
+    }) as NextConfig;
+    expect(config.env).toMatchObject({
+      NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms",
+      NEXT_PUBLIC_PRIVACY_URL: "https://alloplace.com/legal/privacy",
+      NEXT_PUBLIC_DOCS_SITE_URL: "https://alloplace.com",
+      NEXT_PUBLIC_CONTACT_EMAIL: "support@alloplace.com",
+    });
+  });
+
+  it("fixes unset links as empty, so a value added at run time can't split the server from the browser", async () => {
+    for (const name of BRAND_LINK_VARIABLES) vi.stubEnv(name, undefined);
+    const config = await loadConfig({}) as NextConfig;
+    for (const name of BRAND_LINK_VARIABLES) expect(config.env?.[name]).toBe("");
+  });
+});
+
+describe("admin build brand", () => {
+  it("writes the address and preset the brand comes from into the build", async () => {
+    vi.stubEnv("BRAND_PRESET", undefined);
+    const config = await loadConfig({ APP_BASE_URL: "https://demo.alloplace.com" }) as NextConfig;
+    expect(config.env).toMatchObject({ NEXT_PUBLIC_BRAND_BASE_URL: "https://demo.alloplace.com", NEXT_PUBLIC_BRAND_PRESET: "" });
+  });
+
+  it("gives the Docker build that runs next build the address and preset, and no brand of its own", () => {
+    const buildStage = dockerBuildStage();
+    const adminBuild = buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build");
+    for (const name of ["APP_BASE_URL", "BRAND_PRESET"]) {
+      const arg = buildStage.indexOf(`ARG ${name}\n`);
+      expect(arg, name).toBeGreaterThan(-1);
+      expect(arg, name).toBeLessThan(adminBuild);
+    }
+    expect(buildStage).not.toContain("alloplace.com");
+    expect(buildStage).not.toContain("BRAND_APP_NAME");
+  });
+});
+
+describe("admin security headers", () => {
+  it("lets a business's public page frame a Google map, and no other page", async () => {
+    const config = await loadConfig({}) as NextConfig;
+    const policy = async (path: string) => (await unstable_getResponseFromNextConfig({ url: `https://admin.example.com${path}`, nextConfig: config })).headers.get("content-security-policy") ?? "";
+    expect(await policy("/profile/acme-dental")).toContain("frame-src 'self' https://challenges.cloudflare.com https://www.google.com;");
+    expect(await policy("/profile/acme-dental")).toContain("frame-ancestors 'none'");
+    for (const path of ["/settings/profile", "/profiles", "/"]) {
+      expect(await policy(path), path).toContain("frame-src 'self' https://challenges.cloudflare.com;");
+    }
+  });
+});
+
+function dockerBuildStage() {
+  // A Windows checkout with core.autocrlf has CRLF line endings.
+  const dockerfile = readFileSync(new URL("../../Dockerfile.admin", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  return dockerfile.slice(0, dockerfile.indexOf(" AS runtime"));
+}

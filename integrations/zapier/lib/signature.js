@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 
-// Standard Webhooks verification for REST hook deliveries. LobbyStack signs
+// Standard Webhooks verification for REST hook deliveries. The dashboard signs
 // `${webhook-id}.${webhook-timestamp}.${raw body}` with HMAC-SHA256, keyed by
 // the base64 part of the endpoint's whsec_ secret, and sends one or more
 // space-separated `v1,<base64>` values in webhook-signature.

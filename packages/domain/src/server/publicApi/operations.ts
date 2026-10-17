@@ -68,6 +68,8 @@ import {
   type ApiPhoneNumberClaim,
   type ApiPhoneNumberOffer,
   type ApiPhoneNumberSearch,
+  type ApiPublicProfile,
+  type ApiPublicProfileUpdate,
   type ApiReceptionist,
   type ApiReceptionistUpdate,
   type ApiRule,
@@ -88,6 +90,7 @@ import {
   type ApiWidgetKeyCreate,
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
+  type PublicProfileSettings,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } from "../../authz";
@@ -103,9 +106,10 @@ import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
-import { normalizeOnboardingStage, resolveOnboardingStageForPlan, scheduleOnboardingFollowupInTransaction } from "../onboarding";
+import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
+import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
@@ -145,6 +149,7 @@ import {
   serializeContact,
   serializeKnowledgeEntry,
   serializeNotificationPreferences,
+  serializePublicProfile,
   serializeReceptionist,
   serializeRule,
   serializeWidgetKey,
@@ -393,7 +398,7 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
-    if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, so LobbyStack bills it directly.");
+    if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, billed directly by the operator.");
     const { plan: current } = await loadBillingContext(tx, caller.businessId);
     if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
     const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
@@ -823,8 +828,9 @@ function sortedJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCaller): Promise<ApiWidgetKey[]> {
-  return await inBusiness(context, caller, async (tx) => (await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, caller.businessId)).orderBy(desc(widgetKeys.createdAt), desc(widgetKeys.id))).map(serializeWidgetKey));
+/** Every widget key, with the script tag for each, served from the dashboard's own origin. */
+export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCaller, options: { appOrigin: string }): Promise<ApiWidgetKey[]> {
+  return await inBusiness(context, caller, async (tx) => (await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, caller.businessId)).orderBy(desc(widgetKeys.createdAt), desc(widgetKeys.id))).map((row) => serializeWidgetKey(row, options.appOrigin)));
 }
 
 /** Creates a widget key and the script tag for it, served from the dashboard's own origin. */
@@ -832,17 +838,16 @@ export async function createWidgetKeyForApi(context: DomainContext, caller: ApiC
   return await inBusiness(context, caller, async (tx) => {
     const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
     await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
-    const widgetKey = serializeWidgetKey(row);
-    return { ...widgetKey, key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
+    return { ...serializeWidgetKey(row, options.appOrigin), key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
   });
 }
 
-export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiCaller, widgetKeyId: string, input: ApiWidgetKeyUpdate): Promise<ApiWidgetKey> {
+export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiCaller, widgetKeyId: string, input: ApiWidgetKeyUpdate, options: { appOrigin: string }): Promise<ApiWidgetKey> {
   if (Object.keys(input).length === 0) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     const [current] = await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, widgetKeyId), eq(widgetKeys.businessId, caller.businessId))).limit(1).for("no key update");
     if (!current) throw notFound("Widget key");
-    const before = serializeWidgetKey(current);
+    const before = serializeWidgetKey(current, options.appOrigin);
     // A revoked key may be on a page someone else controls, so it stays off.
     if (before.status === "revoked" && input.status !== undefined && input.status !== "revoked") throw conflict("A revoked widget key can't be turned back on. Create a new one.");
     const patch: WidgetKeyPatch = {};
@@ -854,14 +859,72 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
     }
     if (input.config !== undefined) {
       const config = widgetConfigFromApi(input.config);
-      if (sortedJson(serializeWidgetKey({ ...current, config }).config) !== sortedJson(before.config)) patch.config = config;
+      if (sortedJson(serializeWidgetKey({ ...current, config }, options.appOrigin).config) !== sortedJson(before.config)) patch.config = config;
     }
     if (input.status !== undefined && input.status !== before.status) patch.status = input.status;
     if (Object.keys(patch).length === 0) return before;
     const row = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
     if (!row) throw notFound("Widget key");
     await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
-    return serializeWidgetKey(row);
+    return serializeWidgetKey(row, options.appOrigin);
+  });
+}
+
+// Public profile page. The API changes the same settings as Settings >
+// Public profile, with the same checks.
+
+/** The settings with the fields sent over them, and the address parts sent over the address. */
+function publicProfileWith(current: PublicProfileSettings, input: ApiPublicProfileUpdate): PublicProfileSettings {
+  const address = input.address ?? {};
+  const or = <T>(value: T | undefined, fallback: T): T => (value === undefined ? fallback : value);
+  return {
+    published: or(input.published, current.published),
+    category: or(input.category, current.category),
+    description: or(input.description, current.description),
+    address: {
+      line1: or(address.line1, current.address.line1),
+      line2: or(address.line2, current.address.line2),
+      city: or(address.city, current.address.city),
+      region: or(address.region, current.address.region),
+      postalCode: or(address.postal_code, current.address.postalCode),
+      countryCode: or(address.country_code, current.address.countryCode),
+    },
+    publicEmail: or(input.public_email, current.publicEmail),
+    showPhone: or(input.show_phone, current.showPhone),
+    showHours: or(input.show_hours, current.showHours),
+    showServices: or(input.show_services, current.showServices),
+    showMap: or(input.show_map, current.showMap),
+    widgetKeyId: or(input.widget_key_id, current.widgetKeyId),
+  };
+}
+
+export async function getPublicProfileForApi(context: DomainContext, caller: ApiCaller, options: { appOrigin: string }): Promise<ApiPublicProfile> {
+  return await inBusiness(context, caller, async (tx) => serializePublicProfile(await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId }), options.appOrigin));
+}
+
+/**
+ * Changes the fields sent, over the saved settings or, the first time, the
+ * defaults the dashboard starts from, which are saved with them. Values a
+ * saved page already has change nothing, so it isn't written or audited.
+ */
+export async function updatePublicProfileForApi(context: DomainContext, caller: ApiCaller, input: ApiPublicProfileUpdate, options: { appOrigin: string }): Promise<ApiPublicProfile> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const view = await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId, lock: true });
+    const settings = publicProfileWith(view.settings, input);
+    const before = serializePublicProfile(view, options.appOrigin);
+    const after = serializePublicProfile({ ...view, settings }, options.appOrigin);
+    const sent = (Object.keys(input) as Array<keyof ApiPublicProfileUpdate>).filter((field) => input[field] !== undefined);
+    const fields = view.saved ? sent.filter((field) => sortedJson(after[field]) !== sortedJson(before[field])) : sent;
+    if (!fields.length) return before;
+    // A widget other than the saved one must be active; the saved one may have been paused since.
+    const savedWidgetKeyId = view.saved ? view.settings.widgetKeyId : null;
+    if (settings.widgetKeyId && settings.widgetKeyId !== savedWidgetKeyId && !view.widgetKeys.some((key) => key.id === settings.widgetKeyId)) {
+      throw invalidRequest(PUBLIC_PROFILE_WIDGET_UNAVAILABLE, [{ path: "widget_key_id", message: "Use the id of an active widget key from GET /widget-keys." }]);
+    }
+    await savePublicProfileInTransaction(tx, { businessId: caller.businessId, settings, audit: callerAudit(caller) });
+    await audit(tx, caller, { eventType: "api.public_profile.updated", entityType: "business", entityId: caller.businessId, payload: { fields } });
+    return serializePublicProfile(await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId }), options.appOrigin);
   });
 }
 
@@ -879,7 +942,7 @@ export type CalendarAccess = {
 
 type AccountCalendar = Awaited<ReturnType<CalendarAccess["listCalendars"]>>[number];
 
-/** LobbyStack adds appointments to the calendar it reads, so it needs one it may write to, as in the dashboard. */
+/** Booking adds appointments to the calendar it reads, so it needs one it may write to, as in the dashboard. */
 function isWritableCalendar(calendar: AccountCalendar): boolean {
   return calendar.accessRole === "owner" || calendar.accessRole === "writer";
 }
@@ -945,7 +1008,7 @@ export async function updateCalendarConnectionForApi(context: DomainContext, cal
   if (calendarId !== undefined) {
     const picked = (await accountCalendars(context, caller, connectionId, access())).find((calendar) => calendar.id === calendarId);
     if (!picked) throw invalidRequest("The connected account has no calendar with this id.", [{ path: "calendar_id", message: "Use an id from GET /calendars/{connection_id}/calendars." }]);
-    if (!isWritableCalendar(picked)) throw invalidRequest("LobbyStack can't add appointments to this calendar. Pick one the account can change.", [{ path: "calendar_id", message: "Not writable." }]);
+    if (!isWritableCalendar(picked)) throw invalidRequest("Appointments can't be added to this calendar. Pick one the account can change.", [{ path: "calendar_id", message: "Not writable." }]);
   }
   return await inBusiness(context, caller, async (tx) => {
     // Held to the end, so a disconnect can't land between the checks and the changes.
@@ -1252,16 +1315,24 @@ export async function listBusinessesForApi(context: DomainContext, input: { part
   const limit = pageSize(input.limit);
   const cursor = decodeCursor(input.cursor);
   // The links and businesses are tenant-isolated, so a resolver reads one partner's page.
-  const rows = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => (await tx.execute<{ business_id: string; name: string; timezone: string; default_locale: string; website_url: string | null; onboarding_stage: string; created_at: Date | string }>(sql`select business_id, name, timezone, default_locale, website_url, onboarding_stage, created_at from app.list_platform_partner_businesses(${input.partnerId}, ${cursor?.at.toISOString() ?? null}::timestamptz, ${cursor?.id ?? null}::uuid, ${limit + 1}::int)`)).rows);
-  return toPage(rows, limit, (row) => ({
-    id: row.business_id,
-    name: row.name,
-    timezone: row.timezone,
-    locale: row.default_locale,
-    website_url: row.website_url,
-    onboarding_stage: row.onboarding_stage,
-    created_at: new Date(row.created_at).toISOString(),
-  }), (row) => ({ at: new Date(row.created_at), id: row.business_id }));
+  const summaries = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
+    const rows = (await tx.execute<{ business_id: string; name: string; timezone: string; default_locale: string; website_url: string | null; onboarding_stage: string; created_at: Date | string }>(sql`select business_id, name, timezone, default_locale, website_url, onboarding_stage, created_at from app.list_platform_partner_businesses(${input.partnerId}, ${cursor?.at.toISOString() ?? null}::timestamptz, ${cursor?.id ?? null}::uuid, ${limit + 1}::int)`)).rows;
+    const page: ApiBusinessSummary[] = [];
+    // One business at a time: the dashboard's step can depend on a plan read in that business's own scope.
+    for (const row of rows) {
+      page.push({
+        id: row.business_id,
+        name: row.name,
+        timezone: row.timezone,
+        locale: row.default_locale,
+        website_url: row.website_url,
+        onboarding_stage: await resolveOnboardingStageInTransaction(tx, row.business_id, row.onboarding_stage),
+        created_at: new Date(row.created_at).toISOString(),
+      });
+    }
+    return page;
+  });
+  return toPage(summaries, limit, (summary) => summary, (summary) => ({ at: new Date(summary.created_at), id: summary.id }));
 }
 
 export async function listServicesForApi(context: DomainContext, caller: ApiCaller, options: { includeInactive?: boolean | undefined } = {}): Promise<ApiService[]> {

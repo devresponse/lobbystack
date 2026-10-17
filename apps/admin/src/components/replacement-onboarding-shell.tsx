@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 
 import { BrandMark } from "@/components/brand-mark";
 import { resolveLocale } from "@/lib/locale";
-import { localizeMarketingHref } from "@/lib/marketing-site-url";
+import { privacyHref, termsHref } from "@/lib/marketing-site-url";
 import { cn } from "@/lib/utils";
 
 type OnboardingShellProps = {
@@ -81,9 +81,9 @@ export function ReplacementOnboardingShell({ eyebrow, title, description, progre
           </nav>
         ) : null}
         {legalFooter ?? <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <a className="hover:text-foreground" href={localizeMarketingHref(marketingLocale, "/terms")} rel="noreferrer" target="_blank">{t("shell.terms")}</a>
+          <a className="hover:text-foreground" href={termsHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.terms")}</a>
           <span aria-hidden="true">·</span>
-          <a className="hover:text-foreground" href={localizeMarketingHref(marketingLocale, "/privacy")} rel="noreferrer" target="_blank">{t("shell.privacy")}</a>
+          <a className="hover:text-foreground" href={privacyHref(marketingLocale)} rel="noreferrer" target="_blank">{t("shell.privacy")}</a>
         </div>}
       </footer>
     </div>

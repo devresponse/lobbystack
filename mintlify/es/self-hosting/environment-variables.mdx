@@ -22,14 +22,23 @@ Use `.env.example` como fuente de referencia. Guarde los valores de producción 
 
 ## Imagen de marca
 
-Configúrelas en el servicio de administración. Si no configura las suyas, la imagen del servicio de administración usa el nombre y el logo de AlloPlace: `AlloPlace` y `/brand/alloplace/logo.svg`. Cada una tiene prioridad sobre el nombre y el logo que elige el primer propietario de la implementación durante la incorporación, así que asígnele un valor vacío para que esa persona elija. Páselas también a la compilación del servicio de administración, como argumentos de compilación de Docker con el mismo nombre, para que las páginas de inicio de sesión prerrenderizadas las muestren sin consultar antes al servidor.
+El nombre, el logo, el color y los enlaces externos vienen de una carpeta de marca en `brands/` del repositorio, elegida por el dominio de `APP_BASE_URL`: `alloplace.com` y sus subdominios reciben los de AlloPlace. Para añadir su propia marca, añada una carpeta, reclame su dominio en `brands/index.json` y ejecute `pnpm brands:build`. El archivo `docs/branding.md` del repositorio enumera los campos.
 
 | Variable | Función |
 | --- | --- |
-| `BRAND_APP_NAME` | El nombre que muestra el panel en lugar de LobbyStack, de hasta 40 caracteres. Aparece en la pestaña del navegador, encima de las páginas de inicio de sesión y de incorporación, y en los textos del panel. |
-| `BRAND_LOGO_URL` | El logo que aparece junto al nombre y como icono de la pestaña. Use una URL `https://` o una ruta del panel, como `/brand/logo.svg`. Sin logo, una implementación con otro nombre muestra solo su nombre. |
+| `APP_BASE_URL` | Configúrela en el servicio de administración y en el worker, y pásela a la compilación del servicio de administración como argumento de compilación de Docker, para que las páginas de inicio de sesión prerrenderizadas muestren la marca sin consultar antes al servidor. |
+| `BRAND_PRESET` | La carpeta de marca que se usa donde ninguna marca reclama el dominio, como `alloplace` en `localhost` o en una dirección de la plataforma. En un dominio reclamado no tiene efecto. Pásela también a la compilación del servicio de administración. |
+| `BRAND_REQUIRED` | `true` impide que el servicio de administración y el worker se inicien cuando ningún archivo de marca coincide. |
 
-Los correos electrónicos, los SMS y la API todavía dicen LobbyStack por ahora.
+Donde ninguna marca reclama el dominio y `BRAND_PRESET` está vacía, la implementación muestra LobbyStack, y su primer propietario elige un nombre y un logo durante la incorporación.
+
+`BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` y `NEXT_PUBLIC_CONTACT_EMAIL` todavía tienen prioridad sobre el archivo de marca durante una versión más y luego desaparecerán. Mientras alguna esté definida, el admin y el worker registran `brand.deprecated_variables` al iniciarse.
+
+Las páginas de [perfil público](/es/settings/public-profile) leen una variable más al cargarse, así que basta con reiniciar el servicio de administración después de cambiarla.
+
+| Variable | Función |
+| --- | --- |
+| `GOOGLE_MAPS_EMBED_API_KEY` | Una clave de la API Maps Embed de Google, para un mapa interactivo de la dirección del negocio. Sin ella, las páginas muestran un mapa dibujado que abre Google Maps. Restrinja la clave a la API Maps Embed y a la dirección de su panel. |
 
 ## Servicios internos
 

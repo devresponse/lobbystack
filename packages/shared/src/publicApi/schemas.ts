@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { billingPlanSlugs } from "../billing";
 import { interfaceLocales } from "../locales";
+import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -76,16 +77,21 @@ export const apiMeSchema = z.object({
   }).optional().describe("Present only for a platform key."),
 }).describe("The API key making the request and the business it acts on.");
 
+const businessHoursSources = ["none", "generated", "operator"] as const;
+const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
+
 export const apiBusinessSchema = z.object({
   id,
   name: z.string(),
+  slug: z.string().describe("A short name no other business uses, set when the business is created. Its public profile page is at /profile/{slug}."),
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
   business_type: z.string().describe("What kind of business it is. The dashboard uses service_company."),
-  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
+  onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
   booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
+  hours_source: z.enum(businessHoursSources).describe("Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -96,7 +102,7 @@ export const apiBusinessUpdateSchema = z.strictObject({
   locale: locale.optional(),
   website_url: z.url().max(2_000).nullable().optional(),
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
-  hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
+  hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them."),
 });
 
 const appointmentChangePolicyFields = {
@@ -170,7 +176,7 @@ const billingIntervals = ["monthly", "annual"] as const;
 
 export const apiBillingSchema = z.object({
   plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."),
-  managed: z.boolean().describe("true when the LobbyStack operator runs the plan outside Polar and bills the business directly."),
+  managed: z.boolean().describe("true when the deployment's operator runs the plan outside Polar and bills the business directly."),
   subscription_state: z.string().nullable().describe("The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription."),
   billing_interval: z.enum(billingIntervals).nullable().describe("Null unless the plan is Starter or Pro."),
   current_period_end: nullableTimestamp.describe("When the paid period ends. Null unless the plan is Starter or Pro."),
@@ -210,8 +216,8 @@ const phoneNumberKinds = ["local", "toll_free"] as const;
 export const apiPhoneNumberSchema = z.object({
   id,
   phone_number: e164,
-  status: z.enum(["active", "releasing", "released"]).describe("active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: LobbyStack is giving the number back to the carrier. released: the business no longer has it."),
-  release_scheduled_at: nullableTimestamp.describe("When LobbyStack releases an active number: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."),
+  status: z.enum(["active", "releasing", "released"]).describe("active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: the number is being given back to the carrier. released: the business no longer has it."),
+  release_scheduled_at: nullableTimestamp.describe("When an active number is released: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."),
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A phone number the business has or had.");
@@ -244,7 +250,7 @@ export const apiPhoneNumberClaimCreateSchema = z.strictObject({
 
 export const apiPhoneNumberClaimSchema = z.object({
   id,
-  status: z.enum(["pending", "provisioning", "claimed", "failed"]).describe("pending: waiting to be bought. provisioning: LobbyStack is buying the number and connecting it to the receptionist. claimed: the number is live and phone_number_id names it. failed: error says why; search again for another number."),
+  status: z.enum(["pending", "provisioning", "claimed", "failed"]).describe("pending: waiting to be bought. provisioning: the number is being bought and connected to the receptionist. claimed: the number is live and phone_number_id names it. failed: error says why; search again for another number."),
   phone_number: e164.describe("The number being claimed."),
   phone_number_id: z.uuid().nullable().describe("The number's id once the claim is claimed."),
   replaces_phone_number_id: z.uuid().nullable().describe("For a replacement, the number it replaces. That number keeps working until 30 days after the new one goes live."),
@@ -280,12 +286,14 @@ export const apiWidgetKeySchema = z.object({
   status: z.enum(widgetKeyStatuses).describe("active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."),
   allowed_origins: z.array(z.string()).describe("The websites the widget runs on, such as https://example.com."),
   config: apiWidgetConfigSchema,
+  key: z.string().nullable().describe("The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw."),
+  embed_snippet: z.string().nullable().describe("The script tag to paste into the website's HTML. null when key is null."),
   last_used_at: nullableTimestamp,
   created_at: timestamp,
 }).describe("A key that puts the chat widget on the business's websites.");
 
 export const apiWidgetKeyCreatedSchema = apiWidgetKeySchema.extend({
-  key: z.string().describe("The key itself, shown only here. The widget's script tag carries it."),
+  key: z.string().describe("The key itself, which the widget's script tag carries."),
   embed_snippet: z.string().describe("The script tag to paste into the website's HTML."),
 }).describe("A new widget key, with the script tag that adds the widget to a website.");
 
@@ -302,13 +310,61 @@ export const apiWidgetKeyUpdateSchema = z.strictObject({
   status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
 });
 
+// The public profile page checks its text as the dashboard does: whitespace
+// runs become one space, and an empty value is stored as null.
+const profileText = publicProfileTextFields;
+
+export const apiPublicProfileSchema = z.object({
+  slug: z.string().describe("The business's slug, the last part of the page's address."),
+  url: z.string().describe("The page's address. It answers 404 until the page is published."),
+  published: z.boolean().describe("Whether anyone can open the page. Until it's published, only the business's team can preview it, from the dashboard."),
+  published_at: nullableTimestamp.describe("When the page was last published. Unpublishing keeps it."),
+  category: z.string().nullable().describe("What kind of business it is, shown under its name, such as Dental clinic."),
+  description: z.string().nullable().describe("About the business, as plain text with paragraphs."),
+  address: z.object({
+    line1: z.string().nullable(),
+    line2: z.string().nullable(),
+    city: z.string().nullable(),
+    region: z.string().nullable().describe("Province or state."),
+    postal_code: z.string().nullable(),
+    country_code: z.string().nullable().describe("Two-letter country code, such as CA."),
+  }).describe("The address the page shows. Parts that are null are left out."),
+  public_email: z.string().nullable().describe("The email address the page shows."),
+  show_phone: z.boolean().describe("Whether the page shows the number callers reach the receptionist on."),
+  show_hours: z.boolean().describe("Whether the page shows the opening hours and closures in the next 30 days."),
+  show_services: z.boolean().describe("Whether the page lists the active services."),
+  show_map: z.boolean().describe("Whether the page shows a map of the address. It needs a street or a city."),
+  widget_key_id: z.uuid().nullable().describe("The widget key of the website chat the page opens. null: the page has no chat. While that key is disabled or revoked, the page has no chat either."),
+  updated_at: nullableTimestamp.describe("When the settings were last saved. null: they never were, so these are the defaults the dashboard starts from: the receptionist's summary as the description, unless it's still the sign-up placeholder, and the most recently used widget."),
+}).describe("The business's public profile page on this deployment, at /profile/{slug}: whether it's published and what it shows.");
+
+export const apiPublicProfileUpdateSchema = z.strictObject({
+  published: z.boolean().optional().describe("true publishes the page. false takes it down, and its address answers 404."),
+  category: profileText.category.optional().describe(`Up to ${PUBLIC_PROFILE_LIMITS.category} characters. An empty string or null removes it.`),
+  description: profileText.description.optional().describe(`Up to ${PUBLIC_PROFILE_LIMITS.description} characters. Paragraphs are kept, with at most one blank line between them. An empty string or null removes it.`),
+  address: z.strictObject({
+    line1: profileText.address.line1.optional(),
+    line2: profileText.address.line2.optional(),
+    city: profileText.address.city.optional(),
+    region: profileText.address.region.optional(),
+    postal_code: profileText.address.postalCode.optional(),
+    country_code: profileText.address.countryCode.optional().describe("Two-letter country code, such as CA."),
+  }).optional().describe("Changes the parts sent and keeps the rest. An empty string or null removes a part."),
+  public_email: profileText.publicEmail.optional().describe("An empty string or null removes it."),
+  show_phone: z.boolean().optional(),
+  show_hours: z.boolean().optional(),
+  show_services: z.boolean().optional(),
+  show_map: z.boolean().optional(),
+  widget_key_id: z.uuid().nullable().optional().describe("One of the business's active widget keys, which GET /widget-keys lists. null removes the chat from the page."),
+});
+
 const calendarStatuses = ["connected", "syncing", "error"] as const;
 
 export const apiCalendarConnectionSchema = z.object({
   id,
   provider: z.string().describe("google: Google Calendar."),
   account_id: z.string().describe("Google's id for the connected account."),
-  calendar_id: z.string().nullable().describe("The calendar LobbyStack reads busy times from and adds appointments to. null until one is picked with PATCH /calendars/{connection_id}; until then the connection changes nothing."),
+  calendar_id: z.string().nullable().describe("The calendar the receptionist reads busy times from and adds appointments to. null until one is picked with PATCH /calendars/{connection_id}; until then the connection changes nothing."),
   staff_id: id.nullable().describe("The staff member whose calendar this is: its busy times block only them, and their appointments go to it. null: the business's calendar, whose busy times block everyone and which takes the appointments of staff without a calendar of their own."),
   status: z.enum(calendarStatuses).describe("connected: the busy times are up to date. syncing: reading the calendar after a change. error: the last sync failed, and sync_error says why. While a picked calendar is syncing or failing, the staff it covers can't be booked."),
   sync_error: z.string().nullable(),
@@ -326,12 +382,12 @@ export const apiAccountCalendarSchema = z.object({
   id: z.string().describe("Google's id for the calendar. Send it as calendar_id."),
   name: z.string(),
   primary: z.boolean().describe("true for the account's main calendar."),
-  writable: z.boolean().describe("true when LobbyStack can add appointments to it. Only a writable calendar can be picked."),
+  writable: z.boolean().describe("true when appointments can be added to it. Only a writable calendar can be picked."),
   selected: z.boolean().describe("true for the calendar the connection uses."),
 }).describe("A calendar in a connected account.");
 
 export const apiCalendarConnectLinkSchema = z.object({
-  url: z.string().describe("The link to open in a browser. Whoever opens it signs in to LobbyStack as an owner or admin of the business, then agrees on Google's page."),
+  url: z.string().describe("The link to open in a browser. Whoever opens it signs in to the dashboard as an owner or admin of the business, then agrees on Google's page."),
   expires_at: timestamp.describe("The link works until then."),
 }).describe("A link that connects a Google Calendar to the business.");
 
@@ -343,7 +399,8 @@ const notificationEventDescriptions = {
   calendar_sync: "An appointment couldn't sync to the connected calendar.",
   transfer_failed: "The receptionist tried to transfer a caller to a person, and the transfer didn't complete.",
   website_chat: "A visitor wrote through the website chat widget. At most one alert per chat a day.",
-  webhook_disabled: "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day.",
+  website_live_chat: "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message.",
+  webhook_disabled: "Events stopped going to a webhook endpoint after its deliveries failed for about a day.",
 } as const;
 export type ApiNotificationEvent = keyof typeof notificationEventDescriptions;
 export const apiNotificationEvents = Object.keys(notificationEventDescriptions) as ApiNotificationEvent[];
@@ -407,7 +464,7 @@ export const apiTeamSchema = z.object({
 }).describe("The business's team and its open invitations.");
 
 export const apiTeamInvitationCreateSchema = z.strictObject({
-  email: teamEmail.describe("One address. Only a LobbyStack account with this verified email can accept."),
+  email: teamEmail.describe("One address. Only an account with this verified email can accept."),
   role: z.enum(invitableRoles),
 });
 
@@ -416,19 +473,19 @@ export const apiTeamMemberUpdateSchema = z.strictObject({
 });
 
 export const apiClaimLinkCreateSchema = z.strictObject({
-  email: teamEmail.describe("The new owner's email. Only a LobbyStack account with this verified email can claim the business."),
+  email: teamEmail.describe("The new owner's email. Only an account with this verified email can claim the business."),
 });
 
 export const apiClaimLinkSchema = z.object({
   invitation: apiTeamInvitationSchema,
-  url: z.string().describe("The link that claims the business. LobbyStack emails it to the new owner; you can also send it yourself."),
+  url: z.string().describe("The link that claims the business. It is emailed to the new owner; you can also send it yourself."),
 }).describe("A link that hands the business over to its owner.");
 
 const onboardingItems = ["business_details", "knowledge", "greeting", "plan", "phone_number", "full_site_read", "test_call"] as const;
 const onboardingSkippableSteps = ["knowledge", "phone_number", "full_site_read", "test_call"] as const;
 
 export const apiOnboardingSchema = z.object({
-  stage: z.string().describe("The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."),
+  stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows. phone_number_claiming: a number is being set up. The API doesn't follow these steps in order."),
   complete: z.boolean().describe("true once onboarding is finished, so the dashboard opens on the business itself."),
   checklist: z.array(z.object({
     id: z.enum(onboardingItems).describe("business_details: a name and time zone. knowledge: a website or knowledge the receptionist answers from. greeting: a greeting, the default one included; change it with PATCH /receptionist. plan: a paid plan. phone_number: a live number. full_site_read: the whole website read, beyond the first sample, and done when there is no website. test_call: a call the receptionist answered."),
@@ -443,7 +500,7 @@ export const apiOnboardingUpdateSchema = z.strictObject({
 });
 
 export const apiOnboardingCompleteSchema = z.strictObject({
-  source: z.string().trim().max(120).optional().describe("How the business heard about LobbyStack."),
+  source: z.string().trim().max(120).optional().describe("How the business heard about the service."),
   referral_code: z.string().trim().min(1).max(64).optional().describe("An affiliate's referral code. Not accepted from a platform key, or for a business a partner onboarded."),
   skip_number: z.boolean().optional().describe("true finishes a paid plan's onboarding without a phone number."),
 });
@@ -463,12 +520,12 @@ export const apiBusinessSummarySchema = z.object({
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
-  onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
+  onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
   created_at: timestamp,
 }).describe("A business the platform key's partner onboarded.");
 
 export const apiUserCreateSchema = z.strictObject({
-  email: teamEmail.describe("The person's email. An address that already has a LobbyStack account is a 409."),
+  email: teamEmail.describe("The person's email. An address that already has an account is a 409."),
   name: z.string().trim().min(1).max(200).optional(),
   locale: z.enum(interfaceLocales).optional().describe("The language of the account's emails and dashboard: en, fr, es or sr. Defaults to en."),
 });
@@ -480,7 +537,7 @@ export const apiUserSchema = z.object({
   locale: z.string().describe("The language of the account's emails and dashboard."),
   email_verified: z.boolean().describe("false until the person sets a password with the code the setup email leads to, which proves the address is theirs. Only a verified account can claim a business."),
   created_at: timestamp,
-}).describe("A LobbyStack account.");
+}).describe("A dashboard account.");
 
 export const apiServiceSchema = z.object({
   id,
@@ -552,17 +609,24 @@ export const apiCallDetailSchema = apiCallSchema.extend({
   transcript: z.array(apiTranscriptEntrySchema),
 });
 
+const smsConsentStatuses = ["subscribed", "declined", "opted_out"] as const;
+
 export const apiContactSchema = z.object({
   id,
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
-  locale: z.string().nullable(),
+  locale: z.string().nullable().describe("Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language."),
   timezone: z.string().nullable(),
   passcode: z.object({
     set_at: timestamp,
     locked: z.boolean().describe(`true after ${CONTACT_PASSCODE_LOCK_ATTEMPTS} wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set.`),
   }).nullable().describe("The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."),
+  sms_consent: z.object({
+    status: z.enum(smsConsentStatuses).describe("subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."),
+    updated_at: nullableTimestamp.describe("When the answer was last recorded."),
+  }).nullable().describe("The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."),
+  blocked_at: nullableTimestamp.describe("When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -601,7 +665,7 @@ export const apiContactPasscodesGenerateSchema = z.strictObject({
 
 export const apiGeneratedContactPasscodesSchema = z.object({
   contacts: z.array(apiContactSchema.extend({
-    new_passcode: z.string().describe("The PIN just set. LobbyStack keeps only a hash of it, so this is the only time it's shown: give it to the contact."),
+    new_passcode: z.string().describe("The PIN just set. Only a hash of it is kept, so this is the only time it's shown: give it to the contact."),
   })).describe("The contacts that got a new PIN."),
   remaining: z.number().int().describe("Contacts that have a phone number and still no PIN. Without contact_ids, send the request again until this is 0."),
 });
@@ -619,7 +683,7 @@ export const apiAppointmentSchema = z.object({
   contact_id: id,
   contact_name: z.string().nullable(),
   contact_phone: z.string().nullable(),
-  source: z.string().describe("Where the booking came from, for example voice, web_chat, dashboard or api."),
+  source: z.string().describe("Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking made before this field existed may show another value."),
   calendar_sync_status: z.enum(["pending", "synced", "failed", "not_required"]),
   created_at: timestamp,
   updated_at: timestamp,
@@ -631,8 +695,8 @@ export const apiAppointmentCreateSchema = z.strictObject({
   contact_id: id.optional().describe("An existing contact with a phone number. Provide contact_id or contact_phone."),
   contact_phone: e164.optional(),
   contact_name: z.string().trim().min(1).max(200).optional(),
-  staff_id: id.optional().describe("Book with this active staff member. Without it, LobbyStack picks one who is free."),
-  sms_consent: z.boolean().optional().describe("True only if the customer agreed to receive confirmation and reminder texts. Self-hosted instances only: on LobbyStack Cloud, texts come from LobbyStack's shared number, and only the receptionist can collect that consent, on a call."),
+  staff_id: id.optional().describe("Book with this active staff member. Without it, one who is free is picked."),
+  sms_consent: z.boolean().optional().describe("True only if the customer agreed to receive confirmation and reminder texts. Used only outside cloud mode: in cloud mode, texts come from the deployment's shared number, and only the receptionist can collect that consent, on a call."),
 }).refine((value) => Boolean(value.contact_id || value.contact_phone), { error: "Provide contact_id or contact_phone.", path: ["contact_phone"] });
 
 export const apiAppointmentRescheduleSchema = z.strictObject({
@@ -645,6 +709,8 @@ export const apiAvailabilitySlotSchema = z.object({
   ends_at: timestamp,
 });
 
+const messageRequests = ["appointment_cancellation"] as const;
+
 export const apiMessageSchema = z.object({
   id,
   status: z.enum(["open", "done"]),
@@ -656,6 +722,8 @@ export const apiMessageSchema = z.object({
   callback_window: z.string().nullable(),
   channel: z.enum(["voice", "web_voice", "web_chat", "sms"]).nullable(),
   call_id: id.nullable(),
+  request: z.enum(messageRequests).nullable().describe("appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."),
+  appointment_id: id.nullable().describe("For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -695,6 +763,8 @@ export const apiKnowledgeSourceSchema = z.object({
   error: z.string().nullable().describe("Why reading failed, when status is error."),
   active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
   page_limit: z.number().int().nullable().describe("How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."),
+  content_type: z.string().nullable().describe("A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded."),
+  tags: z.array(z.string()).describe("The tags given when a file's upload was completed. Empty for a website or a page."),
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A website, page or file the receptionist learns from.");
@@ -822,6 +892,8 @@ export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
 export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;
 export type ApiWidgetKeyCreate = z.infer<typeof apiWidgetKeyCreateSchema>;
 export type ApiWidgetKeyUpdate = z.infer<typeof apiWidgetKeyUpdateSchema>;
+export type ApiPublicProfile = z.infer<typeof apiPublicProfileSchema>;
+export type ApiPublicProfileUpdate = z.infer<typeof apiPublicProfileUpdateSchema>;
 export type ApiCalendarConnection = z.infer<typeof apiCalendarConnectionSchema>;
 export type ApiCalendarConnectionUpdate = z.infer<typeof apiCalendarConnectionUpdateSchema>;
 export type ApiAccountCalendar = z.infer<typeof apiAccountCalendarSchema>;

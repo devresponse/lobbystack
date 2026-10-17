@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import nodemailer, { type Transporter } from "nodemailer";
-import { assertCertificationRecipient } from "@lobbystack/shared";
+import { assertCertificationRecipient, type BrandImage } from "@lobbystack/shared";
 
 export type SmtpConfig = {
   host: string;
@@ -11,6 +11,8 @@ export type SmtpConfig = {
   password: string;
   from: string;
   replyTo?: string;
+  /** The brand's email logo, at an absolute URL, shown above the deployment's name. */
+  logo?: BrandImage;
 };
 
 type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup";
@@ -29,9 +31,10 @@ export class SmtpEmailProvider {
     this.transporter = transporter;
   }
 
-  async sendTemplate(input: { template: TemplateName; to: string; subject: string; variables: Record<string, string>; idempotencyKey?: string; from?: string; replyTo?: string }): Promise<{ messageId: string }> {
+  /** `appName` is the deployment's name, which the email calls the app by (see docs/branding.md). */
+  async sendTemplate(input: { template: TemplateName; to: string; subject: string; variables: Record<string, string>; appName: string; idempotencyKey?: string; from?: string; replyTo?: string }): Promise<{ messageId: string }> {
     assertCertificationRecipient("email", input.to);
-    const email = renderTemplate(input.template, input.subject, input.variables);
+    const email = renderTemplate(input.template, input.subject, input.variables, input.appName, this.config.logo);
     // A per-message sender (the founder check-in) replaces the default reply-to
     // too, so replies reach that sender rather than the shared inbox.
     const replyTo = input.from ? input.replyTo : input.replyTo ?? this.config.replyTo;
@@ -48,8 +51,8 @@ export class SmtpEmailProvider {
   }
 }
 
-function renderTemplate(template: TemplateName, subject: string, variables: Record<string, string>): { text: string; html?: string } {
-  const text = templateBody(template, variables);
+function renderTemplate(template: TemplateName, subject: string, variables: Record<string, string>, appName: string, logo?: BrandImage): { text: string; html?: string } {
+  const text = templateBody(template, variables, appName);
 
   if (template !== "verify_email" || !variables.code) {
     return { text };
@@ -59,10 +62,12 @@ function renderTemplate(template: TemplateName, subject: string, variables: Reco
   return {
     text,
     html: renderEmailLayout({
+      appName,
+      logo,
       previewText: subject,
       content: [
         '<h1 style="margin:0 0 24px;font-size:28px;font-weight:600;line-height:1.25;color:#0B0B0D;text-align:center;">Verify your email address</h1>',
-        '<p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#3D3D3D;text-align:center;">Enter this verification code to finish setting up your LobbyStack account.</p>',
+        `<p style="margin:0 0 24px;font-size:16px;line-height:1.6;color:#3D3D3D;text-align:center;">Enter this verification code to finish setting up your ${escapeHtml(appName)} account.</p>`,
         `<p style="margin:0 0 24px;padding:16px 24px;background-color:#F3F4F6;border-radius:16px;font-size:32px;font-weight:600;line-height:1.25;letter-spacing:8px;color:#0B0B0D;text-align:center;">${code}</p>`,
         '<p style="margin:0 0 12px;font-size:14px;line-height:1.5;color:#6B7280;text-align:center;">This code expires in 10 minutes.</p>',
         '<p style="margin:0;font-size:14px;line-height:1.5;color:#6B7280;text-align:center;">If you did not request this code, you can safely ignore this email.</p>',
@@ -71,70 +76,72 @@ function renderTemplate(template: TemplateName, subject: string, variables: Reco
   };
 }
 
-function templateBody(template: TemplateName, variables: Record<string, string>): string {
+function templateBody(template: TemplateName, variables: Record<string, string>, appName: string): string {
   switch (template) {
     case "existing_account":
-      return existingAccountBody(variables);
+      return existingAccountBody(variables, appName);
     case "account_setup":
-      return accountSetupBody(variables);
+      return accountSetupBody(variables, appName);
     case "verify_email":
       return variables.code
-        ? `Your LobbyStack email verification code is: ${variables.code}. It expires in 10 minutes.`
-        : `Verify your LobbyStack email address using this link: ${variables.url ?? ""}`;
+        ? `Your ${appName} email verification code is: ${variables.code}. It expires in 10 minutes.`
+        : `Verify your ${appName} email address using this link: ${variables.url ?? ""}`;
     case "password_reset":
       return variables.code
-        ? `Your LobbyStack password reset code is: ${variables.code}. It expires in 10 minutes.`
-        : `Reset your LobbyStack password using this link: ${variables.url ?? ""}`;
+        ? `Your ${appName} password reset code is: ${variables.code}. It expires in 10 minutes.`
+        : `Reset your ${appName} password using this link: ${variables.url ?? ""}`;
     case "invitation":
-      return `You have been invited to join LobbyStack. Accept the invitation here: ${variables.url ?? ""}`;
+      return `You have been invited to join ${appName}. Accept the invitation here: ${variables.url ?? ""}`;
     case "operator_alert":
-      return variables.message ?? "LobbyStack operator notification";
+      return variables.message ?? `${appName} operator notification`;
     case "feedback_submission":
-      return variables.body ?? "LobbyStack dashboard feedback";
+      return variables.body ?? `${appName} dashboard feedback`;
     case "onboarding_followup":
-      return onboardingFollowupBody(variables);
+      return onboardingFollowupBody(variables, appName);
   }
 }
 
 /** For an account a platform key made: the forgot-password page's code sets its first password and verifies the email. */
-function accountSetupBody(variables: Record<string, string>): string {
+function accountSetupBody(variables: Record<string, string>, appName: string): string {
   const url = variables.url;
   const email = variables.email;
   switch (variables.locale) {
     case "fr":
-      return `Un compte LobbyStack a été créé pour vous avec l’adresse ${email}. Pour choisir votre mot de passe, ouvrez ${url}, saisissez cette adresse et entrez le code que nous vous enverrons. Si vous ne l’attendiez pas, ignorez cet e-mail.`;
+      return `Un compte ${appName} a été créé pour vous avec l’adresse ${email}. Pour choisir votre mot de passe, ouvrez ${url}, saisissez cette adresse et entrez le code que nous vous enverrons. Si vous ne l’attendiez pas, ignorez cet e-mail.`;
     case "es":
-      return `Se creó una cuenta de LobbyStack para usted con la dirección ${email}. Para elegir su contraseña, abra ${url}, escriba esta dirección e introduzca el código que le enviaremos. Si no lo esperaba, ignore este correo.`;
+      return `Se creó una cuenta de ${appName} para usted con la dirección ${email}. Para elegir su contraseña, abra ${url}, escriba esta dirección e introduzca el código que le enviaremos. Si no lo esperaba, ignore este correo.`;
     case "sr":
-      return `Za Vas je napravljen LobbyStack nalog sa adresom ${email}. Da biste izabrali lozinku, otvorite ${url}, upišite ovu adresu i unesite kod koji ćemo Vam poslati. Ako ovo niste očekivali, zanemarite ovaj imejl.`;
+      return `Za Vas je napravljen ${appName} nalog sa adresom ${email}. Da biste izabrali lozinku, otvorite ${url}, upišite ovu adresu i unesite kod koji ćemo Vam poslati. Ako ovo niste očekivali, zanemarite ovaj imejl.`;
     default:
-      return `A LobbyStack account was made for you with ${email}. To choose your password, open ${url}, enter this address, and type in the code we send you. If you weren't expecting this, ignore this email.`;
+      return `An account on ${appName} was made for you with ${email}. To choose your password, open ${url}, enter this address, and type in the code we send you. If you weren't expecting this, ignore this email.`;
   }
 }
 
-function existingAccountBody(variables: Record<string, string>): string {
+function existingAccountBody(variables: Record<string, string>, appName: string): string {
   const signIn = variables.signInUrl;
   const reset = variables.resetUrl;
   switch (variables.locale) {
     case "fr":
-      return `Vous avez déjà un compte LobbyStack. Connectez-vous pour continuer : ${signIn}. Mot de passe oublié ? ${reset}. Si vous n’avez pas demandé la création d’un compte, ignorez cet e-mail.`;
+      return `Vous avez déjà un compte ${appName}. Connectez-vous pour continuer : ${signIn}. Mot de passe oublié ? ${reset}. Si vous n’avez pas demandé la création d’un compte, ignorez cet e-mail.`;
     case "es":
-      return `Ya tiene una cuenta de LobbyStack. Inicie sesión para continuar: ${signIn}. ¿Olvidó su contraseña? ${reset}. Si no solicitó una cuenta, ignore este correo.`;
+      return `Ya tiene una cuenta de ${appName}. Inicie sesión para continuar: ${signIn}. ¿Olvidó su contraseña? ${reset}. Si no solicitó una cuenta, ignore este correo.`;
     case "sr":
-      return `Već imate LobbyStack nalog. Prijavite se da biste nastavili: ${signIn}. Zaboravili ste lozinku? ${reset}. Ako niste zatražili nalog, zanemarite ovaj imejl.`;
+      return `Već imate ${appName} nalog. Prijavite se da biste nastavili: ${signIn}. Zaboravili ste lozinku? ${reset}. Ako niste zatražili nalog, zanemarite ovaj imejl.`;
     default:
-      return `You already have a LobbyStack account. Sign in to continue: ${signIn}. Forgot your password? ${reset}. If you did not request an account, ignore this email.`;
+      return `You already have an account on ${appName}. Sign in to continue: ${signIn}. Forgot your password? ${reset}. If you did not request an account, ignore this email.`;
   }
 }
 
-function onboardingFollowupBody(variables: Record<string, string>): string {
+// Serbian never declines the name and French puts no "de" before it, because
+// a configured name can't change its form (see docs/branding.md).
+function onboardingFollowupBody(variables: Record<string, string>, appName: string): string {
   const sender = variables.senderName ?? "";
   const business = variables.businessName ?? "";
   if (variables.locale === "es") {
     return [
       variables.firstName ? `Hola, ${variables.firstName}:` : "Hola:",
       "",
-      `Soy ${sender}, fundador de LobbyStack. Ayer configuró una recepcionista para ${business}. Gracias por probarla.`,
+      `Soy ${sender}, fundador de ${appName}. Ayer configuró una recepcionista para ${business}. Gracias por probarla.`,
       "",
       "Me encantaría saber qué le pareció:",
       "",
@@ -146,14 +153,14 @@ function onboardingFollowupBody(variables: Record<string, string>): string {
       "",
       "Gracias de nuevo,",
       sender,
-      "Fundador, LobbyStack",
+      `Fundador, ${appName}`,
     ].join("\n");
   }
   if (variables.locale === "sr") {
     return [
       variables.firstName ? `Zdravo, ${variables.firstName},` : "Zdravo,",
       "",
-      `Ja sam ${sender}, osnivač LobbyStacka. Juče ste podesili recepcionera za ${business}. Hvala što ste ga isprobali.`,
+      `Ja sam ${sender}, osnivač servisa ${appName}. Juče ste podesili recepcionera za ${business}. Hvala što ste ga isprobali.`,
       "",
       "Voleo bih da čujem Vaše utiske:",
       "",
@@ -165,14 +172,14 @@ function onboardingFollowupBody(variables: Record<string, string>): string {
       "",
       "Hvala još jednom,",
       sender,
-      "Osnivač, LobbyStack",
+      `Osnivač, ${appName}`,
     ].join("\n");
   }
   if (variables.locale === "fr") {
     return [
       variables.firstName ? `Bonjour ${variables.firstName},` : "Bonjour,",
       "",
-      `Je suis ${sender}, le fondateur de LobbyStack. Vous avez configuré une réceptionniste pour ${business} hier. Merci de l'avoir essayée.`,
+      `Je suis ${sender}, fondateur du service ${appName}. Vous avez configuré une réceptionniste pour ${business} hier. Merci de l'avoir essayée.`,
       "",
       "J'aimerais savoir ce que vous en avez pensé :",
       "",
@@ -184,13 +191,13 @@ function onboardingFollowupBody(variables: Record<string, string>): string {
       "",
       "Merci encore,",
       sender,
-      "Fondateur, LobbyStack",
+      `Fondateur, ${appName}`,
     ].join("\n");
   }
   return [
     variables.firstName ? `Hi ${variables.firstName},` : "Hi,",
     "",
-    `I'm ${sender}, the founder of LobbyStack. You set up a receptionist for ${business} yesterday. Thanks for giving it a try.`,
+    `I'm ${sender}, the founder of ${appName}. You set up a receptionist for ${business} yesterday. Thanks for giving it a try.`,
     "",
     "I'd love to hear what you thought:",
     "",
@@ -202,13 +209,23 @@ function onboardingFollowupBody(variables: Record<string, string>): string {
     "",
     "Thanks again,",
     sender,
-    "Founder, LobbyStack",
+    `Founder, ${appName}`,
   ].join("\n");
 }
 
-function renderEmailLayout({ previewText, content }: { previewText: string; content: string }): string {
+const EMAIL_LOGO_HEIGHT = 48;
+
+function renderEmailLayout({ appName, logo, previewText, content }: { appName: string; logo: BrandImage | undefined; previewText: string; content: string }): string {
   const escapedPreviewText = escapeHtml(previewText);
-  const logoSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="-30 -30 278 291" role="img" aria-label="LobbyStack"><g transform="translate(0.000000,231.000000) scale(0.100000,-0.100000)" fill="#0B0B0D" stroke="none"><path d="M968 2280 c-42 -16 -195 -79 -340 -141 -144 -62 -317 -133 -383 -159 -90 -36 -130 -58 -162 -88 -85 -82 -78 2 -81 -976 -3 -968 -6 -916 63 -916 19 0 54 9 77 20 24 10 147 62 273 114 338 138 342 140 365 178 20 32 20 48 20 763 0 702 1 731 19 761 12 19 34 37 54 43 33 11 54 4 398 -133 267 -107 370 -152 387 -171 26 -31 23 42 25 -725 l2 -673 c0 -50 8 -86 19 -86 11 -12 31 -21 47 -21 24 0 296 106 358 140 11 5 30 27 43 47 l23 38 l0 654 0 836 -27 46 c-48 81 -77 98 -404 233 -170 71 -371 155 -447 187 -165 71 -208 75 -329 29z"/></g></svg>`;
+  // The deployment's name as a wordmark, under the brand's PNG email logo when
+  // it has one: mail clients such as Gmail and Outlook don't show SVG, and
+  // some hide remote images until asked, so the name stays in text and the
+  // logo needs no alt text of its own.
+  const logoWidth = logo ? Math.round((logo.width * EMAIL_LOGO_HEIGHT) / logo.height) : 0;
+  const logoImage = logo
+    ? `<img src="${escapeHtml(logo.url)}" width="${logoWidth}" height="${EMAIL_LOGO_HEIGHT}" alt="" style="display:block;margin:0 auto 12px;border:0;outline:none;text-decoration:none;width:${logoWidth}px;height:${EMAIL_LOGO_HEIGHT}px;" />`
+    : "";
+  const wordmark = `<p style="margin:0;font-size:22px;font-weight:700;line-height:1.2;color:#0B0B0D;text-align:center;">${escapeHtml(appName)}</p>`;
 
   return `<!doctype html>
 <html lang="en">
@@ -232,7 +249,7 @@ function renderEmailLayout({ previewText, content }: { previewText: string; cont
           <table role="presentation" class="email-container" border="0" cellspacing="0" cellpadding="0" width="600" style="width:600px;max-width:600px;background-color:#FFFFFF;border-radius:24px;padding:48px;">
             <tr>
               <td align="center" style="padding-bottom:32px;">
-                ${logoSvg}
+                ${logoImage}${wordmark}
               </td>
             </tr>
             <tr>

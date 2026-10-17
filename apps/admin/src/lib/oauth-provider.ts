@@ -5,7 +5,7 @@ import { cimd } from "@better-auth/cimd";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import type { BetterAuthPlugin } from "better-auth";
 
-import { createCimdFetch, hashOAuthToken, isCimdUrlAllowed, OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_REFRESH_TOKEN_PREFIX } from "@lobbystack/domain";
+import { createCimdFetch, deploymentAppName, hashOAuthToken, isCimdUrlAllowed, OAUTH_ACCESS_TOKEN_PREFIX, OAUTH_REFRESH_TOKEN_PREFIX } from "@lobbystack/domain";
 import { oauthAccessTokens, oauthClientAssertions, oauthClientResources, oauthClients, oauthConsents, oauthRefreshTokens, oauthResources, type Database } from "@lobbystack/db";
 
 import { MCP_OAUTH_SCOPES, mcpResourceUrl } from "./mcp/oauth-config";
@@ -83,9 +83,10 @@ let resourceReady: Promise<void> | undefined;
 export async function ensureMcpResource(db: Database): Promise<void> {
   resourceReady ??= (async () => {
     const now = new Date();
+    const name = `${await deploymentAppName(db)} MCP server`;
     await db.insert(oauthResources)
-      .values({ identifier: mcpResourceUrl(), name: "LobbyStack MCP server", allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, createdAt: now, updatedAt: now })
-      .onConflictDoUpdate({ target: oauthResources.identifier, set: { allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, updatedAt: now } });
+      .values({ identifier: mcpResourceUrl(), name, allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, createdAt: now, updatedAt: now })
+      .onConflictDoUpdate({ target: oauthResources.identifier, set: { name, allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, updatedAt: now } });
   })().catch((error: unknown) => {
     resourceReady = undefined;
     throw error;

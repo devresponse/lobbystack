@@ -18,6 +18,8 @@
     "usage": "Uso",
     "notifications": "Notificaciones",
     "widget": "Widget del sitio web",
+    "publicPage": "Perfil público",
+    "qrCode": "Código QR",
     "apiKeys": "Claves de API",
     "connectedApps": "Aplicaciones conectadas"
   },
@@ -102,6 +104,142 @@
       "snippetCopied": "Código copiado",
       "noSnippet": "Este widget se creó antes de que se guardaran los códigos de inserción, por lo que no se puede mostrar su código. Cree un widget nuevo para obtener uno que pueda copiar en cualquier momento.",
       "lastUsed": "Último uso: {{date}}"
+    }
+  },
+  "publicPage": {
+    "title": "Perfil público",
+    "loading": "Cargando el perfil público…",
+    "unavailable": "El perfil público no se puede cargar en este momento.",
+    "readOnly": "Solo los propietarios y administradores pueden cambiar el perfil público.",
+    "publish": {
+      "title": "Su página",
+      "description": "{{business}} tiene una página en esta dirección, con su horario, servicios, ubicación y chat.",
+      "label": "Publicada",
+      "on": "Cualquier persona con el enlace puede ver la página, y los buscadores pueden mostrarla.",
+      "off": "Solo su equipo puede ver la página hasta que la publique.",
+      "since": "Publicada el {{date}}",
+      "copy": "Copiar enlace",
+      "copied": "Enlace copiado",
+      "open": "Abrir página",
+      "preview": "Vista previa"
+    },
+    "details": {
+      "title": "Datos",
+      "description": "El nombre de su negocio y su número de teléfono vienen del resto de su configuración.",
+      "category": "Categoría",
+      "categoryPlaceholder": "Clínica dental",
+      "about": "Descripción",
+      "aboutPlaceholder": "Qué hace y a quién ayuda, en pocas frases.",
+      "aboutCount": "{{count}} de {{max}} caracteres",
+      "email": "Correo público",
+      "emailPlaceholder": "hola@ejemplo.com",
+      "address": "Dirección",
+      "line1": "Calle y número",
+      "line2": "Oficina, local o piso",
+      "city": "Ciudad",
+      "region": "Provincia o estado",
+      "postalCode": "Código postal",
+      "country": "País",
+      "noCountry": "Sin país"
+    },
+    "sections": {
+      "title": "Qué muestra la página",
+      "description": "Una sección sin nada que mostrar queda oculta.",
+      "phone": "Número de teléfono",
+      "phoneHint": "El número con el que las personas llaman a su recepcionista.",
+      "hours": "Horario",
+      "hoursHint": "Indica si está abierto ahora.",
+      "editHours": "Editar horario",
+      "services": "Servicios",
+      "servicesHint": "Con la duración de cada uno.",
+      "editServices": "Editar servicios",
+      "map": "Mapa",
+      "mapHint": "Su dirección en un mapa, con indicaciones."
+    },
+    "chat": {
+      "title": "Chat",
+      "description": "En la página, los visitantes chatean con su recepcionista o la llaman desde el navegador, a través de uno de sus widgets del sitio web.",
+      "widget": "Widget del sitio web",
+      "none": "Sin chat",
+      "untitled": "Widget sin nombre",
+      "lastUsed": "{{label}} · último uso el {{date}}",
+      "empty": "Aún no tiene un widget del sitio web activo.",
+      "manage": "Configuración del widget del sitio web",
+      "unavailable": "El widget que mostraba esta página está en pausa o revocado, así que la página no muestra chat."
+    },
+    "save": "Guardar",
+    "saved": "Guardado",
+    "errors": {
+      "email": "Escriba un correo como hola@ejemplo.com.",
+      "invalid": "Algunos datos no se pueden guardar. Revíselos e inténtelo de nuevo.",
+      "widgetUnavailable": "Ese widget está en pausa o revocado. Elija otro, o sin chat.",
+      "saveFailed": "No se pudo guardar el perfil público. Inténtelo de nuevo."
+    }
+  },
+  "qrCode": {
+    "title": "Código QR",
+    "loading": "Cargando su código QR…",
+    "unavailable": "Su código QR no se puede cargar en este momento.",
+    "card": {
+      "title": "Su código QR",
+      "description": "Póngalo en su puerta, mostrador o mesas. Quien lo escanee llegará a su perfil público."
+    },
+    "opens": "Abre",
+    "open": "Abrir página",
+    "preview": "Vista previa",
+    "unpublished": {
+      "title": "Su perfil público aún no está publicado",
+      "description": "Quien escanee este código verá un mensaje de página no encontrada hasta que se publique la página. Aun así, puede imprimirlo ahora.",
+      "link": "Publíquelo en Perfil público",
+      "askAdmin": "Un propietario o administrador puede publicarlo en Perfil público."
+    },
+    "template": {
+      "label": "Plantilla",
+      "signal": "Señal",
+      "signalHint": "Cartel amarillo",
+      "frontDesk": "Recepción",
+      "frontDeskHint": "Blanco, usa menos tóner",
+      "night": "Noche",
+      "nightHint": "Negro, para lugares con poca luz"
+    },
+    "message": {
+      "label": "Mensaje",
+      "hint": "Se imprime como titular. Escriba lo que quiera; Intro empieza una línea nueva.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Tamaño",
+      "a4": "Página completa · A4",
+      "a5": "Media página · A5",
+      "a6": "Cuarto de página · A6",
+      "a7": "Tarjetas · A7",
+      "hint": "{{count}} por hoja · código de {{code}} cm, se escanea desde unos {{distance}}"
+    },
+    "mark": {
+      "label": "Dentro del código",
+      "name": "Nombre",
+      "logo": "Logotipo",
+      "none": "Nada",
+      "tooLong": "Esta dirección es demasiado larga para poner un nombre o un logotipo dentro del código, así que el código es simple."
+    },
+    "language": {
+      "label": "Idioma",
+      "hint": "El idioma de las palabras impresas en el cartel."
+    },
+    "print": "Imprimir",
+    "png": "Código en PNG",
+    "svg": "Código en SVG",
+    "printHint": "Imprima a tamaño real (100 %), no «Ajustar a la página», en papel A4. El papel mate se escanea mejor. Para un PDF, elija Guardar como PDF en la ventana de impresión. Escanee la impresión con dos teléfonos antes de colocarla.",
+    "downloadFailed": "No se pudo crear el archivo. Inténtelo de nuevo o use Imprimir.",
+    "previewLabel": "Vista previa de la plantilla {{template}}, {{size}}",
+    "caption": "Papel A4 · {{count}} por hoja · cada uno de {{width}} × {{height}} cm",
+    "codeLabel": "Código QR que abre {{url}}",
+    "noCode": "Esta dirección no se puede convertir en un código QR.",
+    "sign": {
+      "defaultMessage": "¿Preguntas?\nPregúntenos cuando quiera.",
+      "scanChat": "Escanee para chatear con nosotros",
+      "scanPage": "Escanee para ver nuestra página",
+      "answeredBy": "Atendido por <brand>{{appName}}</brand>"
     }
   },
   "billing": {
@@ -377,7 +515,26 @@
       "loadFailed": "No pudimos cargar los números en este momento.",
       "searchFailed": "No pudimos buscar números en este momento.",
       "claimFailed": "No pudimos reemplazar el número de teléfono. Inténtelo de nuevo.",
+      "getNumberFailed": "No pudimos obtener ese número. Inténtelo de nuevo.",
       "unavailable": "Ese número se acaba de asignar. Elija otro de la lista actualizada."
+    },
+    "errors": {
+      "offerExpired": "Esta lista de números ha caducado. Vuelva a buscar y luego elija un número.",
+      "claimInProgress": "Todavía se está configurando otro número para este espacio de trabajo. Espere unos minutos y vuelva a intentarlo.",
+      "claimRateLimited": "Ha probado 3 números en la última hora, que es el límite. Inténtelo más tarde.",
+      "dailyClaimQuota": "Ha obtenido 2 números en las últimas 24 horas, que es el límite. Inténtelo mañana.",
+      "monthlyClaimQuota": "Ha obtenido 5 números en los últimos 30 días, que es el límite. Inténtelo más tarde.",
+      "numberExists": "Este espacio de trabajo ya tiene un número de teléfono. Vuelva a cargar la página para verlo.",
+      "invalidStage": "Complete los pasos de configuración anteriores antes de elegir un número.",
+      "paidPlanRequired": "Un número dedicado del negocio requiere un plan de pago.",
+      "replacementUsed": "Este espacio de trabajo ya usó su único cambio de número.",
+      "activeNumberRequired": "Su número actual ya no está activo, así que no se puede cambiar.",
+      "replacementMustDiffer": "Elija un número distinto de su número actual.",
+      "unsupportedCountry": "Los números de teléfono están disponibles en EE. UU., Canadá, el Reino Unido y Australia.",
+      "searchRateLimited": "Demasiadas búsquedas. Espere unos minutos y vuelva a intentarlo.",
+      "searchInvalid": "El operador no pudo buscar con ese código de área. Revíselo e inténtelo de nuevo.",
+      "searchUnsupported": "El operador no tiene números de este tipo en este país.",
+      "withErrorId": "{{message}} ID del error: {{errorId}}"
     },
     "toast": {
       "changed": "Número de teléfono cambiado. Su número anterior seguirá activo durante 30 días.",
@@ -811,11 +968,11 @@
     "phoneVerification": {
       "phone": {
         "title": "Su número de móvil",
-        "consent": "Al enviar el código, acepta recibir alertas de LobbyStack por SMS. La frecuencia varía. Pueden aplicarse tarifas de mensajes y datos. Responda STOP para darse de baja, HELP para obtener ayuda."
+        "consent": "Al enviar el código, acepta recibir alertas de {{appName}} por SMS. La frecuencia varía. Pueden aplicarse tarifas de mensajes y datos. Responda STOP para darse de baja, HELP para obtener ayuda."
       },
       "confirm": {
         "title": "Activar alertas por SMS",
-        "consent": "Al activarlas, acepta recibir alertas de LobbyStack por SMS en su número verificado. La frecuencia varía. Pueden aplicarse tarifas de mensajes y datos. Responda STOP para darse de baja, HELP para obtener ayuda.",
+        "consent": "Al activarlas, acepta recibir alertas de {{appName}} por SMS en su número verificado. La frecuencia varía. Pueden aplicarse tarifas de mensajes y datos. Responda STOP para darse de baja, HELP para obtener ayuda.",
         "turnOn": "Activar"
       },
       "fields": {
@@ -861,6 +1018,12 @@
     "neverUsed": "Nunca",
     "createdBy": "{{date}} por {{name}}",
     "revoked": "Revocada el {{date}}",
+    "businessId": {
+      "title": "ID del negocio",
+      "description": "La API y el comando lobbystack identifican {{business}} por este ID. Úselo en el encabezado {{header}}, con --business o en business.id de un manifiesto para lobbystack onboard.",
+      "copy": "Copiar",
+      "copied": "Copiado"
+    },
     "restricted": {
       "title": "Solo los propietarios y administradores pueden gestionar las claves de API",
       "description": "Pida a un propietario o administrador de este negocio que cree una clave para usted."

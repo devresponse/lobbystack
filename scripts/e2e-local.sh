@@ -40,6 +40,8 @@ TESTS=(
   e2e/onboarding-pending.e2e.ts
   e2e/operator-auth.e2e.ts
   e2e/performance-startup.e2e.ts
+  e2e/public-profile.e2e.ts
+  e2e/qr-code-settings.e2e.ts
   e2e/supported-journeys.e2e.ts
   e2e/widget-settings.e2e.ts
 )

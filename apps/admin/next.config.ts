@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 
 import { publicAssetVersion } from "./asset-version";
 import { releaseVersion } from "./src/lib/release-version";
-import { brandLogoSecurityHeaders, embeddableSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
+import { brandLogoSecurityHeaders, embeddableSecurityHeaders, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
 // One release identifies the build everywhere: browser error reports, the source
 // maps uploaded to PostHog, and the deployment ID below.
@@ -34,6 +34,19 @@ const nextConfig: NextConfig = {
     // deployment variable that can stay unchanged across deploys.
     NEXT_PUBLIC_ASSET_VERSION: publicAssetVersion(resolve(process.cwd(), "public"), serviceVersion),
     NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV ?? "development",
+    // The address and preset the brand comes from (packages/shared/src/brands/resolve.ts),
+    // fixed at build so the prerendered pages, the server and the browser all
+    // show the same brand. The admin warns at start when they no longer match.
+    NEXT_PUBLIC_BRAND_BASE_URL: process.env.APP_BASE_URL ?? "",
+    NEXT_PUBLIC_BRAND_PRESET: process.env.BRAND_PRESET ?? "",
+    // Old overrides for the brand file's outside links (packages/shared/src/brandLinks.ts),
+    // to be removed. Fixed at build even when unset, so a value set only at run
+    // time can't make the server render a link the browser then disagrees with.
+    NEXT_PUBLIC_LANDING_SITE_URL: process.env.NEXT_PUBLIC_LANDING_SITE_URL ?? "",
+    NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL ?? "",
+    NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL ?? "",
+    NEXT_PUBLIC_DOCS_SITE_URL: process.env.NEXT_PUBLIC_DOCS_SITE_URL ?? "",
+    NEXT_PUBLIC_CONTACT_EMAIL: process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "",
     // No NEXT_PUBLIC_DEPLOYMENT_MODE: browser telemetry gets the mode from the
     // server at runtime (src/lib/deployment-mode.ts).
   },
@@ -83,8 +96,9 @@ const nextConfig: NextConfig = {
       { source: "/brand/:path*", headers: immutableAssetCache },
       { source: "/lobbystack-logo.svg", headers: immutableAssetCache },
       { source: "/embed/embed.js", headers: immutableAssetCache },
-      { source: "/((?!embed\\.js|embed/|api/branding/logo$).*)", headers: toNextHeaderList(securityHeaders()) },
+      { source: "/((?!embed\\.js|embed/|api/branding/logo$|profile/).*)", headers: toNextHeaderList(securityHeaders()) },
       { source: "/api/branding/logo", headers: toNextHeaderList(brandLogoSecurityHeaders()) },
+      { source: "/profile/:slug*", headers: toNextHeaderList(publicProfileSecurityHeaders()) },
       { source: "/embed.js", missing: [{ type: "query", key: "key" }], headers: [...embeddable, ...embedLoaderCache] },
       { source: "/embed.js", has: [{ type: "query", key: "key" }], headers: [...embeddable, ...keyedEmbedLoaderCache] },
       { source: "/embed/:key*", headers: embeddable },

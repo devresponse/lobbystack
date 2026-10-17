@@ -1,12 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound } from "lucide-react";
+import { Check, Copy, KeyRound } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { offeredApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
+import { BUSINESS_HEADER, offeredApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
@@ -82,6 +82,7 @@ export function LiveApiKeysSurface() {
         description={t("apiKeys.description")}
         title={t("apiKeys.title")}
       >
+        {business ? <BusinessIdPanel businessId={business.businessId} businessName={business.name} key={business.businessId} /> : null}
         <Surface>
           {keys.isLoading ? <div className="p-6"><Skeleton className="h-24 w-full rounded-xl" /></div> : rows.length === 0 ? (
             <p className="type-body-muted p-6 text-center">{t("apiKeys.empty")}</p>
@@ -127,7 +128,7 @@ export function LiveApiKeysSurface() {
       </SectionBlock>
 
       <Dialog onOpenChange={closeCreate} open={createOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
           {created ? (
             <>
               <DialogHeader>
@@ -186,5 +187,34 @@ export function LiveApiKeysSurface() {
         title={t("apiKeys.revoke.title")}
       />
     </>
+  );
+}
+
+/** The active business's id, which the LobbyStack-Business header, --business and an onboard manifest's business.id take. */
+function BusinessIdPanel({ businessId, businessName }: { businessId: string; businessName: string }) {
+  const { t } = useTranslation("settings");
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(businessId);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <Surface className="flex flex-col gap-3 px-6 py-5">
+      <h3 className="type-item-title">{t("apiKeys.businessId.title")}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <code className="type-technical-value min-w-0 break-words rounded-xl bg-muted px-3 py-1.5" data-testid="business-id">{businessId}</code>
+        <Button onClick={() => void copy()} size="sm" type="button" variant="outline">
+          {copied ? <Check data-icon="inline-start" /> : <Copy data-icon="inline-start" />}
+          {copied ? t("apiKeys.businessId.copied") : t("apiKeys.businessId.copy")}
+        </Button>
+      </div>
+      <p className="type-body-muted">{t("apiKeys.businessId.description", { business: businessName, header: BUSINESS_HEADER })}</p>
+    </Surface>
   );
 }

@@ -1,4 +1,4 @@
-/* globals describe, it, expect, afterEach */
+/* globals describe, it, expect, afterEach, jest */
 'use strict';
 
 const { App, TEST_API_KEY, api, apiError, appTester, bundleWith, nock } = require('./helpers');
@@ -51,6 +51,27 @@ describe('authentication', () => {
     });
   });
 
+});
+
+describe('deployment name', () => {
+  it('shows the name, address and docs a deployment sets', () => {
+    const saved = { ...process.env };
+    Object.assign(process.env, { ZAPIER_APP_NAME: 'AlloPlace', ZAPIER_DEFAULT_URL: 'https://demo.alloplace.com/', ZAPIER_DOCS_URL: 'https://docs.alloplace.com/' });
+    try {
+      jest.isolateModules(() => {
+        const authentication = require('../authentication');
+        const { resolveBaseUrl: resolve } = require('../lib/client');
+        const text = JSON.stringify(authentication.fields);
+        expect(text).not.toContain('LobbyStack');
+        expect(authentication.fields[1]).toMatchObject({ label: 'AlloPlace URL', default: 'https://demo.alloplace.com' });
+        expect(authentication.fields[0].helpText).toContain('https://docs.alloplace.com/api/authentication');
+        expect(resolve({})).toBe('https://demo.alloplace.com');
+        expect(() => resolve({ baseUrl: 'http://example.org' })).toThrow('The AlloPlace URL must start with https://.');
+      });
+    } finally {
+      process.env = saved;
+    }
+  });
 });
 
 describe('base URL', () => {

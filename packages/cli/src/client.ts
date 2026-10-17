@@ -75,7 +75,7 @@ export function createClient(options: ClientOptions): Client {
       }
       const json = parseJson(await response.text());
       if (!response.ok) throw toApiError(response, json);
-      if (json === undefined) throw new CliError(`${options.url} answered without JSON. Check that it's a LobbyStack dashboard's address.`, exitCodes.failed);
+      if (json === undefined) throw new CliError(`${options.url} answered without JSON. Check that it's the dashboard's address.`, exitCodes.failed);
       return json as ApiResponseBody<Id>;
     },
   };

@@ -82,19 +82,37 @@ export function requestWidgetOrigin(request: Request): string | null {
   }
 }
 
+/** APP_BASE_URL's origin, where the dashboard and the businesses' profile pages are served. */
+function appBaseOrigin(): string {
+  try {
+    return normalizeOrigin(new URL(process.env.APP_BASE_URL ?? "").origin);
+  } catch {
+    // Empty when APP_BASE_URL is unset.
+    return "";
+  }
+}
+
 export function isAllowedWidgetOrigin(origin: string, allowedOrigins: unknown, options: { allowAdminOrigin?: boolean; allowLocalhost?: boolean } = {}): boolean {
   const normalized = normalizeOrigin(origin);
   const allowlist = normalizeAllowedOrigins(allowedOrigins);
   if (allowlist.has(normalized)) return true;
   if (options.allowLocalhost !== false && isLocalhostHttp(normalized) && process.env.NODE_ENV !== "production") return true;
-  let adminOrigin = "";
-  try {
-    adminOrigin = normalizeOrigin(new URL(process.env.APP_BASE_URL ?? "").origin);
-  } catch {
-    // Fall through when APP_BASE_URL is unset.
-  }
+  const adminOrigin = appBaseOrigin();
   if (options.allowAdminOrigin !== false && adminOrigin && normalized === adminOrigin) return true;
   return options.allowAdminOrigin !== false && Boolean(adminOrigin) && allowlist.has(adminOrigin);
+}
+
+/**
+ * Whether the page is the business's own profile page, at /profile/<slug> on
+ * the deployment's domain, showing this widget. Widget sessions are otherwise
+ * refused on that domain, so only the widget an owner chose for the page runs
+ * there, and only while the page is published.
+ */
+export function isPublicProfileWidgetOrigin(origin: string, profile: { published: boolean | null; widgetKeyId: string | null } | null | undefined, widgetKeyId: string): boolean {
+  if (!profile?.published || profile.widgetKeyId !== widgetKeyId) return false;
+  const appOrigin = appBaseOrigin();
+  // A sandboxed page's origin is the opaque "null", which no deployment has.
+  return Boolean(appOrigin) && appOrigin !== "null" && normalizeOrigin(origin) === appOrigin;
 }
 
 type WidgetSessionTokenPayload = {

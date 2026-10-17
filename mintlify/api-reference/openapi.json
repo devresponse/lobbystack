@@ -38,6 +38,9 @@
       "name": "Website chat"
     },
     {
+      "name": "Public profile"
+    },
+    {
       "name": "Calendars"
     },
     {
@@ -130,7 +133,7 @@
             }
           },
           "403": {
-            "description": "Refused. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -234,7 +237,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -347,7 +350,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -473,7 +476,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the businesses:create scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the businesses:create scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -610,7 +613,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -644,7 +647,7 @@
       "post": {
         "operationId": "createUser",
         "summary": "Create a user",
-        "description": "Platform keys only. Creates a LobbyStack account with no password and an unverified email, and emails the person a link to set a password, which also verifies the email. Use it for an owner who has no account yet, then send them a claim link. An email that already has an account is a 409. Idempotency-Key is required: a retry with the same value returns the account it created, and a different email with that value is a 422.",
+        "description": "Platform keys only. Creates an account with no password and an unverified email, and emails the person a link to set a password, which also verifies the email. Use it for an owner who has no account yet, then send them a claim link. An email that already has an account is a 409. Idempotency-Key is required: a retry with the same value returns the account it created, and a different email with that value is a 422.",
         "tags": [
           "Platform"
         ],
@@ -716,7 +719,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the users:create scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the users:create scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -831,7 +834,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -944,7 +947,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1074,7 +1077,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1196,7 +1199,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1341,7 +1344,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1463,7 +1466,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1603,7 +1606,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1717,7 +1720,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1830,7 +1833,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1964,7 +1967,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2098,7 +2101,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2213,7 +2216,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2326,7 +2329,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2456,7 +2459,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2586,7 +2589,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2721,7 +2724,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2856,7 +2859,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2971,7 +2974,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3116,7 +3119,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the phone_numbers:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3241,7 +3244,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3354,7 +3357,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3479,7 +3482,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3594,7 +3597,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3638,7 +3641,7 @@
       "post": {
         "operationId": "createTeamInvitation",
         "summary": "Invite someone",
-        "description": "Emails an invitation to join the team, which the invitee accepts with a verified LobbyStack account for that email within 7 days. It sends an email, so Idempotency-Key is required, and the account the key acts as can invite 20 people an hour, counted with its dashboard invitations.",
+        "description": "Emails an invitation to join the team, which the invitee accepts with a verified account for that email within 7 days. It sends an email, so Idempotency-Key is required, and the account the key acts as can invite 20 people an hour, counted with its dashboard invitations.",
         "tags": [
           "Team"
         ],
@@ -3719,7 +3722,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3854,7 +3857,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3989,7 +3992,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4112,7 +4115,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4166,7 +4169,7 @@
       "post": {
         "operationId": "createClaimLink",
         "summary": "Hand the business over",
-        "description": "Emails the new owner a link that claims the business, and returns it so you can send it too. Whoever accepts it with a verified LobbyStack account for that email becomes an owner, and the account the key acts as, which must own the business, leaves the team. A new claim link revokes the one before. Idempotency-Key is required, and the invitation limit of POST /team/invitations applies.",
+        "description": "Emails the new owner a link that claims the business, and returns it so you can send it too. Whoever accepts it with a verified account for that email becomes an owner, and the account the key acts as, which must own the business, leaves the team. A new claim link revokes the one before. Idempotency-Key is required, and the invitation limit of POST /team/invitations applies.",
         "tags": [
           "Team"
         ],
@@ -4247,7 +4250,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the team:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4311,7 +4314,7 @@
       "get": {
         "operationId": "listWidgetKeys",
         "summary": "List widget keys",
-        "description": "Every key for the website chat widget, newest first, all in one page. The keys themselves aren't shown again after they're created.",
+        "description": "Every key for the website chat widget, newest first, all in one page, with the script tag that adds each one to a website.",
         "tags": [
           "Website chat"
         ],
@@ -4387,7 +4390,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4429,7 +4432,7 @@
       "post": {
         "operationId": "createWidgetKey",
         "summary": "Add the chat widget to a website",
-        "description": "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. The key is shown only in this response. A deployment that doesn't offer website chat yet answers 403.",
+        "description": "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. GET /widget-keys shows the tag again. A deployment that doesn't offer website chat yet answers 403.",
         "tags": [
           "Website chat"
         ],
@@ -4509,7 +4512,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4654,7 +4657,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4704,11 +4707,239 @@
         }
       }
     },
+    "/public-profile": {
+      "get": {
+        "operationId": "getPublicProfile",
+        "summary": "Get the public profile page",
+        "description": "The business's page at /profile/{slug} on this deployment: whether it's published and what it shows, as owners and admins set it in Settings > Public profile. A business that never saved these settings gets the defaults the dashboard starts from, and updated_at is null.",
+        "tags": [
+          "Public profile"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PublicProfile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "operationId": "updatePublicProfile",
+        "summary": "Update or publish the public profile page",
+        "description": "Changes the fields sent and leaves the rest. The first change also saves the defaults GET showed. published: true publishes the page and false takes it down. Once the settings are saved, values the page already has change nothing.",
+        "tags": [
+          "Public profile"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "business:write",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicProfileUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/PublicProfile"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/calendars/google/connect": {
       "post": {
         "operationId": "createCalendarConnectLink",
         "summary": "Get a link that connects Google Calendar",
-        "description": "Google asks the calendar's owner to agree in a browser, so the API can't connect a calendar by itself: send the link this returns to whoever owns the calendar. They sign in to LobbyStack as an owner or admin of the business, agree on Google's page, and land on the dashboard's integrations page, where they can pick the calendar to use; PATCH /calendars/{connection_id} can pick it too. For a business nobody has claimed yet, hand it over with POST /team/claim-link first, unless the account the key acts as connects its own calendar. The link works until expires_at. Connecting another Google account replaces the business's calendar, the connection without a staff member, so to add a staff member's calendar, first move the current one to its staff member with PATCH /calendars/{connection_id}. A deployment without Google Calendar answers 403.",
+        "description": "Google asks the calendar's owner to agree in a browser, so the API can't connect a calendar by itself: send the link this returns to whoever owns the calendar. They sign in to the dashboard as an owner or admin of the business, agree on Google's page, and land on the dashboard's integrations page, where they can pick the calendar to use; PATCH /calendars/{connection_id} can pick it too. For a business nobody has claimed yet, hand it over with POST /team/claim-link first, unless the account the key acts as connects its own calendar. The link works until expires_at. Connecting another Google account replaces the business's calendar, the connection without a staff member, so to add a staff member's calendar, first move the current one to its staff member with PATCH /calendars/{connection_id}. A deployment without Google Calendar answers 403.",
         "tags": [
           "Calendars"
         ],
@@ -4769,7 +5000,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4899,7 +5130,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5029,7 +5260,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5154,7 +5385,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5277,7 +5508,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5392,7 +5623,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5505,7 +5736,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5643,7 +5874,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5765,7 +5996,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5910,7 +6141,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6033,7 +6264,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6163,7 +6394,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the business:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6319,7 +6550,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6434,7 +6665,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6597,7 +6828,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6719,7 +6950,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6853,7 +7084,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6975,7 +7206,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7029,7 +7260,7 @@
       "post": {
         "operationId": "setContactPasscodes",
         "summary": "Set or remove keypad PINs",
-        "description": "Sets the keypad PIN each contact types to change appointments by phone when verification_mode is passcode_required, or removes it with null. A new PIN also unlocks a locked one. Send up to 100 contacts, each once: if any isn't this business's, nothing changes. Returns the contacts in the order sent. LobbyStack keeps only a hash of each PIN, and this endpoint ignores Idempotency-Key so it never stores a copy. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
+        "description": "Sets the keypad PIN each contact types to change appointments by phone when verification_mode is passcode_required, or removes it with null. A new PIN also unlocks a locked one. Send up to 100 contacts, each once: if any isn't this business's, nothing changes. Returns the contacts in the order sent. Only a hash of each PIN is kept, and this endpoint ignores Idempotency-Key so it never stores a copy. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
         "tags": [
           "Contacts"
         ],
@@ -7115,7 +7346,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7169,7 +7400,7 @@
       "post": {
         "operationId": "generateContactPasscodes",
         "summary": "Generate keypad PINs",
-        "description": "Gives contacts a random keypad PIN and returns each one in new_passcode. LobbyStack keeps only a hash, so this response is the only time the PINs appear: give each contact theirs. With contact_ids, those contacts get a new PIN, replacing any they have. Without it, contacts that have a phone number and no PIN get one, oldest first, 100 per request: send it again until remaining is 0. This endpoint ignores Idempotency-Key, so no copy of a PIN is stored. After a network error, look for contacts whose passcode set_at is from that request, and give them new PINs with contact_ids. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
+        "description": "Gives contacts a random keypad PIN and returns each one in new_passcode. Only a hash is kept, so this response is the only time the PINs appear: give each contact theirs. With contact_ids, those contacts get a new PIN, replacing any they have. Without it, contacts that have a phone number and no PIN get one, oldest first, 100 per request: send it again until remaining is 0. This endpoint ignores Idempotency-Key, so no copy of a PIN is stored. After a network error, look for contacts whose passcode set_at is from that request, and give them new PINs with contact_ids. As in the dashboard, only owners and admins set PINs: a per-business key whose creator no longer is one gets a 403 key_owner_inactive.",
         "tags": [
           "Contacts"
         ],
@@ -7240,7 +7471,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the contacts:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7427,7 +7658,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7549,7 +7780,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7727,7 +7958,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7841,7 +8072,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7956,7 +8187,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8091,7 +8322,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the appointments:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8251,7 +8482,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the messages:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the messages:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8401,7 +8632,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8523,7 +8754,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8657,7 +8888,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8780,7 +9011,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -8902,7 +9133,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9078,7 +9309,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9191,7 +9422,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9315,7 +9546,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9438,7 +9669,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9561,7 +9792,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9686,7 +9917,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9811,7 +10042,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -9936,7 +10167,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10071,7 +10302,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10196,7 +10427,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:write scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10325,7 +10556,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10438,7 +10669,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10562,7 +10793,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10685,7 +10916,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10807,7 +11038,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10932,7 +11163,7 @@
             }
           },
           "403": {
-            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified LobbyStack account.",
+            "description": "Refused. insufficient_scope: the key lacks the webhooks:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
             "content": {
               "application/json": {
                 "schema": {
@@ -11533,6 +11764,10 @@
           "name": {
             "type": "string"
           },
+          "slug": {
+            "type": "string",
+            "description": "A short name no other business uses, set when the business is created. Its public profile page is at /profile/{slug}."
+          },
           "timezone": {
             "type": "string",
             "description": "IANA time zone, for example America/Toronto."
@@ -11553,7 +11788,18 @@
           },
           "onboarding_stage": {
             "type": "string",
-            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."
           },
           "booking_mode": {
             "type": "string",
@@ -11601,6 +11847,15 @@
               "description": "One opening window on one day. A day with a break, such as lunch, has two windows. Days that are not listed are closed."
             }
           },
+          "hours_source": {
+            "type": "string",
+            "enum": [
+              "none",
+              "generated",
+              "operator"
+            ],
+            "description": "Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11615,6 +11870,7 @@
         "required": [
           "id",
           "name",
+          "slug",
           "timezone",
           "locale",
           "website_url",
@@ -11622,6 +11878,7 @@
           "onboarding_stage",
           "booking_mode",
           "hours",
+          "hours_source",
           "created_at",
           "updated_at"
         ],
@@ -11666,7 +11923,7 @@
             "maxLength": 64
           },
           "hours": {
-            "description": "Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap.",
+            "description": "Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them.",
             "maxItems": 28,
             "type": "array",
             "items": {
@@ -11779,7 +12036,18 @@
           },
           "onboarding_stage": {
             "type": "string",
-            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."
           },
           "created_at": {
             "type": "string",
@@ -11839,7 +12107,7 @@
           "created_at"
         ],
         "additionalProperties": false,
-        "description": "A LobbyStack account."
+        "description": "A dashboard account."
       },
       "UserCreate": {
         "type": "object",
@@ -11848,7 +12116,7 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 320,
-            "description": "The person's email. An address that already has a LobbyStack account is a 409."
+            "description": "The person's email. An address that already has an account is a 409."
           },
           "name": {
             "type": "string",
@@ -12393,6 +12661,7 @@
             ]
           },
           "locale": {
+            "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
             "type": [
               "string",
               "null"
@@ -12431,6 +12700,59 @@
             ],
             "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
           },
+          "sms_consent": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "subscribed",
+                      "declined",
+                      "opted_out"
+                    ],
+                    "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                  },
+                  "updated_at": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "When the answer was last recorded."
+                  }
+                },
+                "required": [
+                  "status",
+                  "updated_at"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+          },
+          "blocked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12450,6 +12772,8 @@
           "locale",
           "timezone",
           "passcode",
+          "sms_consent",
+          "blocked_at",
           "created_at",
           "updated_at"
         ],
@@ -12652,6 +12976,7 @@
                   ]
                 },
                 "locale": {
+                  "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
                   "type": [
                     "string",
                     "null"
@@ -12690,6 +13015,59 @@
                   ],
                   "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
                 },
+                "sms_consent": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "subscribed",
+                            "declined",
+                            "opted_out"
+                          ],
+                          "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                        },
+                        "updated_at": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "ISO 8601 timestamp in UTC."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the answer was last recorded."
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "updated_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+                },
+                "blocked_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12702,7 +13080,7 @@
                 },
                 "new_passcode": {
                   "type": "string",
-                  "description": "The PIN just set. LobbyStack keeps only a hash of it, so this is the only time it's shown: give it to the contact."
+                  "description": "The PIN just set. Only a hash of it is kept, so this is the only time it's shown: give it to the contact."
                 }
               },
               "required": [
@@ -12713,6 +13091,8 @@
                 "locale",
                 "timezone",
                 "passcode",
+                "sms_consent",
+                "blocked_at",
                 "created_at",
                 "updated_at",
                 "new_passcode"
@@ -12797,7 +13177,7 @@
           },
           "source": {
             "type": "string",
-            "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+            "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking made before this field existed may show another value."
           },
           "calendar_sync_status": {
             "type": "string",
@@ -12868,12 +13248,12 @@
             "maxLength": 200
           },
           "staff_id": {
-            "description": "Book with this active staff member. Without it, LobbyStack picks one who is free.",
+            "description": "Book with this active staff member. Without it, one who is free is picked.",
             "type": "string",
             "format": "uuid"
           },
           "sms_consent": {
-            "description": "True only if the customer agreed to receive confirmation and reminder texts. Self-hosted instances only: on LobbyStack Cloud, texts come from LobbyStack's shared number, and only the receptionist can collect that consent, on a call.",
+            "description": "True only if the customer agreed to receive confirmation and reminder texts. Used only outside cloud mode: in cloud mode, texts come from the deployment's shared number, and only the receptionist can collect that consent, on a call.",
             "type": "boolean"
           }
         },
@@ -13005,6 +13385,33 @@
               }
             ]
           },
+          "request": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "appointment_cancellation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."
+          },
+          "appointment_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -13027,6 +13434,8 @@
           "callback_window",
           "channel",
           "call_id",
+          "request",
+          "appointment_id",
           "created_at",
           "updated_at"
         ],
@@ -13048,7 +13457,7 @@
           },
           "managed": {
             "type": "boolean",
-            "description": "true when the LobbyStack operator runs the plan outside Polar and bills the business directly."
+            "description": "true when the deployment's operator runs the plan outside Polar and bills the business directly."
           },
           "subscription_state": {
             "description": "The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription.",
@@ -13361,6 +13770,20 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "key": {
+            "description": "The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "embed_snippet": {
+            "description": "The script tag to paste into the website's HTML. null when key is null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -13385,6 +13808,8 @@
           "status",
           "allowed_origins",
           "config",
+          "key",
+          "embed_snippet",
           "last_used_at",
           "created_at"
         ],
@@ -13497,6 +13922,14 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "key": {
+            "type": "string",
+            "description": "The key itself, which the widget's script tag carries."
+          },
+          "embed_snippet": {
+            "type": "string",
+            "description": "The script tag to paste into the website's HTML."
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -13513,14 +13946,6 @@
             "type": "string",
             "format": "date-time",
             "description": "ISO 8601 timestamp in UTC."
-          },
-          "key": {
-            "type": "string",
-            "description": "The key itself, shown only here. The widget's script tag carries it."
-          },
-          "embed_snippet": {
-            "type": "string",
-            "description": "The script tag to paste into the website's HTML."
           }
         },
         "required": [
@@ -13529,10 +13954,10 @@
           "status",
           "allowed_origins",
           "config",
-          "last_used_at",
-          "created_at",
           "key",
-          "embed_snippet"
+          "embed_snippet",
+          "last_used_at",
+          "created_at"
         ],
         "additionalProperties": false,
         "description": "A new widget key, with the script tag that adds the widget to a website."
@@ -13751,6 +14176,313 @@
         },
         "additionalProperties": false
       },
+      "PublicProfile": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "description": "The business's slug, the last part of the page's address."
+          },
+          "url": {
+            "type": "string",
+            "description": "The page's address. It answers 404 until the page is published."
+          },
+          "published": {
+            "type": "boolean",
+            "description": "Whether anyone can open the page. Until it's published, only the business's team can preview it, from the dashboard."
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the page was last published. Unpublishing keeps it."
+          },
+          "category": {
+            "description": "What kind of business it is, shown under its name, such as Dental clinic.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "description": "About the business, as plain text with paragraphs.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "address": {
+            "type": "object",
+            "properties": {
+              "line1": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "line2": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "city": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "region": {
+                "description": "Province or state.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "postal_code": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "country_code": {
+                "description": "Two-letter country code, such as CA.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "line1",
+              "line2",
+              "city",
+              "region",
+              "postal_code",
+              "country_code"
+            ],
+            "additionalProperties": false,
+            "description": "The address the page shows. Parts that are null are left out."
+          },
+          "public_email": {
+            "description": "The email address the page shows.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "show_phone": {
+            "type": "boolean",
+            "description": "Whether the page shows the number callers reach the receptionist on."
+          },
+          "show_hours": {
+            "type": "boolean",
+            "description": "Whether the page shows the opening hours and closures in the next 30 days."
+          },
+          "show_services": {
+            "type": "boolean",
+            "description": "Whether the page lists the active services."
+          },
+          "show_map": {
+            "type": "boolean",
+            "description": "Whether the page shows a map of the address. It needs a street or a city."
+          },
+          "widget_key_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The widget key of the website chat the page opens. null: the page has no chat. While that key is disabled or revoked, the page has no chat either."
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the settings were last saved. null: they never were, so these are the defaults the dashboard starts from: the receptionist's summary as the description, unless it's still the sign-up placeholder, and the most recently used widget."
+          }
+        },
+        "required": [
+          "slug",
+          "url",
+          "published",
+          "published_at",
+          "category",
+          "description",
+          "address",
+          "public_email",
+          "show_phone",
+          "show_hours",
+          "show_services",
+          "show_map",
+          "widget_key_id",
+          "updated_at"
+        ],
+        "additionalProperties": false,
+        "description": "The business's public profile page on this deployment, at /profile/{slug}: whether it's published and what it shows."
+      },
+      "PublicProfileUpdate": {
+        "type": "object",
+        "properties": {
+          "published": {
+            "description": "true publishes the page. false takes it down, and its address answers 404.",
+            "type": "boolean"
+          },
+          "category": {
+            "description": "Up to 80 characters. An empty string or null removes it.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 80
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "description": "Up to 750 characters. Paragraphs are kept, with at most one blank line between them. An empty string or null removes it.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 750
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "address": {
+            "description": "Changes the parts sent and keeps the rest. An empty string or null removes a part.",
+            "type": "object",
+            "properties": {
+              "line1": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "line2": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "city": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "region": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 120
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "postal_code": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 20
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "country_code": {
+                "description": "Two-letter country code, such as CA.",
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^(?:[A-Z]{2})?$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "public_email": {
+            "description": "An empty string or null removes it.",
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 254
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "show_phone": {
+            "type": "boolean"
+          },
+          "show_hours": {
+            "type": "boolean"
+          },
+          "show_services": {
+            "type": "boolean"
+          },
+          "show_map": {
+            "type": "boolean"
+          },
+          "widget_key_id": {
+            "description": "One of the business's active widget keys, which GET /widget-keys lists. null removes the chat from the page.",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "NotificationPreferences": {
         "type": "object",
         "properties": {
@@ -13867,6 +14599,23 @@
                 "additionalProperties": false,
                 "description": "A visitor wrote through the website chat widget. At most one alert per chat a day."
               },
+              "website_live_chat": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message."
+              },
               "webhook_disabled": {
                 "type": "object",
                 "properties": {
@@ -13882,7 +14631,7 @@
                   "sms"
                 ],
                 "additionalProperties": false,
-                "description": "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day."
+                "description": "Events stopped going to a webhook endpoint after its deliveries failed for about a day."
               }
             },
             "required": [
@@ -13892,6 +14641,7 @@
               "calendar_sync",
               "transfer_failed",
               "website_chat",
+              "website_live_chat",
               "webhook_disabled"
             ],
             "additionalProperties": false,
@@ -14057,8 +14807,21 @@
                 },
                 "additionalProperties": false
               },
+              "website_live_chat": {
+                "description": "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
               "webhook_disabled": {
-                "description": "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day.",
+                "description": "Events stopped going to a webhook endpoint after its deliveries failed for about a day.",
                 "type": "object",
                 "properties": {
                   "email": {
@@ -14115,7 +14878,7 @@
             "description": "Google's id for the connected account."
           },
           "calendar_id": {
-            "description": "The calendar LobbyStack reads busy times from and adds appointments to. null until one is picked with PATCH /calendars/{connection_id}; until then the connection changes nothing.",
+            "description": "The calendar the receptionist reads busy times from and adds appointments to. null until one is picked with PATCH /calendars/{connection_id}; until then the connection changes nothing.",
             "type": [
               "string",
               "null"
@@ -14228,7 +14991,7 @@
           },
           "writable": {
             "type": "boolean",
-            "description": "true when LobbyStack can add appointments to it. Only a writable calendar can be picked."
+            "description": "true when appointments can be added to it. Only a writable calendar can be picked."
           },
           "selected": {
             "type": "boolean",
@@ -14250,7 +15013,7 @@
         "properties": {
           "url": {
             "type": "string",
-            "description": "The link to open in a browser. Whoever opens it signs in to LobbyStack as an owner or admin of the business, then agrees on Google's page."
+            "description": "The link to open in a browser. Whoever opens it signs in to the dashboard as an owner or admin of the business, then agrees on Google's page."
           },
           "expires_at": {
             "type": "string",
@@ -14497,7 +15260,7 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 320,
-            "description": "One address. Only a LobbyStack account with this verified email can accept."
+            "description": "One address. Only an account with this verified email can accept."
           },
           "role": {
             "type": "string",
@@ -14592,7 +15355,7 @@
           },
           "url": {
             "type": "string",
-            "description": "The link that claims the business. LobbyStack emails it to the new owner; you can also send it yourself."
+            "description": "The link that claims the business. It is emailed to the new owner; you can also send it yourself."
           }
         },
         "required": [
@@ -14609,7 +15372,7 @@
             "type": "string",
             "minLength": 3,
             "maxLength": 320,
-            "description": "The new owner's email. Only a LobbyStack account with this verified email can claim the business."
+            "description": "The new owner's email. Only an account with this verified email can claim the business."
           }
         },
         "required": [
@@ -14622,7 +15385,18 @@
         "properties": {
           "stage": {
             "type": "string",
-            "description": "The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows. phone_number_claiming: a number is being set up. The API doesn't follow these steps in order."
           },
           "complete": {
             "type": "boolean",
@@ -14721,7 +15495,7 @@
         "type": "object",
         "properties": {
           "source": {
-            "description": "How the business heard about LobbyStack.",
+            "description": "How the business heard about the service.",
             "type": "string",
             "maxLength": 120
           },
@@ -14758,7 +15532,7 @@
               "releasing",
               "released"
             ],
-            "description": "active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: LobbyStack is giving the number back to the carrier. released: the business no longer has it."
+            "description": "active: calls and texts to the number reach the receptionist, even while a release is scheduled. releasing: the number is being given back to the carrier. released: the business no longer has it."
           },
           "release_scheduled_at": {
             "anyOf": [
@@ -14771,7 +15545,7 @@
                 "type": "null"
               }
             ],
-            "description": "When LobbyStack releases an active number: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."
+            "description": "When an active number is released: when DELETE asked for it, or 30 days after a replacement went live. Null when no release is planned."
           },
           "created_at": {
             "type": "string",
@@ -14942,7 +15716,7 @@
               "claimed",
               "failed"
             ],
-            "description": "pending: waiting to be bought. provisioning: LobbyStack is buying the number and connecting it to the receptionist. claimed: the number is live and phone_number_id names it. failed: error says why; search again for another number."
+            "description": "pending: waiting to be bought. provisioning: the number is being bought and connected to the receptionist. claimed: the number is live and phone_number_id names it. failed: error says why; search again for another number."
           },
           "phone_number": {
             "type": "string",
@@ -15611,6 +16385,20 @@
             ],
             "description": "How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."
           },
+          "content_type": {
+            "description": "A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tags given when a file's upload was completed. Empty for a website or a page."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -15631,6 +16419,8 @@
           "error",
           "active",
           "page_limit",
+          "content_type",
+          "tags",
           "created_at",
           "updated_at"
         ],
@@ -16362,7 +17152,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking made before this field existed may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -16504,7 +17294,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking made before this field existed may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -16646,7 +17436,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking made before this field existed may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -16808,6 +17598,33 @@
                   }
                 ]
               },
+              "request": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "appointment_cancellation"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."
+              },
+              "appointment_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Stable identifier (UUID)."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time",
@@ -16830,6 +17647,8 @@
               "callback_window",
               "channel",
               "call_id",
+              "request",
+              "appointment_id",
               "created_at",
               "updated_at"
             ],
@@ -16899,6 +17718,7 @@
                 ]
               },
               "locale": {
+                "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
                 "type": [
                   "string",
                   "null"
@@ -16937,6 +17757,59 @@
                 ],
                 "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
               },
+              "sms_consent": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "subscribed",
+                          "declined",
+                          "opted_out"
+                        ],
+                        "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                      },
+                      "updated_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "When the answer was last recorded."
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "updated_at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+              },
+              "blocked_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 timestamp in UTC."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time",
@@ -16956,6 +17829,8 @@
               "locale",
               "timezone",
               "passcode",
+              "sms_consent",
+              "blocked_at",
               "created_at",
               "updated_at"
             ],

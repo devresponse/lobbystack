@@ -1,7 +1,7 @@
 {
   "name": "lobbystack-zapier",
   "version": "1.0.0",
-  "description": "Zapier integration for LobbyStack.",
+  "description": "Zapier integration for a LobbyStack dashboard, named per deployment.",
   "private": true,
   "main": "index.js",
   "license": "MIT",

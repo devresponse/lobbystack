@@ -158,7 +158,7 @@ These use the name from `deploymentAppName()` or `loadBranding()`, like emails:
 
 - The OpenAPI document at `/api/v1/openapi.json` is titled "{name} API". Its descriptions, and the API's error messages, say "the dashboard", "an account" or "the operator" rather than a name. The committed `mintlify/api-reference/openapi.json` keeps LobbyStack's title.
 - The MCP server's title and the first line of its instructions use the name; OAuth's protected resource metadata gives it as `resource_name`, and the `oauth_resources` row is named "{name} MCP server". The `WWW-Authenticate` realm is just "MCP".
-- Prospect demos tell the voice agent "This is a {name} prospect demo."
+- Prospect demos tell the voice agent "This is a prospect demo made with {name}."
 - New businesses start with their own name as the placeholder summary, as the agent settings API already did. Migration 0102 changed the old placeholder, "… uses LobbyStack to answer calls.", to the business name; `agent-core/src/businessFacts.ts` still recognizes the old wording in snapshots cached before that.
 
 ## Still branded

@@ -146,7 +146,7 @@ files          uploaded     docs/price-list.pdf
 
 Un pago y un número de teléfono cuestan dinero, así que el comando pregunta antes de iniciar cualquiera de los dos. Pase `--yes` para omitir las preguntas, lo que necesita un script: sin una terminal donde preguntar, el comando se detiene.
 
-Para configurar un negocio que ya existe, ponga su ID en `business.id`. `--business <id>` también funciona cuando el negocio ya tiene el nombre del manifiesto. El comando ignora `LOBBYSTACK_BUSINESS` y el negocio guardado en un perfil, para que un manifiesto nuevo nunca caiga en uno de ellos por error.
+Para configurar un negocio que ya existe, ponga su ID en `business.id`. Sus propietarios y administradores pueden copiar el ID en la parte superior de **Configuración** > **Claves de API**. `--business <id>` también funciona cuando el negocio ya tiene el nombre del manifiesto. El comando ignora `LOBBYSTACK_BUSINESS` y el negocio guardado en un perfil, para que un manifiesto nuevo nunca caiga en uno de ellos por error.
 
 El enlace de reclamación sale cuando todo lo demás está hecho, o antes del pago cuando la clave de un operador configura un plan que paga el propietario. Cuando el propietario lo acepta, la clave de un socio y la clave de API que lo envió ya no llegan al negocio, y una nueva ejecución lo indica. La clave de un operador sigue llegando.
 

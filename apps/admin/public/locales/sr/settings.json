@@ -999,6 +999,12 @@
     "neverUsed": "Nikad",
     "createdBy": "{{date}}, korisnik {{name}}",
     "revoked": "Opozvan {{date}}",
+    "businessId": {
+      "title": "ID firme",
+      "description": "API i komanda lobbystack prepoznaju firmu {{business}} po ovom ID-u. Koristite ga u zaglavlju {{header}}, uz --business ili pod business.id u manifestu za lobbystack onboard.",
+      "copy": "Kopiraj",
+      "copied": "Kopirano"
+    },
     "restricted": {
       "title": "Samo vlasnici i administratori mogu da upravljaju API ključevima",
       "description": "Zamolite vlasnika ili administratora ove firme da kreira ključ za Vas."

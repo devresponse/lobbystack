@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { UnrecoverableError } from "bullmq";
 import { afterEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
@@ -301,17 +302,33 @@ describe("worker handlers", () => {
     expect(purchasePhoneNumber).not.toHaveBeenCalled();
   });
 
-  it("refuses to provision a number when no SIP trunk is configured", async () => {
+  it("refuses to provision a number when no SIP trunk is configured, and ends the claim", async () => {
     const businessId = randomUUID(); const claimId = randomUUID(); const domain = { db: undefined as never };
     vi.stubEnv("APP_BASE_URL", "https://app.example.test");
     vi.stubEnv("TWILIO_SIP_TRUNK_SID", "");
     vi.mocked(claimNumberProvisioning).mockClear();
+    vi.mocked(failNumberProvisioning).mockClear();
     const purchasePhoneNumber = vi.fn();
 
     // Failing the job is better than buying a number that cannot answer.
-    await expect(handleJob({ jobId: randomUUID(), type: "phoneNumber.provision", queue: "critical", businessId, payload: { claimId }, trace: {}, idempotencyKey: `claim:${claimId}`, scheduled: false }, { domain, twilio: { sendSms: vi.fn(), findOwnedPhoneNumber: vi.fn(), purchasePhoneNumber, addNumberToSipTrunk: vi.fn() } })).rejects.toThrow(/TWILIO_SIP_TRUNK_SID/);
+    const failure = handleJob({ jobId: randomUUID(), type: "phoneNumber.provision", queue: "critical", businessId, payload: { claimId }, trace: {}, idempotencyKey: `claim:${claimId}`, scheduled: false }, { domain, twilio: { sendSms: vi.fn(), findOwnedPhoneNumber: vi.fn(), purchasePhoneNumber, addNumberToSipTrunk: vi.fn() } });
+    await expect(failure).rejects.toThrow(/TWILIO_SIP_TRUNK_SID/);
+    // No retry can fix the setup, and a claim left reserved would refuse the business's next pick.
+    await expect(failure).rejects.toBeInstanceOf(UnrecoverableError);
+    expect(failNumberProvisioning).toHaveBeenCalledWith(domain, { businessId, claimId, unavailable: false, error: "This server isn't set up to buy phone numbers." });
     expect(claimNumberProvisioning).not.toHaveBeenCalled();
     expect(purchasePhoneNumber).not.toHaveBeenCalled();
+  });
+
+  it("ends the claim when the worker has no Twilio account", async () => {
+    const businessId = randomUUID(); const claimId = randomUUID(); const domain = { db: undefined as never };
+    vi.stubEnv("TWILIO_SIP_TRUNK_SID", "TK123");
+    vi.mocked(claimNumberProvisioning).mockClear();
+    vi.mocked(failNumberProvisioning).mockClear();
+
+    await expect(handleJob({ jobId: randomUUID(), type: "phoneNumber.provision", queue: "critical", businessId, payload: { claimId }, trace: {}, idempotencyKey: `claim:${claimId}`, scheduled: false }, { domain })).rejects.toThrow(/TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN/);
+    expect(failNumberProvisioning).toHaveBeenCalledWith(domain, { businessId, claimId, unavailable: false, error: "This server isn't set up to buy phone numbers." });
+    expect(claimNumberProvisioning).not.toHaveBeenCalled();
   });
 
   it("runs all tenant retention work from the hourly privacy job", async () => {

@@ -287,7 +287,7 @@ export function PhoneNumberChooser({
   async function handleSelect(number: AvailableNumberSummary): Promise<void> {
     if (isClaiming) return;
     if (!number.claimToken) {
-      setError(labels.claimFailed);
+      setError(getErrorMessage(null, labels.claimFailed));
       return;
     }
     setSelectedE164(number.e164);

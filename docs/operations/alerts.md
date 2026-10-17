@@ -8,7 +8,7 @@ An outbox message exhausted ten delivery attempts. Query `operations.outbox_mess
 
 ## ReplacementWorkerJobFailures
 
-At least three BullMQ jobs failed within ten minutes. Inspect worker logs and BullMQ state by queue and job type. Confirm Redis and PostgreSQL health before retrying. Job payloads can contain customer data and must not be copied into incident systems.
+At least three BullMQ jobs failed within ten minutes. Inspect worker logs and BullMQ state by queue and job type: the worker logs each failed attempt as a `job.failed` JSON line with its queue, job type, attempt, and redacted reason. Confirm Redis and PostgreSQL health before retrying. Job payloads can contain customer data and must not be copied into incident systems.
 
 ## ReplacementOutboxDispatcherUnavailable
 

@@ -515,7 +515,26 @@
       "loadFailed": "Impossible de charger les numéros pour le moment.",
       "searchFailed": "Impossible de rechercher des numéros pour le moment.",
       "claimFailed": "Impossible de remplacer le numéro de téléphone. Veuillez réessayer.",
+      "getNumberFailed": "Impossible d'obtenir ce numéro. Veuillez réessayer.",
       "unavailable": "Ce numéro vient d'être pris. Choisissez-en un autre dans la liste actualisée."
+    },
+    "errors": {
+      "offerExpired": "Cette liste de numéros a expiré. Relancez la recherche, puis choisissez un numéro.",
+      "claimInProgress": "Un autre numéro est encore en cours de configuration pour cet espace de travail. Patientez quelques minutes, puis réessayez.",
+      "claimRateLimited": "Vous avez essayé 3 numéros au cours de la dernière heure, soit la limite. Réessayez plus tard.",
+      "dailyClaimQuota": "Vous avez obtenu 2 numéros au cours des dernières 24 heures, soit la limite. Réessayez demain.",
+      "monthlyClaimQuota": "Vous avez obtenu 5 numéros au cours des 30 derniers jours, soit la limite. Réessayez plus tard.",
+      "numberExists": "Cet espace de travail a déjà un numéro de téléphone. Rechargez la page pour le voir.",
+      "invalidStage": "Terminez les étapes de configuration précédentes avant de choisir un numéro.",
+      "paidPlanRequired": "Un numéro d'entreprise dédié nécessite un forfait payant.",
+      "replacementUsed": "Cet espace de travail a déjà utilisé son unique changement de numéro.",
+      "activeNumberRequired": "Votre numéro actuel n'est plus actif, il ne peut donc pas être changé.",
+      "replacementMustDiffer": "Choisissez un numéro différent de votre numéro actuel.",
+      "unsupportedCountry": "Les numéros de téléphone sont disponibles aux États-Unis, au Canada, au Royaume-Uni et en Australie.",
+      "searchRateLimited": "Trop de recherches. Patientez quelques minutes, puis réessayez.",
+      "searchInvalid": "L'opérateur n'a pas pu lancer la recherche avec cet indicatif régional. Vérifiez-le et réessayez.",
+      "searchUnsupported": "L'opérateur n'a aucun numéro de ce type dans ce pays.",
+      "withErrorId": "{{message}} ID de l'erreur : {{errorId}}"
     },
     "toast": {
       "changed": "Numéro de téléphone modifié. Votre ancien numéro restera actif pendant 30 jours.",

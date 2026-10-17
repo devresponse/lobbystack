@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PhoneNumberChooser, phoneNumberChooserApi, type ClaimResult } from "./phone-number-chooser";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { formatPhoneNumberDisplay } from "@/lib/phone";
+import { phoneNumberErrorMessage } from "@/lib/phone-number-errors";
 import { requestJson } from "@/lib/request-json";
 import type { BillingUsageViewModel, PhoneNumberViewModel } from "@/lib/page-view-models";
 import { formatDateTime } from "@/lib/locale";
@@ -49,6 +50,8 @@ export function LivePhoneNumberSettingsSurface() {
   const billingStatus = billing.data ? { includedBusinessNumbers: billingPlanCatalog[billing.data.effectivePlan].includedBusinessNumbers, phoneNumberReclaimScheduledAt: null } : null;
   const isReplacement = Boolean(primaryPhoneNumber);
   const numberApi = useMemo(() => phoneNumberChooserApi(isReplacement), [isReplacement]);
+  // The reason the server named, or a logged failure's error ID, before the server's own words.
+  const getErrorMessage = useCallback((error: unknown, fallback: string) => phoneNumberErrorMessage(error, t, fallback) ?? getSettingsPhoneNumberErrorMessage(error, fallback), [t]);
   const displayPhoneNumber = primaryPhoneNumber
     ? formatPhoneNumberDisplay(primaryPhoneNumber.e164, i18n.language)
     : null;
@@ -166,7 +169,7 @@ export function LivePhoneNumberSettingsSurface() {
                         <PhoneNumberChooser
                           businessId={businessId}
                           claimNumber={numberApi.claimNumber}
-                          getErrorMessage={getSettingsPhoneNumberErrorMessage}
+                          getErrorMessage={getErrorMessage}
                           getInitialNumberSuggestion={numberApi.getInitialNumberSuggestion}
                           labels={{
                             countryLabel: t("phoneNumber.picker.countryLabel"),
@@ -179,7 +182,7 @@ export function LivePhoneNumberSettingsSurface() {
                             empty: t("phoneNumber.picker.empty"),
                             loadFailed: t("phoneNumber.picker.loadFailed"),
                             searchFailed: t("phoneNumber.picker.searchFailed"),
-                            claimFailed: t("phoneNumber.picker.claimFailed"),
+                            claimFailed: t(hasPhoneNumber ? "phoneNumber.picker.claimFailed" : "phoneNumber.picker.getNumberFailed"),
                             unavailable: t("phoneNumber.picker.unavailable"),
                           }}
                           onClaimed={handleClaimed}

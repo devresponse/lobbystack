@@ -11,6 +11,7 @@ import { PolarBillingProvider } from "@lobbystack/providers/polar/polarBilling";
 import { createStorageProvider } from "@lobbystack/providers/storage/provider";
 import { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import { getMeter, initializeTelemetry, redactOtelExceptionText, shutdownTelemetry, withSpan } from "@lobbystack/telemetry/node";
+import { jobFailureLogLine } from "./jobFailureLog";
 import { redactJobError } from "./redactJobError";
 import { DelayedError, Worker } from "bullmq";
 import { and, eq, isNull } from "drizzle-orm";
@@ -229,10 +230,13 @@ async function main(): Promise<void> {
     // Node treats one as fatal.
     worker.on("error", (error) => console.error(JSON.stringify({ event: "worker.error", queue: queueName, message: redactOtelExceptionText(error.message) })));
     const failedJobs = getMeter("lobbystack-worker").createCounter("lobbystack.worker.jobs.failed");
-    worker.on("failed", (job) => failedJobs.add(1, {
-      "messaging.destination.name": queueName,
-      ...(job?.data.type ? { "lobbystack.job_type": job.data.type } : {}),
-    }));
+    worker.on("failed", (job, error) => {
+      failedJobs.add(1, {
+        "messaging.destination.name": queueName,
+        ...(job?.data.type ? { "lobbystack.job_type": job.data.type } : {}),
+      });
+      console.error(jobFailureLogLine(queueName, job, error));
+    });
     return worker;
   });
   const dispatcher = new OutboxDispatcher(dispatcherDatabase.db, new Map(queues));

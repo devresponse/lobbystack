@@ -61,7 +61,26 @@ describe.skipIf(!testUrl)("onboarding number claims against dedicated PostgreSQL
   it("refuses a second claim while a worker still holds the first", async () => {
     await rollbackTest(async (tx) => {
       const { userId, businessId } = await workspaceWithProvisioningClaim(tx, 1);
-      await expect(reserveAsApp(tx, { userId, businessId })).rejects.toMatchObject({ cause: { message: "number_claim_in_progress" } });
+      await expect(reserveAsApp(tx, { userId, businessId })).rejects.toMatchObject({ status: 409, code: "number_claim_in_progress", cause: { message: "number_claim_in_progress" } });
+    });
+  });
+
+  it("answers the carrier refusing the filters as the person's to fix, and any other carrier failure as a server failure", async () => {
+    await rollbackTest(async (tx) => {
+      const { userId, businessId } = await workspaceWithProvisioningClaim(tx, 1);
+      const carrier = (error: Error) => ({ listAvailablePhoneNumbers: async () => { throw error; } });
+      await tx.execute(sql`set local session authorization lobbystack_app`);
+      try {
+        const db = tx as unknown as Database;
+        await expect(searchBusinessNumberInventory({ db }, { userId, businessId, claimTokenSecret }, carrier(Object.assign(new Error("Invalid areaCode"), { status: 400, code: 21452 })))).rejects.toMatchObject({ status: 400, code: "number_search_invalid" });
+        // The carrier's 401 is about our account, not the person's session.
+        const unauthorized = Object.assign(new Error("Authenticate"), { status: 401, code: 20003 });
+        const failure = await searchBusinessNumberInventory({ db }, { userId, businessId, claimTokenSecret }, carrier(unauthorized)).catch((error: unknown) => error);
+        expect(failure).toMatchObject({ message: "The carrier's number search failed.", cause: unauthorized });
+        expect(failure).not.toHaveProperty("status");
+      } finally {
+        await tx.execute(sql`reset session authorization`);
+      }
     });
   });
 

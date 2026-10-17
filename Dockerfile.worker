@@ -32,6 +32,10 @@ ARG SERVICE_VERSION=development
 ENV NODE_ENV=production
 ENV SERVICE_VERSION=$SERVICE_VERSION
 LABEL org.opencontainers.image.revision=$SERVICE_VERSION
+# The name emails and texts call the app by, AlloPlace unless the deployment
+# passes its own. Keep it the same as the admin's BRAND_APP_NAME.
+ARG BRAND_APP_NAME=AlloPlace
+ENV BRAND_APP_NAME=$BRAND_APP_NAME
 WORKDIR /app
 
 RUN groupadd --system --gid 1001 lobbystack && \

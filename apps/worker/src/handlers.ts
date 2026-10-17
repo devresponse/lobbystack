@@ -11,7 +11,7 @@ import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSum
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
-import { issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
+import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
@@ -284,7 +284,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: "Alert SMS delivery is not configured." });
         return { status: "skipped", entityId: attemptId };
       }
-      const body = verificationCodeSmsBody(target.code, normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
+      const body = verificationCodeSmsBody(target.code, await deploymentAppName(dependencies.domain.db), normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
       // The code goes out from the alert sender, so it counts against the alert SMS quota.
       const usageSourceKey = `alert_sms:phone_verification:${attemptId}`;
       let usageEventId: string | undefined;
@@ -465,12 +465,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           ? Object.fromEntries(Object.entries(job.payload.variables).map(([key, value]) => [key, String(value)]))
           : { message: String(job.payload.message ?? ""), url: String(job.payload.url ?? "") };
         const feedbackSubmissionId = typeof job.payload.feedbackSubmissionId === "string" ? job.payload.feedbackSubmissionId : undefined;
+        const appName = await deploymentAppName(dependencies.domain.db);
         try {
           const sent = await dependencies.email.sendTemplate({
             template,
             to: String(job.payload.to ?? job.payload.email ?? ""),
-            subject: String(job.payload.subject ?? "LobbyStack notification"),
+            subject: String(job.payload.subject ?? (template === "invitation" ? `You're invited to join ${appName}` : `${appName} notification`)),
             variables,
+            appName,
             idempotencyKey: job.idempotencyKey,
             ...(typeof job.payload.from === "string" && job.payload.from ? { from: job.payload.from } : {}),
           });
@@ -524,7 +526,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         return { status: "skipped", entityId: verificationId };
       }
       try {
-        await sender.sendSms({ to: target.to, from: target.from, body: verificationCodeSmsBody(target.code) });
+        await sender.sendSms({ to: target.to, from: target.from, body: verificationCodeSmsBody(target.code, target.businessName.trim() || await deploymentAppName(dependencies.domain.db)) });
         await markAppointmentChangeOtpSent(dependencies.domain, { businessId, verificationId });
         return { status: "completed", entityId: verificationId };
       } catch (error) {
@@ -737,7 +739,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
           } else {
             if (!dependencies.email) throw new Error("Operator email delivery is not configured.");
-            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables: { message: delivery.body }, idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
+            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables: { message: delivery.body }, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           }
           await markOperatorNotificationSent(dependencies.domain, { businessId, deliveryId: delivery.id, providerMessageId });
           if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
@@ -796,7 +798,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
             return { status: "skipped", entityId: delivery.notificationId };
           }
-          const sent = await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.to, subject: delivery.subject, variables: { message: delivery.body }, idempotencyKey: `notification:${delivery.notificationId}` });
+          const sent = await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.to, subject: delivery.subject, variables: { message: delivery.body }, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `notification:${delivery.notificationId}` });
           providerMessageId = sent.messageId;
         }
         await markNotificationSent(dependencies.domain, { businessId: delivery.businessId, notificationId: delivery.notificationId, providerMessageId });

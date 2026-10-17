@@ -134,7 +134,16 @@ describe("worker handlers", () => {
     const sendTemplate = vi.fn().mockResolvedValue({ messageId: "provider-id" });
     const payload = { template: "onboarding_followup", to: "owner@example.test", from: "Raphael <raphael@lobbystack.com>", subject: "How'd you like LobbyStack?", variables: { businessName: "Acme" } };
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload, trace: {}, idempotencyKey: "onboarding-followup:x:email", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
-    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "onboarding_followup", to: "owner@example.test", from: "Raphael <raphael@lobbystack.com>" }));
+    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "onboarding_followup", to: "owner@example.test", from: "Raphael <raphael@lobbystack.com>", appName: "LobbyStack" }));
+  });
+  it("names the deployment in emails and gives invitations their own subject", async () => {
+    vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
+    const sendTemplate = vi.fn().mockResolvedValue({ messageId: "provider-id" });
+    const invitation = { invitationId: randomUUID(), email: "agent@example.test", token: "token", template: "invitation", url: "https://app.example.test/invite/token" };
+    await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: invitation, trace: {}, idempotencyKey: "invitation:x:send", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
+    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "invitation", to: "agent@example.test", subject: "You're invited to join RealInfoBot", appName: "RealInfoBot" }));
+    await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: { template: "operator_alert", to: "owner@example.test", message: "Hi" }, trace: {}, idempotencyKey: "alert:x", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
+    expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "RealInfoBot notification", appName: "RealInfoBot" }));
   });
   it("drains a retired phone verification send without contacting the provider", async () => {
     const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
@@ -150,12 +159,13 @@ describe("worker handlers", () => {
 
     it("texts the code from the restricted alert sender and marks it sent", async () => {
       const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: undefined as never };
+      vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
       vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
       const alertSms = vi.fn().mockResolvedValue({ providerMessageId: "SMalert" }); const mainSms = vi.fn();
       const result = await handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms: mainSms }, twilioAlerts: { from: "+14165550100", sendSms: alertSms } });
       expect(result).toEqual({ status: "completed", entityId: attemptId });
       expect(issueOperatorPhoneVerificationCode).toHaveBeenCalledWith(domain, { businessId, attemptId });
-      expect(alertSms).toHaveBeenCalledWith({ to: "+14165550123", from: "+14165550100", body: "LobbyStack verification code: 482913. It expires in 10 minutes." });
+      expect(alertSms).toHaveBeenCalledWith({ to: "+14165550123", from: "+14165550100", body: "RealInfoBot verification code: 482913. It expires in 10 minutes." });
       expect(mainSms).not.toHaveBeenCalled();
       expect(markOperatorPhoneVerificationCodeSent).toHaveBeenCalledWith(domain, { businessId, attemptId });
     });
@@ -584,7 +594,7 @@ describe("worker handlers", () => {
     const verificationId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimAppointmentChangeOtp).mockResolvedValue(true);
-    vi.mocked(loadAppointmentChangeOtpTarget).mockResolvedValue({ to: "+15555550123", from: "+15555550124", code: "123456" });
+    vi.mocked(loadAppointmentChangeOtpTarget).mockResolvedValue({ to: "+15555550123", from: "+15555550124", code: "123456", businessName: "Cedar & Stone Plumbing" });
     vi.mocked(markAppointmentChangeOtpSent).mockResolvedValue(true);
     const sendSms = vi.fn().mockResolvedValue({ providerMessageId: "SMOTP" });
 
@@ -600,7 +610,7 @@ describe("worker handlers", () => {
     }, { domain, twilio: { sendSms } });
 
     expect(result).toEqual({ status: "completed", entityId: verificationId });
-    expect(sendSms).toHaveBeenCalledWith({ to: "+15555550123", from: "+15555550124", body: "LobbyStack verification code: 123456. It expires in 10 minutes." });
+    expect(sendSms).toHaveBeenCalledWith({ to: "+15555550123", from: "+15555550124", body: "Cedar & Stone Plumbing verification code: 123456. It expires in 10 minutes." });
     expect(markAppointmentChangeOtpSent).toHaveBeenCalledWith(domain, { businessId, verificationId });
   });
 
@@ -776,14 +786,16 @@ describe("worker handlers", () => {
     const verificationId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimAppointmentChangeOtp).mockResolvedValue(true);
-    vi.mocked(loadAppointmentChangeOtpTarget).mockResolvedValue({ to: "+15555550123", from: "+18446562290", code: "123456" });
+    vi.mocked(loadAppointmentChangeOtpTarget).mockResolvedValue({ to: "+15555550123", from: "+18446562290", code: "123456", businessName: "  " });
+    vi.stubEnv("BRAND_APP_NAME", "AlloPlace");
     vi.mocked(markAppointmentChangeOtpSent).mockResolvedValue(true);
     const mainSend = vi.fn().mockResolvedValue({ providerMessageId: "SMmain" });
     const defaultSend = vi.fn();
     const job: JobEnvelope = { jobId: randomUUID(), type: "appointment.sendChangeOtp", queue: "critical", businessId, payload: { verificationId, code: "123456", to: "+15555550123", from: "+18446562290" }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
 
     await expect(handleJob(job, { domain, twilio: { sendSms: defaultSend }, twilioAlerts: { from: "+18446562290", sendSms: mainSend } })).resolves.toEqual({ status: "completed", entityId: verificationId });
-    expect(mainSend).toHaveBeenCalledWith({ to: "+15555550123", from: "+18446562290", body: "LobbyStack verification code: 123456. It expires in 10 minutes." });
+    // A business without a usable name falls back to the deployment's.
+    expect(mainSend).toHaveBeenCalledWith({ to: "+15555550123", from: "+18446562290", body: "AlloPlace verification code: 123456. It expires in 10 minutes." });
     expect(defaultSend).not.toHaveBeenCalled();
   });
 

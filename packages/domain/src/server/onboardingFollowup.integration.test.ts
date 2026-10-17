@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { businesses, calls, createDatabaseClient, outboxMessages, sessions, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { createBusiness } from "./tenancy";
 import { ONBOARDING_FOLLOWUP_DELAY_MS, queueOnboardingFollowupEmail, submitOnboardingAttribution } from "./onboarding";
@@ -52,6 +52,8 @@ async function followupEmails(tx: DatabaseTransaction, businessId: string) {
   return await tx.select().from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "email.send")));
 }
 
+afterEach(() => { vi.unstubAllEnvs(); });
+
 describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreSQL roles", () => {
   it("schedules the follow-up a day after onboarding completes, once", async () => {
     await rollbackTest(async tx => {
@@ -70,6 +72,7 @@ describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreS
   });
 
   it("queues one email to an owner who has not come back", async () => {
+    vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
     await rollbackTest(async tx => {
       const { userId, businessId, email } = await completedWorkspace(tx);
       const completedAt = new Date(Date.now() - ONBOARDING_FOLLOWUP_DELAY_MS);
@@ -84,7 +87,7 @@ describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreS
         template: "onboarding_followup",
         to: email,
         from: sender.from,
-        subject: "Qu'avez-vous pensé de LobbyStack ?",
+        subject: "Votre avis sur RealInfoBot ?",
         variables: { locale: "fr", firstName: "Sam", senderName: "Raphael" },
       });
     });

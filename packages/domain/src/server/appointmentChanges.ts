@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
 
-import { appointmentChangeVerifications, appointments, auditLogs, contacts, enqueueOutbox, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { appointmentChangeVerifications, appointments, auditLogs, businesses, contacts, enqueueOutbox, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { canTextNumber, normalizeAppointmentChangePolicy, type AppointmentChangeVerificationMode } from "@lobbystack/shared";
 
 import { appointmentTimesMatch, serviceNamesMatch, substantiveServiceNameFactMatches } from "./appointmentFacts";
@@ -130,11 +130,12 @@ export async function claimAppointmentChangeOtp(
 export async function loadAppointmentChangeOtpTarget(
   context: DomainContext,
   input: { businessId: string; verificationId: string; to: string; from: string; code: string },
-): Promise<{ to: string; from: string; code: string } | null> {
+): Promise<{ to: string; from: string; code: string; businessName: string } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const row = (await tx.select({ id: appointmentChangeVerifications.id, expiresAt: appointmentChangeVerifications.expiresAt, status: appointmentChangeVerifications.status }).from(appointmentChangeVerifications).where(and(eq(appointmentChangeVerifications.id, input.verificationId), eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.callerPhone, input.to), eq(appointmentChangeVerifications.status, "otp_sending"))).limit(1))[0];
+    const row = (await tx.select({ id: appointmentChangeVerifications.id, expiresAt: appointmentChangeVerifications.expiresAt, status: appointmentChangeVerifications.status, businessName: businesses.name }).from(appointmentChangeVerifications).innerJoin(businesses, eq(businesses.id, appointmentChangeVerifications.businessId)).where(and(eq(appointmentChangeVerifications.id, input.verificationId), eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.callerPhone, input.to), eq(appointmentChangeVerifications.status, "otp_sending"))).limit(1))[0];
     if (!row || row.expiresAt <= new Date()) return null;
-    return { to: input.to, from: input.from, code: input.code };
+    // The caller phoned the business, so the code is sent in its name.
+    return { to: input.to, from: input.from, code: input.code, businessName: row.businessName };
   });
 }
 

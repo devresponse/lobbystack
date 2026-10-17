@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { businesses, enqueueOutbox, feedbackSubmissions, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { requireBusinessMembership } from "../authz";
+import { deploymentAppName } from "./branding";
 import type { DomainContext } from "./context";
 
 const MAX_MESSAGE_LENGTH = 2_000;
@@ -27,6 +28,7 @@ export async function submitFeedback(
   context: DomainContext,
   input: { userId: string; businessId?: string; message: string; pagePath?: string; userAgent?: string },
 ): Promise<string> {
+  const appName = await deploymentAppName(context.db);
   return await withBusinessTransaction(context.db, { userId: input.userId, ...(input.businessId ? { businessId: input.businessId } : {}), actorType: "operator" }, async (tx) => {
     const message = input.message.trim();
     if (!message) throw new Error("Feedback message is required.");
@@ -64,7 +66,7 @@ export async function submitFeedback(
           template: "feedback_submission",
           feedbackSubmissionId: submission.id,
           to: recipientEmail,
-          subject: `LobbyStack feedback from ${safeSubjectText(businessName ?? user.name ?? user.email)}`,
+          subject: `${appName} feedback from ${safeSubjectText(businessName ?? user.name ?? user.email)}`,
           variables: { body: message },
         },
       });

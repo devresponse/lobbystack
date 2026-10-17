@@ -12,7 +12,7 @@ import type { SmsConsentAnswer } from "./contactSmsConsent";
 import { refreshBusinessSnapshot } from "./knowledge";
 import { CANCELLATION_CONFIRMATION, defaultOperatorNotificationEventPreferences, queueOperatorAlert, resolveNotificationDelivery } from "./notifications";
 import { createAppointmentForApi } from "./publicApi/operations";
-import { receiveSharedSenderSms, sharedSenderHelpReply, SHARED_SENDER_START_REPLY } from "./sms";
+import { receiveSharedSenderSms, sharedSenderHelpReply, sharedSenderStartReply } from "./sms";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -201,6 +201,7 @@ describe.skipIf(!client)("the number a business texts from", () => {
 describe.skipIf(!client)("STOP and START to the shared sender", () => {
   it("STOP opts the phone out at every business and START restores each contact, keeping a declined one declined", async () => {
     vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
+    vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
     await rollbackTest(async (tx) => {
       const customer = phone();
       const subscribedAt = await seed(tx, { selfHosted: false });
@@ -216,7 +217,7 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
       // Queued texts stop at delivery.
       expect(await subscribedAt.deliver(appointmentId, "appointment_reminder")).toMatchObject({ kind: "skipped" });
 
-      expect(await textShared(tx, customer, "START")).toEqual({ reply: SHARED_SENDER_START_REPLY, contactsChanged: 3 });
+      expect(await textShared(tx, customer, "START")).toEqual({ reply: sharedSenderStartReply("RealInfoBot"), contactsChanged: 3 });
       expect(await subscribedAt.consent(customer)).toMatchObject({ status: "subscribed", source: "shared_sender:START" });
       expect(await declinedAt.consent(customer)).toMatchObject({ status: "declined", events: ["opt_out_cleared shared_sender:START", "opted_out shared_sender:STOP", "reminder_consent_declined appointment_booking"] });
       expect(await neverAskedAt.consent(customer)).toMatchObject({ status: null, events: ["opt_out_cleared shared_sender:START", "opted_out shared_sender:STOP"] });
@@ -251,11 +252,12 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
   });
 
   it("answers HELP and START, and nothing else", async () => {
+    vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
     await rollbackTest(async (tx) => {
       const customer = phone();
       const business = await seed(tx, { selfHosted: false });
       await business.book(customer, "agreed");
-      expect(await textShared(tx, customer, "help")).toEqual({ reply: sharedSenderHelpReply(), contactsChanged: 0 });
+      expect(await textShared(tx, customer, "help")).toEqual({ reply: sharedSenderHelpReply("RealInfoBot"), contactsChanged: 0 });
       expect(await textShared(tx, customer, "Can I move my appointment?")).toEqual({ reply: null, contactsChanged: 0 });
       expect(await business.consent(customer)).toMatchObject({ status: "subscribed" });
     });

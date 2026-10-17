@@ -236,7 +236,8 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      EMAIL_FROM: ${EMAIL_FROM:-LobbyStack <no-reply@localhost>}
+      BRAND_APP_NAME: ${BRAND_APP_NAME-AlloPlace}
+      EMAIL_FROM: ${EMAIL_FROM:-AlloPlace <no-reply@localhost>}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
       LOCAL_STORAGE_PATH: /var/lib/lobbystack/storage

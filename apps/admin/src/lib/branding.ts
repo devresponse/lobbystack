@@ -1,4 +1,4 @@
-import { getSavedBranding } from "@lobbystack/domain";
+import { forgetCachedDeploymentAppName, getSavedBranding } from "@lobbystack/domain";
 import { readBrandingEnvironment, resolveBranding, type Branding, type BrandingEnvironment } from "@lobbystack/shared";
 
 import { getAppDatabase } from "./api-helpers";
@@ -54,6 +54,7 @@ export async function loadBranding(): Promise<Branding> {
 /** Drops the cached branding, so the next page shows what was just saved. */
 export function forgetCachedBranding(): void {
   cached = undefined;
+  forgetCachedDeploymentAppName();
 }
 
 export function brandingSnapshot(branding: Pick<Branding, "appName" | "logoUrl">): BrandingSnapshot {

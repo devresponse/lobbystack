@@ -12,6 +12,14 @@
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9._-]*\\.(?:svg|png|jpg|jpeg|webp)$"
     },
+    "emailLogo": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.png$"
+    },
+    "ogImage": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.png$"
+    },
     "accentColor": {
       "type": "string"
     },

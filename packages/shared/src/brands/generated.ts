@@ -15,6 +15,16 @@ export const BRANDS: Record<string, BrandDefinition> = {
     "id": "alloplace",
     "appName": "AlloPlace",
     "logoUrl": "/brand/alloplace/logo.svg?v=3d51f41fda16",
+    "emailLogo": {
+      "url": "/brand/alloplace/logo-email.png?v=e95945331602",
+      "width": 96,
+      "height": 96
+    },
+    "ogImage": {
+      "url": "/brand/alloplace/og.png?v=46488114fa1b",
+      "width": 1200,
+      "height": 630
+    },
     "accentColor": "#ffd100",
     "links": {
       "siteUrl": "https://alloplace.com",
@@ -40,6 +50,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
     "id": "lobbystack",
     "appName": "LobbyStack",
     "logoUrl": null,
+    "emailLogo": null,
+    "ogImage": null,
     "accentColor": "#0f766e",
     "links": {
       "siteUrl": "https://lobbystack.com",

@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { brandFileMatched, brandHost, brandStartupReport, claimedDomain, resolveBrand, type BrandData } from "./resolve";
+import { brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
 
 function brand(id: string, appName: string, environments: BrandDefinition["environments"] = []): BrandDefinition {
-  return { id, appName, logoUrl: `/brand/${id}/logo.svg?v=1`, accentColor: null, links, environments };
+  return { id, appName, logoUrl: `/brand/${id}/logo.svg?v=1`, emailLogo: null, ogImage: null, accentColor: null, links, environments };
 }
 
 const data: BrandData = {
@@ -83,9 +83,29 @@ describe("resolveBrand", () => {
     expect(resolveBrand({ appBaseUrl: "https://alloplace.com" }, data)).toMatchObject({ appName: "AlloPlace", indexing: true });
   });
 
+  it("keeps the address's origin for absolute links", () => {
+    expect(resolveBrand({ appBaseUrl: "https://demo.alloplace.com/sign-in" }, data).origin).toBe("https://demo.alloplace.com");
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" }, data).origin).toBe("http://localhost:3000");
+    expect(resolveBrand({ appBaseUrl: "mailto:support@alloplace.com" }, data).origin).toBeNull();
+    expect(resolveBrand({}, data).origin).toBeNull();
+  });
+
   it("resolves the committed brands", () => {
     expect(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" })).toMatchObject({ id: "alloplace", appName: "AlloPlace", accentColor: "#ffd100", links: { siteUrl: "https://alloplace.com", contactEmail: "support@alloplace.com" } });
-    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "lobbystack", appName: "LobbyStack", logoUrl: null });
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "lobbystack", appName: "LobbyStack", logoUrl: null, emailLogo: null, ogImage: null });
+  });
+});
+
+describe("brandImage", () => {
+  const logo = { url: "/brand/alloplace/logo-email.png?v=1", width: 96, height: 96 };
+
+  it("puts an image under the deployment's address", () => {
+    expect(brandImage(resolveBrand({ appBaseUrl: "https://demo.alloplace.com/" }, data), logo)).toEqual({ ...logo, url: "https://demo.alloplace.com/brand/alloplace/logo-email.png?v=1" });
+  });
+
+  it("is null without an image or an address", () => {
+    expect(brandImage(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data), null)).toBeNull();
+    expect(brandImage(resolveBrand({}, data), logo)).toBeNull();
   });
 });
 
@@ -107,6 +127,14 @@ describe("brandStartupReport", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://app.example.com" }, data), { BRAND_REQUIRED: "true" }).error).toContain("BRAND_REQUIRED=true");
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost", preset: "alloplace" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();
+  });
+
+  it("warns while a variable that will go away is still set", () => {
+    const brand = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data);
+    expect(brandStartupReport(brand, { BRAND_APP_NAME: "AlloPlace", NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms", BRAND_LOGO_URL: " " }).warnings).toEqual([
+      "[brand] brand.deprecated_variables: BRAND_APP_NAME, NEXT_PUBLIC_TERMS_URL still override the brand file, but will be removed in a later release. Put the values in a folder under brands/ instead.",
+    ]);
+    expect(brandStartupReport(brand, {}).warnings).toEqual([]);
   });
 
   it("names the brand and how it was chosen", () => {

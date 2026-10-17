@@ -20,6 +20,8 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 | --- | --- | --- |
 | `appName` (required) | 1 to 40 characters once whitespace is collapsed, with no control or format characters. | |
 | `logo` | A PNG, JPEG, WebP or plain SVG file in the folder, up to 256 KB, checked like an uploaded logo. | The name on its own. |
+| `emailLogo` | A PNG in the folder, up to 256 KB, shown 48 pixels tall above the name in HTML emails. Make it twice that, 96 pixels tall, for sharp screens. | The name on its own. |
+| `ogImage` | A PNG in the folder, up to 256 KB, that link previews show for the admin's pages. 1200 by 630 pixels suits most sites. | No picture in previews. |
 | `accentColor` | `#rgb` or `#rrggbb`. | The website widget's teal, `#0f766e`. |
 | `links.site`, `links.docs` | An `http://` or `https://` URL without credentials, a query, or a fragment. | LobbyStack's site and docs. |
 | `links.terms`, `links.privacy` | An `http://` or `https://` URL without credentials. | `/terms` and `/privacy` on the site. |
@@ -28,7 +30,7 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 
 `brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
 
-After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each logo to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one.
+After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each image to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one.
 
 The repository is public, so everything in a brand folder is public too.
 
@@ -40,7 +42,7 @@ The admin and the worker resolve the brand once when they start (`packages/share
 2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace`. Use it for `localhost` and for platform addresses such as `*.up.railway.app`. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
 3. Otherwise the default brand, LobbyStack. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
 
-For one more release, `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR` and the five `NEXT_PUBLIC_*` link variables still win over the brand file, field by field. Nothing sets them by default any more, and they'll be removed.
+For one more release, `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR` and the five `NEXT_PUBLIC_*` link variables still win over the brand file, field by field. Nothing sets them by default any more, and they'll be removed. While any of them is set, both services log `brand.deprecated_variables` at start, naming them.
 
 When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
 
@@ -78,7 +80,8 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 
 ## Where the name and logo appear
 
-- The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame.
+- The browser tab's title and icon on every admin page: the dashboard, sign-in and sign-up, onboarding, and the website widget's frame. The logo is the tab icon, so a square logo works best.
+- The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.
 - The foot of each business's [public profile page](../mintlify/settings/public-profile.mdx) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
@@ -92,7 +95,9 @@ Every email and text the app sends calls it by the same name as the dashboard: v
 
 `deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: `BRAND_APP_NAME` while it lasts, then a matched brand file, then the saved onboarding choice, then the default brand. It caches the saved choice for 30 seconds and uses the default brand when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `APP_BASE_URL` on the worker as well as the admin**: the worker picks its brand from it the same way.
 
-The verification email's HTML header shows the name as a wordmark rather than a logo, because Gmail and Outlook don't show SVG logos. Without `EMAIL_FROM`, the worker sends as `<app name> <no-reply@localhost>`.
+The verification email's HTML header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text. While `BRAND_LOGO_URL` sets a different logo, emails show the name alone.
+
+When `EMAIL_FROM` holds only an address, the worker puts the deployment's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`, if `BRAND_APP_NAME` or a matched brand file names the deployment. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
 
 The SMS HELP and START replies are part of the registered SMS campaign or toll-free verification, so update the registration's sample messages when the name changes.
 

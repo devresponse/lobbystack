@@ -5,7 +5,9 @@ import {
   DEFAULT_APP_NAME,
   MAX_BRAND_LOGO_BYTES,
   brandAccentColor,
+  brandEmailLogo,
   brandLogoContentType,
+  emailSender,
   normalizeAppName,
   normalizeLogoUrl,
   readBrandingEnvironment,
@@ -117,6 +119,39 @@ describe("brandAccentColor", () => {
     expect(brandAccentColor({ BRAND_ACCENT_COLOR: "#123456" }, { accentColor: "#ffd100" })).toBe("#123456");
     expect(brandAccentColor({}, { accentColor: "#ffd100" })).toBe("#ffd100");
     expect(brandAccentColor({}, { accentColor: null })).toBe("#0f766e");
+  });
+});
+
+describe("emailSender", () => {
+  const matched = resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" });
+  const unmatched = resolveBrand({ appBaseUrl: "https://app.example.com" });
+
+  it("puts a matched brand's name in front of an address on its own", () => {
+    expect(emailSender({ EMAIL_FROM: " no-reply@alloplace.com " }, matched)).toBe('"AlloPlace (dev)" <no-reply@alloplace.com>');
+    expect(emailSender({ EMAIL_FROM: "no-reply@alloplace.com", BRAND_APP_NAME: 'Allo "Place"' }, unmatched)).toBe('"Allo \\"Place\\"" <no-reply@alloplace.com>');
+  });
+
+  it("keeps a name EMAIL_FROM already has, and an address when no file or variable names the deployment", () => {
+    expect(emailSender({ EMAIL_FROM: "AlloPlace Support <support@alloplace.com>" }, matched)).toBe("AlloPlace Support <support@alloplace.com>");
+    expect(emailSender({ EMAIL_FROM: "no-reply@example.com" }, unmatched)).toBe("no-reply@example.com");
+  });
+
+  it("falls back to a local address without EMAIL_FROM", () => {
+    expect(emailSender({}, matched)).toBe('"AlloPlace (dev)" <no-reply@localhost>');
+    expect(emailSender({ EMAIL_FROM: "" }, unmatched)).toBe('"LobbyStack" <no-reply@localhost>');
+  });
+});
+
+describe("brandEmailLogo", () => {
+  const brand = { ...resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }), emailLogo: { url: "/brand/alloplace/logo-email.png?v=1", width: 96, height: 96 } };
+
+  it("gives the brand's email logo under the deployment's address", () => {
+    expect(brandEmailLogo({}, brand)).toEqual({ url: "https://demo.alloplace.com/brand/alloplace/logo-email.png?v=1", width: 96, height: 96 });
+  });
+
+  it("shows none while BRAND_LOGO_URL sets another logo, or without one", () => {
+    expect(brandEmailLogo({ BRAND_LOGO_URL: "https://cdn.example.com/logo.png" }, brand)).toBeNull();
+    expect(brandEmailLogo({}, resolveBrand({ appBaseUrl: "http://localhost:3000" }))).toBeNull();
   });
 });
 

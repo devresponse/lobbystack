@@ -349,14 +349,14 @@ export const v1 = {
     const userId = await resolveActingUserId(context, caller);
     return { body: data(await createClaimLinkForApi(context, caller, body, { userId, beforeSend: () => requireInvitationAllowed(userId) })) };
   }),
-  listWidgetKeys: (request: Request) => handleApiRequest(request, "listWidgetKeys", async ({ context, caller }) => ({ body: { data: await listWidgetKeysForApi(context, caller), next_cursor: null, has_more: false } })),
+  listWidgetKeys: (request: Request) => handleApiRequest(request, "listWidgetKeys", async ({ context, caller }) => ({ body: { data: await listWidgetKeysForApi(context, caller, { appOrigin: appOrigin(request) }), next_cursor: null, has_more: false } })),
   createWidgetKey: (request: Request) => handleApiRequest(request, "createWidgetKey", async ({ context, caller }) => {
     if (!isWidgetKeyIssuanceEnabled(process.env)) throw new PublicApiError(403, "forbidden", "Website chat widgets aren't available on this deployment yet.");
     return { body: data(await createWidgetKeyForApi(context, caller, await readApiBody(request, apiWidgetKeyCreateSchema), { appOrigin: appOrigin(request) })) };
   }),
   updateWidgetKey: (request: Request, { params }: Params<"widget_key_id">) => handleApiRequest(request, "updateWidgetKey", async ({ context, caller }) => {
     const widgetKeyId = uuidParam((await params).widget_key_id, "widget_key_id");
-    return { body: data(await updateWidgetKeyForApi(context, caller, widgetKeyId, await readApiBody(request, apiWidgetKeyUpdateSchema))) };
+    return { body: data(await updateWidgetKeyForApi(context, caller, widgetKeyId, await readApiBody(request, apiWidgetKeyUpdateSchema), { appOrigin: appOrigin(request) })) };
   }),
   getPublicProfile: (request: Request) => handleApiRequest(request, "getPublicProfile", async ({ context, caller }) => ({ body: data(await getPublicProfileForApi(context, caller, { appOrigin: appOrigin(request) })) })),
   updatePublicProfile: (request: Request) => handleApiRequest(request, "updatePublicProfile", async ({ context, caller }) => ({ body: data(await updatePublicProfileForApi(context, caller, await readApiBody(request, apiPublicProfileUpdateSchema), { appOrigin: appOrigin(request) })) })),

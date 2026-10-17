@@ -15,6 +15,7 @@ import {
   normalizeBookingMode,
   normalizeTransferMode,
   publicProfilePath,
+  widgetEmbedSnippet,
   weekdays,
   type ApiAppointment,
   type ApiBusiness,
@@ -123,6 +124,7 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
   return {
     id: business.id,
     name: business.name,
+    slug: business.slug,
     timezone: business.timezone,
     locale: business.defaultLocale,
     website_url: business.websiteUrl,
@@ -133,6 +135,7 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
       const day = weekdays[row.dayOfWeek];
       return day && row.closeMinutes > row.openMinutes ? [{ day, open: minutesToClock(row.openMinutes), close: minutesToClock(row.closeMinutes) }] : [];
     }),
+    hours_source: business.hoursSource === "generated" || business.hoursSource === "operator" ? business.hoursSource : "none",
     created_at: iso(business.createdAt),
     updated_at: iso(business.updatedAt),
   };
@@ -280,8 +283,23 @@ type ContactRow = typeof contacts.$inferSelect;
 /** A contact's keypad PIN row, without the hash: null when it has none. */
 type ContactPasscodeRow = { setAt: Date; lockedAt: Date | null } | null;
 
-export function serializeContact(row: Pick<ContactRow, "id" | "name" | "phone" | "email" | "preferredLocale" | "timezone" | "createdAt" | "updatedAt">, passcode: ContactPasscodeRow): ApiContact {
-  return { id: row.id, name: row.name, phone: row.phone, email: row.email, locale: row.preferredLocale, timezone: row.timezone, passcode: passcode ? { set_at: iso(passcode.setAt), locked: passcode.lockedAt !== null } : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+const smsConsentStatuses = new Set(["subscribed", "declined", "opted_out"]);
+
+export function serializeContact(row: Pick<ContactRow, "id" | "name" | "phone" | "email" | "preferredLocale" | "timezone" | "smsConsentStatus" | "smsConsentUpdatedAt" | "operatorBlockedAt" | "createdAt" | "updatedAt">, passcode: ContactPasscodeRow): ApiContact {
+  const consent = row.smsConsentStatus && smsConsentStatuses.has(row.smsConsentStatus) ? row.smsConsentStatus as NonNullable<ApiContact["sms_consent"]>["status"] : null;
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    email: row.email,
+    locale: row.preferredLocale,
+    timezone: row.timezone,
+    passcode: passcode ? { set_at: iso(passcode.setAt), locked: passcode.lockedAt !== null } : null,
+    sms_consent: consent ? { status: consent, updated_at: isoOrNull(row.smsConsentUpdatedAt) } : null,
+    blocked_at: isoOrNull(row.operatorBlockedAt),
+    created_at: iso(row.createdAt),
+    updated_at: iso(row.updatedAt),
+  };
 }
 
 /** Contacts with their PIN's status. The hash is never selected. */
@@ -400,7 +418,7 @@ export async function listAppointmentResources(tx: DatabaseTransaction, business
 
 // Messages the receptionist took for the team (voice follow-up inbox items).
 
-export type MessageMetadata = { callerName?: string; callbackPhone?: string; urgency?: string; callbackWindow?: string; channel?: string; message?: string };
+export type MessageMetadata = { callerName?: string; callbackPhone?: string; urgency?: string; callbackWindow?: string; channel?: string; message?: string; request?: string; appointmentId?: string };
 
 const messageExpired = sql<boolean>`(${inboxItems.contentRetentionStatus} = 'scrubbed' or coalesce(${inboxItems.contentExpiresAt} <= current_timestamp, false))`;
 
@@ -430,6 +448,9 @@ export function serializeMessage(row: MessageRow): ApiMessage {
   const metadata = row.expired ? {} : (row.metadata ?? {});
   const urgency = text(metadata.urgency);
   const channel = text(metadata.channel);
+  // A caller's request, such as a cancellation, carries the appointment it matched.
+  const request = text(metadata.request) === "appointment_cancellation" ? "appointment_cancellation" : null;
+  const appointmentId = text(metadata.appointmentId);
   return {
     id: row.id,
     status: row.status === "done" ? "done" : "open",
@@ -441,6 +462,8 @@ export function serializeMessage(row: MessageRow): ApiMessage {
     callback_window: text(metadata.callbackWindow),
     channel: channel && messageChannels.has(channel) ? (channel as ApiMessage["channel"]) : null,
     call_id: row.relatedCallId,
+    request,
+    appointment_id: request && appointmentId && isUuid(appointmentId) ? appointmentId : null,
     created_at: iso(row.createdAt),
     updated_at: iso(row.updatedAt),
   };
@@ -490,7 +513,7 @@ export async function loadKnowledgeEntryResource(tx: DatabaseTransaction, busine
   return row ? serializeKnowledgeEntry(row) : null;
 }
 
-type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
+type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
 
 const knowledgeSourceStatuses = ["pending", "processing", "indexed", "error", "cancelled"] as const;
 
@@ -504,12 +527,13 @@ export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeS
   const type = knowledgeSourceType(row);
   // A status this API does not know yet reads as still processing.
   const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
-  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status, error: status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : [];
+  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status, error: status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function selectKnowledgeSourceRows(tx: DatabaseTransaction, businessId: string) {
   return tx
-    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
+    .select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title, sourceType: knowledgeDocuments.sourceType, sourceUrl: knowledgeDocuments.sourceUrl, mimeType: knowledgeDocuments.mimeType, tags: knowledgeDocuments.tags, status: knowledgeDocuments.status, error: knowledgeDocuments.error, active: knowledgeDocuments.active, createdAt: knowledgeDocuments.createdAt, updatedAt: knowledgeDocuments.updatedAt, jobId: websiteIngestionJobs.id, pageLimit: websiteIngestionJobs.pageLimit })
     .from(knowledgeDocuments)
     .leftJoin(websiteIngestionJobs, and(eq(websiteIngestionJobs.rootDocumentId, knowledgeDocuments.id), eq(websiteIngestionJobs.businessId, businessId)));
 }
@@ -590,15 +614,20 @@ export async function loadPhoneNumberClaimResource(tx: DatabaseTransaction, busi
 
 // Website chat widget keys. The stored configuration uses the dashboard's
 // field names; the API's are snake_case. A key shows the defaults the widget
-// falls back to, as the dashboard does.
+// falls back to, as the dashboard does. The key itself is public, since the
+// website's script tag carries it, so it's shown with its tag, as the
+// dashboard shows it, until it's revoked. Keys created before it was stored
+// kept only their hash.
 
-export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; lastUsedAt: Date | null; createdAt: Date }): ApiWidgetKey {
+export function serializeWidgetKey(row: { id: string; label: string | null; status: string; allowedOrigins: unknown; config: unknown; keyValue: string | null; lastUsedAt: Date | null; createdAt: Date }, appOrigin: string): ApiWidgetKey {
   const parsed = widgetConfigSchema.safeParse(row.config ?? {});
   const config = { ...defaultWidgetConfig, ...(parsed.success ? parsed.data : {}) };
+  const status = row.status === "disabled" || row.status === "revoked" ? row.status : "active";
+  const key = status === "revoked" ? null : row.keyValue;
   return {
     id: row.id,
     label: row.label,
-    status: row.status === "disabled" || row.status === "revoked" ? row.status : "active",
+    status,
     allowed_origins: Array.isArray(row.allowedOrigins) ? row.allowedOrigins.filter((value): value is string => typeof value === "string").map(normalizeWidgetOrigin) : [],
     config: {
       ...(config.color !== undefined ? { color: config.color } : {}),
@@ -610,6 +639,8 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
       ...(config.leadForm !== undefined ? { lead_form: { enabled: config.leadForm.enabled, require_phone: config.leadForm.requirePhone ?? false, require_email: config.leadForm.requireEmail ?? false, show_before_chat: config.leadForm.showBeforeChat ?? false } } : {}),
       ...(config.liveChat !== undefined ? { live_chat: { enabled: config.liveChat.enabled } } : {}),
     },
+    key,
+    embed_snippet: key ? widgetEmbedSnippet(appOrigin, key) : null,
     last_used_at: isoOrNull(row.lastUsedAt),
     created_at: iso(row.createdAt),
   };
@@ -649,6 +680,7 @@ export const notificationEventKeys = {
   calendar_sync: "calendarSync",
   transfer_failed: "transferFailed",
   website_chat: "widgetChat",
+  website_live_chat: "liveChatRequest",
   webhook_disabled: "webhookDisabled",
 } as const satisfies Record<ApiNotificationEvent, OperatorNotificationEventKey>;
 

@@ -296,8 +296,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "transfer-owner": { operation: "createClaimLink", args: ["email"], show: (data) => `Sent ${String((data.invitation as Row).email)} a link to claim the business. You can also send it yourself:\n${String(data.url)}` },
   }),
   group("widget", "The chat widget on the business's websites.", {
-    list: { operation: "listWidgetKeys", columns: columns("id", "label", "status", "allowed_origins", "last_used_at") },
-    create: { operation: "createWidgetKey", show: (data) => `Key: ${String(data.key)} (shown only now)\n\nPaste this into the website's HTML:\n${String(data.embed_snippet)}` },
+    list: { operation: "listWidgetKeys", columns: columns("id", "label", "status", "key", "allowed_origins", "last_used_at") },
+    create: { operation: "createWidgetKey", show: (data) => `Key: ${String(data.key)}\n\nPaste this into the website's HTML:\n${String(data.embed_snippet)}` },
     update: { operation: "updateWidgetKey" },
   }),
   group("public-profile", "The business's public page at /profile/<slug>, and publishing it.", {

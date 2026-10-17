@@ -4314,7 +4314,7 @@
       "get": {
         "operationId": "listWidgetKeys",
         "summary": "List widget keys",
-        "description": "Every key for the website chat widget, newest first, all in one page. The keys themselves aren't shown again after they're created.",
+        "description": "Every key for the website chat widget, newest first, all in one page, with the script tag that adds each one to a website.",
         "tags": [
           "Website chat"
         ],
@@ -4432,7 +4432,7 @@
       "post": {
         "operationId": "createWidgetKey",
         "summary": "Add the chat widget to a website",
-        "description": "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. The key is shown only in this response. A deployment that doesn't offer website chat yet answers 403.",
+        "description": "Creates a key for the website chat widget and returns the script tag to paste into the site's HTML. GET /widget-keys shows the tag again. A deployment that doesn't offer website chat yet answers 403.",
         "tags": [
           "Website chat"
         ],
@@ -11764,6 +11764,10 @@
           "name": {
             "type": "string"
           },
+          "slug": {
+            "type": "string",
+            "description": "A short name no other business uses, set when the business is created. Its public profile page is at /profile/{slug}."
+          },
           "timezone": {
             "type": "string",
             "description": "IANA time zone, for example America/Toronto."
@@ -11832,6 +11836,15 @@
               "description": "One opening window on one day. A day with a break, such as lunch, has two windows. Days that are not listed are closed."
             }
           },
+          "hours_source": {
+            "type": "string",
+            "enum": [
+              "none",
+              "generated",
+              "operator"
+            ],
+            "description": "Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11846,6 +11859,7 @@
         "required": [
           "id",
           "name",
+          "slug",
           "timezone",
           "locale",
           "website_url",
@@ -11853,6 +11867,7 @@
           "onboarding_stage",
           "booking_mode",
           "hours",
+          "hours_source",
           "created_at",
           "updated_at"
         ],
@@ -11897,7 +11912,7 @@
             "maxLength": 64
           },
           "hours": {
-            "description": "Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap.",
+            "description": "Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them.",
             "maxItems": 28,
             "type": "array",
             "items": {
@@ -12624,6 +12639,7 @@
             ]
           },
           "locale": {
+            "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
             "type": [
               "string",
               "null"
@@ -12662,6 +12678,59 @@
             ],
             "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
           },
+          "sms_consent": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "subscribed",
+                      "declined",
+                      "opted_out"
+                    ],
+                    "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                  },
+                  "updated_at": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "When the answer was last recorded."
+                  }
+                },
+                "required": [
+                  "status",
+                  "updated_at"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+          },
+          "blocked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -12681,6 +12750,8 @@
           "locale",
           "timezone",
           "passcode",
+          "sms_consent",
+          "blocked_at",
           "created_at",
           "updated_at"
         ],
@@ -12883,6 +12954,7 @@
                   ]
                 },
                 "locale": {
+                  "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
                   "type": [
                     "string",
                     "null"
@@ -12921,6 +12993,59 @@
                   ],
                   "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
                 },
+                "sms_consent": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "subscribed",
+                            "declined",
+                            "opted_out"
+                          ],
+                          "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                        },
+                        "updated_at": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "format": "date-time",
+                              "description": "ISO 8601 timestamp in UTC."
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the answer was last recorded."
+                        }
+                      },
+                      "required": [
+                        "status",
+                        "updated_at"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+                },
+                "blocked_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time",
@@ -12944,6 +13069,8 @@
                 "locale",
                 "timezone",
                 "passcode",
+                "sms_consent",
+                "blocked_at",
                 "created_at",
                 "updated_at",
                 "new_passcode"
@@ -13028,7 +13155,7 @@
           },
           "source": {
             "type": "string",
-            "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+            "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking from before LobbyStack's current version may show another value."
           },
           "calendar_sync_status": {
             "type": "string",
@@ -13236,6 +13363,33 @@
               }
             ]
           },
+          "request": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "appointment_cancellation"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."
+          },
+          "appointment_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -13258,6 +13412,8 @@
           "callback_window",
           "channel",
           "call_id",
+          "request",
+          "appointment_id",
           "created_at",
           "updated_at"
         ],
@@ -13592,6 +13748,20 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "key": {
+            "description": "The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "embed_snippet": {
+            "description": "The script tag to paste into the website's HTML. null when key is null.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -13616,6 +13786,8 @@
           "status",
           "allowed_origins",
           "config",
+          "key",
+          "embed_snippet",
           "last_used_at",
           "created_at"
         ],
@@ -13728,6 +13900,14 @@
             "additionalProperties": false,
             "description": "How the widget looks and behaves."
           },
+          "key": {
+            "type": "string",
+            "description": "The key itself, which the widget's script tag carries."
+          },
+          "embed_snippet": {
+            "type": "string",
+            "description": "The script tag to paste into the website's HTML."
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -13744,14 +13924,6 @@
             "type": "string",
             "format": "date-time",
             "description": "ISO 8601 timestamp in UTC."
-          },
-          "key": {
-            "type": "string",
-            "description": "The key itself, shown only here. The widget's script tag carries it."
-          },
-          "embed_snippet": {
-            "type": "string",
-            "description": "The script tag to paste into the website's HTML."
           }
         },
         "required": [
@@ -13760,10 +13932,10 @@
           "status",
           "allowed_origins",
           "config",
-          "last_used_at",
-          "created_at",
           "key",
-          "embed_snippet"
+          "embed_snippet",
+          "last_used_at",
+          "created_at"
         ],
         "additionalProperties": false,
         "description": "A new widget key, with the script tag that adds the widget to a website."
@@ -14405,6 +14577,23 @@
                 "additionalProperties": false,
                 "description": "A visitor wrote through the website chat widget. At most one alert per chat a day."
               },
+              "website_live_chat": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "email",
+                  "sms"
+                ],
+                "additionalProperties": false,
+                "description": "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message."
+              },
               "webhook_disabled": {
                 "type": "object",
                 "properties": {
@@ -14430,6 +14619,7 @@
               "calendar_sync",
               "transfer_failed",
               "website_chat",
+              "website_live_chat",
               "webhook_disabled"
             ],
             "additionalProperties": false,
@@ -14584,6 +14774,19 @@
               },
               "website_chat": {
                 "description": "A visitor wrote through the website chat widget. At most one alert per chat a day.",
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "boolean"
+                  },
+                  "sms": {
+                    "type": "boolean"
+                  }
+                },
+                "additionalProperties": false
+              },
+              "website_live_chat": {
+                "description": "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message.",
                 "type": "object",
                 "properties": {
                   "email": {
@@ -15160,7 +15363,18 @@
         "properties": {
           "stage": {
             "type": "string",
-            "description": "The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows. phone_number_claiming: a number is being set up. The API doesn't follow these steps in order."
           },
           "complete": {
             "type": "boolean",
@@ -16149,6 +16363,20 @@
             ],
             "description": "How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."
           },
+          "content_type": {
+            "description": "A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The tags given when a file's upload was completed. Empty for a website or a page."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -16169,6 +16397,8 @@
           "error",
           "active",
           "page_limit",
+          "content_type",
+          "tags",
           "created_at",
           "updated_at"
         ],
@@ -16900,7 +17130,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking from before LobbyStack's current version may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -17042,7 +17272,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking from before LobbyStack's current version may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -17184,7 +17414,7 @@
               },
               "source": {
                 "type": "string",
-                "description": "Where the booking came from, for example voice, web_chat, dashboard or api."
+                "description": "Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking from before LobbyStack's current version may show another value."
               },
               "calendar_sync_status": {
                 "type": "string",
@@ -17346,6 +17576,33 @@
                   }
                 ]
               },
+              "request": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "appointment_cancellation"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."
+              },
+              "appointment_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Stable identifier (UUID)."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time",
@@ -17368,6 +17625,8 @@
               "callback_window",
               "channel",
               "call_id",
+              "request",
+              "appointment_id",
               "created_at",
               "updated_at"
             ],
@@ -17437,6 +17696,7 @@
                 ]
               },
               "locale": {
+                "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
                 "type": [
                   "string",
                   "null"
@@ -17475,6 +17735,59 @@
                 ],
                 "description": "The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."
               },
+              "sms_consent": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "subscribed",
+                          "declined",
+                          "opted_out"
+                        ],
+                        "description": "subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."
+                      },
+                      "updated_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "When the answer was last recorded."
+                      }
+                    },
+                    "required": [
+                      "status",
+                      "updated_at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."
+              },
+              "blocked_at": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 timestamp in UTC."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."
+              },
               "created_at": {
                 "type": "string",
                 "format": "date-time",
@@ -17494,6 +17807,8 @@
               "locale",
               "timezone",
               "passcode",
+              "sms_consent",
+              "blocked_at",
               "created_at",
               "updated_at"
             ],

@@ -56,19 +56,22 @@ describe("API keys", () => {
 
 describe("knowledge sources", () => {
   const at = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, status: "pending", error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending", error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
 
   it("serializes files, websites and the pages their crawls read to the published schema", () => {
     const file = serializeKnowledgeSource(row);
-    expect(file).toMatchObject({ type: "file", url: null, status: "pending", page_limit: null });
+    expect(file).toMatchObject({ type: "file", url: null, status: "pending", page_limit: null, content_type: "application/pdf", tags: ["prices"] });
     expect(apiKnowledgeSourceSchema.safeParse(file).success).toBe(true);
     const website = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/", status: "error", error: "The site timed out.", jobId: "7a1c2e9d-3b4f-4d8a-9c6e-1f2a3b4c5d6e", pageLimit: 10 });
-    expect(website).toMatchObject({ type: "website", url: "https://maple.example/", status: "error", error: "The site timed out.", page_limit: 10 });
+    expect(website).toMatchObject({ type: "website", url: "https://maple.example/", status: "error", error: "The site timed out.", page_limit: 10, content_type: null });
     expect(apiKnowledgeSourceSchema.safeParse(website).success).toBe(true);
     // A page has no crawl job of its own.
     const page = serializeKnowledgeSource({ ...row, sourceType: "website", sourceUrl: "https://maple.example/about", status: "indexed" });
     expect(page).toMatchObject({ type: "page", url: "https://maple.example/about", page_limit: null });
     expect(apiKnowledgeSourceSchema.safeParse(page).success).toBe(true);
+    // Tags are a JSON column, so anything but a list of words shows as none.
+    expect(serializeKnowledgeSource({ ...row, tags: { faq: true } as never }).tags).toEqual([]);
+    expect(serializeKnowledgeSource({ ...row, tags: ["prices", 3] as never }).tags).toEqual(["prices"]);
   });
 
   it("shows an FAQ's type instead of the tag that marks it", () => {
@@ -135,7 +138,7 @@ describe("v1 resource serializers match the published schemas", () => {
   });
 
   it("serializes contacts with whether they have a keypad PIN", () => {
-    const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Ada", phone: "+14165550134", email: null, preferredLocale: "fr", timezone: null, createdAt: now, updatedAt: now };
+    const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Ada", phone: "+14165550134", email: null, preferredLocale: "fr", timezone: null, smsConsentStatus: null, smsConsentUpdatedAt: null, operatorBlockedAt: null, createdAt: now, updatedAt: now };
     const contact = serializeContact(row, null);
     expect(apiContactSchema.parse(contact)).toEqual(contact);
     expect(contact.passcode).toBeNull();
@@ -145,6 +148,17 @@ describe("v1 resource serializers match the published schemas", () => {
     expect(serializeContact(row, { setAt: now, lockedAt: null }).passcode).toEqual({ set_at: now.toISOString(), locked: false });
   });
 
+  it("shows a contact's answer about appointment texts, and when the contact was blocked", () => {
+    const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", name: "Ada", phone: "+14165550134", email: null, preferredLocale: null, timezone: null, smsConsentStatus: null, smsConsentUpdatedAt: null, operatorBlockedAt: null, createdAt: now, updatedAt: now };
+    expect(serializeContact(row, null)).toMatchObject({ sms_consent: null, blocked_at: null });
+    const blocked = serializeContact({ ...row, smsConsentStatus: "opted_out", smsConsentUpdatedAt: now, operatorBlockedAt: now }, null);
+    expect(apiContactSchema.parse(blocked)).toEqual(blocked);
+    expect(blocked).toMatchObject({ sms_consent: { status: "opted_out", updated_at: now.toISOString() }, blocked_at: now.toISOString() });
+    expect(serializeContact({ ...row, smsConsentStatus: "subscribed" }, null).sms_consent).toEqual({ status: "subscribed", updated_at: null });
+    // A status this API doesn't know reads as never asked.
+    expect(serializeContact({ ...row, smsConsentStatus: "pending", smsConsentUpdatedAt: now }, null).sms_consent).toBeNull();
+  });
+
   it("withholds expired message content", () => {
     const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Call me", metadata: { callerName: "Ada", callbackPhone: "+14165550134", urgency: "urgent", channel: "voice" }, relatedCallId: null, createdAt: now, updatedAt: now };
     const message = serializeMessage({ ...base, expired: false });
@@ -152,6 +166,21 @@ describe("v1 resource serializers match the published schemas", () => {
     expect(message).toMatchObject({ caller_name: "Ada", urgency: "urgent", channel: "voice" });
     const expired = serializeMessage({ ...base, expired: true });
     expect(expired).toMatchObject({ caller_name: null, callback_phone: null, body: "[Expired by the retention policy]" });
+    expect(message).toMatchObject({ request: null, appointment_id: null });
+  });
+
+  it("shows a cancellation request with the appointment it matched", () => {
+    const appointmentId = "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5c";
+    const base = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", status: "open", title: "Voice message from Ada", body: "Cancellation request: Cut", relatedCallId: null, expired: false, createdAt: now, updatedAt: now };
+    const request = serializeMessage({ ...base, metadata: { callerName: "Ada", channel: "voice", request: "appointment_cancellation", appointmentId } });
+    expect(apiMessageSchema.parse(request)).toEqual(request);
+    expect(request).toMatchObject({ request: "appointment_cancellation", appointment_id: appointmentId });
+    expect(serializeMessage({ ...base, metadata: { request: "appointment_cancellation" } })).toMatchObject({ request: "appointment_cancellation", appointment_id: null });
+    // Only a request this API knows shows, and only with an id it can look up.
+    expect(serializeMessage({ ...base, metadata: { request: "refund", appointmentId } })).toMatchObject({ request: null, appointment_id: null });
+    expect(serializeMessage({ ...base, metadata: { request: "appointment_cancellation", appointmentId: "not-an-id" } }).appointment_id).toBeNull();
+    // Expired content hides the request, as the retention job's scrub will.
+    expect(serializeMessage({ ...base, expired: true, metadata: { request: "appointment_cancellation", appointmentId } })).toMatchObject({ request: null, appointment_id: null });
   });
 });
 
@@ -211,7 +240,7 @@ describe("notification preferences", () => {
     expect(serializeNotificationPreferences({ ...preferences, smsConsent: true, canUseSms: false, smsUnavailableReason: "sender_missing" }).sms).toEqual({ available: false, unavailable_reason: "sender_missing" });
     // Each API name is one of the dashboard's events, and every event it shows has one.
     expect(Object.values(notificationEventKeys).every((key) => (operatorNotificationEventKeys as readonly string[]).includes(key))).toBe(true);
-    expect(new Set(Object.values(notificationEventKeys))).toEqual(new Set(["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "widgetChat", "webhookDisabled"]));
+    expect(new Set(Object.values(notificationEventKeys))).toEqual(new Set(["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "widgetChat", "liveChatRequest", "webhookDisabled"]));
   });
 });
 
@@ -229,14 +258,25 @@ describe("calendar connections", () => {
 
 describe("widget keys", () => {
   const now = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], lastUsedAt: null, createdAt: now };
+  const origin = "https://app.example.com";
+  const row = { id: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", label: null, status: "active", allowedOrigins: ["https://example.com/", "shop.example.com "], keyValue: null, lastUsedAt: null, createdAt: now };
 
   it("shows the dashboard's configuration in snake_case, with the defaults the widget falls back to", () => {
-    const plain = serializeWidgetKey({ ...row, config: {} });
+    const plain = serializeWidgetKey({ ...row, config: {} }, origin);
     expect(apiWidgetKeySchema.parse(plain)).toEqual(plain);
     expect(plain).toMatchObject({ allowed_origins: ["https://example.com", "https://shop.example.com"], config: { position: "bottom-right", title: "", lead_form: { enabled: false, require_phone: false, require_email: false, show_before_chat: false }, live_chat: { enabled: false } } });
-    const styled = serializeWidgetKey({ ...row, status: "weird", config: { color: "#112233", localeOverride: "sr", leadForm: { enabled: true, requireEmail: true }, liveChat: { enabled: true } } });
+    const styled = serializeWidgetKey({ ...row, status: "weird", config: { color: "#112233", localeOverride: "sr", leadForm: { enabled: true, requireEmail: true }, liveChat: { enabled: true } } }, origin);
     expect(styled).toMatchObject({ status: "active", config: { color: "#112233", locale: "sr", lead_form: { enabled: true, require_phone: false, require_email: true, show_before_chat: false }, live_chat: { enabled: true } } });
+  });
+
+  it("shows the key with its script tag until it's revoked, and nothing for a key that was never stored", () => {
+    const key = "wk_live_x";
+    const active = serializeWidgetKey({ ...row, config: {}, keyValue: key }, origin);
+    expect(apiWidgetKeySchema.parse(active)).toEqual(active);
+    expect(active).toMatchObject({ key, embed_snippet: widgetEmbedSnippet(origin, key) });
+    expect(serializeWidgetKey({ ...row, status: "disabled", config: {}, keyValue: key }, origin)).toMatchObject({ key, embed_snippet: widgetEmbedSnippet(origin, key) });
+    expect(serializeWidgetKey({ ...row, status: "revoked", config: {}, keyValue: key }, origin)).toMatchObject({ key: null, embed_snippet: null });
+    expect(serializeWidgetKey({ ...row, config: {} }, origin)).toMatchObject({ key: null, embed_snippet: null });
   });
 
   it("keeps an origin's scheme, host and port, and reads a bare host as https", () => {

@@ -163,6 +163,23 @@ describe("contact PINs", () => {
   });
 });
 
+describe("widget", () => {
+  const key = "wk_live_abcdefghijklmnopqrstuvwxyz012345";
+  const snippet = `<script src="https://app.example.com/embed.js?key=${key}" data-widget-key="${key}" defer></script>`;
+  const widget = { id: "7b8c9d0e-1f2a-4b3c-8d4e-5f6a7b8c9d0e", label: "Main site", status: "active", allowed_origins: ["https://example.com"], config: { position: "bottom-right", title: "" }, key, embed_snippet: snippet, last_used_at: null, created_at: "2026-10-17T09:00:00.000Z" };
+
+  it("lists each key, and shows a new key's script tag", async () => {
+    const api = fakeApi({
+      "GET /api/v1/widget-keys": { body: { data: [widget], next_cursor: null, has_more: false } },
+      "POST /api/v1/widget-keys": { status: 201, body: { data: widget } },
+    });
+    const list = await runCli(["widget", "list"], { fetch: api.fetch });
+    expect(list.code).toBe(exitCodes.ok);
+    expect(list.out).toMatch(new RegExp(`Main site\\s+active\\s+${key}`));
+    expect(await runCli(["widget", "create", "--allowed-origins", '["https://example.com"]'], { fetch: api.fetch })).toMatchObject({ code: exitCodes.ok, out: `Key: ${key}\n\nPaste this into the website's HTML:\n${snippet}` });
+  });
+});
+
 describe("public profile", () => {
   const profile = { slug: "acme-dental", url: "https://app.example.com/profile/acme-dental", published: false, published_at: null, category: "Dental clinic", description: null, address: { line1: "418 Larkspur Street", line2: null, city: "Vancouver", region: "BC", postal_code: "V5T 1A1", country_code: "CA" }, public_email: null, show_phone: true, show_hours: true, show_services: true, show_map: true, widget_key_id: null, updated_at: null };
 

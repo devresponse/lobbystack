@@ -7,6 +7,7 @@ import { businessContextSnapshots, businessMemberships, businesses, calls, enque
 import { type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
+import { deploymentAppName } from "./branding";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { recordProductEventBestEffort } from "./productEvents";
 
@@ -182,6 +183,7 @@ export async function createProspectDemo(
   const locale = input.locale === "fr" ? "fr" : "en";
   const timezone = input.timezone?.trim() || "America/New_York";
   const suggestedPrompts = cleanPrompts(input.suggestedPrompts);
+  const appName = await deploymentAppName(context.db);
   const serviceNames = (input.services ?? []).map((value) => value.trim()).filter(Boolean);
   return await withBusinessTransaction(context.db, { userId: input.operatorUserId, businessId, actorType: "system" }, async (tx) => {
     await tx.insert(businesses).values({ id: businessId, slug, name, timezone, defaultLocale: locale, websiteUrl: normalizedWebsiteUrl, businessType: "general", deploymentMode: process.env.DEPLOYMENT_MODE === "cloud" ? "cloud" : "development" });
@@ -192,7 +194,7 @@ export async function createProspectDemo(
       tone: "professional and friendly",
       summary: `${name} virtual receptionist`,
       bookingPolicy: "Do not book appointments during this prospect demo.",
-      voiceInstructions: "This is a LobbyStack prospect demo. Answer from public business knowledge. Collect sample contact details for a quote or service request. Do not book appointments, transfer calls, or promise outbound messages.",
+      voiceInstructions: `This is a ${appName} prospect demo. Answer from public business knowledge. Collect sample contact details for a quote or service request. Do not book appointments, transfer calls, or promise outbound messages.`,
       smsInstructions: "Do not send SMS during prospect demos.",
       transferMode: "on_request",
     });

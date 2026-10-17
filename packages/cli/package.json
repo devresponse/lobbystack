@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "The lobbystack command: onboard and manage businesses through the LobbyStack API.",
+  "description": "The lobbystack command: onboard and manage businesses through a dashboard's v1 API.",
   "bin": {
     "lobbystack": "./dist/bin.js"
   },

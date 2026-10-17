@@ -194,7 +194,7 @@ export async function handleApiRequest<Id extends ApiOperationId>(request: Reque
     let caller: RestApiCaller | null;
     if (credential.kind === "platform_key") {
       const actingUserId = await (dependencies.resolvePlatformOwner ?? ((email) => resolvePlatformKeyOwner(context, email)))(credential.ownerEmail);
-      if (!actingUserId) return (status = 403, apiError(403, "key_owner_inactive", "This platform key's owner_email has no verified LobbyStack account. Sign up with that email and verify it, or change owner_email in PLATFORM_API_KEYS."));
+      if (!actingUserId) return (status = 403, apiError(403, "key_owner_inactive", "This platform key's owner_email has no verified account. Sign up with that email and verify it, or change owner_email in PLATFORM_API_KEYS."));
       if (businessless) {
         // The operation applies the Idempotency-Key itself: there is no business to keep the record under.
         const idempotencyKey = operation.idempotent ? validateIdempotencyKey(request.headers.get("idempotency-key")) : null;

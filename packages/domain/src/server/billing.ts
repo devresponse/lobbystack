@@ -139,7 +139,7 @@ export async function createBillingCheckoutRequestInTransaction(
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
   const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
-  if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, so LobbyStack bills it directly."), { status: 409 });
+  if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, billed directly by the operator."), { status: 409 });
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}` }).onConflictDoNothing({ target: billingAccounts.businessId });
   const [request] = await tx.insert(billingCheckoutRequests).values({
     businessId: input.businessId,

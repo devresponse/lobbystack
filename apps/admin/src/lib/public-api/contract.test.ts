@@ -94,4 +94,11 @@ describe("v1 contract", () => {
     const generated = buildOpenApiDocument({ serverUrl: "https://app.lobbystack.com/api/v1" });
     expect(committed, "Run pnpm api:openapi to regenerate mintlify/api-reference/openapi.json.").toEqual(JSON.parse(JSON.stringify(generated)));
   });
+
+  it("titles the document with the deployment's name and names no product in its descriptions", () => {
+    const document = buildOpenApiDocument({ serverUrl: "https://demo.alloplace.com/api/v1", appName: "AlloPlace" }) as { info: { title: string } };
+    expect(document.info.title).toBe("AlloPlace API");
+    // The header is a wire name clients send, so it keeps its name.
+    expect(JSON.stringify(document).replaceAll("LobbyStack-Business", "")).not.toContain("LobbyStack");
+  });
 });

@@ -15,8 +15,8 @@ export async function POST(request: Request) {
     if (!token || !organizationId) throw new Error("Billing customer portal is not configured.");
     const account = await withOperatorTransaction(request, async ({ businessId, tx }) => (await tx.select({ source: billingAccounts.source, billingKey: billingAccounts.billingKey, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0] ?? null, { minimumRole: "business_admin" });
     if (!account || !hasBillingCustomerPortal(account)) return jsonError("A billing customer with subscription history is required before opening the customer portal.", 409);
-    // LobbyStack bills a managed plan directly, so Polar has nothing for its customer to manage.
-    if (isManagedBillingAccount(account)) return jsonError("This business is on a managed plan, so LobbyStack bills it directly.", 409);
+    // The operator bills a managed plan directly, so Polar has nothing for its customer to manage.
+    if (isManagedBillingAccount(account)) return jsonError("This business is on a managed plan, billed directly by the operator.", 409);
     const provider = new PolarBillingProvider({ accessToken: token, organizationId, ...(process.env.POLAR_API_BASE_URL ? { baseUrl: process.env.POLAR_API_BASE_URL } : {}) });
     return NextResponse.json(await provider.createCustomerPortalSession({ externalCustomerId: account.billingKey, returnUrl: `${process.env.APP_BASE_URL ?? new URL(request.url).origin}/settings/plan` }));
   } catch (error) { return asApiResponse(error); }

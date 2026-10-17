@@ -1,7 +1,7 @@
 /** Exit codes scripts can tell apart. */
 export const exitCodes = {
   ok: 0,
-  /** LobbyStack or the network failed, the work failed, or the key hit a rate limit: trying again later may work. */
+  /** The dashboard or the network failed, the work failed, or the key hit a rate limit: trying again later may work. */
   failed: 1,
   /** The command or its input is wrong. */
   invalid: 2,

@@ -1,6 +1,7 @@
 'use strict';
 
-const { DEFAULT_BASE_URL, apiUrl } = require('./lib/client');
+const { APP_NAME, DEFAULT_BASE_URL, DOCS_URL } = require('./lib/brand');
+const { apiUrl } = require('./lib/client');
 
 // GET /me works for any valid key, whatever its scopes, so a key made only
 // for one action can still connect.
@@ -9,7 +10,7 @@ const test = async (z, bundle) => {
   const me = response.data.data;
   // A platform key (lsp_) acts on many businesses and has none of its own here.
   if (!me.business) {
-    throw new z.errors.Error('This is a LobbyStack platform key. Zapier needs an API key from Settings > API keys, which starts with lsk_.', 'platform_key', 400);
+    throw new z.errors.Error(`This is a ${APP_NAME} platform key. Zapier needs an API key from Settings > API keys, which starts with lsk_.`, 'platform_key', 400);
   }
   return {
     business_id: me.business.id,
@@ -30,16 +31,16 @@ module.exports = {
       type: 'password',
       required: true,
       helpText:
-        'In LobbyStack, go to **Settings > API keys** and create a key for Zapier. It starts with `lsk_`. Any key connects; give it the scopes for the steps you plan to use. Triggers need `webhooks:manage` plus the read scope for their data, such as `calls:read` for new calls. [Learn more](https://docs.lobbystack.com/api/authentication).',
+        `In ${APP_NAME}, go to **Settings > API keys** and create a key for Zapier. It starts with \`lsk_\`. Any key connects; give it the scopes for the steps you plan to use. Triggers need \`webhooks:manage\` plus the read scope for their data, such as \`calls:read\` for new calls. [Learn more](${DOCS_URL}/api/authentication).`,
     },
     {
       key: 'baseUrl',
-      label: 'LobbyStack URL',
+      label: `${APP_NAME} URL`,
       type: 'string',
       required: false,
       default: DEFAULT_BASE_URL,
       helpText:
-        'Leave as is for LobbyStack Cloud. If you host LobbyStack yourself, enter the address you use to sign in, for example `https://lobbystack.yourcompany.com`.',
+        `Leave as is unless you sign in to ${APP_NAME} at another address. If you host it yourself, enter the address you use to sign in, for example \`https://app.yourcompany.com\`.`,
     },
   ],
   test,

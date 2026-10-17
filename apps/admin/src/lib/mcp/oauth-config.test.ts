@@ -24,7 +24,9 @@ describe("MCP OAuth configuration", () => {
       scopes_supported: [...MCP_OAUTH_SCOPES],
       bearer_methods_supported: ["header"],
       resource_documentation: "https://docs.lobbystack.com/ai/mcp",
+      resource_name: "LobbyStack",
     });
+    expect(protectedResourceMetadata(env, "AlloPlace")).toMatchObject({ resource_name: "AlloPlace" });
     expect(MCP_OAUTH_SCOPES).not.toContain("webhooks:manage");
     expect(MCP_OAUTH_SCOPES).toContain("offline_access");
   });
@@ -39,7 +41,7 @@ describe("MCP OAuth configuration", () => {
   });
 
   it("points 401 challenges at the metadata", () => {
-    expect(mcpBearerChallenge(undefined, env)).toBe(`Bearer realm="LobbyStack MCP", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/api/mcp", scope="${MCP_OAUTH_SCOPES.join(" ")}"`);
+    expect(mcpBearerChallenge(undefined, env)).toBe(`Bearer realm="MCP", resource_metadata="https://app.example.com/.well-known/oauth-protected-resource/api/mcp", scope="${MCP_OAUTH_SCOPES.join(" ")}"`);
     expect(mcpBearerChallenge("invalid_token", env)).toContain('error="invalid_token"');
   });
 

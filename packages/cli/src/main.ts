@@ -38,7 +38,7 @@ function helpText(): string {
     "",
     "LOBBYSTACK_URL with LOBBYSTACK_API_KEY take the place of a profile, and LOBBYSTACK_BUSINESS picks the business.",
     "",
-    "Exit codes: 0 done. 1 LobbyStack or the network failed, or a rate limit: try again later.",
+    "Exit codes: 0 done. 1 the dashboard or the network failed, or a rate limit: try again later.",
     "2 the command or its input is wrong. 3 the API key is missing or invalid, or isn't allowed to do this.",
     "4 not finished: the rest waits on someone else, such as a payment. Run it again once they're done.",
   ].join("\n");

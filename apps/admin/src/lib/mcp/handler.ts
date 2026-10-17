@@ -16,6 +16,7 @@ import { isApiKeyScope, type ApiErrorCode, type ApiKeyScope } from "@lobbystack/
 
 import { runAfterResponse } from "../after-response";
 import { configuredAppOrigins } from "../app-origins";
+import { loadBranding } from "../branding";
 import { createWorkerDomainContext } from "../domain-context";
 import { enforceApiRateLimit } from "../public-api/rate-limit";
 import { mcpBearerChallenge, mcpResourceUrl, tokenAudienceMatches } from "./oauth-config";
@@ -23,7 +24,7 @@ import { createLobbyStackMcpServer, type McpPrincipal, type McpServerDependencie
 import { mcpTools } from "./tools";
 
 // HTTP entry for /api/mcp: Streamable HTTP, stateless. Callers authenticate
-// with a LobbyStack API key (`Bearer lsk_...`) or an OAuth access token issued
+// with an API key (`Bearer lsk_...`) or an OAuth access token issued
 // to an MCP client (`Bearer lsa_...`). Either way the credential picks one
 // business and its scopes pick the tools. Keys and tokens never reach logs:
 // logs and audit rows carry the key id or the grant id.
@@ -33,6 +34,8 @@ export type McpHandlerDependencies = Partial<McpServerDependencies> & {
   touchKey?: (key: ResolvedApiKey) => Promise<void>;
   resolveGrant?: (token: string) => Promise<ResolvedOAuthGrant | null>;
   touchGrant?: (grantId: string) => Promise<void>;
+  /** The deployment's name for the server's title and instructions; defaults to the dashboard's branding. */
+  appName?: () => Promise<string>;
 };
 
 const mcpScopes = new Set(mcpTools.map((entry) => entry.scope));
@@ -65,9 +68,9 @@ function principalFor(credential: VerifiedCredential): McpPrincipal {
 
 // The SDK hands AuthInfo to the per-request server factory. It carries ids
 // only; the secret stays in this module.
-function authInfoFor(credential: VerifiedCredential): AuthInfo {
+function authInfoFor(credential: VerifiedCredential, appName: string): AuthInfo {
   const principal = principalFor(credential);
-  const extra = { caller: principal.caller, logFields: principal.logFields };
+  const extra = { caller: principal.caller, logFields: principal.logFields, appName };
   if (credential.kind === "api_key") return { token: `api_key:${credential.key.apiKeyId}`, clientId: credential.key.apiKeyId, scopes: [...principal.scopes], extra };
   return {
     token: `oauth_grant:${credential.grant.grantId}`,
@@ -82,8 +85,9 @@ function authInfoFor(credential: VerifiedCredential): AuthInfo {
 function principalFromAuthInfo(authInfo: AuthInfo | undefined): McpPrincipal {
   const caller = authInfo?.extra?.caller as ApiCaller | undefined;
   const logFields = authInfo?.extra?.logFields as Record<string, string> | undefined;
+  const appName = authInfo?.extra?.appName;
   if (!caller || typeof caller.businessId !== "string" || !logFields) throw new Error("The MCP handler ran without a verified credential.");
-  return { caller, scopes: authInfo!.scopes.filter(isApiKeyScope) as ApiKeyScope[], logFields };
+  return { caller, scopes: authInfo!.scopes.filter(isApiKeyScope) as ApiKeyScope[], logFields, ...(typeof appName === "string" ? { appName } : {}) };
 }
 
 export function createLobbyStackMcpHttpHandler(dependencies: McpHandlerDependencies = {}): (request: Request) => Promise<Response> {
@@ -98,6 +102,7 @@ export function createLobbyStackMcpHttpHandler(dependencies: McpHandlerDependenc
   const resolveGrant = dependencies.resolveGrant ?? (async (value: string) => await resolveOAuthAccessToken(serverDependencies.context(), value));
   const touchKey = dependencies.touchKey ?? (async (resolved: ResolvedApiKey) => await touchApiKeyLastUsed(serverDependencies.context(), resolved));
   const touchGrant = dependencies.touchGrant ?? (async (grantId: string) => await touchOAuthGrant(serverDependencies.context(), grantId));
+  const appName = dependencies.appName ?? (async () => (await loadBranding()).appName);
   const mcp: McpHttpHandler = createMcpHandler(({ authInfo }) => createLobbyStackMcpServer(principalFromAuthInfo(authInfo), serverDependencies), {
     onerror: (error) => console.warn(JSON.stringify({ event: "mcp.transport_error", message: error.message })),
   });
@@ -107,10 +112,10 @@ export function createLobbyStackMcpHttpHandler(dependencies: McpHandlerDependenc
     // outside the configured app URLs is refused, including one that matches the
     // request's Host, so a DNS-rebinding page cannot drive the endpoint.
     const origin = request.headers.get("origin");
-    if (origin !== null && !trustedMcpOrigins().has(origin.trim())) return jsonError(403, "forbidden", "This origin may not call the LobbyStack MCP server.");
+    if (origin !== null && !trustedMcpOrigins().has(origin.trim())) return jsonError(403, "forbidden", "This origin may not call this MCP server.");
 
     const token = bearerToken(request.headers.get("authorization"));
-    if (!token) return jsonError(401, "unauthorized", "Sign in with OAuth, or send a LobbyStack API key as Authorization: Bearer <key>.", { "WWW-Authenticate": mcpBearerChallenge() });
+    if (!token) return jsonError(401, "unauthorized", "Sign in with OAuth, or send an API key as Authorization: Bearer <key>.", { "WWW-Authenticate": mcpBearerChallenge() });
 
     let credential: VerifiedCredential | null = null;
     if (isOAuthAccessToken(token)) {
@@ -133,6 +138,6 @@ export function createLobbyStackMcpHttpHandler(dependencies: McpHandlerDependenc
       if (verified.kind === "api_key") await touchKey(verified.key).catch(() => undefined);
       else await touchGrant(verified.grant.grantId).catch(() => undefined);
     });
-    return await mcp.fetch(request, { authInfo: authInfoFor(credential) });
+    return await mcp.fetch(request, { authInfo: authInfoFor(credential, await appName()) });
   };
 }

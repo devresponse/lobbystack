@@ -64,6 +64,16 @@ Run the tests on Node.js 22 before a push, since Zapier runs that version: `npx 
 
 The script tests the connection, subscribes and unsubscribes all six triggers, loads samples, and runs every action and search. Test subscriptions point at a `.invalid` host, so the worker's delivery attempts fail at DNS and no data leaves your machine.
 
+## Name and address
+
+The integration calls the product LobbyStack and connects to `https://app.lobbystack.com` unless three variables say otherwise. A deployment that publishes its own integration, such as AlloPlace, sets them in the shell that runs `zapier-platform push` (field labels and help text are read then) and with `zapier-platform env:set` for the running integration (error messages are read then):
+
+- `ZAPIER_APP_NAME`: the name users see, for example `AlloPlace`.
+- `ZAPIER_DEFAULT_URL`: the dashboard address a new connection starts with.
+- `ZAPIER_DOCS_URL`: where the API key help links, without a trailing slash.
+
+Register it under that name too, in step 2 below.
+
 ## Register and publish
 
 The account owner has to accept the Zapier Developer Platform Agreement first. Nobody has run any of these commands yet.

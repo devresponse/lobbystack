@@ -398,7 +398,7 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
-    if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, so LobbyStack bills it directly.");
+    if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, billed directly by the operator.");
     const { plan: current } = await loadBillingContext(tx, caller.businessId);
     if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
     const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
@@ -942,7 +942,7 @@ export type CalendarAccess = {
 
 type AccountCalendar = Awaited<ReturnType<CalendarAccess["listCalendars"]>>[number];
 
-/** LobbyStack adds appointments to the calendar it reads, so it needs one it may write to, as in the dashboard. */
+/** Booking adds appointments to the calendar it reads, so it needs one it may write to, as in the dashboard. */
 function isWritableCalendar(calendar: AccountCalendar): boolean {
   return calendar.accessRole === "owner" || calendar.accessRole === "writer";
 }
@@ -1008,7 +1008,7 @@ export async function updateCalendarConnectionForApi(context: DomainContext, cal
   if (calendarId !== undefined) {
     const picked = (await accountCalendars(context, caller, connectionId, access())).find((calendar) => calendar.id === calendarId);
     if (!picked) throw invalidRequest("The connected account has no calendar with this id.", [{ path: "calendar_id", message: "Use an id from GET /calendars/{connection_id}/calendars." }]);
-    if (!isWritableCalendar(picked)) throw invalidRequest("LobbyStack can't add appointments to this calendar. Pick one the account can change.", [{ path: "calendar_id", message: "Not writable." }]);
+    if (!isWritableCalendar(picked)) throw invalidRequest("Appointments can't be added to this calendar. Pick one the account can change.", [{ path: "calendar_id", message: "Not writable." }]);
   }
   return await inBusiness(context, caller, async (tx) => {
     // Held to the end, so a disconnect can't land between the checks and the changes.

@@ -56,7 +56,7 @@ import {
 import { SUPPORTED_LOCALES } from "../locale";
 import { contractSchema } from "./contract-schema";
 
-// The LobbyStack MCP tools. Each tool maps to one v1 domain operation, the
+// The MCP tools. Each tool maps to one v1 domain operation, the
 // same function the REST handler calls, and requires the same scope. Request
 // bodies are checked against the v1 contract schemas, so a tool accepts
 // exactly what the matching REST endpoint accepts.
@@ -352,7 +352,7 @@ export const mcpTools: McpTool[] = [
       contact_phone: z.string().optional().describe("Customer phone in E.164 format. A new contact is created if none has this number."),
       contact_name: z.string().optional().describe("Customer name, used when a new contact is created."),
       staff_id: z.uuid().optional().describe("Preferred staff member, if the customer asked for one."),
-      sms_consent: z.boolean().optional().describe("True only if the customer agreed to confirmation and reminder texts. Never assume it. Has no effect on LobbyStack Cloud, where only the receptionist collects text consent, on a call."),
+      sms_consent: z.boolean().optional().describe("True only if the customer agreed to confirmation and reminder texts. Never assume it. Has no effect in cloud mode, where only the receptionist collects text consent, on a call."),
       idempotency_key: idempotencyKeyInput,
     }),
     outputSchema: contractSchema(apiAppointmentSchema),
@@ -362,7 +362,7 @@ export const mcpTools: McpTool[] = [
   tool({
     name: "cancel_appointment",
     title: "Cancel an appointment",
-    description: "Cancels an appointment, removes it from the staff calendar and stops its reminders. When the customer agreed to texts, LobbyStack texts them that it's cancelled. Cancelling an appointment that is already cancelled returns it unchanged. Confirm with the owner before calling.",
+    description: "Cancels an appointment, removes it from the staff calendar and stops its reminders. When the customer agreed to texts, they get a text that it's cancelled. Cancelling an appointment that is already cancelled returns it unchanged. Confirm with the owner before calling.",
     operation: "cancelAppointment",
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     inputSchema: z.object({ appointment_id: uuid("appointment") }),

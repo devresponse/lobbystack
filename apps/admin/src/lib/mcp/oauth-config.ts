@@ -1,4 +1,4 @@
-import { brandLinks, oauthGrantableScopes } from "@lobbystack/shared";
+import { DEFAULT_APP_NAME, brandLinks, oauthGrantableScopes } from "@lobbystack/shared";
 
 // Where the MCP resource and its authorization server live. Everything is
 // derived from APP_BASE_URL, the public URL of the admin app, so metadata,
@@ -31,13 +31,13 @@ export function protectedResourceMetadataUrl(environment?: Readonly<Record<strin
 }
 
 /** The RFC 9728 Protected Resource Metadata document for /api/mcp. */
-export function protectedResourceMetadata(environment?: Readonly<Record<string, string | undefined>>): Record<string, unknown> {
+export function protectedResourceMetadata(environment?: Readonly<Record<string, string | undefined>>, appName: string = DEFAULT_APP_NAME): Record<string, unknown> {
   return {
     resource: mcpResourceUrl(environment),
     authorization_servers: [oauthIssuer(environment)],
     scopes_supported: [...MCP_OAUTH_SCOPES],
     bearer_methods_supported: ["header"],
-    resource_name: "LobbyStack",
+    resource_name: appName,
     resource_documentation: `${brandLinks().docsUrl}/ai/mcp`,
   };
 }
@@ -51,7 +51,7 @@ export function tokenAudienceMatches(resources: readonly string[], environment?:
 
 /** The WWW-Authenticate value that points OAuth clients at the metadata. */
 export function mcpBearerChallenge(error?: "invalid_token" | "insufficient_scope", environment?: Readonly<Record<string, string | undefined>>): string {
-  const parts = [`realm="LobbyStack MCP"`, `resource_metadata="${protectedResourceMetadataUrl(environment)}"`, `scope="${MCP_OAUTH_SCOPES.join(" ")}"`];
+  const parts = [`realm="MCP"`, `resource_metadata="${protectedResourceMetadataUrl(environment)}"`, `scope="${MCP_OAUTH_SCOPES.join(" ")}"`];
   if (error) parts.push(`error="${error}"`);
   return `Bearer ${parts.join(", ")}`;
 }

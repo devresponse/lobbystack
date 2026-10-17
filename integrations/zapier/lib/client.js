@@ -2,10 +2,11 @@
 
 const crypto = require('crypto');
 
-const DEFAULT_BASE_URL = 'https://app.lobbystack.com';
+const { APP_NAME, DEFAULT_BASE_URL } = require('./brand');
+
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
-// Returns the origin of the LobbyStack install, without a trailing slash or
+// Returns the origin of the dashboard, without a trailing slash or
 // /api/v1 suffix. Self-hosted installs must use HTTPS; plain HTTP is accepted
 // only for a local development server on this machine.
 const resolveBaseUrl = (authData = {}) => {
@@ -14,14 +15,14 @@ const resolveBaseUrl = (authData = {}) => {
   try {
     url = new URL(raw.includes('://') ? raw : `https://${raw}`);
   } catch (error) {
-    throw new Error(`The LobbyStack URL "${raw}" is not a valid web address.`);
+    throw new Error(`The ${APP_NAME} URL "${raw}" is not a valid web address.`);
   }
   const local = LOCAL_HOSTS.has(url.hostname) || url.hostname.endsWith('.localhost');
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) {
-    throw new Error('The LobbyStack URL must start with https://.');
+    throw new Error(`The ${APP_NAME} URL must start with https://.`);
   }
   if (url.username || url.password) {
-    throw new Error('The LobbyStack URL must not contain a username or password.');
+    throw new Error(`The ${APP_NAME} URL must not contain a username or password.`);
   }
   const path = url.pathname.replace(/\/+$/, '').replace(/\/api\/v1$/, '');
   return `${url.origin}${path}`;

@@ -35,7 +35,7 @@ describe("OAuth page hops", () => {
 
 describe("OAuth CORS", () => {
   it("lets browser MCP clients read discovery metadata", async () => {
-    const response = protectedResourceMetadataResponse();
+    const response = await protectedResourceMetadataResponse();
     expect(response.headers.get("access-control-allow-origin")).toBe("*");
     expect(await response.json()).toHaveProperty("authorization_servers");
     expect(metadataOptions().status).toBe(204);

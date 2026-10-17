@@ -130,6 +130,7 @@ beforeEach(() => {
     rateLimit,
     operations,
     log: (line) => { logs.push(line); },
+    appName: async () => "AlloPlace",
   });
 });
 
@@ -249,6 +250,12 @@ describe("MCP authentication", () => {
 });
 
 describe("MCP tool listing", () => {
+  it("names the server after the deployment", async () => {
+    const client = await connect(keyWith(["calls:read"]));
+    expect(client.getServerVersion()).toMatchObject({ name: "lobbystack", title: "AlloPlace" });
+    expect(client.getInstructions()).toMatch(/^AlloPlace runs an AI receptionist for one business\./);
+  });
+
   it("lists every tool for a key with every scope, with annotations and output schemas", async () => {
     const client = await connect("lsk_aaaaaaaa_full");
     const { tools } = await client.listTools();

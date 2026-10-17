@@ -152,6 +152,15 @@ The sign-in, sign-up, and other public pages are prerendered at build time, befo
   - The `LobbyStack-Business` API header (keep it, or add an alias).
   - Cookie and storage keys, `x-lobbystack-*` headers, the Redis prefix, and telemetry names.
 
+## API, MCP and AI text
+
+These use the name from `deploymentAppName()` or `loadBranding()`, like emails:
+
+- The OpenAPI document at `/api/v1/openapi.json` is titled "{name} API". Its descriptions, and the API's error messages, say "the dashboard", "an account" or "the operator" rather than a name. The committed `mintlify/api-reference/openapi.json` keeps LobbyStack's title.
+- The MCP server's title and the first line of its instructions use the name; OAuth's protected resource metadata gives it as `resource_name`, and the `oauth_resources` row is named "{name} MCP server". The `WWW-Authenticate` realm is just "MCP".
+- Prospect demos tell the voice agent "This is a prospect demo made with {name}."
+- New businesses start with their own name as the placeholder summary, as the agent settings API already did. Migration 0102 changed the old placeholder, "… uses LobbyStack to answer calls.", to the business name; `agent-core/src/businessFacts.ts` still recognizes the old wording in snapshots cached before that.
+
 ## Still branded
 
 These places still say LobbyStack or link to lobbystack.com. Variables marked "proposed" don't exist yet. When they're added, they should be resolved like the name and logo: the environment first, then a saved value, then the default.
@@ -159,11 +168,11 @@ These places still say LobbyStack or link to lobbystack.com. Variables marked "p
 | Area | Where | Proposed setting |
 | --- | --- | --- |
 | Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
-| AI and voice text | The prospect demo instructions (`packages/domain/src/server/demos.ts`); the placeholder summary "… uses LobbyStack to answer calls." (`tenancy.ts`, `businessSummary.ts`), which `agent-core/src/businessFacts.ts` and migration 0074 detect by its wording; the MCP server's title and instructions (`apps/admin/src/lib/mcp/server.ts`) | The app name. The placeholder detection has to keep matching the old wording. |
-| API and OAuth | The OpenAPI title "LobbyStack API" and descriptions such as "LobbyStack Cloud" (`packages/shared/src/publicApi/`); API error messages; the webhook test event; the `LobbyStack-Webhooks` and `LobbyStack-OAuth` user agents; the OAuth resource name and realm (`apps/admin/src/lib/mcp/oauth-config.ts`, `oauth-provider.ts`) | The app name, except the user agents. |
-| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack` as an alias, because customers' sites may call it. Use `BRAND_ACCENT_COLOR`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
+| API wire names | The `LobbyStack-Business` header, the `LobbyStack-Webhooks/1.0` and `LobbyStack-OAuth/1.0` user agents, the `lsk_` and `lsp_` key prefixes, and the MCP server id `lobbystack` | None: API clients, the CLI and Zapier send or match them, so renaming them would break integrations. Descriptions and messages around them name no product. |
+| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use `BRAND_ACCENT_COLOR`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
-| CLI and Zapier | The `lobbystack` command, its config path, and its help text, which links to `docs.lobbystack.com` (`packages/cli`); the Zapier app's labels, errors, and docs link, plus its name and logo in Zapier's dashboard (`integrations/zapier`) | Separate distributions, so they're renamed by publishing a renamed copy rather than with a variable. |
+| CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to `docs.lobbystack.com` in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
+| Zapier | The integration's name and logo in Zapier's developer dashboard | `ZAPIER_APP_NAME`, `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` set its labels, messages, default address and docs link (`integrations/zapier/README.md`); registering it under that name is done in Zapier. |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |
 

@@ -138,7 +138,7 @@ const contactsGeneratePins = (path: string): Command => {
       length: { type: "string", placeholder: "<digits>", description: `Digits in each PIN, ${CONTACT_PASSCODE_MIN_LENGTH} to ${CONTACT_PASSCODE_MAX_LENGTH}. Defaults to ${CONTACT_PASSCODE_DEFAULT_LENGTH}.` },
       all: { type: "boolean", description: "Keep going until every contact with a phone number has a PIN." },
     },
-    notes: "LobbyStack keeps only a hash of each PIN, so this is the only time the PINs are shown. Keep the output safe until every customer has theirs.",
+    notes: "Only a hash of each PIN is kept, so this is the only time the PINs are shown. Keep the output safe until every customer has theirs.",
     operations: ["generateContactPasscodes"],
     async run({ output, values, positionals, connect }) {
       const digits = stringValue(values, "length");
@@ -227,7 +227,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     update: { operation: "updateBusiness" },
     use: businessUse,
   }),
-  group("users", "Make LobbyStack accounts for owners who have none yet, with a platform key.", {
+  group("users", "Make dashboard accounts for owners who have none yet, with a platform key.", {
     create: { operation: "createUser", args: ["email"] },
   }),
   group("hours", "See and change the opening hours.", { get: hoursGet, set: hoursSet }),

@@ -134,7 +134,8 @@ export async function insertBusinessInTransaction(
     businessId,
     greeting: `Thanks for calling ${name}.`,
     tone: "warm and direct",
-    summary: `${name} uses LobbyStack to answer calls.`,
+    // The business name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
+    summary: name,
     bookingPolicy: "Only confirm a booking after availability is checked.",
     voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
     smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",

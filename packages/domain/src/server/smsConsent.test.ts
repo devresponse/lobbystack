@@ -45,4 +45,13 @@ describe("SMS HELP replies", () => {
     expect(sharedSenderHelpReply("AlloPlace")).toBe("AlloPlace: For help with an appointment, call the business you booked with. For anything else, email support@alloplace.com. Reply STOP to opt out.");
     expect(sharedSenderStartReply("AlloPlace")).toBe("AlloPlace: You can get texts from this number again. Reply HELP for help or STOP to opt out.");
   });
+
+  it("take the address and website from the brand file the deployment's domain picks", async () => {
+    // The brand is resolved once per process, so this test loads the modules afresh.
+    vi.resetModules();
+    vi.stubEnv("APP_BASE_URL", "https://demo.alloplace.com");
+    const sms = await import("./sms");
+    expect(sms.classifySmsKeywordReply({ body: "HELP" }, "AlloPlace")?.body).toBe("AlloPlace: For help, contact support@alloplace.com or visit https://alloplace.com. Reply STOP to opt out.");
+    expect(sms.sharedSenderHelpReply("AlloPlace")).toBe("AlloPlace: For help with an appointment, call the business you booked with. For anything else, email support@alloplace.com. Reply STOP to opt out.");
+  });
 });

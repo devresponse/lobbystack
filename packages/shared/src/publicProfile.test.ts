@@ -37,6 +37,15 @@ describe("public profile settings", () => {
     expect(publicProfileSettingsSchema.safeParse({ ...settings, widgetKeyId: "not-a-uuid" }).success).toBe(false);
   });
 
+  it("reads a missing text field as empty", () => {
+    const { category: _category, publicEmail: _publicEmail, ...rest } = settings;
+    expect(publicProfileSettingsSchema.parse({ ...rest, address: { city: "Vancouver" } })).toMatchObject({
+      category: null,
+      publicEmail: null,
+      address: { line1: null, line2: null, city: "Vancouver", region: null, postalCode: null, countryCode: null },
+    });
+  });
+
   it("keeps a widget key id", () => {
     const widgetKeyId = "6f1c2b9e-3d4a-4b5c-8d6e-7f8091a2b3c4";
     expect(publicProfileSettingsSchema.parse({ ...settings, widgetKeyId }).widgetKeyId).toBe(widgetKeyId);

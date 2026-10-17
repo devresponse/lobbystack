@@ -28,46 +28,78 @@ export const PUBLIC_PROFILE_LIMITS = {
 const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 const UNSAFE_CHARACTERS_EXCEPT_NEWLINE = /(?!\n)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 
+// Each field cleans up its text before checking it, and keeps an empty value
+// as null. They stay plain strings to zod, so the API documents them as text.
+
 /** One line of text: whitespace runs become one space; empty becomes null. */
 function singleLine(max: number) {
-  return z.preprocess(
-    (value) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim() || null : value ?? null),
-    z.string().max(max).refine((value) => !UNSAFE_CHARACTERS.test(value), "Use plain text.").nullable(),
-  );
+  return z.string()
+    .overwrite((value) => value.replace(/\s+/g, " ").trim())
+    .max(max)
+    .refine((value) => !UNSAFE_CHARACTERS.test(value), "Use plain text.")
+    .nullable()
+    .transform((value) => value || null);
 }
 
 /** Plain text that keeps its paragraphs, with at most one blank line between them. */
-const description = z.preprocess(
-  (value) => (typeof value === "string" ? value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim() || null : value ?? null),
-  z.string().max(PUBLIC_PROFILE_LIMITS.description).refine((value) => !UNSAFE_CHARACTERS_EXCEPT_NEWLINE.test(value), "Use plain text.").nullable(),
-);
+const description = z.string()
+  .overwrite((value) => value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim())
+  .max(PUBLIC_PROFILE_LIMITS.description)
+  .refine((value) => !UNSAFE_CHARACTERS_EXCEPT_NEWLINE.test(value), "Use plain text.")
+  .nullable()
+  .transform((value) => value || null);
 
-const countryCode = z.preprocess(
-  (value) => (typeof value === "string" ? value.trim().toUpperCase() || null : value ?? null),
-  z.string().regex(/^[A-Z]{2}$/, "Use a two-letter country code, such as CA.").nullable(),
-);
+const countryCode = z.string()
+  .overwrite((value) => value.trim().toUpperCase())
+  .regex(/^(?:[A-Z]{2})?$/, "Use a two-letter country code, such as CA.")
+  .nullable()
+  .transform((value) => value || null);
 
-const publicEmail = z.preprocess(
-  (value) => (typeof value === "string" ? value.trim() || null : value ?? null),
-  z.string().max(PUBLIC_PROFILE_LIMITS.email).refine((value) => normalizeEmailAddress(value) !== null, "Enter an email address such as hello@example.com.").nullable(),
-);
+const publicEmail = z.string()
+  .overwrite((value) => value.trim())
+  .max(PUBLIC_PROFILE_LIMITS.email)
+  .refine((value) => !value || normalizeEmailAddress(value) !== null, "Enter an email address such as hello@example.com.")
+  .nullable()
+  .transform((value) => value || null);
+
+/** The page's text fields, checked the same way by the dashboard and the API. */
+export const publicProfileTextFields = {
+  category: singleLine(PUBLIC_PROFILE_LIMITS.category),
+  description,
+  publicEmail,
+  address: {
+    line1: singleLine(PUBLIC_PROFILE_LIMITS.addressLine),
+    line2: singleLine(PUBLIC_PROFILE_LIMITS.addressLine),
+    city: singleLine(PUBLIC_PROFILE_LIMITS.city),
+    region: singleLine(PUBLIC_PROFILE_LIMITS.region),
+    postalCode: singleLine(PUBLIC_PROFILE_LIMITS.postalCode),
+    countryCode,
+  },
+} as const;
+
+/** A text field that reads a missing value as empty. */
+function orEmpty<T extends z.ZodType>(field: T) {
+  return z.preprocess((value) => value ?? null, field);
+}
+
+const { address: addressFields } = publicProfileTextFields;
 
 export const publicProfileAddressSchema = z.object({
-  line1: singleLine(PUBLIC_PROFILE_LIMITS.addressLine),
-  line2: singleLine(PUBLIC_PROFILE_LIMITS.addressLine),
-  city: singleLine(PUBLIC_PROFILE_LIMITS.city),
-  region: singleLine(PUBLIC_PROFILE_LIMITS.region),
-  postalCode: singleLine(PUBLIC_PROFILE_LIMITS.postalCode),
-  countryCode,
+  line1: orEmpty(addressFields.line1),
+  line2: orEmpty(addressFields.line2),
+  city: orEmpty(addressFields.city),
+  region: orEmpty(addressFields.region),
+  postalCode: orEmpty(addressFields.postalCode),
+  countryCode: orEmpty(addressFields.countryCode),
 }).strict();
 
 /** Everything an owner or admin sets for the page. The dashboard sends all of it on each save. */
 export const publicProfileSettingsSchema = z.object({
   published: z.boolean(),
-  category: singleLine(PUBLIC_PROFILE_LIMITS.category),
-  description,
+  category: orEmpty(publicProfileTextFields.category),
+  description: orEmpty(publicProfileTextFields.description),
   address: publicProfileAddressSchema,
-  publicEmail,
+  publicEmail: orEmpty(publicProfileTextFields.publicEmail),
   showPhone: z.boolean(),
   showHours: z.boolean(),
   showServices: z.boolean(),

@@ -289,6 +289,8 @@ export type PublicProfileSettingsView = {
   slug: string;
   businessName: string;
   publishedAt: string | null;
+  /** When the settings were last saved, or null when they never were. */
+  updatedAt: string | null;
   settings: PublicProfileSettings;
   widgetKeys: PublicProfileWidgetKeyOption[];
 };
@@ -302,15 +304,17 @@ async function profileWidgetKeyOptions(tx: DatabaseTransaction, businessId: stri
 }
 
 /**
- * The page settings for the dashboard. A business that never saved them gets
- * the defaults: unpublished, every section shown, the receptionist's summary
- * as the description when AI or a person wrote one, and the most recently
- * used widget.
+ * The page settings for the dashboard and the API. A business that never
+ * saved them gets the defaults: unpublished, every section shown, the
+ * receptionist's summary as the description when AI or a person wrote one,
+ * and the most recently used widget. lock holds the saved row until the
+ * transaction ends, for a change made from these settings.
  */
-export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, input: { businessId: string }): Promise<PublicProfileSettingsView> {
+export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, input: { businessId: string; lock?: boolean }): Promise<PublicProfileSettingsView> {
+  const profileQuery = tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1);
   const [business, profile, receptionist, keys] = await Promise.all([
     tx.select({ slug: businesses.slug, name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).then((rows) => rows[0]),
-    tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1).then((rows) => rows[0]),
+    (input.lock ? profileQuery.for("update") : profileQuery).then((rows) => rows[0]),
     tx.select({ summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1).then((rows) => rows[0]),
     profileWidgetKeyOptions(tx, input.businessId),
   ]);
@@ -321,6 +325,7 @@ export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, 
     slug: business.slug,
     businessName: business.name,
     publishedAt: row.publishedAt?.toISOString() ?? null,
+    updatedAt: profile ? row.updatedAt.toISOString() : null,
     settings: {
       published: row.published,
       category: row.category,
@@ -337,20 +342,25 @@ export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, 
   };
 }
 
+export const PUBLIC_PROFILE_WIDGET_UNAVAILABLE = "Choose one of this business's active website widgets.";
+
+/** Who changed the page, for the audit log: the account, and the API key or grant that acted for it. */
+export type PublicProfileAudit = { actorUserId: string | null; payload?: Record<string, unknown> };
+
 /**
- * Saves the page settings, for an owner or admin of the business. The widget
- * must be one of the business's active widgets. Publishing and unpublishing
- * are recorded in the audit log.
+ * Saves the page settings. A widget other than the saved one must be one of
+ * the business's active widgets; the saved one may have been paused since,
+ * and keeping it changes nothing. Publishing and unpublishing are recorded in
+ * the audit log.
  */
-export async function updateBusinessPublicProfile(tx: DatabaseTransaction, input: { businessId: string; userId: string; settings: PublicProfileSettings }): Promise<PublicProfileSettingsView> {
-  await requireBusinessAdmin(tx, input);
+export async function savePublicProfileInTransaction(tx: DatabaseTransaction, input: { businessId: string; settings: PublicProfileSettings; audit: PublicProfileAudit }): Promise<void> {
   const { settings } = input;
-  if (settings.widgetKeyId) {
-    const keys = await profileWidgetKeyOptions(tx, input.businessId);
-    if (!keys.some((key) => key.id === settings.widgetKeyId)) throw Object.assign(new Error("Choose one of this business's active website widgets."), { status: 400, code: "widget_key_unavailable" });
-  }
   // Locks the row, so two saves can't both record the same publish.
-  const previous = (await tx.select({ published: businessPublicProfiles.published }).from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1).for("update"))[0];
+  const previous = (await tx.select({ published: businessPublicProfiles.published, widgetKeyId: businessPublicProfiles.widgetKeyId }).from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1).for("update"))[0];
+  if (settings.widgetKeyId && settings.widgetKeyId !== previous?.widgetKeyId) {
+    const keys = await profileWidgetKeyOptions(tx, input.businessId);
+    if (!keys.some((key) => key.id === settings.widgetKeyId)) throw Object.assign(new Error(PUBLIC_PROFILE_WIDGET_UNAVAILABLE), { status: 400, code: "widget_key_unavailable" });
+  }
   const wasPublished = previous?.published ?? false;
   const now = new Date();
   const values = {
@@ -374,7 +384,14 @@ export async function updateBusinessPublicProfile(tx: DatabaseTransaction, input
   };
   await tx.insert(businessPublicProfiles).values({ businessId: input.businessId, ...values }).onConflictDoUpdate({ target: businessPublicProfiles.businessId, set: values });
   if (settings.published !== wasPublished) {
-    await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: settings.published ? "public_profile.published" : "public_profile.unpublished", entityType: "business", entityId: input.businessId });
+    const { actorUserId, payload } = input.audit;
+    await tx.insert(auditLogs).values({ businessId: input.businessId, ...(actorUserId ? { actorUserId } : {}), eventType: settings.published ? "public_profile.published" : "public_profile.unpublished", entityType: "business", entityId: input.businessId, ...(payload ? { payload } : {}) });
   }
+}
+
+/** Saves the page settings, for an owner or admin of the business. */
+export async function updateBusinessPublicProfile(tx: DatabaseTransaction, input: { businessId: string; userId: string; settings: PublicProfileSettings }): Promise<PublicProfileSettingsView> {
+  await requireBusinessAdmin(tx, input);
+  await savePublicProfileInTransaction(tx, { businessId: input.businessId, settings: input.settings, audit: { actorUserId: input.userId } });
   return await getBusinessPublicProfileSettings(tx, { businessId: input.businessId });
 }

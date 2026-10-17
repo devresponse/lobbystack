@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { billingPlanSlugs } from "../billing";
 import { interfaceLocales } from "../locales";
+import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, webhookEventTypes, weekdays } from "./constants";
@@ -300,6 +301,54 @@ export const apiWidgetKeyUpdateSchema = z.strictObject({
   allowed_origins: widgetOrigins.optional().describe("Replaces the list."),
   config: apiWidgetConfigSchema.optional().describe("Replaces the whole configuration."),
   status: z.enum(widgetKeyStatuses).optional().describe("A revoked key can't be turned back on."),
+});
+
+// The public profile page checks its text as the dashboard does: whitespace
+// runs become one space, and an empty value is stored as null.
+const profileText = publicProfileTextFields;
+
+export const apiPublicProfileSchema = z.object({
+  slug: z.string().describe("The business's slug, the last part of the page's address."),
+  url: z.string().describe("The page's address. It answers 404 until the page is published."),
+  published: z.boolean().describe("Whether anyone can open the page. Until it's published, only the business's team can preview it, from the dashboard."),
+  published_at: nullableTimestamp.describe("When the page was last published. Unpublishing keeps it."),
+  category: z.string().nullable().describe("What kind of business it is, shown under its name, such as Dental clinic."),
+  description: z.string().nullable().describe("About the business, as plain text with paragraphs."),
+  address: z.object({
+    line1: z.string().nullable(),
+    line2: z.string().nullable(),
+    city: z.string().nullable(),
+    region: z.string().nullable().describe("Province or state."),
+    postal_code: z.string().nullable(),
+    country_code: z.string().nullable().describe("Two-letter country code, such as CA."),
+  }).describe("The address the page shows. Parts that are null are left out."),
+  public_email: z.string().nullable().describe("The email address the page shows."),
+  show_phone: z.boolean().describe("Whether the page shows the number callers reach the receptionist on."),
+  show_hours: z.boolean().describe("Whether the page shows the opening hours and closures in the next 30 days."),
+  show_services: z.boolean().describe("Whether the page lists the active services."),
+  show_map: z.boolean().describe("Whether the page shows a map of the address. It needs a street or a city."),
+  widget_key_id: z.uuid().nullable().describe("The widget key of the website chat the page opens. null: the page has no chat. While that key is disabled or revoked, the page has no chat either."),
+  updated_at: nullableTimestamp.describe("When the settings were last saved. null: they never were, so these are the defaults the dashboard starts from: the receptionist's summary as the description, unless it's still the sign-up placeholder, and the most recently used widget."),
+}).describe("The business's public profile page on this deployment, at /profile/{slug}: whether it's published and what it shows.");
+
+export const apiPublicProfileUpdateSchema = z.strictObject({
+  published: z.boolean().optional().describe("true publishes the page. false takes it down, and its address answers 404."),
+  category: profileText.category.optional().describe(`Up to ${PUBLIC_PROFILE_LIMITS.category} characters. An empty string or null removes it.`),
+  description: profileText.description.optional().describe(`Up to ${PUBLIC_PROFILE_LIMITS.description} characters. Paragraphs are kept, with at most one blank line between them. An empty string or null removes it.`),
+  address: z.strictObject({
+    line1: profileText.address.line1.optional(),
+    line2: profileText.address.line2.optional(),
+    city: profileText.address.city.optional(),
+    region: profileText.address.region.optional(),
+    postal_code: profileText.address.postalCode.optional(),
+    country_code: profileText.address.countryCode.optional().describe("Two-letter country code, such as CA."),
+  }).optional().describe("Changes the parts sent and keeps the rest. An empty string or null removes a part."),
+  public_email: profileText.publicEmail.optional().describe("An empty string or null removes it."),
+  show_phone: z.boolean().optional(),
+  show_hours: z.boolean().optional(),
+  show_services: z.boolean().optional(),
+  show_map: z.boolean().optional(),
+  widget_key_id: z.uuid().nullable().optional().describe("One of the business's active widget keys, which GET /widget-keys lists. null removes the chat from the page."),
 });
 
 const calendarStatuses = ["connected", "syncing", "error"] as const;
@@ -822,6 +871,8 @@ export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;
 export type ApiWidgetKeyCreated = z.infer<typeof apiWidgetKeyCreatedSchema>;
 export type ApiWidgetKeyCreate = z.infer<typeof apiWidgetKeyCreateSchema>;
 export type ApiWidgetKeyUpdate = z.infer<typeof apiWidgetKeyUpdateSchema>;
+export type ApiPublicProfile = z.infer<typeof apiPublicProfileSchema>;
+export type ApiPublicProfileUpdate = z.infer<typeof apiPublicProfileUpdateSchema>;
 export type ApiCalendarConnection = z.infer<typeof apiCalendarConnectionSchema>;
 export type ApiCalendarConnectionUpdate = z.infer<typeof apiCalendarConnectionUpdateSchema>;
 export type ApiAccountCalendar = z.infer<typeof apiAccountCalendarSchema>;

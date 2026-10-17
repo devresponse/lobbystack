@@ -316,6 +316,15 @@ async function syncReceptionist(run: Run): Promise<void> {
   await apply(run, "receptionist", Object.keys(changes), async () => { await run.client.call("updateReceptionist", { body: changes }); });
 }
 
+/** The page at /profile/<slug>. Address parts the manifest leaves out keep what they have. */
+async function syncPublicProfile(run: Run): Promise<void> {
+  const wanted = run.manifest.public_profile;
+  if (!wanted) return;
+  const current = (await run.client.call("getPublicProfile")).data as Row;
+  const changes = Object.fromEntries(Object.entries(wanted).filter(([field, value]) => value !== undefined && !sameValue(value, current[field])));
+  await apply(run, "public profile", Object.keys(changes), async () => { await run.client.call("updatePublicProfile", { body: changes }); });
+}
+
 async function syncServices(run: Run): Promise<void> {
   const wanted = run.manifest.services;
   if (!wanted?.length) return;
@@ -770,7 +779,7 @@ async function completeOnboarding(run: Run): Promise<void> {
 export const onboard: Command = {
   summary: "Set up a business from a manifest file, and on reruns change only what differs.",
   usage: "lobbystack onboard <manifest.yaml> [--plan] [--yes] [--state <path>] [--business <id>]",
-  arguments: [{ name: "manifest.yaml", description: "The business, its knowledge, receptionist, services, plan, number and owner. https://docs.lobbystack.com/api/cli lists every field." }],
+  arguments: [{ name: "manifest.yaml", description: "The business, its knowledge, receptionist, services, public page, plan, number and owner. https://docs.lobbystack.com/api/cli lists every field." }],
   options: {
     plan: { type: "boolean", description: "Show what it would change, and change nothing." },
     yes: { type: "boolean", description: "Claim a number and start a checkout without asking first." },
@@ -784,7 +793,7 @@ export const onboard: Command = {
     "Exit codes: 0 the business matches the manifest. 4 not finished: the rest waits on a payment or the owner's",
     "claim, so run it again once that's done. 1, 2 and 3 as for every command.",
   ].join("\n"),
-  operations: ["getMe", "listBusinesses", "createBusiness", "getBusiness", "updateBusiness", "getReceptionist", "updateReceptionist", "listServices", "createService", "updateService", "listRules", "createRule", "updateRule", "listKnowledgeSources", "createKnowledgeSource", "expandKnowledgeSource", "retryKnowledgeSource", "deleteKnowledgeSource", "getKnowledgeSource", "createKnowledgeUpload", "completeKnowledgeUpload", "listKnowledgeEntries", "createKnowledgeEntry", "updateKnowledgeEntry", "getBilling", "setManagedPlan", "createCheckout", "getCheckout", "listPhoneNumbers", "searchPhoneNumbers", "createPhoneNumberClaim", "getPhoneNumberClaim", "getOnboarding", "completeOnboarding", "getTeam", "createClaimLink"],
+  operations: ["getMe", "listBusinesses", "createBusiness", "getBusiness", "updateBusiness", "getReceptionist", "updateReceptionist", "listServices", "createService", "updateService", "listRules", "createRule", "updateRule", "listKnowledgeSources", "createKnowledgeSource", "expandKnowledgeSource", "retryKnowledgeSource", "deleteKnowledgeSource", "getKnowledgeSource", "createKnowledgeUpload", "completeKnowledgeUpload", "listKnowledgeEntries", "createKnowledgeEntry", "updateKnowledgeEntry", "getPublicProfile", "updatePublicProfile", "getBilling", "setManagedPlan", "createCheckout", "getCheckout", "listPhoneNumbers", "searchPhoneNumbers", "createPhoneNumberClaim", "getPhoneNumberClaim", "getOnboarding", "completeOnboarding", "getTeam", "createClaimLink"],
   async run(context: CommandContext): Promise<ExitCode> {
     const { io, output, values, positionals } = context;
     const [manifestPath, ...extra] = positionals;
@@ -828,7 +837,7 @@ export const onboard: Command = {
       const businessId = await ensureBusiness(run, make, named, fresh, connection.key.startsWith("lsk_"));
       if (!businessId) {
         // With --plan and no business yet there's nothing to compare against, so every section would be set up.
-        for (const section of ["receptionist", "services", "rules", "knowledge", "plan", "phone_number", "owner"] as const) {
+        for (const section of ["receptionist", "services", "rules", "knowledge", "public_profile", "plan", "phone_number", "owner"] as const) {
           if (manifest[section] !== undefined) run.log({ step: section.replace("_", " "), action: "would set up", detail: "" });
         }
       } else {
@@ -846,6 +855,7 @@ export const onboard: Command = {
         await syncServices(run);
         await syncRules(run);
         await syncKnowledge(run);
+        await syncPublicProfile(run);
         // An operator's checkout goes to the business's owner, so the claim link goes out first; the operator's key keeps reaching the business.
         if (run.access === "all" && run.planPending) await handOver(run);
         if (run.billing && manifest.plan) await syncCheckout(run, run.billing);

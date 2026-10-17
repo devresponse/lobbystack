@@ -4,8 +4,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
@@ -15,7 +15,7 @@ import { acceptInvitation } from "../tenancy";
 import { createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -1210,6 +1210,65 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(updateWidgetKeyForApi(context, a.caller, created.id, { label: "Theirs" }), 404, "not_found");
       expect(await audited("api.widget_key.updated")).toBe(3);
     } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("reads, changes and publishes the public profile page with the checks Settings makes", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    const slug = `api-profile-${businessId}`;
+    await admin!.db.insert(businesses).values({ id: businessId, slug, name: "Profile test", timezone: "UTC", businessType: "test" });
+    await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Maple cuts hair.", summarySource: "generated", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
+    const options = { appOrigin: "https://app.lobbystack.example" };
+    const audited = async (eventType: string) => await admin!.db.select({ actorUserId: auditLogs.actorUserId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType))).orderBy(auditLogs.createdAt);
+    const rows = async () => await admin!.db.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, businessId));
+    const resolved = async () => (await worker!.db.execute<{ business_id: string | null }>(sql`select app.resolve_public_profile(${slug}) as business_id`)).rows[0]?.business_id ?? null;
+    let othersWidgetId: string | undefined;
+    try {
+      const widget = await createWidgetKeyForApi(context, caller, { allowed_origins: ["https://example.com"] }, options);
+      // Never saved: the defaults Settings starts from, and nothing stored yet.
+      const initial = await getPublicProfileForApi(context, caller, options);
+      expect(apiPublicProfileSchema.safeParse(initial).success).toBe(true);
+      expect(initial).toEqual({ slug, url: `https://app.lobbystack.example/profile/${slug}`, published: false, published_at: null, category: null, description: "Maple cuts hair.", address: { line1: null, line2: null, city: null, region: null, postal_code: null, country_code: null }, public_email: null, show_phone: true, show_hours: true, show_services: true, show_map: true, widget_key_id: widget.id, updated_at: null });
+      expect(await rows()).toEqual([]);
+      await expectApiError(updatePublicProfileForApi(context, caller, {}, options), 400, "invalid_request");
+
+      // The first change saves the defaults with it.
+      expect(await updatePublicProfileForApi(context, caller, { category: "Hair salon", address: { city: "Toronto", country_code: "CA" } }, options)).toMatchObject({ published: false, category: "Hair salon", description: "Maple cuts hair.", address: { line1: null, city: "Toronto", country_code: "CA" }, widget_key_id: widget.id, updated_at: expect.any(String) });
+      expect(await rows()).toHaveLength(1);
+      expect(await resolved()).toBeNull();
+
+      // Address parts merge, and publishing puts the page up and records which key did it.
+      const live = await updatePublicProfileForApi(context, caller, { published: true, address: { line1: "12 King St W", city: null } }, options);
+      expect(live).toMatchObject({ published: true, published_at: expect.any(String), address: { line1: "12 King St W", city: null, country_code: "CA" } });
+      expect(await resolved()).toBe(businessId);
+      expect(await audited("public_profile.published")).toEqual([{ actorUserId: null, payload: expect.objectContaining({ actor: "api_key", apiKeyId: caller.apiKeyId }) }]);
+      expect((await audited("api.public_profile.updated")).map((row) => row.payload?.fields)).toEqual([["category", "address"], ["published", "address"]]);
+
+      // Sending what it already has writes and audits nothing.
+      const savedAt = (await rows())[0]!.updatedAt.getTime();
+      expect(await updatePublicProfileForApi(context, caller, { published: true, category: "Hair salon", address: { country_code: "CA" } }, options)).toEqual(live);
+      expect((await rows())[0]!.updatedAt.getTime()).toBe(savedAt);
+      expect(await audited("api.public_profile.updated")).toHaveLength(2);
+
+      // Only the business's own active widgets, but a widget paused since it was chosen stays until it's changed.
+      othersWidgetId = (await createWidgetKeyForApi(context, b.caller, { allowed_origins: ["https://example.com"] }, options)).id;
+      await expectApiError(updatePublicProfileForApi(context, caller, { widget_key_id: othersWidgetId }, options), 400, "invalid_request");
+      await updateWidgetKeyForApi(context, caller, widget.id, { status: "disabled" });
+      expect(await updatePublicProfileForApi(context, caller, { show_map: false }, options)).toMatchObject({ show_map: false, widget_key_id: widget.id });
+      expect(await updatePublicProfileForApi(context, caller, { widget_key_id: null }, options)).toMatchObject({ widget_key_id: null });
+      await expectApiError(updatePublicProfileForApi(context, caller, { widget_key_id: widget.id }, options), 400, "invalid_request");
+
+      // Unpublishing takes the page down and keeps when it was published.
+      expect(await updatePublicProfileForApi(context, caller, { published: false }, options)).toMatchObject({ published: false, published_at: live.published_at });
+      expect(await resolved()).toBeNull();
+      expect(await audited("public_profile.unpublished")).toHaveLength(1);
+      // Another business's key sees only its own page.
+      expect(await getPublicProfileForApi(context, a.caller, options)).toMatchObject({ slug: `api-a-${a.businessId}`, updated_at: null });
+    } finally {
+      if (othersWidgetId) await admin!.db.delete(widgetKeys).where(eq(widgetKeys.id, othersWidgetId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
   });

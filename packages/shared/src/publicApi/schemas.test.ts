@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
+import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -57,6 +57,23 @@ describe("parseApiInput", () => {
       // The default caller language is locale on PATCH /business.
       { locale: "fr" },
     ]) expect(parseApiInput(apiReceptionistUpdateSchema, bad).ok, JSON.stringify(bad)).toBe(false);
+  });
+
+  it("checks public profile changes as Settings does, naming the field", () => {
+    expect(parseApiInput(apiPublicProfileUpdateSchema, { category: " Dental   clinic ", description: "Family care.\r\n\r\n\r\nSame-week visits. ", address: { country_code: "ca", line2: "  " }, public_email: "" })).toEqual({
+      ok: true,
+      data: { category: "Dental clinic", description: "Family care.\n\nSame-week visits.", address: { country_code: "CA", line2: null }, public_email: null },
+    });
+    expect(parseApiInput(apiPublicProfileUpdateSchema, { public_email: "not an email", address: { country_code: "CAN" } })).toEqual({
+      ok: false,
+      details: [
+        { path: "address.country_code", message: "Use a two-letter country code, such as CA." },
+        { path: "public_email", message: "Enter an email address such as hello@example.com." },
+      ],
+    });
+    for (const bad of [{ category: "x".repeat(81) }, { category: "Dental\u202eclinic" }, { address: { postalCode: "V5T" } }, { widget_key_id: "not-a-uuid" }, { published: "yes" }]) {
+      expect(parseApiInput(apiPublicProfileUpdateSchema, bad).ok, JSON.stringify(bad)).toBe(false);
+    }
   });
 
   it("takes upload file names that name a file, up to the shared size limit", () => {

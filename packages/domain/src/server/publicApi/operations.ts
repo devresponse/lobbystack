@@ -828,8 +828,9 @@ function sortedJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCaller): Promise<ApiWidgetKey[]> {
-  return await inBusiness(context, caller, async (tx) => (await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, caller.businessId)).orderBy(desc(widgetKeys.createdAt), desc(widgetKeys.id))).map(serializeWidgetKey));
+/** Every widget key, with the script tag for each, served from the dashboard's own origin. */
+export async function listWidgetKeysForApi(context: DomainContext, caller: ApiCaller, options: { appOrigin: string }): Promise<ApiWidgetKey[]> {
+  return await inBusiness(context, caller, async (tx) => (await tx.select().from(widgetKeys).where(eq(widgetKeys.businessId, caller.businessId)).orderBy(desc(widgetKeys.createdAt), desc(widgetKeys.id))).map((row) => serializeWidgetKey(row, options.appOrigin)));
 }
 
 /** Creates a widget key and the script tag for it, served from the dashboard's own origin. */
@@ -837,17 +838,16 @@ export async function createWidgetKeyForApi(context: DomainContext, caller: ApiC
   return await inBusiness(context, caller, async (tx) => {
     const { row, key } = await insertWidgetKeyInTransaction(tx, { businessId: caller.businessId, label: input.label, allowedOrigins: widgetOrigins(input.allowed_origins), config: widgetConfigFromApi(input.config ?? {}) });
     await audit(tx, caller, { eventType: "api.widget_key.created", entityType: "widget_key", entityId: row.id });
-    const widgetKey = serializeWidgetKey(row);
-    return { ...widgetKey, key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
+    return { ...serializeWidgetKey(row, options.appOrigin), key, embed_snippet: widgetEmbedSnippet(options.appOrigin, key) };
   });
 }
 
-export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiCaller, widgetKeyId: string, input: ApiWidgetKeyUpdate): Promise<ApiWidgetKey> {
+export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiCaller, widgetKeyId: string, input: ApiWidgetKeyUpdate, options: { appOrigin: string }): Promise<ApiWidgetKey> {
   if (Object.keys(input).length === 0) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     const [current] = await tx.select().from(widgetKeys).where(and(eq(widgetKeys.id, widgetKeyId), eq(widgetKeys.businessId, caller.businessId))).limit(1).for("no key update");
     if (!current) throw notFound("Widget key");
-    const before = serializeWidgetKey(current);
+    const before = serializeWidgetKey(current, options.appOrigin);
     // A revoked key may be on a page someone else controls, so it stays off.
     if (before.status === "revoked" && input.status !== undefined && input.status !== "revoked") throw conflict("A revoked widget key can't be turned back on. Create a new one.");
     const patch: WidgetKeyPatch = {};
@@ -859,14 +859,14 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
     }
     if (input.config !== undefined) {
       const config = widgetConfigFromApi(input.config);
-      if (sortedJson(serializeWidgetKey({ ...current, config }).config) !== sortedJson(before.config)) patch.config = config;
+      if (sortedJson(serializeWidgetKey({ ...current, config }, options.appOrigin).config) !== sortedJson(before.config)) patch.config = config;
     }
     if (input.status !== undefined && input.status !== before.status) patch.status = input.status;
     if (Object.keys(patch).length === 0) return before;
     const row = await updateWidgetKeyInTransaction(tx, { businessId: caller.businessId, widgetKeyId, patch });
     if (!row) throw notFound("Widget key");
     await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
-    return serializeWidgetKey(row);
+    return serializeWidgetKey(row, options.appOrigin);
   });
 }
 

@@ -5,17 +5,17 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiBusinessSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { acceptInvitation } from "../tenancy";
-import { createVoiceFollowUpTask } from "../voice";
+import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -122,6 +122,18 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       return await tx.select({ id: contacts.id }).from(contacts).where(eq(contacts.id, contactB.id));
     });
     expect(rows).toEqual([]);
+  });
+
+  it("shows a contact's answer about appointment texts, and when the contact was blocked", async () => {
+    const context = { db: worker!.db };
+    const contact = await createContactForApi(context, a.caller, { name: "Texts", phone: "+14165557711" });
+    expect(contact).toMatchObject({ sms_consent: null, blocked_at: null });
+    const at = new Date("2026-10-17T09:00:00.000Z");
+    await admin!.db.update(contacts).set({ smsConsentStatus: "opted_out", smsConsentUpdatedAt: at, operatorBlockedAt: at }).where(eq(contacts.id, contact.id));
+    const saved = await getContactForApi(context, a.caller, contact.id);
+    expect(apiContactSchema.parse(saved)).toEqual(saved);
+    expect(saved).toMatchObject({ sms_consent: { status: "opted_out", updated_at: at.toISOString() }, blocked_at: at.toISOString() });
+    expect((await listContactsForApi(context, a.caller, { limit: 100 })).data.find((row) => row.id === contact.id)).toEqual(saved);
   });
 
   it("pages through contacts with a cursor without gaps or repeats", async () => {
@@ -306,6 +318,19 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(delivery).toMatchObject({ status: "succeeded", attemptCount: 1, lastResponseStatus: 200 });
   });
 
+  it("lists the receptionist's messages, with the appointment a cancellation request names", async () => {
+    const context = { db: worker!.db };
+    const appointmentId = randomUUID();
+    const { inboxItemId: requestId } = await createVoiceFollowUpTask(context, { businessId: a.businessId, callerName: "Ada", callbackPhone: "+14165550134", channel: "voice", message: "Cancellation request: Cut", request: { request: CANCELLATION_REQUEST, appointmentId } });
+    const { inboxItemId: messageId } = await createVoiceFollowUpTask(context, { businessId: a.businessId, callerName: "Ada", message: "Please call me back." });
+    const page = await listMessagesForApi(context, a.caller, { limit: 100 });
+    const request = page.data.find((message) => message.id === requestId);
+    expect(apiMessageSchema.parse(request)).toEqual(request);
+    expect(request).toMatchObject({ caller_name: "Ada", channel: "voice", request: "appointment_cancellation", appointment_id: appointmentId });
+    expect(page.data.find((message) => message.id === messageId)).toMatchObject({ caller_name: "Ada", request: null, appointment_id: null });
+    expect((await listMessagesForApi(context, b.caller, { limit: 100 })).data.map((message) => message.id)).not.toContain(requestId);
+  });
+
   it("lists each business's own staff with the services they take", async () => {
     const context = { db: worker!.db };
     const listA = await listStaffForApi(context, a.caller);
@@ -377,9 +402,12 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect((await listAppointmentsForApi(context, b.caller, { contactId: contact!.id, limit: 100 })).data).toEqual([]);
   });
 
-  it("replaces opening hours through the business endpoint", async () => {
+  it("replaces opening hours through the business endpoint, and counts them as a person's", async () => {
+    const [row] = await admin!.db.update(businesses).set({ hoursSource: "generated" }).where(eq(businesses.id, a.businessId)).returning({ slug: businesses.slug });
+    expect(await getBusinessForApi({ db: worker!.db }, a.caller)).toMatchObject({ slug: row!.slug, hours_source: "generated" });
     const business = await updateBusinessForApi({ db: worker!.db }, a.caller, { name: "API a renamed", hours: [{ day: "monday", open: "09:00", close: "17:30" }] });
-    expect(business).toMatchObject({ name: "API a renamed", hours: [{ day: "monday", open: "09:00", close: "17:30" }] });
+    expect(apiBusinessSchema.parse(business)).toEqual(business);
+    expect(business).toMatchObject({ name: "API a renamed", slug: row!.slug, hours: [{ day: "monday", open: "09:00", close: "17:30" }], hours_source: "operator" });
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { hours: [{ day: "monday", open: "10:00", close: "09:00" }] }), 400, "invalid_request");
     await expectApiError(updateBusinessForApi({ db: worker!.db }, a.caller, { timezone: "Mars/Olympus" }), 400, "invalid_request");
   });
@@ -387,7 +415,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
   it("adds a website as a sample crawl and returns the same source for a repeat", async () => {
     const context = { db: worker!.db };
     const source = await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "maple-api.example" });
-    expect(source).toMatchObject({ type: "website", url: "https://maple-api.example/", status: "processing", page_limit: ONBOARDING_CRAWL_PAGE_LIMIT });
+    expect(source).toMatchObject({ type: "website", url: "https://maple-api.example/", status: "processing", page_limit: ONBOARDING_CRAWL_PAGE_LIMIT, content_type: null, tags: [] });
     expect(apiKnowledgeSourceSchema.safeParse(source).success).toBe(true);
     const [crawl] = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.businessId, a.businessId), eq(outboxMessages.topic, "knowledge.crawlWebsite"), eq(outboxMessages.aggregateId, source.id)));
     expect(crawl?.payload).toMatchObject({ documentId: source.id, limit: ONBOARDING_CRAWL_PAGE_LIMIT });
@@ -448,8 +476,8 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(upload.expires_at).not.toBeNull();
       await expectApiError(completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, {}, storage), 409, "conflict");
       stored.set(await keyOf(upload.upload_id), { length: 10, contentType: "application/pdf", checksum });
-      const source = await completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, { title: "Price list" }, storage);
-      expect(source).toMatchObject({ type: "file", title: "Price list", url: null, status: "pending", page_limit: null });
+      const source = await completeKnowledgeUploadForApi(context, a.caller, upload.upload_id, { title: "Price list", tags: ["prices"] }, storage);
+      expect(source).toMatchObject({ type: "file", title: "Price list", url: null, status: "pending", page_limit: null, content_type: "application/pdf", tags: ["prices"] });
       expect(apiKnowledgeSourceSchema.safeParse(source).success).toBe(true);
       const [extract] = await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "knowledge.extractDocument"), eq(outboxMessages.aggregateId, source.id)));
       expect(extract).toBeDefined();
@@ -1189,25 +1217,30 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
     const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
     const resolve = async (key: string) => (await worker!.db.execute<{ business_id: string }>(sql`select business_id from app.resolve_business_by_widget_key(${createHash("sha256").update(key).digest("hex")})`)).rows[0]?.business_id;
+    const options = { appOrigin: "https://app.lobbystack.example" };
     try {
-      const created = await createWidgetKeyForApi(context, caller, { label: "Main site", allowed_origins: ["https://example.com/contact", "https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } }, { appOrigin: "https://app.lobbystack.example" });
+      const created = await createWidgetKeyForApi(context, caller, { label: "Main site", allowed_origins: ["https://example.com/contact", "https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } }, options);
       expect(apiWidgetKeyCreatedSchema.safeParse(created).success).toBe(true);
       expect(created).toMatchObject({ label: "Main site", status: "active", allowed_origins: ["https://example.com"], config: { color: "#112233", position: "bottom-left", lead_form: { enabled: true, require_email: true } } });
       expect(created.embed_snippet).toBe(`<script src="https://app.lobbystack.example/embed.js?key=${created.key}" data-widget-key="${created.key}" defer></script>`);
       // The widget finds the business by the key's hash.
       expect(await resolve(created.key)).toBe(businessId);
-      const { key: _key, embed_snippet: _snippet, ...listed } = created;
-      expect(await listWidgetKeysForApi(context, caller)).toEqual([listed]);
+      // The list shows the key and its script tag again, as the dashboard does.
+      const [listed] = await listWidgetKeysForApi(context, caller, options);
+      expect(listed).toEqual(created);
+      expect(apiWidgetKeySchema.safeParse(listed).success).toBe(true);
 
       // Sending back what GET showed, defaults and all, changes nothing.
-      await updateWidgetKeyForApi(context, caller, created.id, { label: listed.label, allowed_origins: ["https://example.com/"], config: listed.config });
+      await updateWidgetKeyForApi(context, caller, created.id, { label: listed!.label, allowed_origins: ["https://example.com/"], config: listed!.config }, options);
       expect(await audited("api.widget_key.updated")).toBe(0);
-      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "disabled", label: null })).toMatchObject({ status: "disabled", label: null });
-      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "active" })).toMatchObject({ status: "active" });
-      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "revoked" })).toMatchObject({ status: "revoked" });
-      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, { status: "active" }), 409, "conflict");
-      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, {}), 400, "invalid_request");
-      await expectApiError(updateWidgetKeyForApi(context, a.caller, created.id, { label: "Theirs" }), 404, "not_found");
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "disabled", label: null }, options)).toMatchObject({ status: "disabled", label: null, key: created.key, embed_snippet: created.embed_snippet });
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "active" }, options)).toMatchObject({ status: "active" });
+      // A revoked key no longer works, so it isn't shown.
+      expect(await updateWidgetKeyForApi(context, caller, created.id, { status: "revoked" }, options)).toMatchObject({ status: "revoked", key: null, embed_snippet: null });
+      expect(await listWidgetKeysForApi(context, caller, options)).toEqual([expect.objectContaining({ id: created.id, key: null, embed_snippet: null })]);
+      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, { status: "active" }, options), 409, "conflict");
+      await expectApiError(updateWidgetKeyForApi(context, caller, created.id, {}, options), 400, "invalid_request");
+      await expectApiError(updateWidgetKeyForApi(context, a.caller, created.id, { label: "Theirs" }, options), 404, "not_found");
       expect(await audited("api.widget_key.updated")).toBe(3);
     } finally {
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
@@ -1256,7 +1289,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       // Only the business's own active widgets, but a widget paused since it was chosen stays until it's changed.
       othersWidgetId = (await createWidgetKeyForApi(context, b.caller, { allowed_origins: ["https://example.com"] }, options)).id;
       await expectApiError(updatePublicProfileForApi(context, caller, { widget_key_id: othersWidgetId }, options), 400, "invalid_request");
-      await updateWidgetKeyForApi(context, caller, widget.id, { status: "disabled" });
+      await updateWidgetKeyForApi(context, caller, widget.id, { status: "disabled" }, options);
       expect(await updatePublicProfileForApi(context, caller, { show_map: false }, options)).toMatchObject({ show_map: false, widget_key_id: widget.id });
       expect(await updatePublicProfileForApi(context, caller, { widget_key_id: null }, options)).toMatchObject({ widget_key_id: null });
       await expectApiError(updatePublicProfileForApi(context, caller, { widget_key_id: widget.id }, options), 400, "invalid_request");

@@ -77,9 +77,12 @@ export const apiMeSchema = z.object({
   }).optional().describe("Present only for a platform key."),
 }).describe("The API key making the request and the business it acts on.");
 
+const businessHoursSources = ["none", "generated", "operator"] as const;
+
 export const apiBusinessSchema = z.object({
   id,
   name: z.string(),
+  slug: z.string().describe("A short name no other business uses, set when the business is created. Its public profile page is at /profile/{slug}."),
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
   locale: z.string().describe("Default language for callers: en or fr."),
   website_url: z.string().nullable(),
@@ -87,6 +90,7 @@ export const apiBusinessSchema = z.object({
   onboarding_stage: z.string().describe("Where the business is in onboarding, for example website, phone_number or complete."),
   booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
+  hours_source: z.enum(businessHoursSources).describe("Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -97,7 +101,7 @@ export const apiBusinessUpdateSchema = z.strictObject({
   locale: locale.optional(),
   website_url: z.url().max(2_000).nullable().optional(),
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
-  hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap."),
+  hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them."),
 });
 
 const appointmentChangePolicyFields = {
@@ -281,12 +285,14 @@ export const apiWidgetKeySchema = z.object({
   status: z.enum(widgetKeyStatuses).describe("active: the widget works. disabled: it stops until it's turned back on. revoked: it stops for good."),
   allowed_origins: z.array(z.string()).describe("The websites the widget runs on, such as https://example.com."),
   config: apiWidgetConfigSchema,
+  key: z.string().nullable().describe("The key itself, which the widget's script tag carries. null for a revoked key, and for a key created before keys were stored, which only its creator saw."),
+  embed_snippet: z.string().nullable().describe("The script tag to paste into the website's HTML. null when key is null."),
   last_used_at: nullableTimestamp,
   created_at: timestamp,
 }).describe("A key that puts the chat widget on the business's websites.");
 
 export const apiWidgetKeyCreatedSchema = apiWidgetKeySchema.extend({
-  key: z.string().describe("The key itself, shown only here. The widget's script tag carries it."),
+  key: z.string().describe("The key itself, which the widget's script tag carries."),
   embed_snippet: z.string().describe("The script tag to paste into the website's HTML."),
 }).describe("A new widget key, with the script tag that adds the widget to a website.");
 
@@ -392,6 +398,7 @@ const notificationEventDescriptions = {
   calendar_sync: "An appointment couldn't sync to the connected calendar.",
   transfer_failed: "The receptionist tried to transfer a caller to a person, and the transfer didn't complete.",
   website_chat: "A visitor wrote through the website chat widget. At most one alert per chat a day.",
+  website_live_chat: "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message.",
   webhook_disabled: "LobbyStack stopped sending events to a webhook endpoint after its deliveries failed for about a day.",
 } as const;
 export type ApiNotificationEvent = keyof typeof notificationEventDescriptions;
@@ -473,11 +480,12 @@ export const apiClaimLinkSchema = z.object({
   url: z.string().describe("The link that claims the business. LobbyStack emails it to the new owner; you can also send it yourself."),
 }).describe("A link that hands the business over to its owner.");
 
+const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 const onboardingItems = ["business_details", "knowledge", "greeting", "plan", "phone_number", "full_site_read", "test_call"] as const;
 const onboardingSkippableSteps = ["knowledge", "phone_number", "full_site_read", "test_call"] as const;
 
 export const apiOnboardingSchema = z.object({
-  stage: z.string().describe("The step the dashboard's onboarding shows, for example website, phone_number or complete. The API doesn't follow these steps in order."),
+  stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows. phone_number_claiming: a number is being set up. The API doesn't follow these steps in order."),
   complete: z.boolean().describe("true once onboarding is finished, so the dashboard opens on the business itself."),
   checklist: z.array(z.object({
     id: z.enum(onboardingItems).describe("business_details: a name and time zone. knowledge: a website or knowledge the receptionist answers from. greeting: a greeting, the default one included; change it with PATCH /receptionist. plan: a paid plan. phone_number: a live number. full_site_read: the whole website read, beyond the first sample, and done when there is no website. test_call: a call the receptionist answered."),
@@ -601,17 +609,24 @@ export const apiCallDetailSchema = apiCallSchema.extend({
   transcript: z.array(apiTranscriptEntrySchema),
 });
 
+const smsConsentStatuses = ["subscribed", "declined", "opted_out"] as const;
+
 export const apiContactSchema = z.object({
   id,
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
-  locale: z.string().nullable(),
+  locale: z.string().nullable().describe("Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language."),
   timezone: z.string().nullable(),
   passcode: z.object({
     set_at: timestamp,
     locked: z.boolean().describe(`true after ${CONTACT_PASSCODE_LOCK_ATTEMPTS} wrong PINs in a row, even across calls. A locked PIN works again only once a new one is set.`),
   }).nullable().describe("The contact's keypad PIN, which callers type to change appointments when verification_mode is passcode_required: whether there is one, never the PIN itself. null: the contact has no PIN."),
+  sms_consent: z.object({
+    status: z.enum(smsConsentStatuses).describe("subscribed: agreed to appointment texts. declined: was asked and said no. opted_out: texted STOP."),
+    updated_at: nullableTimestamp.describe("When the answer was last recorded."),
+  }).nullable().describe("The contact's answer about appointment texts. Only a subscribed contact gets the texts the business starts, such as reminders. null: never asked."),
+  blocked_at: nullableTimestamp.describe("When the contact was blocked, from the dashboard or by the receptionist after an abusive call. Calls from a blocked contact are hung up at once, and it gets no texts, whatever sms_consent says. null: not blocked."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -668,7 +683,7 @@ export const apiAppointmentSchema = z.object({
   contact_id: id,
   contact_name: z.string().nullable(),
   contact_phone: z.string().nullable(),
-  source: z.string().describe("Where the booking came from, for example voice, web_chat, dashboard or api."),
+  source: z.string().describe("Where the booking came from: voice (a phone call), web_voice (a call from the website), web_chat (the website chat), sms (a text) or api. A booking from before LobbyStack's current version may show another value."),
   calendar_sync_status: z.enum(["pending", "synced", "failed", "not_required"]),
   created_at: timestamp,
   updated_at: timestamp,
@@ -694,6 +709,8 @@ export const apiAvailabilitySlotSchema = z.object({
   ends_at: timestamp,
 });
 
+const messageRequests = ["appointment_cancellation"] as const;
+
 export const apiMessageSchema = z.object({
   id,
   status: z.enum(["open", "done"]),
@@ -705,6 +722,8 @@ export const apiMessageSchema = z.object({
   callback_window: z.string().nullable(),
   channel: z.enum(["voice", "web_voice", "web_chat", "sms"]).nullable(),
   call_id: id.nullable(),
+  request: z.enum(messageRequests).nullable().describe("appointment_cancellation: the caller asked to cancel an appointment. null: an ordinary message."),
+  appointment_id: id.nullable().describe("For a cancellation request, the appointment the receptionist matched. The message closes by itself once that appointment is cancelled. null when it couldn't tell which one."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -744,6 +763,8 @@ export const apiKnowledgeSourceSchema = z.object({
   error: z.string().nullable().describe("Why reading failed, when status is error."),
   active: z.boolean().describe("Whether the receptionist answers from it. An inactive source stays indexed but unused."),
   page_limit: z.number().int().nullable().describe("How many pages a website's crawl reads: a sample at first, the full site after POST /knowledge/sources/{source_id}/expand. Null for a page or a file."),
+  content_type: z.string().nullable().describe("A file's type, such as application/pdf. Null for a website or a page, and for a file whose type wasn't recorded."),
+  tags: z.array(z.string()).describe("The tags given when a file's upload was completed. Empty for a website or a page."),
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A website, page or file the receptionist learns from.");

@@ -146,7 +146,7 @@ files          uploaded     docs/price-list.pdf
 
 Un paiement et un numéro de téléphone coûtent de l'argent, donc la commande demande confirmation avant de lancer l'un ou l'autre. Passez `--yes` pour sauter les questions, ce dont un script a besoin : sans terminal où poser la question, la commande s'arrête.
 
-Pour configurer une entreprise qui existe déjà, mettez son ID dans `business.id`. `--business <id>` fonctionne aussi quand l'entreprise porte déjà le nom du manifeste. La commande ignore `LOBBYSTACK_BUSINESS` et l'entreprise enregistrée dans un profil, pour qu'un nouveau manifeste n'atterrisse jamais sur l'une d'elles par erreur.
+Pour configurer une entreprise qui existe déjà, mettez son ID dans `business.id`. Ses propriétaires et ses administrateurs peuvent copier cet ID en haut de **Réglages** > **Clés API**. `--business <id>` fonctionne aussi quand l'entreprise porte déjà le nom du manifeste. La commande ignore `LOBBYSTACK_BUSINESS` et l'entreprise enregistrée dans un profil, pour qu'un nouveau manifeste n'atterrisse jamais sur l'une d'elles par erreur.
 
 Le lien de réclamation part une fois tout le reste terminé, ou avant le paiement quand la clé d'un exploitant configure un forfait que le propriétaire paie. Quand le propriétaire l'accepte, la clé d'un partenaire et la clé API qui l'a envoyé n'atteignent plus l'entreprise, et une nouvelle exécution le signale. La clé d'un exploitant l'atteint toujours.
 

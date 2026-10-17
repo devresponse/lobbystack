@@ -999,6 +999,12 @@
     "neverUsed": "Never",
     "createdBy": "{{date}} by {{name}}",
     "revoked": "Revoked {{date}}",
+    "businessId": {
+      "title": "Business ID",
+      "description": "The API and the lobbystack command identify {{business}} by this ID. Use it in the {{header}} header, with --business, or under business.id in a lobbystack onboard manifest.",
+      "copy": "Copy",
+      "copied": "Copied"
+    },
     "restricted": {
       "title": "Only owners and admins can manage API keys",
       "description": "Ask an owner or admin of this business to create a key for you."

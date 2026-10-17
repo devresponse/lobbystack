@@ -9,13 +9,14 @@ import { LiveApiKeysSurface } from "./live-api-keys-surface";
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en", resolvedLanguage: "en" } }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 
+const BUSINESS_ID = "75795511-9ee2-4cb2-a89d-f173ec1dd82d";
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); });
 
 function setup(role: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
-  client.setQueryData(["businesses"], { businesses: [{ businessId: "business-1", name: "Salon", active: true, role }] });
+  client.setQueryData(["businesses"], { businesses: [{ businessId: BUSINESS_ID, name: "Salon", active: true, role }] });
   let keys: unknown[] = [];
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (init?.method === "POST") {
@@ -37,6 +38,17 @@ describe("API keys settings", () => {
     const fetchMock = setup("viewer");
     expect(await screen.findByText("apiKeys.restricted.title")).toBeTruthy();
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/api/api-keys"), expect.anything());
+    expect(screen.queryByTestId("business-id")).toBeNull();
+  });
+
+  it("shows the business's id with a button that copies it", async () => {
+    const user = userEvent.setup();
+    setup("business_owner");
+    expect((await screen.findByTestId("business-id")).textContent).toBe(BUSINESS_ID);
+    expect(screen.getByText("apiKeys.businessId.description")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "apiKeys.businessId.copy" }));
+    expect(await navigator.clipboard.readText()).toBe(BUSINESS_ID);
+    expect(await screen.findByRole("button", { name: "apiKeys.businessId.copied" })).toBeTruthy();
   });
 
   it("creates a key with the chosen scopes and shows it once", async () => {

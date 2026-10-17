@@ -68,6 +68,8 @@ import {
   type ApiPhoneNumberClaim,
   type ApiPhoneNumberOffer,
   type ApiPhoneNumberSearch,
+  type ApiPublicProfile,
+  type ApiPublicProfileUpdate,
   type ApiReceptionist,
   type ApiReceptionistUpdate,
   type ApiRule,
@@ -88,6 +90,7 @@ import {
   type ApiWidgetKeyCreate,
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
+  type PublicProfileSettings,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } from "../../authz";
@@ -106,6 +109,7 @@ import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferen
 import { normalizeOnboardingStage, resolveOnboardingStageForPlan, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
+import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
@@ -145,6 +149,7 @@ import {
   serializeContact,
   serializeKnowledgeEntry,
   serializeNotificationPreferences,
+  serializePublicProfile,
   serializeReceptionist,
   serializeRule,
   serializeWidgetKey,
@@ -862,6 +867,64 @@ export async function updateWidgetKeyForApi(context: DomainContext, caller: ApiC
     if (!row) throw notFound("Widget key");
     await audit(tx, caller, { eventType: "api.widget_key.updated", entityType: "widget_key", entityId: widgetKeyId, payload: { fields: Object.keys(patch) } });
     return serializeWidgetKey(row);
+  });
+}
+
+// Public profile page. The API changes the same settings as Settings >
+// Public profile, with the same checks.
+
+/** The settings with the fields sent over them, and the address parts sent over the address. */
+function publicProfileWith(current: PublicProfileSettings, input: ApiPublicProfileUpdate): PublicProfileSettings {
+  const address = input.address ?? {};
+  const or = <T>(value: T | undefined, fallback: T): T => (value === undefined ? fallback : value);
+  return {
+    published: or(input.published, current.published),
+    category: or(input.category, current.category),
+    description: or(input.description, current.description),
+    address: {
+      line1: or(address.line1, current.address.line1),
+      line2: or(address.line2, current.address.line2),
+      city: or(address.city, current.address.city),
+      region: or(address.region, current.address.region),
+      postalCode: or(address.postal_code, current.address.postalCode),
+      countryCode: or(address.country_code, current.address.countryCode),
+    },
+    publicEmail: or(input.public_email, current.publicEmail),
+    showPhone: or(input.show_phone, current.showPhone),
+    showHours: or(input.show_hours, current.showHours),
+    showServices: or(input.show_services, current.showServices),
+    showMap: or(input.show_map, current.showMap),
+    widgetKeyId: or(input.widget_key_id, current.widgetKeyId),
+  };
+}
+
+export async function getPublicProfileForApi(context: DomainContext, caller: ApiCaller, options: { appOrigin: string }): Promise<ApiPublicProfile> {
+  return await inBusiness(context, caller, async (tx) => serializePublicProfile(await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId }), options.appOrigin));
+}
+
+/**
+ * Changes the fields sent, over the saved settings or, the first time, the
+ * defaults the dashboard starts from, which are saved with them. Values a
+ * saved page already has change nothing, so it isn't written or audited.
+ */
+export async function updatePublicProfileForApi(context: DomainContext, caller: ApiCaller, input: ApiPublicProfileUpdate, options: { appOrigin: string }): Promise<ApiPublicProfile> {
+  if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
+  return await inBusiness(context, caller, async (tx) => {
+    const view = await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId, lock: true });
+    const settings = publicProfileWith(view.settings, input);
+    const before = serializePublicProfile(view, options.appOrigin);
+    const after = serializePublicProfile({ ...view, settings }, options.appOrigin);
+    const sent = (Object.keys(input) as Array<keyof ApiPublicProfileUpdate>).filter((field) => input[field] !== undefined);
+    const fields = view.saved ? sent.filter((field) => sortedJson(after[field]) !== sortedJson(before[field])) : sent;
+    if (!fields.length) return before;
+    // A widget other than the saved one must be active; the saved one may have been paused since.
+    const savedWidgetKeyId = view.saved ? view.settings.widgetKeyId : null;
+    if (settings.widgetKeyId && settings.widgetKeyId !== savedWidgetKeyId && !view.widgetKeys.some((key) => key.id === settings.widgetKeyId)) {
+      throw invalidRequest(PUBLIC_PROFILE_WIDGET_UNAVAILABLE, [{ path: "widget_key_id", message: "Use the id of an active widget key from GET /widget-keys." }]);
+    }
+    await savePublicProfileInTransaction(tx, { businessId: caller.businessId, settings, audit: callerAudit(caller) });
+    await audit(tx, caller, { eventType: "api.public_profile.updated", entityType: "business", entityId: caller.businessId, payload: { fields } });
+    return serializePublicProfile(await getBusinessPublicProfileSettings(tx, { businessId: caller.businessId }), options.appOrigin);
   });
 }
 

@@ -1,11 +1,11 @@
 ---
 title: "Intégrer une entreprise en ligne de commande"
-description: "Décrivez une entreprise dans un seul fichier, et laissez la commande lobbystack configurer ses connaissances, sa réceptionniste, son forfait, son numéro de téléphone et son propriétaire."
+description: "Décrivez une entreprise dans un seul fichier, et laissez la commande lobbystack configurer ses connaissances, sa réceptionniste, sa page publique, son forfait, son numéro de téléphone et son propriétaire."
 sidebarTitle: "Ligne de commande"
 contentType: "How-to"
 ---
 
-La commande `lobbystack` travaille avec LobbyStack par l'[API](/fr/api/overview). `lobbystack onboard` lit un fichier qui décrit une entreprise et rend l'entreprise conforme à ce fichier. Elle crée l'entreprise, ajoute ses connaissances, configure la réceptionniste et les services, choisit un forfait, réserve un numéro de téléphone et envoie au propriétaire un lien pour prendre le relais. Quand vous modifiez le fichier et la relancez, elle ne change que ce qui diffère.
+La commande `lobbystack` travaille avec LobbyStack par l'[API](/fr/api/overview). `lobbystack onboard` lit un fichier qui décrit une entreprise et rend l'entreprise conforme à ce fichier. Elle crée l'entreprise, ajoute ses connaissances, configure la réceptionniste, les services et la page publique, choisit un forfait, réserve un numéro de téléphone et envoie au propriétaire un lien pour prendre le relais. Quand vous modifiez le fichier et la relancez, elle ne change que ce qui diffère.
 
 ## Installer la commande
 
@@ -75,6 +75,15 @@ services:
 rules:
   - title: Gas leaks
     content: If a caller smells gas, tell them to leave the building and call the gas company.
+public_profile:
+  published: true
+  category: Plumber
+  address:
+    line1: 25 King Street West
+    city: Toronto
+    region: ON
+    postal_code: M5H 1A1
+    country_code: CA
 plan:
   checkout: { plan: pro, interval: monthly }
 phone_number: { country: CA, area_code: "416" }
@@ -97,6 +106,7 @@ owner:
 | `knowledge.files` | Des fichiers PDF, Word, texte, Markdown, JPEG, PNG, WebP ou TIFF jusqu'à 10 Mo, sous forme de chemins dans le dossier du manifeste. Donnez à une entrée `path`, `title` et `tags` pour la nommer. |
 | `knowledge.faqs` | Des questions et leurs réponses. Une FAQ avec la même question reçoit la nouvelle réponse. |
 | `knowledge.texts` | Des notes avec un `title` et un `content`. Une note du même titre reçoit le nouveau contenu. |
+| `public_profile` | Les champs de `PATCH /public-profile`, qui configure la [page publique](/fr/settings/public-profile) de l'entreprise à `/profile/<slug>` : `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` et `widget_key_id`. `published: true` publie la page. Les parties de l'adresse que le fichier omet gardent leur valeur. |
 | `plan` | `checkout` avec un `plan` (`starter` ou `pro`) et un `interval` (`monthly` ou `annual`). Ou `managed: true` pour un forfait facturé hors de Polar, que seule la clé de plateforme d'un exploitant peut définir. |
 | `phone_number` | Les champs de `POST /phone-numbers/search` : `country`, `kind`, `area_code`, `city`, `region` et `postal_code`. La commande réserve le premier numéro que la recherche propose. |
 | `onboarding` | L'intégration se termine dès qu'il ne lui manque plus rien, sauf avec la clé d'un partenaire, qui la laisse ouverte pour le propriétaire. `skip_number: true` la termine sans numéro, `complete` indique si elle se termine, et `source` indique d'où vient l'entreprise. |
@@ -118,6 +128,7 @@ receptionist   would set up
 services       would set up
 rules          would set up
 knowledge      would set up
+public profile would set up
 plan           would set up
 phone number   would set up
 owner          would set up
@@ -186,4 +197,4 @@ Sans fichier d'état, une clé de plateforme ne crée pas d'entreprise si vous e
 
 ## Autres commandes
 
-`lobbystack` a une commande pour chaque point de terminaison de l'API, regroupées comme l'API : `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack numbers search`, etc. `lobbystack --help` liste les groupes, et `--help` après n'importe quelle commande liste ses options.
+`lobbystack` a une commande pour chaque point de terminaison de l'API, regroupées comme l'API : `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, etc. `lobbystack --help` liste les groupes, et `--help` après n'importe quelle commande liste ses options.

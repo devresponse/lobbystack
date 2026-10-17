@@ -39,6 +39,7 @@ import {
   getNotificationPreferencesForApi,
   getOnboardingForApi,
   getPlatformMeForApi,
+  getPublicProfileForApi,
   getReceptionistForApi,
   getTeamForApi,
   getCallForApi,
@@ -79,6 +80,7 @@ import {
   updateCalendarConnectionForApi,
   updateContactForApi,
   updateOnboardingForApi,
+  updatePublicProfileForApi,
   updateKnowledgeEntryForApi,
   updateKnowledgeSourceForApi,
   updateNotificationPreferencesForApi,
@@ -108,6 +110,7 @@ import {
   apiOnboardingUpdateSchema,
   apiPhoneNumberClaimCreateSchema,
   apiPhoneNumberSearchSchema,
+  apiPublicProfileUpdateSchema,
   apiBusinessUpdateSchema,
   apiContactCreateSchema,
   apiContactPasscodesGenerateSchema,
@@ -199,7 +202,7 @@ async function requireInvitationAllowed(userId: string): Promise<void> {
   throw new PublicApiError(429, "rate_limited", `Too many invitations. The account this key acts as can invite 20 people an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
-/** The dashboard's public address, or this request's origin without one. The widget's script and the calendar link are served there. */
+/** The dashboard's public address, or this request's origin without one. The widget's script, the calendar link and profile pages are served there. */
 function appOrigin(request: Request): string {
   try {
     return new URL(process.env.APP_BASE_URL ?? "").origin;
@@ -355,6 +358,8 @@ export const v1 = {
     const widgetKeyId = uuidParam((await params).widget_key_id, "widget_key_id");
     return { body: data(await updateWidgetKeyForApi(context, caller, widgetKeyId, await readApiBody(request, apiWidgetKeyUpdateSchema))) };
   }),
+  getPublicProfile: (request: Request) => handleApiRequest(request, "getPublicProfile", async ({ context, caller }) => ({ body: data(await getPublicProfileForApi(context, caller, { appOrigin: appOrigin(request) })) })),
+  updatePublicProfile: (request: Request) => handleApiRequest(request, "updatePublicProfile", async ({ context, caller }) => ({ body: data(await updatePublicProfileForApi(context, caller, await readApiBody(request, apiPublicProfileUpdateSchema), { appOrigin: appOrigin(request) })) })),
   listRules: (request: Request) => handleApiRequest(request, "listRules", async ({ context, caller }) => ({ body: { data: await listRulesForApi(context, caller), next_cursor: null, has_more: false } })),
   createRule: (request: Request) => handleApiRequest(request, "createRule", async ({ context, caller }) => ({ body: data(await createRuleForApi(context, caller, await readApiBody(request, apiRuleCreateSchema))) })),
   updateRule: (request: Request, { params }: Params<"rule_id">) => handleApiRequest(request, "updateRule", async ({ context, caller }) => {

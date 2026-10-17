@@ -14,6 +14,7 @@ import {
   normalizeAppointmentChangePolicy,
   normalizeBookingMode,
   normalizeTransferMode,
+  publicProfilePath,
   weekdays,
   type ApiAppointment,
   type ApiBusiness,
@@ -29,6 +30,7 @@ import {
   type ApiNotificationPreferences,
   type ApiPhoneNumber,
   type ApiPhoneNumberClaim,
+  type ApiPublicProfile,
   type ApiReceptionist,
   type ApiRule,
   type ApiService,
@@ -40,6 +42,7 @@ import {
 import { resolveCallOutcome } from "../callOutcome";
 import type { NotificationPreferences, OperatorNotificationEventKey } from "../notifications";
 import { EXPIRED_FOLLOW_UP_TITLE } from "../followUpRetention";
+import type { PublicProfileSettingsView } from "../publicProfiles";
 import { recordingState } from "../recordingState";
 import { invalidRequest } from "./errors";
 
@@ -609,6 +612,30 @@ export function serializeWidgetKey(row: { id: string; label: string | null; stat
     },
     last_used_at: isoOrNull(row.lastUsedAt),
     created_at: iso(row.createdAt),
+  };
+}
+
+// Public profile page
+
+/** The page settings in the API's names, with the page's address on the dashboard's domain. */
+export function serializePublicProfile(view: Pick<PublicProfileSettingsView, "slug" | "publishedAt" | "updatedAt" | "settings">, appOrigin: string): ApiPublicProfile {
+  const { settings } = view;
+  const { address } = settings;
+  return {
+    slug: view.slug,
+    url: new URL(publicProfilePath(view.slug), appOrigin).toString(),
+    published: settings.published,
+    published_at: view.publishedAt,
+    category: settings.category,
+    description: settings.description,
+    address: { line1: address.line1, line2: address.line2, city: address.city, region: address.region, postal_code: address.postalCode, country_code: address.countryCode },
+    public_email: settings.publicEmail,
+    show_phone: settings.showPhone,
+    show_hours: settings.showHours,
+    show_services: settings.showServices,
+    show_map: settings.showMap,
+    widget_key_id: settings.widgetKeyId,
+    updated_at: view.updatedAt,
   };
 }
 

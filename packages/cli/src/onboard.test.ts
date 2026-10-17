@@ -72,6 +72,8 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     rules: [] as Row[],
     sources: [] as Row[],
     entries: [] as Row[],
+    /** The page at /profile/<slug>, as GET /public-profile shows it before anyone saves it. */
+    profile: { slug: "acme-plumbing", url: `${ORIGIN}/profile/acme-plumbing`, published: false, published_at: null, category: null, description: null, address: { line1: null, line2: null, city: null, region: null, postal_code: null, country_code: null } as Row, public_email: null, show_phone: true, show_hours: true, show_services: true, show_map: true, widget_key_id: null, updated_at: null } as Row,
     uploads: new Map<string, { name: string; length: number; arrived: boolean; source?: Row }>(),
     /** Bytes of document text the free plan has room for. A plan already full refuses a document; one that fills up fails it while it's read. */
     freeRoom: Number.POSITIVE_INFINITY,
@@ -195,6 +197,13 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
     }
     if (route === "GET /knowledge") return page(world.entries.filter((entry) => entry.type === url.searchParams.get("type")));
     if (route === "POST /knowledge") { const entry = body!.type === "faq" ? { id: id(), type: "faq", title: body!.question, content: body!.answer } : { id: id(), ...body }; world.entries.push(entry); return ok(entry, 201); }
+    if (route === "GET /public-profile") return ok(world.profile);
+    // Address parts the request leaves out keep theirs, as in the API.
+    if (route === "PATCH /public-profile") {
+      const { address, ...rest } = body!;
+      Object.assign(world.profile, rest, { address: { ...(world.profile.address as Row), ...(address as Row | undefined) }, updated_at: new Date().toISOString() });
+      return ok(world.profile);
+    }
     if (route === "GET /billing") return world.billingHidden ? error(403, "insufficient_scope", "This API key needs the billing:manage scope.") : ok(world.billing);
     if (route === "POST /billing/managed-plan") {
       if (mode.key !== "platform" || mode.access !== "all") return error(403, "forbidden", "Only an operator's platform key, one with access to every business, can manage a plan outside Polar.");
@@ -325,6 +334,15 @@ describe("the manifest", () => {
     expect(error).toMatch(/\(the file\): .*extra/);
   });
 
+  it("checks the public page's fields as the API does", async () => {
+    await writeFile(manifest, `${manifestYaml}public_profile: { slug: acme, public_email: not an email, address: { postal_code: 90210, country_code: CAN } }\n`);
+    const error = await readManifest(manifest).then(() => null, (value: Error) => value.message);
+    expect(error).toMatch(/public_profile: .*slug/);
+    expect(error).toContain("public_profile.public_email: Enter an email address such as hello@example.com.");
+    expect(error).toContain("public_profile.address.postal_code: Invalid input: expected string, received number. Put the value in quotes");
+    expect(error).toContain("public_profile.address.country_code: Use a two-letter country code, such as CA.");
+  });
+
   it("refuses two entries a rerun couldn't tell apart", async () => {
     await writeFile(manifest, `${manifestYaml}rules:\n  - { title: Gas leaks, content: Leave the building. }\n  - { title: gas leaks , content: Call the gas company. }\n`.replace("websites: [https://acmeplumbing.ca]", "websites: [https://acmeplumbing.ca, acmeplumbing.ca/]"));
     const error = await readManifest(manifest).then(() => null, (value: Error) => value.message);
@@ -374,6 +392,37 @@ describe("lobbystack onboard", () => {
     expect(second.code).toBe(exitCodes.ok);
     expect(world.writes).toEqual([]);
     expect(second.out).not.toMatch(/created|updated|added|uploaded|claimed|sent|reading/);
+  });
+
+  it("sets up the public page, and on a rerun changes only the fields that differ", async () => {
+    const { world, fetch } = fakeWorld();
+    await writeFile(manifest, `${manifestYaml}public_profile:
+  published: true
+  category: "  Plumber "
+  description: |
+    Licensed plumbers since 1998.
+    Same-day emergency calls.
+  address: { city: Toronto, region: ON, country_code: ca }
+  show_map: false
+`);
+    expect((await onboard(["--plan"], fetch)).out).toContain("public profile would set up");
+    const first = await onboard(["--yes"], fetch);
+    expect(first.code).toBe(exitCodes.ok);
+    expect(first.out).toContain("public profile updated      published, category, description, address, show_map");
+    expect(count(world.writes, /^PATCH \/public-profile$/)).toBe(1);
+    expect(world.profile).toMatchObject({ published: true, category: "Plumber", description: "Licensed plumbers since 1998.\nSame-day emergency calls.", address: { line1: null, city: "Toronto", region: "ON", country_code: "CA" }, show_map: false });
+
+    // Someone adds the street in the dashboard and turns the map back on: the street stays, and the map goes off again.
+    world.profile.address = { ...(world.profile.address as Row), line1: "12 King Street West" };
+    world.profile.show_map = true;
+    world.writes.length = 0;
+    expect((await onboard(["--plan"], fetch)).out).toContain("public profile would update show_map");
+    expect(world.writes).toEqual([]);
+    const rerun = await onboard([], fetch);
+    expect(rerun.code).toBe(exitCodes.ok);
+    expect(rerun.out).toContain("public profile updated      show_map");
+    expect(world.writes).toEqual(["PATCH /public-profile"]);
+    expect(world.profile).toMatchObject({ address: { line1: "12 King Street West", city: "Toronto" }, show_map: false });
   });
 
   it("with an operator's key and a checkout, sends the claim link first and exits 4 until the plan is paid", async () => {

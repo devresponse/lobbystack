@@ -1,4 +1,4 @@
-import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, isUuid, weekdays, type ApiHoursWindow } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
@@ -180,6 +180,45 @@ function onboardingTable(data: Row): string {
   return `${formatTable(checklist.map((item) => ({ ...item, required: item.required ? "yes" : "" })), columns("id", "status", "required"))}\n\nStage: ${String(data.stage)}. ${data.complete ? "Onboarding is complete." : missing.length ? `Still needed to finish: ${missing.join(", ")}.` : "Ready to finish with lobbystack onboarding complete."}`;
 }
 
+/** The page's settings, with the address on one line. */
+function publicProfileText(data: Row): string {
+  const address = data.address as Row;
+  const line = formatPublicProfileAddress({ line1: address.line1 as string | null, line2: address.line2 as string | null, city: address.city as string | null, region: address.region as string | null, postalCode: address.postal_code as string | null, countryCode: address.country_code as string | null });
+  const record = showRecord({ ...data, address: line || null });
+  return data.published ? record : `${record}\n\nThe page isn't published, so its address answers 404. Publish it with lobbystack public-profile publish.`;
+}
+
+const addressFlags = { line1: "line1", line2: "line2", city: "city", region: "region", "postal-code": "postal_code", "country-code": "country_code" } as const;
+
+const publicProfileAddress = (path: string): Command => {
+  const usage = `lobbystack ${path} [--line1 <text>] [--line2 <text>] [--city <text>] [--region <text>] [--postal-code <text>] [--country-code <code>]`;
+  return {
+    summary: "Change the parts of the page's address named. The other parts keep theirs.",
+    usage,
+    options: {
+      line1: { type: "string", placeholder: "<text>", description: "The street address." },
+      line2: { type: "string", placeholder: "<text>", description: "More of it, such as a suite." },
+      city: { type: "string", placeholder: "<text>" },
+      region: { type: "string", placeholder: "<text>", description: "Province or state." },
+      "postal-code": { type: "string", placeholder: "<text>" },
+      "country-code": { type: "string", placeholder: "<code>", description: "Two letters, such as CA." },
+    },
+    notes: "null removes a part.",
+    operations: ["updatePublicProfile"],
+    async run({ output, values, positionals, connect }) {
+      if (positionals.length) throw new CliError(`Usage: ${usage}`);
+      const address = Object.fromEntries(Object.entries(addressFlags).flatMap(([flag, field]) => {
+        const raw = stringValue(values, flag);
+        return raw === undefined ? [] : [[field, raw === "null" ? null : raw]];
+      })) as NonNullable<ApiPublicProfileUpdate["address"]>;
+      if (!Object.keys(address).length) throw new CliError(`Name at least one part of the address.\nUsage: ${usage}`);
+      const { client } = await connect();
+      const profile = (await client.call("updatePublicProfile", { body: { address } })).data;
+      print(output, profile, () => publicProfileText(profile));
+    },
+  };
+};
+
 export const groups: Record<string, Group> = Object.fromEntries([
   group("business", "Create, list and pick businesses, and change their details.", {
     list: { operation: "listBusinesses", columns: columns("id", "name", "timezone", "onboarding_stage", "created_at") },
@@ -260,6 +299,13 @@ export const groups: Record<string, Group> = Object.fromEntries([
     list: { operation: "listWidgetKeys", columns: columns("id", "label", "status", "allowed_origins", "last_used_at") },
     create: { operation: "createWidgetKey", show: (data) => `Key: ${String(data.key)} (shown only now)\n\nPaste this into the website's HTML:\n${String(data.embed_snippet)}` },
     update: { operation: "updateWidgetKey" },
+  }),
+  group("public-profile", "The business's public page at /profile/<slug>, and publishing it.", {
+    get: { operation: "getPublicProfile", show: publicProfileText },
+    set: { operation: "updatePublicProfile", files: ["description"], show: publicProfileText },
+    address: publicProfileAddress,
+    publish: { operation: "updatePublicProfile", summary: "Publish the page, so anyone can open it.", fixed: { published: true }, show: (data) => `Published. Anyone can open ${String(data.url)}.` },
+    unpublish: { operation: "updatePublicProfile", summary: "Take the page down. Its address answers 404 until it's published again.", fixed: { published: false }, show: (data) => `Taken down. ${String(data.url)} answers 404 until the page is published again.` },
   }),
   group("calendar", "Google Calendar connections.", {
     connect: { operation: "createCalendarConnectLink", show: (data) => `Send this link to whoever owns the Google Calendar. It works until ${String(data.expires_at)}:\n${String(data.url)}` },

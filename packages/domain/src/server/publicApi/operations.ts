@@ -106,7 +106,7 @@ import type { DomainContext } from "../context";
 import { cancelKnowledgeDocumentInTransaction, createKnowledgeDocumentInTransaction, createKnowledgeSnippetInTransaction, deleteKnowledgeDocumentInTransaction, deleteKnowledgeSnippetInTransaction, expandWebsiteCrawlInTransaction, KnowledgeStorageLimitError, ONBOARDING_CRAWL_PAGE_LIMIT, retryKnowledgeDocumentInTransaction, setKnowledgeDocumentActiveInTransaction, updateKnowledgeSnippetInTransaction } from "../knowledge";
 import { normalizeWebsiteSourceUrl } from "../knowledgeUrl";
 import { loadNotificationPreferencesInTransaction, loadSavedNotificationPreferencesInTransaction, saveNotificationPreferencesInTransaction } from "../notifications";
-import { normalizeOnboardingStage, resolveOnboardingStageForPlan, scheduleOnboardingFollowupInTransaction } from "../onboarding";
+import { normalizeOnboardingStage, resolveOnboardingStageForPlan, resolveOnboardingStageInTransaction, scheduleOnboardingFollowupInTransaction } from "../onboarding";
 import { completeUploadInTransaction, insertPendingUploadInTransaction, planUpload, type StorageProvider } from "../storage";
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
@@ -1315,16 +1315,24 @@ export async function listBusinessesForApi(context: DomainContext, input: { part
   const limit = pageSize(input.limit);
   const cursor = decodeCursor(input.cursor);
   // The links and businesses are tenant-isolated, so a resolver reads one partner's page.
-  const rows = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => (await tx.execute<{ business_id: string; name: string; timezone: string; default_locale: string; website_url: string | null; onboarding_stage: string; created_at: Date | string }>(sql`select business_id, name, timezone, default_locale, website_url, onboarding_stage, created_at from app.list_platform_partner_businesses(${input.partnerId}, ${cursor?.at.toISOString() ?? null}::timestamptz, ${cursor?.id ?? null}::uuid, ${limit + 1}::int)`)).rows);
-  return toPage(rows, limit, (row) => ({
-    id: row.business_id,
-    name: row.name,
-    timezone: row.timezone,
-    locale: row.default_locale,
-    website_url: row.website_url,
-    onboarding_stage: row.onboarding_stage,
-    created_at: new Date(row.created_at).toISOString(),
-  }), (row) => ({ at: new Date(row.created_at), id: row.business_id }));
+  const summaries = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
+    const rows = (await tx.execute<{ business_id: string; name: string; timezone: string; default_locale: string; website_url: string | null; onboarding_stage: string; created_at: Date | string }>(sql`select business_id, name, timezone, default_locale, website_url, onboarding_stage, created_at from app.list_platform_partner_businesses(${input.partnerId}, ${cursor?.at.toISOString() ?? null}::timestamptz, ${cursor?.id ?? null}::uuid, ${limit + 1}::int)`)).rows;
+    const page: ApiBusinessSummary[] = [];
+    // One business at a time: the dashboard's step can depend on a plan read in that business's own scope.
+    for (const row of rows) {
+      page.push({
+        id: row.business_id,
+        name: row.name,
+        timezone: row.timezone,
+        locale: row.default_locale,
+        website_url: row.website_url,
+        onboarding_stage: await resolveOnboardingStageInTransaction(tx, row.business_id, row.onboarding_stage),
+        created_at: new Date(row.created_at).toISOString(),
+      });
+    }
+    return page;
+  });
+  return toPage(summaries, limit, (summary) => summary, (summary) => ({ at: new Date(summary.created_at), id: summary.id }));
 }
 
 export async function listServicesForApi(context: DomainContext, caller: ApiCaller, options: { includeInactive?: boolean | undefined } = {}): Promise<ApiService[]> {

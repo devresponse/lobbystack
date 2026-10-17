@@ -3,7 +3,8 @@ import { randomUUID } from "node:crypto";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { apiKeys, auditLogs, businessMemberships, businesses, contacts, createDatabaseClient, idempotencyKeys, outboxMessages, platformPartnerBusinesses, receptionistProfiles, staff, users } from "@lobbystack/db";
+import { apiKeys, auditLogs, billingAccounts, businessMemberships, businesses, contacts, createDatabaseClient, idempotencyKeys, outboxMessages, platformPartnerBusinesses, receptionistProfiles, staff, users } from "@lobbystack/db";
+import { apiBusinessSummarySchema } from "@lobbystack/shared";
 
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { PublicApiError } from "./errors";
@@ -240,6 +241,31 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
       expect(seen).not.toContain(other.business.id);
       expect(seen).not.toContain(suspended.business.id);
       expect(seen.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("lists each business at the onboarding step the dashboard shows", async () => {
+      const partnerId = `stages-${randomUUID().slice(0, 8)}`;
+      // Oldest first. The list reads them newest first, so the free plan's number step comes after a paid one's.
+      const cases = [
+        // A verification step onboarding no longer has resumes at the plan.
+        { stored: "verify_phone", plan: null, shows: "plan" },
+        // The free plan goes back from the number steps to its plan.
+        { stored: "phone_number", plan: "free_cloud", shows: "plan" },
+        { stored: "phone_number_claiming", plan: "pro", shows: "phone_number_claiming" },
+        { stored: "knowledge", plan: "free_cloud", shows: "knowledge" },
+      ] as const;
+      const expected: Record<string, string> = {};
+      for (const entry of cases) {
+        const id = randomUUID();
+        createdBusinessIds.push(id);
+        expected[id] = entry.shows;
+        await admin!.db.insert(businesses).values({ id, slug: `platform-stage-${id}`, name: `Stage ${entry.stored}`, timezone: "UTC", businessType: "test", onboardingStage: entry.stored });
+        await admin!.db.insert(platformPartnerBusinesses).values({ businessId: id, partnerId });
+        if (entry.plan) await admin!.db.insert(billingAccounts).values({ businessId: id, billingKey: `business:${id}`, plan: entry.plan });
+      }
+      const page = await listBusinessesForApi({ db: worker!.db }, { partnerId, limit: 10 });
+      expect(Object.fromEntries(page.data.map((business) => [business.id, business.onboarding_stage]))).toEqual(expected);
+      for (const business of page.data) expect(apiBusinessSummarySchema.safeParse(business).success).toBe(true);
     });
 
     it("lets only the worker list a partner's businesses", async () => {

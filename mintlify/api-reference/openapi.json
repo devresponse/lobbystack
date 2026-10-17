@@ -11788,7 +11788,18 @@
           },
           "onboarding_stage": {
             "type": "string",
-            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."
           },
           "booking_mode": {
             "type": "string",
@@ -12025,7 +12036,18 @@
           },
           "onboarding_stage": {
             "type": "string",
-            "description": "Where the business is in onboarding, for example website, phone_number or complete."
+            "enum": [
+              "create_business",
+              "website",
+              "knowledge",
+              "greeting",
+              "plan",
+              "phone_number",
+              "phone_number_claiming",
+              "attribution",
+              "complete"
+            ],
+            "description": "The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."
           },
           "created_at": {
             "type": "string",

@@ -1,11 +1,13 @@
 import { sql } from "drizzle-orm";
 import {
-  DEFAULT_APP_NAME,
   MAX_BRAND_LOGO_BYTES,
+  brandFileMatched,
+  currentBrand,
   brandLogoContentType,
   normalizeAppName,
   readBrandingEnvironment,
   type BrandLogoContentType,
+  type ResolvedBrand,
   type SavedBranding,
 } from "@lobbystack/shared";
 
@@ -34,23 +36,25 @@ let cachedSavedAppName: { promise: Promise<string | null>; expiresAt: number } |
 
 /**
  * The name emails and texts call the deployment by, in the order the dashboard
- * uses: BRAND_APP_NAME, then what onboarding saved, then LobbyStack. Admin and
- * worker both call it, so each needs BRAND_APP_NAME when the environment sets
- * the name. When the database can't be read, the default stands in.
+ * uses: BRAND_APP_NAME, then a matched brand file, then what onboarding saved,
+ * then the default brand. Admin and worker both call it, and both resolve the
+ * same brand from APP_BASE_URL. When the database can't be read, the default
+ * brand stands in.
  */
-export async function deploymentAppName(db: Database, environment: Record<string, string | undefined> = process.env): Promise<string> {
+export async function deploymentAppName(db: Database, environment: Record<string, string | undefined> = process.env, brand: ResolvedBrand = currentBrand()): Promise<string> {
   const fromEnvironment = readBrandingEnvironment(environment).appName;
   if (fromEnvironment) return fromEnvironment;
+  if (brandFileMatched(brand)) return brand.appName;
   const now = Date.now();
   if (!cachedSavedAppName || cachedSavedAppName.expiresAt <= now) {
     cachedSavedAppName = { promise: getSavedBranding(db).then((saved) => normalizeAppName(saved?.appName)), expiresAt: now + APP_NAME_CACHE_MS };
   }
   const entry = cachedSavedAppName;
   try {
-    return (await entry.promise) ?? DEFAULT_APP_NAME;
+    return (await entry.promise) ?? brand.appName;
   } catch {
     if (cachedSavedAppName === entry) cachedSavedAppName = undefined;
-    return DEFAULT_APP_NAME;
+    return brand.appName;
   }
 }
 

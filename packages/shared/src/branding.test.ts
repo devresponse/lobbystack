@@ -4,12 +4,14 @@ import {
   BRAND_LOGO_PATH,
   DEFAULT_APP_NAME,
   MAX_BRAND_LOGO_BYTES,
+  brandAccentColor,
   brandLogoContentType,
   normalizeAppName,
   normalizeLogoUrl,
   readBrandingEnvironment,
   resolveBranding,
 } from "./branding";
+import { resolveBrand } from "./brands/resolve";
 
 const svg = (body: string, prologue = "") => new TextEncoder().encode(`${prologue}<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${body}</svg>`);
 
@@ -83,6 +85,38 @@ describe("resolveBranding", () => {
       logoUrl: "https://cdn.example.com/a.png",
       sources: { appName: "default", logoUrl: "environment" },
     });
+  });
+});
+
+describe("resolveBranding with a brand", () => {
+  const none = { appName: null, logoUrl: null };
+  const saved = { appName: "Saved Name", logoVersion: "abc123" };
+
+  it("takes a matched brand file over what onboarding saved", () => {
+    const alloplace = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" });
+    expect(resolveBranding({ environment: none, saved, brand: alloplace })).toEqual({
+      appName: "AlloPlace",
+      logoUrl: alloplace.logoUrl,
+      sources: { appName: "file", logoUrl: "file" },
+    });
+    expect(resolveBranding({ environment: { appName: "Override", logoUrl: null }, saved, brand: alloplace })).toMatchObject({
+      appName: "Override",
+      sources: { appName: "environment", logoUrl: "file" },
+    });
+  });
+
+  it("keeps onboarding's choice over the default brand", () => {
+    const fallback = resolveBrand({ appBaseUrl: "http://localhost" });
+    expect(resolveBranding({ environment: none, saved, brand: fallback })).toMatchObject({ appName: "Saved Name", sources: { appName: "database", logoUrl: "database" } });
+    expect(resolveBranding({ environment: none, saved: null, brand: fallback })).toEqual({ appName: "LobbyStack", logoUrl: null, sources: { appName: "default", logoUrl: "default" } });
+  });
+});
+
+describe("brandAccentColor", () => {
+  it("takes the variable, then the brand's colour, then the widget's teal", () => {
+    expect(brandAccentColor({ BRAND_ACCENT_COLOR: "#123456" }, { accentColor: "#ffd100" })).toBe("#123456");
+    expect(brandAccentColor({}, { accentColor: "#ffd100" })).toBe("#ffd100");
+    expect(brandAccentColor({}, { accentColor: null })).toBe("#0f766e");
   });
 });
 

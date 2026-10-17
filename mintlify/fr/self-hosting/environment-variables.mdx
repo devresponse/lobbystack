@@ -22,30 +22,22 @@ Utilisez `.env.example` comme source de référence. Stockez les valeurs de prod
 
 ## Image de marque
 
-Définissez-les sur l'admin. Sauf si vous définissez les vôtres, l'image de l'admin utilise le nom et le logo d'AlloPlace : `AlloPlace` et `/brand/alloplace/logo.svg`. Chacune l'emporte sur le nom et le logo que le premier propriétaire du déploiement choisit pendant l'intégration : donnez-lui une valeur vide pour lui laisser ce choix. Passez-les aussi à la compilation de l'admin, comme arguments de compilation Docker du même nom, pour que les pages de connexion prérendues les affichent sans d'abord interroger le serveur.
+Le nom, le logo, la couleur et les liens externes viennent d'un dossier de marque sous `brands/` dans le dépôt, choisi par le domaine de `APP_BASE_URL` : `alloplace.com` et ses sous-domaines reçoivent ceux d'AlloPlace. Pour ajouter votre marque, ajoutez un dossier, réclamez votre domaine dans `brands/index.json`, puis lancez `pnpm brands:build`. Le fichier `docs/branding.md` du dépôt liste les champs.
 
 | Variable | Rôle |
 | --- | --- |
-| `BRAND_APP_NAME` | Le nom que le tableau de bord affiche à la place de LobbyStack, jusqu'à 40 caractères. Il apparaît dans l'onglet du navigateur, en haut des pages de connexion et d'intégration, et dans les textes du tableau de bord. |
-| `BRAND_LOGO_URL` | Le logo affiché à côté du nom et comme icône de l'onglet. Utilisez une URL `https://` ou un chemin sur le tableau de bord, comme `/brand/logo.svg`. Sans logo, un déploiement renommé affiche son nom seul. |
+| `APP_BASE_URL` | Définissez-la sur l'admin et le worker, et passez-la à la compilation de l'admin comme argument de compilation Docker, pour que les pages de connexion prérendues affichent la marque sans d'abord interroger le serveur. |
+| `BRAND_PRESET` | Le dossier de marque à utiliser là où aucune marque ne réclame le domaine, comme `alloplace` sur `localhost` ou une adresse de plateforme. Sur un domaine réclamé, elle est sans effet. Passez-la aussi à la compilation de l'admin. |
+| `BRAND_REQUIRED` | `true` empêche l'admin et le worker de démarrer quand aucun fichier de marque ne correspond. |
 
-Les liens du tableau de bord vers des pages extérieures viennent de cinq autres variables. Next.js les inscrit dans la compilation de l'admin : passez-les comme arguments de compilation Docker du même nom, et recompilez après en avoir changé une. Sauf si vous définissez les vôtres, l'image de l'admin renvoie vers alloplace.com. Une valeur vide renvoie plutôt vers la page de LobbyStack.
+Là où aucune marque ne réclame le domaine et où `BRAND_PRESET` est vide, le déploiement affiche LobbyStack, et son premier propriétaire choisit un nom et un logo pendant l'intégration.
 
-| Variable | Rôle |
-| --- | --- |
-| `NEXT_PUBLIC_LANDING_SITE_URL` | Votre site web, comme `https://example.com`. La page de démonstration publique y renvoie, et la réponse SMS à HELP le donne. Sans variable propre, les liens vers les conditions et la confidentialité ouvrent `/terms` et `/privacy` sur ce site. |
-| `NEXT_PUBLIC_TERMS_URL` | Vos conditions d'utilisation, liées sous le formulaire d'inscription, en bas de l'intégration et depuis le programme d'affiliation. |
-| `NEXT_PUBLIC_PRIVACY_URL` | Votre politique de confidentialité, liée sous le formulaire d'inscription et en bas de l'intégration. |
-| `NEXT_PUBLIC_DOCS_SITE_URL` | Votre documentation, liée depuis le panneau Commentaires du tableau de bord et les métadonnées du serveur MCP. |
-| `NEXT_PUBLIC_CONTACT_EMAIL` | L'adresse unique à laquelle on vous écrit : le lien de contact du panneau Commentaires, le bouton de contact du forfait Enterprise et les réponses SMS à HELP. |
+`BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` et `NEXT_PUBLIC_CONTACT_EMAIL` l'emportent encore sur le fichier de marque pendant une version, puis disparaîtront.
 
-Les e-mails, les SMS et l'API indiquent encore LobbyStack pour l'instant.
-
-Les pages de [profil public](/fr/settings/public-profile) lisent deux autres variables à leur chargement : un redémarrage de l'admin suffit après en avoir changé une.
+Les pages de [profil public](/fr/settings/public-profile) lisent une autre variable à leur chargement : un redémarrage de l'admin suffit après l'avoir changée.
 
 | Variable | Rôle |
 | --- | --- |
-| `BRAND_ACCENT_COLOR` | La couleur derrière le clavardage et les heures d'ouverture du jour, au format `#rrggbb`. Le texte posé dessus passe en noir ou en blanc, selon ce qui se lit le mieux. L'image de l'admin utilise le jaune d'AlloPlace, `#FFD100`. Sans couleur valide, les pages utilisent la sarcelle par défaut du widget de site Web. Dans un fichier `.env`, mettez la valeur entre guillemets, comme `BRAND_ACCENT_COLOR="#FFD100"`, car `#` y commence un commentaire. |
 | `GOOGLE_MAPS_EMBED_API_KEY` | Une clé de l'API Maps Embed de Google, pour une carte interactive de l'adresse de l'entreprise. Sans elle, les pages affichent une carte dessinée qui ouvre Google Maps. Limitez la clé à l'API Maps Embed et à l'adresse de votre tableau de bord. |
 
 ## Services internes

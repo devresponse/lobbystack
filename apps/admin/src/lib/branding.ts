@@ -1,5 +1,5 @@
 import { forgetCachedDeploymentAppName, getSavedBranding } from "@lobbystack/domain";
-import { readBrandingEnvironment, resolveBranding, type Branding, type BrandingEnvironment } from "@lobbystack/shared";
+import { brandFileMatched, currentBrand, readBrandingEnvironment, resolveBranding, type Branding, type BrandingEnvironment } from "@lobbystack/shared";
 
 import { getAppDatabase } from "./api-helpers";
 import type { BrandingSnapshot } from "./branding-snapshot";
@@ -25,15 +25,17 @@ function environmentBranding(environment: Record<string, string | undefined>): B
 
 async function readBranding(): Promise<Branding> {
   const environment = environmentBranding(process.env);
-  // The database can't change a field the environment sets, so skip it when both are set.
-  const saved = environment.appName && environment.logoUrl ? null : await getSavedBranding(getAppDatabase().db);
-  return resolveBranding({ environment, saved });
+  const brand = currentBrand();
+  // The database can't change a field the environment or a brand file sets, so skip it then.
+  const saved = brandFileMatched(brand) || (environment.appName && environment.logoUrl) ? null : await getSavedBranding(getAppDatabase().db);
+  return resolveBranding({ environment, saved, brand });
 }
 
 /**
- * The deployment's name and logo: BRAND_APP_NAME and BRAND_LOGO_URL, then what
- * onboarding saved, then LobbyStack. When the database can't be read, pages
- * still render with the environment's choice.
+ * The deployment's name and logo: BRAND_APP_NAME and BRAND_LOGO_URL, then the
+ * brand file the deployment's domain picks, then what onboarding saved, then
+ * LobbyStack. When the database can't be read, pages still render with the
+ * environment's and the brand file's choice.
  */
 export async function loadBranding(): Promise<Branding> {
   const now = Date.now();
@@ -47,7 +49,7 @@ export async function loadBranding(): Promise<Branding> {
       lastFailureReportAt = now;
       void reportServerError(error, { operation: "load_branding" });
     }
-    return resolveBranding({ environment: environmentBranding(process.env), saved: null });
+    return resolveBranding({ environment: environmentBranding(process.env), saved: null, brand: currentBrand() });
   }
 }
 
@@ -62,11 +64,14 @@ export function brandingSnapshot(branding: Pick<Branding, "appName" | "logoUrl">
 }
 
 /**
- * What a prerendered page can know when it's built: the environment's choice.
- * It's final only when the environment sets both the name and the logo.
+ * What a prerendered page can know when it's built: the environment's choice
+ * and the build's brand file. It's final when a brand file matched, or when
+ * the environment sets both the name and the logo; otherwise the browser asks
+ * the server what onboarding saved.
  */
 export function buildTimeBrandingSnapshot(environment: Record<string, string | undefined> = process.env): BrandingSnapshot {
   const fromEnvironment = environmentBranding(environment);
-  const branding = resolveBranding({ environment: fromEnvironment, saved: null });
-  return { appName: branding.appName, logoUrl: branding.logoUrl, final: Boolean(fromEnvironment.appName && fromEnvironment.logoUrl) };
+  const brand = currentBrand();
+  const branding = resolveBranding({ environment: fromEnvironment, saved: null, brand });
+  return { appName: branding.appName, logoUrl: branding.logoUrl, final: brandFileMatched(brand) || Boolean(fromEnvironment.appName && fromEnvironment.logoUrl) };
 }

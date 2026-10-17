@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn() }));
+const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn(), appBaseUrl: "http://localhost" }));
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, currentBrand: () => shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl }) };
+});
 vi.mock("@lobbystack/domain", () => ({ saveInitialBranding: fixture.save }));
 vi.mock("@/lib/api-helpers", () => ({
   getAppDatabase: () => ({ db: {} }),
@@ -22,7 +26,7 @@ beforeEach(() => {
   fixture.save.mockResolvedValue(undefined);
   fixture.load.mockResolvedValue({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; });
 
 describe("initial branding route", () => {
   it("saves the name and the decoded logo, then answers with what pages now show", async () => {
@@ -31,6 +35,14 @@ describe("initial branding route", () => {
     expect(await response.json()).toEqual({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" });
     expect(fixture.save).toHaveBeenCalledWith({ db: {} }, { userId: "owner", appName: "Acme Desk", logo: PNG });
     expect(fixture.forget).toHaveBeenCalledBefore(fixture.load);
+  });
+
+  it("refuses on a deployment whose brand file sets the name and logo", async () => {
+    fixture.appBaseUrl = "https://demo.alloplace.com";
+    const response = await post(JSON.stringify({ appName: "Acme Desk" }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "branding_set_by_brand_file" });
+    expect(fixture.save).not.toHaveBeenCalled();
   });
 
   it("leaves out a field the environment already sets", async () => {

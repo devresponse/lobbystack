@@ -80,17 +80,25 @@ describe("admin build links", () => {
     const config = await loadConfig({}) as NextConfig;
     for (const name of BRAND_LINK_VARIABLES) expect(config.env?.[name]).toBe("");
   });
+});
 
-  it("gives the Docker build that runs next build alloplace.com's links", () => {
+describe("admin build brand", () => {
+  it("writes the address and preset the brand comes from into the build", async () => {
+    vi.stubEnv("BRAND_PRESET", undefined);
+    const config = await loadConfig({ APP_BASE_URL: "https://demo.alloplace.com" }) as NextConfig;
+    expect(config.env).toMatchObject({ NEXT_PUBLIC_BRAND_BASE_URL: "https://demo.alloplace.com", NEXT_PUBLIC_BRAND_PRESET: "" });
+  });
+
+  it("gives the Docker build that runs next build the address and preset, and no brand of its own", () => {
     const buildStage = dockerBuildStage();
     const adminBuild = buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build");
-    for (const name of BRAND_LINK_VARIABLES) {
-      const linkArg = buildStage.indexOf(`ARG ${name}=`);
-      expect(linkArg, name).toBeGreaterThan(-1);
-      expect(linkArg, name).toBeLessThan(adminBuild);
+    for (const name of ["APP_BASE_URL", "BRAND_PRESET"]) {
+      const arg = buildStage.indexOf(`ARG ${name}\n`);
+      expect(arg, name).toBeGreaterThan(-1);
+      expect(arg, name).toBeLessThan(adminBuild);
     }
-    expect(buildStage).toContain("ARG NEXT_PUBLIC_TERMS_URL=https://alloplace.com/legal/terms\n");
-    expect(buildStage).toContain("ARG NEXT_PUBLIC_CONTACT_EMAIL=support@alloplace.com\n");
+    expect(buildStage).not.toContain("alloplace.com");
+    expect(buildStage).not.toContain("BRAND_APP_NAME");
   });
 });
 

@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listSchedulerBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
-import { DEFAULT_APP_NAME, assertProductionSecrets, isMaintenanceMode, readBrandingEnvironment } from "@lobbystack/shared";
+import { assertProductionSecrets, brandStartupReport, currentBrand, isMaintenanceMode, readBrandingEnvironment } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, isKnownJobType, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -38,7 +38,7 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     secure: process.env.SMTP_SECURE === "true",
     username: process.env.SMTP_USERNAME ?? "",
     password: process.env.SMTP_PASSWORD ?? "",
-    from: process.env.EMAIL_FROM || `${readBrandingEnvironment(process.env).appName ?? DEFAULT_APP_NAME} <no-reply@localhost>`,
+    from: process.env.EMAIL_FROM || `${readBrandingEnvironment(process.env).appName ?? currentBrand().appName} <no-reply@localhost>`,
     ...(process.env.EMAIL_REPLY_TO ? { replyTo: process.env.EMAIL_REPLY_TO } : {}),
   });
 }
@@ -119,6 +119,11 @@ async function main(): Promise<void> {
     "OTP_HASH_SECRET",
     ...(process.env.STORAGE_PROVIDER === "s3" ? [] : ["LOCAL_STORAGE_SIGNING_SECRET"]),
   ]);
+  // The brand emails and texts go out under, from APP_BASE_URL like the admin's.
+  const brand = brandStartupReport(currentBrand());
+  console.info(brand.info);
+  for (const warning of brand.warnings) console.warn(warning);
+  if (brand.error) throw new Error(brand.error);
   await initializeTelemetry({ serviceName: "lobbystack-worker" });
   const database = createDatabaseClient("lobbystack_worker");
   const dispatcherDatabase = createDatabaseClient("lobbystack_dispatcher");

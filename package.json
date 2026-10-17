@@ -50,6 +50,7 @@
     "db:migrate": "pnpm --filter @lobbystack/db db:migrate",
     "env:generate": "node scripts/generate-env.mjs",
     "api:openapi": "tsx --tsconfig scripts/tsconfig.json scripts/write-openapi.ts",
+    "brands:build": "tsx --tsconfig scripts/tsconfig.json scripts/write-brands.ts",
     "db:check": "pnpm --filter @lobbystack/db db:check",
     "db:seed": "pnpm --filter @lobbystack/db db:seed",
     "db:reset:test": "pnpm --filter @lobbystack/db db:reset:test",

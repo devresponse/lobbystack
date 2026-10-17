@@ -10,6 +10,7 @@ import {
   normalizeSiteUrl,
   resolveBrandLinks,
 } from "./brandLinks";
+import { resolveBrand } from "./brands/resolve";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -90,6 +91,18 @@ describe("resolveBrandLinks", () => {
     for (const purpose of Object.keys(LOBBYSTACK_CONTACT_EMAILS) as Array<keyof typeof LOBBYSTACK_CONTACT_EMAILS>) {
       expect(contactEmailFor(links, purpose)).toBe("support@alloplace.com");
     }
+  });
+
+  it("takes the brand's links where no variable sets one", () => {
+    const brand = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }).links;
+    expect(resolveBrandLinks({}, brand)).toEqual({
+      siteUrl: "https://alloplace.com",
+      termsUrl: "https://alloplace.com/legal/terms",
+      privacyUrl: "https://alloplace.com/legal/privacy",
+      docsUrl: "https://alloplace.com",
+      contactEmail: "support@alloplace.com",
+    });
+    expect(resolveBrandLinks({ NEXT_PUBLIC_CONTACT_EMAIL: "help@example.com", NEXT_PUBLIC_TERMS_URL: "" }, brand)).toMatchObject({ contactEmail: "help@example.com", termsUrl: "https://alloplace.com/legal/terms" });
   });
 
   it("falls back to LobbyStack's link for an empty or unusable value, and names the unusable ones", () => {

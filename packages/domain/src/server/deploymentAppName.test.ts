@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Database } from "@lobbystack/db";
+import { resolveBrand } from "@lobbystack/shared";
 
 import { deploymentAppName, forgetCachedDeploymentAppName } from "./branding";
 
@@ -17,6 +18,13 @@ describe("deploymentAppName", () => {
   it("uses BRAND_APP_NAME without reading the database", async () => {
     const { db, limit } = databaseSaving("Saved Name");
     expect(await deploymentAppName(db, { BRAND_APP_NAME: "  RealInfoBot " })).toBe("RealInfoBot");
+    expect(limit).not.toHaveBeenCalled();
+  });
+
+  it("uses a matched brand file without reading the database", async () => {
+    const { db, limit } = databaseSaving("Saved Name");
+    expect(await deploymentAppName(db, {}, resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }))).toBe("AlloPlace (dev)");
+    expect(await deploymentAppName(db, { BRAND_APP_NAME: "Override" }, resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }))).toBe("Override");
     expect(limit).not.toHaveBeenCalled();
   });
 

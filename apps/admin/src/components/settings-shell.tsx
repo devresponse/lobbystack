@@ -22,6 +22,7 @@ export function SettingsShell({ children }: { children: React.ReactNode }) {
     { label: t("sections.connectedApps"), href: "/settings/connected-apps" },
     { label: t("sections.widget"), href: "/settings/widget" },
     { label: t("sections.publicPage"), href: "/settings/profile" },
+    { label: t("sections.qrCode"), href: "/settings/qrcode" },
   ];
   return (
     <section className="flex flex-1 flex-col gap-6">

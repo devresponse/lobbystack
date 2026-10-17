@@ -19,6 +19,7 @@
     "notifications": "Obaveštenja",
     "widget": "Vidžet za sajt",
     "publicPage": "Javni profil",
+    "qrCode": "QR kod",
     "apiKeys": "API ključevi",
     "connectedApps": "Povezane aplikacije"
   },
@@ -173,6 +174,72 @@
       "invalid": "Neki podaci ne mogu da se sačuvaju. Proverite ih i pokušajte ponovo.",
       "widgetUnavailable": "Taj vidžet je pauziran ili opozvan. Izaberite drugi ili bez četa.",
       "saveFailed": "Javni profil nije sačuvan. Pokušajte ponovo."
+    }
+  },
+  "qrCode": {
+    "title": "QR kod",
+    "loading": "Učitava se Vaš QR kod…",
+    "unavailable": "Vaš QR kod trenutno ne može da se učita.",
+    "card": {
+      "title": "Vaš QR kod",
+      "description": "Stavite ga na vrata, pult ili stolove. Svako ko ga skenira stiže na Vaš javni profil."
+    },
+    "opens": "Otvara",
+    "open": "Otvori stranicu",
+    "preview": "Pregled",
+    "unpublished": {
+      "title": "Vaš javni profil još nije objavljen",
+      "description": "Svako ko skenira ovaj kod videće poruku da stranica nije pronađena dok stranica ne bude objavljena. Ipak, možete ga odmah odštampati.",
+      "link": "Objavite ga u Javnom profilu",
+      "askAdmin": "Vlasnik ili administrator može da ga objavi u Javnom profilu."
+    },
+    "template": {
+      "label": "Šablon",
+      "signal": "Signal",
+      "signalHint": "Žuti natpis",
+      "frontDesk": "Recepcija",
+      "frontDeskHint": "Belo, troši manje tonera",
+      "night": "Noć",
+      "nightHint": "Crno, za slabo osvetljene prostore"
+    },
+    "message": {
+      "label": "Poruka",
+      "hint": "Štampa se kao naslov. Upišite šta god želite; Enter počinje novi red.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Veličina",
+      "a4": "Cela strana · A4",
+      "a5": "Pola strane · A5",
+      "a6": "Četvrtina strane · A6",
+      "a7": "Kartice · A7",
+      "hint": "{{count}} po listu · kod od {{code}} cm, skenira se sa oko {{distance}}"
+    },
+    "mark": {
+      "label": "U sredini koda",
+      "name": "Naziv",
+      "logo": "Logo",
+      "none": "Ništa",
+      "tooLong": "Ova adresa je predugačka za naziv ili logo u sredini koda, pa je kod običan."
+    },
+    "language": {
+      "label": "Jezik",
+      "hint": "Jezik reči odštampanih na natpisu."
+    },
+    "print": "Štampaj",
+    "png": "Kod kao PNG",
+    "svg": "Kod kao SVG",
+    "printHint": "Štampajte u stvarnoj veličini (100%), a ne „Prilagodi stranici”, na A4 papiru. Mat papir se najbolje skenira. Za PDF izaberite Sačuvaj kao PDF u prozoru za štampu. Pre nego što ga postavite, skenirajte otisak sa dva telefona.",
+    "downloadFailed": "Datoteka nije mogla da se napravi. Pokušajte ponovo ili koristite Štampaj.",
+    "previewLabel": "Pregled šablona {{template}}, {{size}}",
+    "caption": "A4 papir · {{count}} po listu · svaki {{width}} × {{height}} cm",
+    "codeLabel": "QR kod koji otvara {{url}}",
+    "noCode": "Od ove adrese ne može da se napravi QR kod.",
+    "sign": {
+      "defaultMessage": "Imate pitanja?\nPitajte nas bilo kada.",
+      "scanChat": "Skenirajte i pišite nam",
+      "scanPage": "Skenirajte i posetite našu stranicu",
+      "answeredBy": "Odgovara <brand>{{appName}}</brand>"
     }
   },
   "billing": {

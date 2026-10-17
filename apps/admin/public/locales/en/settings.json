@@ -19,6 +19,7 @@
     "notifications": "Notifications",
     "widget": "Website widget",
     "publicPage": "Public profile",
+    "qrCode": "QR code",
     "apiKeys": "API keys",
     "connectedApps": "Connected apps"
   },
@@ -173,6 +174,72 @@
       "invalid": "Some details can't be saved. Check them and try again.",
       "widgetUnavailable": "That widget is paused or revoked. Choose another one, or no chat.",
       "saveFailed": "The public profile couldn't be saved. Try again."
+    }
+  },
+  "qrCode": {
+    "title": "QR code",
+    "loading": "Loading your QR code…",
+    "unavailable": "Your QR code can't be loaded right now.",
+    "card": {
+      "title": "Your QR code",
+      "description": "Put it on your door, counter or tables. Anyone who scans it lands on your public profile."
+    },
+    "opens": "Opens",
+    "open": "Open page",
+    "preview": "Preview",
+    "unpublished": {
+      "title": "Your public profile isn't published yet",
+      "description": "Anyone who scans this code sees a page-not-found message until the page is published. You can still print it now.",
+      "link": "Publish it in Public profile",
+      "askAdmin": "An owner or admin can publish it in Public profile."
+    },
+    "template": {
+      "label": "Template",
+      "signal": "Signal",
+      "signalHint": "Yellow sign",
+      "frontDesk": "Front desk",
+      "frontDeskHint": "White, uses less toner",
+      "night": "Night",
+      "nightHint": "Black, for dim rooms"
+    },
+    "message": {
+      "label": "Message",
+      "hint": "Printed as the headline. Type anything; Enter starts a new line.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Size",
+      "a4": "Full page · A4",
+      "a5": "Half page · A5",
+      "a6": "Quarter page · A6",
+      "a7": "Cards · A7",
+      "hint": "{{count}} per sheet · code {{code}} cm, scans from about {{distance}}"
+    },
+    "mark": {
+      "label": "Inside the code",
+      "name": "Name",
+      "logo": "Logo",
+      "none": "Nothing",
+      "tooLong": "This address is too long for a name or logo inside the code, so the code is plain."
+    },
+    "language": {
+      "label": "Language",
+      "hint": "The language of the words printed on the sign."
+    },
+    "print": "Print",
+    "png": "Code as PNG",
+    "svg": "Code as SVG",
+    "printHint": "Print at actual size (100%), not Fit to page, on A4 paper. Matte paper scans best. For a PDF, choose Save as PDF in the print window. Scan the print with two phones before you put it up.",
+    "downloadFailed": "The file couldn't be made. Try again, or use Print.",
+    "previewLabel": "Preview of the {{template}} template, {{size}}",
+    "caption": "A4 paper · {{count}} per sheet · each {{width}} × {{height}} cm",
+    "codeLabel": "QR code that opens {{url}}",
+    "noCode": "This address can't be made into a QR code.",
+    "sign": {
+      "defaultMessage": "Questions?\nAsk us any time.",
+      "scanChat": "Scan to chat with us",
+      "scanPage": "Scan to visit our page",
+      "answeredBy": "Answered by <brand>{{appName}}</brand>"
     }
   },
   "billing": {

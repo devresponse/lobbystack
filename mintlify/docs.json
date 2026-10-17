@@ -123,7 +123,8 @@
                   "settings/notifications",
                   "settings/phone-number",
                   "settings/widget",
-                  "settings/public-profile"
+                  "settings/public-profile",
+                  "settings/qr-code"
                 ]
               },
               {
@@ -249,7 +250,8 @@
                   "fr/settings/notifications",
                   "fr/settings/phone-number",
                   "fr/settings/widget",
-                  "fr/settings/public-profile"
+                  "fr/settings/public-profile",
+                  "fr/settings/qr-code"
                 ]
               },
               {
@@ -378,7 +380,8 @@
                   "es/settings/notifications",
                   "es/settings/phone-number",
                   "es/settings/widget",
-                  "es/settings/public-profile"
+                  "es/settings/public-profile",
+                  "es/settings/qr-code"
                 ]
               },
               {

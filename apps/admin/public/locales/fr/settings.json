@@ -19,6 +19,7 @@
     "notifications": "Notifications",
     "widget": "Widget de site web",
     "publicPage": "Profil public",
+    "qrCode": "Code QR",
     "apiKeys": "Clés API",
     "connectedApps": "Applications connectées"
   },
@@ -173,6 +174,72 @@
       "invalid": "Certains renseignements ne peuvent pas être enregistrés. Vérifiez-les et réessayez.",
       "widgetUnavailable": "Ce widget est en pause ou révoqué. Choisissez-en un autre, ou aucun clavardage.",
       "saveFailed": "Le profil public n'a pas pu être enregistré. Réessayez."
+    }
+  },
+  "qrCode": {
+    "title": "Code QR",
+    "loading": "Chargement de votre code QR…",
+    "unavailable": "Votre code QR ne peut pas être chargé pour le moment.",
+    "card": {
+      "title": "Votre code QR",
+      "description": "Placez-le sur votre porte, votre comptoir ou vos tables. Toute personne qui le scanne arrive sur votre profil public."
+    },
+    "opens": "Ouvre",
+    "open": "Ouvrir la page",
+    "preview": "Aperçu",
+    "unpublished": {
+      "title": "Votre profil public n'est pas encore publié",
+      "description": "Toute personne qui scanne ce code verra un message de page introuvable jusqu'à ce que la page soit publiée. Vous pouvez quand même l'imprimer dès maintenant.",
+      "link": "Le publier dans Profil public",
+      "askAdmin": "Un propriétaire ou un administrateur peut le publier dans Profil public."
+    },
+    "template": {
+      "label": "Modèle",
+      "signal": "Signal",
+      "signalHint": "Affiche jaune",
+      "frontDesk": "Réception",
+      "frontDeskHint": "Blanc, utilise moins de toner",
+      "night": "Nuit",
+      "nightHint": "Noir, pour les pièces sombres"
+    },
+    "message": {
+      "label": "Message",
+      "hint": "Imprimé comme titre. Écrivez ce que vous voulez; Entrée commence une nouvelle ligne.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Format",
+      "a4": "Pleine page · A4",
+      "a5": "Demi-page · A5",
+      "a6": "Quart de page · A6",
+      "a7": "Cartes · A7",
+      "hint": "{{count}} par feuille · code de {{code}} cm, lisible jusqu'à environ {{distance}}"
+    },
+    "mark": {
+      "label": "Au centre du code",
+      "name": "Nom",
+      "logo": "Logo",
+      "none": "Rien",
+      "tooLong": "Cette adresse est trop longue pour mettre un nom ou un logo au centre du code, donc le code est simple."
+    },
+    "language": {
+      "label": "Langue",
+      "hint": "La langue des mots imprimés sur l'affiche."
+    },
+    "print": "Imprimer",
+    "png": "Code en PNG",
+    "svg": "Code en SVG",
+    "printHint": "Imprimez à la taille réelle (100 %), pas « Ajuster à la page », sur du papier A4. Le papier mat se scanne le mieux. Pour un PDF, choisissez Enregistrer au format PDF dans la fenêtre d'impression. Scannez l'impression avec deux téléphones avant de l'afficher.",
+    "downloadFailed": "Le fichier n'a pas pu être créé. Réessayez ou utilisez Imprimer.",
+    "previewLabel": "Aperçu du modèle {{template}}, {{size}}",
+    "caption": "Papier A4 · {{count}} par feuille · {{width}} × {{height}} cm chacun",
+    "codeLabel": "Code QR qui ouvre {{url}}",
+    "noCode": "Cette adresse ne peut pas devenir un code QR.",
+    "sign": {
+      "defaultMessage": "Des questions?\nNous répondons en tout temps.",
+      "scanChat": "Scannez pour discuter avec nous",
+      "scanPage": "Scannez pour voir notre page",
+      "answeredBy": "Accueil assuré par <brand>{{appName}}</brand>"
     }
   },
   "billing": {

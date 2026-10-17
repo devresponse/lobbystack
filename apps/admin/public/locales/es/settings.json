@@ -19,6 +19,7 @@
     "notifications": "Notificaciones",
     "widget": "Widget del sitio web",
     "publicPage": "Perfil público",
+    "qrCode": "Código QR",
     "apiKeys": "Claves de API",
     "connectedApps": "Aplicaciones conectadas"
   },
@@ -173,6 +174,72 @@
       "invalid": "Algunos datos no se pueden guardar. Revíselos e inténtelo de nuevo.",
       "widgetUnavailable": "Ese widget está en pausa o revocado. Elija otro, o sin chat.",
       "saveFailed": "No se pudo guardar el perfil público. Inténtelo de nuevo."
+    }
+  },
+  "qrCode": {
+    "title": "Código QR",
+    "loading": "Cargando su código QR…",
+    "unavailable": "Su código QR no se puede cargar en este momento.",
+    "card": {
+      "title": "Su código QR",
+      "description": "Póngalo en su puerta, mostrador o mesas. Quien lo escanee llegará a su perfil público."
+    },
+    "opens": "Abre",
+    "open": "Abrir página",
+    "preview": "Vista previa",
+    "unpublished": {
+      "title": "Su perfil público aún no está publicado",
+      "description": "Quien escanee este código verá un mensaje de página no encontrada hasta que se publique la página. Aun así, puede imprimirlo ahora.",
+      "link": "Publíquelo en Perfil público",
+      "askAdmin": "Un propietario o administrador puede publicarlo en Perfil público."
+    },
+    "template": {
+      "label": "Plantilla",
+      "signal": "Señal",
+      "signalHint": "Cartel amarillo",
+      "frontDesk": "Recepción",
+      "frontDeskHint": "Blanco, usa menos tóner",
+      "night": "Noche",
+      "nightHint": "Negro, para lugares con poca luz"
+    },
+    "message": {
+      "label": "Mensaje",
+      "hint": "Se imprime como titular. Escriba lo que quiera; Intro empieza una línea nueva.",
+      "count": "{{count}}/{{max}}"
+    },
+    "size": {
+      "label": "Tamaño",
+      "a4": "Página completa · A4",
+      "a5": "Media página · A5",
+      "a6": "Cuarto de página · A6",
+      "a7": "Tarjetas · A7",
+      "hint": "{{count}} por hoja · código de {{code}} cm, se escanea desde unos {{distance}}"
+    },
+    "mark": {
+      "label": "Dentro del código",
+      "name": "Nombre",
+      "logo": "Logotipo",
+      "none": "Nada",
+      "tooLong": "Esta dirección es demasiado larga para poner un nombre o un logotipo dentro del código, así que el código es simple."
+    },
+    "language": {
+      "label": "Idioma",
+      "hint": "El idioma de las palabras impresas en el cartel."
+    },
+    "print": "Imprimir",
+    "png": "Código en PNG",
+    "svg": "Código en SVG",
+    "printHint": "Imprima a tamaño real (100 %), no «Ajustar a la página», en papel A4. El papel mate se escanea mejor. Para un PDF, elija Guardar como PDF en la ventana de impresión. Escanee la impresión con dos teléfonos antes de colocarla.",
+    "downloadFailed": "No se pudo crear el archivo. Inténtelo de nuevo o use Imprimir.",
+    "previewLabel": "Vista previa de la plantilla {{template}}, {{size}}",
+    "caption": "Papel A4 · {{count}} por hoja · cada uno de {{width}} × {{height}} cm",
+    "codeLabel": "Código QR que abre {{url}}",
+    "noCode": "Esta dirección no se puede convertir en un código QR.",
+    "sign": {
+      "defaultMessage": "¿Preguntas?\nPregúntenos cuando quiera.",
+      "scanChat": "Escanee para chatear con nosotros",
+      "scanPage": "Escanee para ver nuestra página",
+      "answeredBy": "Atendido por <brand>{{appName}}</brand>"
     }
   },
   "billing": {

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "appName": {
+      "type": "string"
+    },
+    "logo": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*\\.(?:svg|png|jpg|jpeg|webp)$"
+    },
+    "accentColor": {
+      "type": "string"
+    },
+    "links": {
+      "type": "object",
+      "properties": {
+        "site": {
+          "type": "string"
+        },
+        "terms": {
+          "type": "string"
+        },
+        "privacy": {
+          "type": "string"
+        },
+        "docs": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "contactEmail": {
+      "type": "string"
+    },
+    "environments": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+\\*?$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "appNameSuffix": {
+            "type": "string"
+          },
+          "indexing": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "appName"
+  ],
+  "additionalProperties": false
+}

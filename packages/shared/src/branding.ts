@@ -1,9 +1,12 @@
+import { brandFileMatched, currentBrand, type ResolvedBrand } from "./brands/resolve";
+
 // The name and logo a deployment shows in place of LobbyStack.
 //
-// A deployment sets them with BRAND_APP_NAME and BRAND_LOGO_URL, or its first
-// owner picks them in onboarding and the database keeps them. For each field
-// the environment variable wins over the saved value, and LobbyStack fills in
-// whatever neither sets.
+// A brand file under brands/ sets them when the deployment's domain or
+// BRAND_PRESET picks one (brands/resolve.ts). Otherwise the deployment's first
+// owner picks them in onboarding and the database keeps them, and LobbyStack
+// fills in whatever nobody chose. BRAND_APP_NAME and BRAND_LOGO_URL still win
+// over both, field by field, until they are removed.
 
 export const DEFAULT_APP_NAME = "LobbyStack";
 
@@ -15,7 +18,7 @@ export const BRANDING_ENVIRONMENT = {
 
 export type BrandingField = keyof typeof BRANDING_ENVIRONMENT;
 
-export type BrandingSource = "environment" | "database" | "default";
+export type BrandingSource = "environment" | "file" | "database" | "default";
 
 export const MAX_APP_NAME_LENGTH = 40;
 
@@ -112,9 +115,9 @@ export function normalizeAccentColor(value: unknown): string | null {
   return `#${digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits}`;
 }
 
-/** The deployment's accent colour from its environment, else the default. */
-export function brandAccentColor(environment: Record<string, string | undefined>): string {
-  return normalizeAccentColor(environment[BRAND_ACCENT_VARIABLE]) ?? DEFAULT_BRAND_ACCENT_COLOR;
+/** The deployment's accent colour from its environment, else its brand's, else the default. */
+export function brandAccentColor(environment: Record<string, string | undefined>, brand: Pick<ResolvedBrand, "accentColor"> = currentBrand()): string {
+  return normalizeAccentColor(environment[BRAND_ACCENT_VARIABLE]) ?? brand.accentColor ?? DEFAULT_BRAND_ACCENT_COLOR;
 }
 
 /** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
@@ -134,16 +137,24 @@ export function savedBrandLogoUrl(logoVersion: string): string {
   return `${BRAND_LOGO_PATH}?v=${encodeURIComponent(logoVersion)}`;
 }
 
-/** Each field from the environment, else the saved choice, else LobbyStack. */
-export function resolveBranding(input: { environment: Pick<BrandingEnvironment, "appName" | "logoUrl">; saved: SavedBranding | null }): Branding {
-  const savedName = normalizeAppName(input.saved?.appName);
-  const savedLogo = input.saved?.logoVersion ? savedBrandLogoUrl(input.saved.logoVersion) : null;
+type BrandForBranding = Pick<ResolvedBrand, "source" | "appName" | "logoUrl">;
+
+/**
+ * Each field from the environment, else a matched brand file, else the saved
+ * choice, else the default brand. Without a brand, the default is LobbyStack.
+ */
+export function resolveBranding(input: { environment: Pick<BrandingEnvironment, "appName" | "logoUrl">; saved: SavedBranding | null; brand?: BrandForBranding }): Branding {
+  const file = input.brand && brandFileMatched(input.brand) ? input.brand : null;
+  const savedName = file ? null : normalizeAppName(input.saved?.appName);
+  const savedLogo = !file && input.saved?.logoVersion ? savedBrandLogoUrl(input.saved.logoVersion) : null;
+  const fallbackName = input.brand?.appName ?? DEFAULT_APP_NAME;
+  const fallbackLogo = input.brand?.logoUrl ?? null;
   return {
-    appName: input.environment.appName ?? savedName ?? DEFAULT_APP_NAME,
-    logoUrl: input.environment.logoUrl ?? savedLogo,
+    appName: input.environment.appName ?? file?.appName ?? savedName ?? fallbackName,
+    logoUrl: input.environment.logoUrl ?? (file ? file.logoUrl : savedLogo ?? fallbackLogo),
     sources: {
-      appName: input.environment.appName ? "environment" : savedName ? "database" : "default",
-      logoUrl: input.environment.logoUrl ? "environment" : savedLogo ? "database" : "default",
+      appName: input.environment.appName ? "environment" : file ? "file" : savedName ? "database" : "default",
+      logoUrl: input.environment.logoUrl ? "environment" : file ? "file" : savedLogo ? "database" : "default",
     },
   };
 }

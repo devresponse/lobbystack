@@ -1,0 +1,8 @@
+{
+  "$schema": "./index.schema.json",
+  "default": "lobbystack",
+  "domains": {
+    "alloplace.com": "alloplace",
+    "alloplace.ai": "alloplace"
+  }
+}

@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { cache } from "react";
 
 import { getPublicBusinessProfile } from "@lobbystack/domain";
-import { brandAccentColor, brandLinks, readableTextOn } from "@lobbystack/shared";
+import { brandAccentColor, brandLinks, currentBrand, readableTextOn } from "@lobbystack/shared";
 
 import { ProfilePage } from "@/components/public-profile/profile-page";
 import { getSession } from "@/lib/auth";
@@ -57,8 +57,8 @@ export async function generateMetadata({ params }: ProfileRouteProps): Promise<M
     title,
     description,
     alternates: profileAlternates(pageUrl, locale),
-    // A preview stays out of search results.
-    robots: profile.published ? { index: true, follow: true } : { index: false, follow: false },
+    // A preview stays out of search results, and so does every page of a dev or test deployment.
+    robots: profile.published && currentBrand().indexing ? { index: true, follow: true } : { index: false, follow: false },
     openGraph: { type: "website", url: pageUrl, title, description },
     twitter: { card: "summary", title, description },
     ...icons,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { saveInitialBranding } from "@lobbystack/domain";
-import { MAX_BRAND_LOGO_BYTES, readBrandingEnvironment } from "@lobbystack/shared";
+import { MAX_BRAND_LOGO_BYTES, brandFileMatched, currentBrand, readBrandingEnvironment } from "@lobbystack/shared";
 
 import { asApiResponse, getAppDatabase, jsonError, requireApiSession } from "@/lib/api-helpers";
 import { forgetCachedBranding, loadBranding } from "@/lib/branding";
@@ -42,11 +42,15 @@ async function readBody(request: Request): Promise<unknown> {
 /**
  * Saves the name and logo the deployment's first owner chose in onboarding:
  * `{ appName, logo }`, the logo in base64. Leaving both out keeps LobbyStack
- * and ends the choice. A field the environment sets is not theirs to choose.
+ * and ends the choice. A field the environment sets is not theirs to choose,
+ * and neither is anything on a deployment whose brand file sets them.
  */
 export async function POST(request: Request) {
   try {
     const session = await requireApiSession(request);
+    if (brandFileMatched(currentBrand())) {
+      throw jsonError("This deployment's name and logo come from its brand file.", 409, "branding_set_by_brand_file");
+    }
     const body = await readBody(request);
     const fields = body && typeof body === "object" && !Array.isArray(body) ? body as { appName?: unknown; logo?: unknown } : null;
     const appName = fields?.appName ?? null;

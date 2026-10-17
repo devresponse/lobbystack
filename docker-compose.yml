@@ -95,13 +95,9 @@ services:
         NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: ${NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN:-}
         NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://ts.lobbystack.com}
-        BRAND_APP_NAME: ${BRAND_APP_NAME-AlloPlace}
-        BRAND_LOGO_URL: ${BRAND_LOGO_URL-/brand/alloplace/logo.svg}
-        NEXT_PUBLIC_LANDING_SITE_URL: ${NEXT_PUBLIC_LANDING_SITE_URL-https://alloplace.com}
-        NEXT_PUBLIC_TERMS_URL: ${NEXT_PUBLIC_TERMS_URL-https://alloplace.com/legal/terms}
-        NEXT_PUBLIC_PRIVACY_URL: ${NEXT_PUBLIC_PRIVACY_URL-https://alloplace.com/legal/privacy}
-        NEXT_PUBLIC_DOCS_SITE_URL: ${NEXT_PUBLIC_DOCS_SITE_URL-https://alloplace.com}
-        NEXT_PUBLIC_CONTACT_EMAIL: ${NEXT_PUBLIC_CONTACT_EMAIL-support@alloplace.com}
+        # The brand comes from brands/ by this address, or BRAND_PRESET where no brand claims it.
+        APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
+        BRAND_PRESET: ${BRAND_PRESET:-}
     restart: unless-stopped
     environment:
       NODE_ENV: production
@@ -112,9 +108,7 @@ services:
       LOBBYSTACK_CERTIFICATION_CALENDARS: ${LOBBYSTACK_CERTIFICATION_CALENDARS:-}
       PORT: 3000
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
-      BRAND_APP_NAME: ${BRAND_APP_NAME-AlloPlace}
-      BRAND_LOGO_URL: ${BRAND_LOGO_URL-/brand/alloplace/logo.svg}
-      BRAND_ACCENT_COLOR: ${BRAND_ACCENT_COLOR-#FFD100}
+      BRAND_PRESET: ${BRAND_PRESET:-}
       GOOGLE_MAPS_EMBED_API_KEY: ${GOOGLE_MAPS_EMBED_API_KEY:-}
       NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: ${NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN:-}
       NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://ts.lobbystack.com}
@@ -236,8 +230,8 @@ services:
       SMTP_SECURE: ${SMTP_SECURE:-false}
       SMTP_USERNAME: ${SMTP_USERNAME:-}
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      BRAND_APP_NAME: ${BRAND_APP_NAME-AlloPlace}
-      EMAIL_FROM: ${EMAIL_FROM:-AlloPlace <no-reply@localhost>}
+      BRAND_PRESET: ${BRAND_PRESET:-}
+      EMAIL_FROM: ${EMAIL_FROM:-}
       EMAIL_REPLY_TO: ${EMAIL_REPLY_TO:-}
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-}
       LOCAL_STORAGE_PATH: /var/lib/lobbystack/storage

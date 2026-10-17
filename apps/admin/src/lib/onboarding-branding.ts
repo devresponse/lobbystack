@@ -1,5 +1,5 @@
 import { canSaveInitialBranding } from "@lobbystack/domain";
-import { readBrandingEnvironment } from "@lobbystack/shared";
+import { brandFileMatched, currentBrand, readBrandingEnvironment } from "@lobbystack/shared";
 
 import { getAppDatabase } from "./api-helpers";
 import { reportServerError } from "./error-reporting";
@@ -9,9 +9,11 @@ export type InitialBrandingFields = { appName: boolean; logo: boolean };
 /**
  * What the brand step asks this person for: the fields the environment leaves
  * open, while nobody has chosen and they own every business on the deployment.
- * Null when the step doesn't apply.
+ * Null when the step doesn't apply, as on a deployment whose brand file sets
+ * the name and logo.
  */
 export async function initialBrandingFields(userId: string): Promise<InitialBrandingFields | null> {
+  if (brandFileMatched(currentBrand())) return null;
   const environment = readBrandingEnvironment(process.env);
   const fields = { appName: !environment.appName, logo: !environment.logoUrl };
   if (!fields.appName && !fields.logo) return null;

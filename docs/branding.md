@@ -1,35 +1,61 @@
 # Brand a deployment
 
-A deployment can show its own app name and logo instead of LobbyStack, and send its outside links to its own website. This page covers how to set them, how the admin picks which to show, and where the LobbyStack brand still appears, with the variable proposed for each of those places.
+A deployment can show its own app name, logo and colour instead of LobbyStack's, and send its outside links to its own website. Each brand is a folder under `brands/`, and a deployment's address picks one. This page covers how to add a brand, how the admin and worker pick which to show, and where the LobbyStack brand still appears.
 
-## Set the name and logo
+## Brand files
 
-The admin reads two settings. For each one it uses the first of these that has a value:
+A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/index.json` maps apex domains to folders and names the default:
 
-1. The admin's environment: `BRAND_APP_NAME` and `BRAND_LOGO_URL`.
-2. The choice the deployment's first owner saved during onboarding. It's stored as one row in `public.deployment_branding`.
-3. LobbyStack's own name and mark.
+```json
+{
+  "default": "lobbystack",
+  "domains": {
+    "alloplace.com": "alloplace",
+    "alloplace.ai": "alloplace"
+  }
+}
+```
 
-Each setting is resolved on its own, so an operator can fix the name in the environment and still let the first owner upload a logo. The environment comes first so that whoever runs a deployment keeps control of it: the first person to sign up can't replace a name the operator already set, and an operator can fix the branding without database access. Prerendered pages can only read the environment the admin was built with, so it has to be available at build time as well (see [Prerendered pages](#prerendered-pages)).
-
-| Setting | Environment variable | Accepted values |
+| Field in `brand.json` | Accepted values | Without it |
 | --- | --- | --- |
-| App name | `BRAND_APP_NAME` | 1 to 40 characters once whitespace is collapsed. Control and format characters, such as bidirectional overrides, aren't allowed. |
-| Logo | `BRAND_LOGO_URL` | An `https://` URL without credentials, or a path on the dashboard such as `/brand/logo.svg`. |
+| `appName` (required) | 1 to 40 characters once whitespace is collapsed, with no control or format characters. | |
+| `logo` | A PNG, JPEG, WebP or plain SVG file in the folder, up to 256 KB, checked like an uploaded logo. | The name on its own. |
+| `accentColor` | `#rgb` or `#rrggbb`. | The website widget's teal, `#0f766e`. |
+| `links.site`, `links.docs` | An `http://` or `https://` URL without credentials, a query, or a fragment. | LobbyStack's site and docs. |
+| `links.terms`, `links.privacy` | An `http://` or `https://` URL without credentials. | `/terms` and `/privacy` on the site. |
+| `contactEmail` | A plain address, such as `support@example.com`. | LobbyStack's address for each place. |
+| `environments` | Settings by host label, such as `"dev*": { "appNameSuffix": " (dev)", "indexing": false }`. A pattern ending in `*` matches any first label that starts with it. | The plain brand on every host. |
 
-When a variable is set to a value it can't use, the admin logs a warning once and treats the variable as unset.
+`brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
 
-Set the variables on the admin service. Give them to the admin's Docker build too: `Dockerfile.admin` and `docker-compose.yml` pass build arguments with the same names. On Railway, the admin's service variables reach its Docker build automatically.
+After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each logo to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one.
 
-### AlloPlace defaults
+The repository is public, so everything in a brand folder is public too.
 
-Out of the box, both variables carry AlloPlace's brand: `BRAND_APP_NAME=AlloPlace` and `BRAND_LOGO_URL=/brand/alloplace/logo.svg`. `Dockerfile.admin` sets them at build and run time, `docker-compose.yml` passes them when they're unset, and `.env.example` carries them for local development. The logo is the yellow tile from AlloPlace's Cadre brand system, in `apps/admin/public/brand/alloplace/logo.svg`. The dashboard sets the name beside it, and the browser tab uses it as its icon, as alloplace.com does.
+### How a deployment picks its brand
 
-To rebrand a deployment, set your own values. To let the deployment's first owner choose a field in onboarding instead, set that variable to an empty value. In Docker and Compose, leaving it unset keeps AlloPlace's.
+The admin and the worker resolve the brand once when they start (`packages/shared/src/brands/resolve.ts`):
+
+1. The brand whose domain the host of `APP_BASE_URL` sits under. `dev01.alloplace.com`, `demo.alloplace.com` and `alloplace.com` all get AlloPlace. Domains match whole labels, so `notalloplace.com` doesn't.
+2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace`. Use it for `localhost` and for platform addresses such as `*.up.railway.app`. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
+3. Otherwise the default brand, LobbyStack. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
+
+For one more release, `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR` and the five `NEXT_PUBLIC_*` link variables still win over the brand file, field by field. Nothing sets them by default any more, and they'll be removed.
+
+When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
+
+At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`. In production it also logs `brand.unmatched` when no brand claims the address. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked.
+
+### Add a brand
+
+1. Make a folder under `brands/` named for the brand, in lowercase letters, digits and dashes, with its `brand.json` and logo.
+2. Claim its apex domains in `brands/index.json`.
+3. Run `pnpm brands:build` and commit what it writes.
+4. Deploy with `APP_BASE_URL` on that domain. Set `APP_BASE_URL` on both the admin and the worker, and give it to the admin's Docker build: `Dockerfile.admin` takes it as a build argument, and on Railway the admin's service variables reach its build.
 
 ### The onboarding step
 
-The first owner sees a **Make this app your own** step before naming their business. It asks only for the fields the environment leaves unset, and it doesn't appear at all when both are set, as they are with the AlloPlace defaults. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
+On a deployment no brand file matches, the first owner sees a **Make this app your own** step before naming their business. It asks only for the fields the environment leaves unset. It never appears where a brand file matches, and `POST /api/branding/initial` answers 409 there. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
 
 The step is shown only when both of these are true. `app.can_save_initial_branding()` checks them in the database, and `app.save_initial_branding()` checks them again when the choice is saved:
 
@@ -40,16 +66,15 @@ Uploaded logos can be PNG, JPEG, WebP, or SVG files of up to 256 KB. The admin w
 
 ### Change the branding later
 
-There's no settings page for this yet. To change the branding:
+On a deployment a brand file matches, edit the brand file and redeploy.
 
-- Set `BRAND_APP_NAME` or `BRAND_LOGO_URL` and redeploy the admin. They take priority over the saved choice.
-- Or delete the saved row as the database superuser, because the runtime roles can't write the table, and open `/onboarding/brand` as the owner of every business:
+Elsewhere, there's no settings page for this yet. Delete the saved row as the database superuser, because the runtime roles can't write the table, and open `/onboarding/brand` as the owner of every business:
 
-  ```sql
-  DELETE FROM public.deployment_branding;
-  ```
+```sql
+DELETE FROM public.deployment_branding;
+```
 
-The admin caches the branding for 30 seconds, so other admin replicas pick up a change within that time.
+The admin caches the saved row for 30 seconds, so other admin replicas pick up a change within that time. A brand file is part of the build, so every replica always shows the same one.
 
 ## Where the name and logo appear
 
@@ -65,7 +90,7 @@ A deployment still named LobbyStack with no logo of its own shows LobbyStack's m
 
 Every email and text the app sends calls it by the same name as the dashboard: verification codes, password resets, email changes, invitations, the "account was made for you" and "you already have an account" emails, the founder check-in, alert emails, the SMS HELP and START replies, and the operator's phone verification code. The text a caller gets when they change an appointment opens with the business's name instead, since the caller phoned the business, and falls back to the app name when the business has none.
 
-`deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: `BRAND_APP_NAME`, then the saved onboarding choice, then LobbyStack. It caches the saved choice for 30 seconds and uses LobbyStack when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `BRAND_APP_NAME` on the worker as well as the admin**. `Dockerfile.worker` and `docker-compose.yml` default it to AlloPlace, like the admin. On Railway, a shared variable keeps the two services in step.
+`deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: `BRAND_APP_NAME` while it lasts, then a matched brand file, then the saved onboarding choice, then the default brand. It caches the saved choice for 30 seconds and uses the default brand when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `APP_BASE_URL` on the worker as well as the admin**: the worker picks its brand from it the same way.
 
 The verification email's HTML header shows the name as a wordmark rather than a logo, because Gmail and Outlook don't show SVG logos. Without `EMAIL_FROM`, the worker sends as `<app name> <no-reply@localhost>`.
 
@@ -75,9 +100,9 @@ The consent text for operator alert texts uses the app name too (`OPERATOR_SMS_D
 
 ## Send the outside links to your own site
 
-The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. Five variables point them at a deployment's own site and inbox.
+The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. The brand file's `links` and `contactEmail` point them at the brand's own site and inbox. Five variables still override them for one more release:
 
-| Link | Environment variable | Accepted values | When unset |
+| Link | Environment variable | Accepted values | When neither sets it |
 | --- | --- | --- | --- |
 | Website | `NEXT_PUBLIC_LANDING_SITE_URL` | An `http://` or `https://` URL without credentials, a query, or a fragment. | `https://lobbystack.com` |
 | Terms of service | `NEXT_PUBLIC_TERMS_URL` | An `http://` or `https://` URL without credentials. | `/terms` on the website |
@@ -85,7 +110,7 @@ The admin also links to pages outside itself: the website, the terms of service 
 | Docs | `NEXT_PUBLIC_DOCS_SITE_URL` | Like the website. | `https://docs.lobbystack.com` |
 | Contact address | `NEXT_PUBLIC_CONTACT_EMAIL` | A plain address, such as `support@example.com`. | LobbyStack's address for each place: `support@lobbystack.com` in the feedback panel, `hello@lobbystack.ai` for Enterprise plans, and `hello@lobbystack.com` in text messages. |
 
-An empty variable counts as unset. When a variable holds a value it can't use, the admin logs a warning at startup and uses LobbyStack's link in its place.
+An empty variable counts as unset. When a variable holds a value it can't use, the admin logs a warning at startup and uses the brand's link in its place.
 
 Where each one appears:
 
@@ -96,42 +121,23 @@ Where each one appears:
 
 ### Set them for the build
 
-Next.js writes `NEXT_PUBLIC_` variables into the admin's build, both the browser's code and the server's, so a change takes a rebuild. `next.config.ts` fixes all five at build time, even the unset ones, so a value set only when the admin starts can't make the server render one link and the browser another.
+Next.js writes `NEXT_PUBLIC_` variables into the admin's build, both the browser's code and the server's, so a change takes a rebuild. `next.config.ts` fixes the five old link variables at build time, even the unset ones, and writes in the address and preset the brand comes from (`NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`), so the server and the browser always agree. When the admin starts with an `APP_BASE_URL` or `BRAND_PRESET` that would pick another brand than its build did, it logs `brand.build_mismatch`: rebuild it.
 
-`Dockerfile.admin` and `docker-compose.yml` pass build arguments with the same names. On Railway, the admin's service variables reach its Docker build automatically.
-
-### AlloPlace defaults
-
-Out of the box, the links go to alloplace.com:
-
-```bash
-NEXT_PUBLIC_LANDING_SITE_URL=https://alloplace.com
-NEXT_PUBLIC_TERMS_URL=https://alloplace.com/legal/terms
-NEXT_PUBLIC_PRIVACY_URL=https://alloplace.com/legal/privacy
-NEXT_PUBLIC_DOCS_SITE_URL=https://alloplace.com
-NEXT_PUBLIC_CONTACT_EMAIL=support@alloplace.com
-```
-
-`Dockerfile.admin` sets them for the build, `docker-compose.yml` passes them when they're unset, and `.env.example` carries them for local development. alloplace.com has no docs yet, so the docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
-
-To link to LobbyStack's page for one of them instead, set that variable to an empty value. In Docker and Compose, leaving it unset keeps alloplace.com's.
+alloplace.com has no docs yet, so AlloPlace's docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
 
 `packages/shared/src/brandLinks.ts` holds the variable names, the checks, and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
 
 ## Color the public pages
 
-Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. `BRAND_ACCENT_COLOR` sets it, as `#rgb` or `#rrggbb`. Text on it is black or white, whichever contrasts more, so a yellow gets black text.
-
-Out of the box it's AlloPlace's yellow, `#FFD100`. `Dockerfile.admin` sets it at run time, `docker-compose.yml` passes it when it's unset, and `.env.example` carries it in quotes, because an unquoted `#` starts a comment in `.env` files. Without a valid color, the pages use the website widget's default teal, `#0f766e`.
-
-The pages are rendered for each request, so a change only needs a restart, not a rebuild.
+Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it, and `BRAND_ACCENT_COLOR` still overrides it for one more release. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, gets black text. Without either, the pages use the website widget's default teal, `#0f766e`.
 
 ## How it works
 
+- `brands/`: the brand folders and the domain index. `packages/shared/src/brands/schema.ts` checks and compiles them; `scripts/write-brands.ts` writes `packages/shared/src/brands/generated.ts`; `packages/shared/src/brands/resolve.ts` picks the brand (`resolveBrand`, `currentBrand`).
 - `packages/shared/src/branding.ts`: the variable names, the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
-- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. If the database can't be read, pages fall back to the environment and the default, and the error is reported at most once a minute.
+- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file matches, it never reads the database. If the database can't be read, pages fall back to the environment and the default brand, and the error is reported at most once a minute.
 - Routes:
   - `GET /api/branding` returns `{ appName, logoUrl }` and is never cached.
   - `GET /api/branding/logo` serves the saved logo. Its URL carries the logo's SHA-256 (`?v=`), so browsers can keep it for good.
@@ -140,7 +146,7 @@ The pages are rendered for each request, so a change only needs a restart, not a
 
 ### Prerendered pages
 
-The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. They carry the branding that the build's environment sets. When either variable is missing at build time, the browser asks `/api/branding` for both. Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow. Setting both variables for the build skips that request.
+The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. Where the build's `APP_BASE_URL` or `BRAND_PRESET` picks a brand file, they carry that brand and need nothing more. Otherwise, the browser asks `/api/branding` for the name and logo onboarding saved. Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow.
 
 ## Text that keeps LobbyStack on purpose
 
@@ -163,13 +169,13 @@ These use the name from `deploymentAppName()` or `loadBranding()`, like emails:
 
 ## Still branded
 
-These places still say LobbyStack or link to lobbystack.com. Variables marked "proposed" don't exist yet. When they're added, they should be resolved like the name and logo: the environment first, then a saved value, then the default.
+These places still say LobbyStack or link to lobbystack.com. Variables marked "proposed" don't exist yet. When they're added, they should come from the brand file, like the name and logo.
 
 | Area | Where | Proposed setting |
 | --- | --- | --- |
 | Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
 | API wire names | The `LobbyStack-Business` header, the `LobbyStack-Webhooks/1.0` and `LobbyStack-OAuth/1.0` user agents, the `lsk_` and `lsp_` key prefixes, and the MCP server id `lobbystack` | None: API clients, the CLI and Zapier send or match them, so renaming them would break integrations. Descriptions and messages around them name no product. |
-| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use `BRAND_ACCENT_COLOR`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
+| Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use the brand's `accentColor`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
 | CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to `docs.lobbystack.com` in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
 | Zapier | The integration's name and logo in Zapier's developer dashboard | `ZAPIER_APP_NAME`, `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` set its labels, messages, default address and docs link (`integrations/zapier/README.md`); registering it under that name is done in Zapier. |

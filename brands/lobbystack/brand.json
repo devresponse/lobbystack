@@ -1,0 +1,9 @@
+{
+  "$schema": "../brand.schema.json",
+  "appName": "LobbyStack",
+  "accentColor": "#0f766e",
+  "links": {
+    "site": "https://lobbystack.com",
+    "docs": "https://docs.lobbystack.com"
+  }
+}

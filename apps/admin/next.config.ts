@@ -34,9 +34,14 @@ const nextConfig: NextConfig = {
     // deployment variable that can stay unchanged across deploys.
     NEXT_PUBLIC_ASSET_VERSION: publicAssetVersion(resolve(process.cwd(), "public"), serviceVersion),
     NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV ?? "development",
-    // Where the dashboard's outside links go (packages/shared/src/brandLinks.ts),
-    // fixed at build even when unset, so a value set only at run time can't make
-    // the server render a link the browser then disagrees with.
+    // The address and preset the brand comes from (packages/shared/src/brands/resolve.ts),
+    // fixed at build so the prerendered pages, the server and the browser all
+    // show the same brand. The admin warns at start when they no longer match.
+    NEXT_PUBLIC_BRAND_BASE_URL: process.env.APP_BASE_URL ?? "",
+    NEXT_PUBLIC_BRAND_PRESET: process.env.BRAND_PRESET ?? "",
+    // Old overrides for the brand file's outside links (packages/shared/src/brandLinks.ts),
+    // to be removed. Fixed at build even when unset, so a value set only at run
+    // time can't make the server render a link the browser then disagrees with.
     NEXT_PUBLIC_LANDING_SITE_URL: process.env.NEXT_PUBLIC_LANDING_SITE_URL ?? "",
     NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL ?? "",
     NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL ?? "",

@@ -28,6 +28,12 @@ Provider credentials belong only on the services that use them. Follow `.env.exa
 
 Telemetry exporter failure must not affect readiness. Configure retention and sampling in the OTLP backend.
 
+## Find a failed request
+
+When the dashboard shows an error ID, search the admin service's logs for it. The admin logs each server failure as one JSON line whose message starts with `[admin] exception:`, with the request's `route`, its `errorId`, and the underlying `cause`: a database error's SQLSTATE, or a provider's HTTP status and error code.
+
+The worker logs each failed job attempt as one `job.failed` JSON line with the job type, the attempt, and the reason. Buying a phone number needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_SIP_TRUNK_SID` on worker. Without them the worker ends the number claim at once and its `job.failed` line names the missing variable.
+
 ## Twilio callback signatures
 
 Set `TWILIO_SMS_WEBHOOK_URL` and `TWILIO_STATUS_CALLBACK_URL` on admin to their public HTTPS endpoints. Set the same status callback endpoint on worker so delivery updates are requested. These non-secret URLs are declared in `.railway/railway.ts`. Railway may present an internal request URL to Next.js, so signature validation reconstructs the public endpoint while retaining the incoming query string, including `notificationId`, `messageId`, or `operatorDeliveryId`. Query values remain covered by signature verification.

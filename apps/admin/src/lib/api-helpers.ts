@@ -1,3 +1,4 @@
+import { headers } from "next/headers";
 import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
@@ -8,6 +9,7 @@ import { runAfterResponse } from "./after-response";
 import { getSession, type Session } from "./auth";
 import { getDatabase } from "./databases";
 import { reportServerError } from "./error-reporting";
+import { PATHNAME_HEADER } from "./locale-request";
 
 export function getAppDatabase() {
   return getDatabase("lobbystack_app");
@@ -101,6 +103,16 @@ export async function withOperatorTransaction<T>(
   });
 }
 
+/** The path the proxy saw, so a logged failure names its endpoint. Nothing outside a route handler's request. */
+async function requestRoute(): Promise<{ route?: string }> {
+  try {
+    const route = (await headers()).get(PATHNAME_HEADER);
+    return route ? { route } : {};
+  } catch {
+    return {};
+  }
+}
+
 export function asApiResponse(error: unknown): NextResponse {
   if (error instanceof NextResponse) {
     return error;
@@ -113,7 +125,7 @@ export function asApiResponse(error: unknown): NextResponse {
   const message = status >= 500 ? "Request failed." : error instanceof Error ? error.message : "Request failed.";
   if (status >= 500) {
     const errorId = crypto.randomUUID();
-    runAfterResponse(() => reportServerError(error, { operation: "api_response", errorId }));
+    runAfterResponse(async () => reportServerError(error, { operation: "api_response", errorId, ...await requestRoute() }));
     return NextResponse.json({ error: message, errorId }, { status, headers: { "x-error-id": errorId } });
   }
   return jsonError(message, status, code);

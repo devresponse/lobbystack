@@ -515,7 +515,26 @@
       "loadFailed": "No pudimos cargar los números en este momento.",
       "searchFailed": "No pudimos buscar números en este momento.",
       "claimFailed": "No pudimos reemplazar el número de teléfono. Inténtelo de nuevo.",
+      "getNumberFailed": "No pudimos obtener ese número. Inténtelo de nuevo.",
       "unavailable": "Ese número se acaba de asignar. Elija otro de la lista actualizada."
+    },
+    "errors": {
+      "offerExpired": "Esta lista de números ha caducado. Vuelva a buscar y luego elija un número.",
+      "claimInProgress": "Todavía se está configurando otro número para este espacio de trabajo. Espere unos minutos y vuelva a intentarlo.",
+      "claimRateLimited": "Ha probado 3 números en la última hora, que es el límite. Inténtelo más tarde.",
+      "dailyClaimQuota": "Ha obtenido 2 números en las últimas 24 horas, que es el límite. Inténtelo mañana.",
+      "monthlyClaimQuota": "Ha obtenido 5 números en los últimos 30 días, que es el límite. Inténtelo más tarde.",
+      "numberExists": "Este espacio de trabajo ya tiene un número de teléfono. Vuelva a cargar la página para verlo.",
+      "invalidStage": "Complete los pasos de configuración anteriores antes de elegir un número.",
+      "paidPlanRequired": "Un número dedicado del negocio requiere un plan de pago.",
+      "replacementUsed": "Este espacio de trabajo ya usó su único cambio de número.",
+      "activeNumberRequired": "Su número actual ya no está activo, así que no se puede cambiar.",
+      "replacementMustDiffer": "Elija un número distinto de su número actual.",
+      "unsupportedCountry": "Los números de teléfono están disponibles en EE. UU., Canadá, el Reino Unido y Australia.",
+      "searchRateLimited": "Demasiadas búsquedas. Espere unos minutos y vuelva a intentarlo.",
+      "searchInvalid": "El operador no pudo buscar con ese código de área. Revíselo e inténtelo de nuevo.",
+      "searchUnsupported": "El operador no tiene números de este tipo en este país.",
+      "withErrorId": "{{message}} ID del error: {{errorId}}"
     },
     "toast": {
       "changed": "Número de teléfono cambiado. Su número anterior seguirá activo durante 30 días.",

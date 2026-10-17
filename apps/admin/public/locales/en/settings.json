@@ -515,7 +515,26 @@
       "loadFailed": "We couldn't load numbers right now.",
       "searchFailed": "We couldn't search numbers right now.",
       "claimFailed": "We couldn't replace the phone number. Please try again.",
+      "getNumberFailed": "We couldn't get that number. Please try again.",
       "unavailable": "That number was just taken. Pick another one from the refreshed list."
+    },
+    "errors": {
+      "offerExpired": "This list of numbers has expired. Search again, then pick a number.",
+      "claimInProgress": "Another number for this workspace is still being set up. Wait a few minutes, then try again.",
+      "claimRateLimited": "You've tried 3 numbers in the last hour, which is the limit. Try again later.",
+      "dailyClaimQuota": "You've gotten 2 numbers in the last 24 hours, which is the limit. Try again tomorrow.",
+      "monthlyClaimQuota": "You've gotten 5 numbers in the last 30 days, which is the limit. Try again later.",
+      "numberExists": "This workspace already has a phone number. Reload the page to see it.",
+      "invalidStage": "Finish the earlier setup steps before you pick a number.",
+      "paidPlanRequired": "A dedicated business number needs a paid plan.",
+      "replacementUsed": "This workspace has already used its one number change.",
+      "activeNumberRequired": "Your current number is no longer active, so it can't be changed.",
+      "replacementMustDiffer": "Pick a number other than your current one.",
+      "unsupportedCountry": "Phone numbers are available in the US, Canada, the UK and Australia.",
+      "searchRateLimited": "Too many searches. Wait a few minutes, then try again.",
+      "searchInvalid": "The phone carrier couldn't search with that area code. Check it and try again.",
+      "searchUnsupported": "The phone carrier has no numbers of this kind in this country.",
+      "withErrorId": "{{message}} Error ID: {{errorId}}"
     },
     "toast": {
       "changed": "Phone number changed. Your previous number will stay active for 30 days.",

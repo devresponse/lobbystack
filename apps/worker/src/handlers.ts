@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import Redis from "ioredis";
+import { UnrecoverableError } from "bullmq";
 import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
 import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
@@ -894,13 +895,20 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     }
     case "phoneNumber.provision": {
       const businessId = businessIdOrThrow(job); const claimId = String(job.payload.claimId ?? "");
-      if (!claimId || !dependencies.twilio?.findOwnedPhoneNumber || !dependencies.twilio.purchasePhoneNumber) return { status: "skipped", entityId: claimId };
+      if (!claimId) return { status: "skipped", entityId: claimId };
       // Calls reach GPT-Live only through the Twilio SIP trunk. A number off the
       // trunk has nothing to answer it, so refuse to buy one without a trunk.
       const sipTrunkSid = process.env.TWILIO_SIP_TRUNK_SID?.trim();
-      if (!sipTrunkSid) throw new Error("TWILIO_SIP_TRUNK_SID is required to provision a phone number. See docs/voice/runtime.md.");
-      if (!dependencies.twilio.addNumberToSipTrunk) throw new Error("The Twilio provider can't assign numbers to a SIP trunk.");
-      const addNumberToSipTrunk = dependencies.twilio.addNumberToSipTrunk.bind(dependencies.twilio);
+      const twilio = dependencies.twilio;
+      if (!twilio?.findOwnedPhoneNumber || !twilio.purchasePhoneNumber || !twilio.addNumberToSipTrunk || !sipTrunkSid) {
+        // No attempt can buy the number, so end the claim now and don't retry.
+        // Left reserved, it would refuse the business's next pick for 15 minutes.
+        await failNumberProvisioning(dependencies.domain, { businessId, claimId, unavailable: false, error: "This server isn't set up to buy phone numbers." });
+        throw new UnrecoverableError(!twilio?.findOwnedPhoneNumber || !twilio.purchasePhoneNumber
+          ? "TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN are required to provision a phone number."
+          : !sipTrunkSid ? "TWILIO_SIP_TRUNK_SID is required to provision a phone number. See docs/voice/runtime.md." : "The Twilio provider can't assign numbers to a SIP trunk.");
+      }
+      const addNumberToSipTrunk = twilio.addNumberToSipTrunk.bind(twilio);
       const claim = await claimNumberProvisioning(dependencies.domain, { businessId, claimId });
       // A worker killed mid-purchase leaves the claim provisioning. Retry once its lease ends instead of leaving it stuck.
       if (!claim) return retryAfterLease(await numberProvisioningLeaseEndsAt(dependencies.domain, { businessId, claimId }), claimId);
@@ -908,14 +916,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const smsUrl = `${baseUrl}/api/webhooks/twilio/sms`; const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/status`;
       let purchased = false; let providerPhoneId: string | undefined;
       try {
-        const owned = await dependencies.twilio.findOwnedPhoneNumber({ e164: claim.e164 });
+        const owned = await twilio.findOwnedPhoneNumber({ e164: claim.e164 });
         if (owned) providerPhoneId = owned.providerPhoneId;
-        else { const result = await dependencies.twilio.purchasePhoneNumber({ e164: claim.e164, friendlyName: `LobbyStack ${businessId}`, smsUrl, statusCallbackUrl }); providerPhoneId = result.providerPhoneId; purchased = true; }
+        else { const result = await twilio.purchasePhoneNumber({ e164: claim.e164, friendlyName: `LobbyStack ${businessId}`, smsUrl, statusCallbackUrl }); providerPhoneId = result.providerPhoneId; purchased = true; }
         await addNumberToSipTrunk({ trunkSid: sipTrunkSid, providerPhoneId });
         const phoneNumberId = await completeNumberProvisioning(dependencies.domain, { businessId, claimId, e164: claim.e164, providerPhoneId, voiceUrl: `sip-trunk:${sipTrunkSid}`, smsUrl });
         return { status: "completed", entityId: phoneNumberId };
       } catch (error) {
-        if (purchased && providerPhoneId && dependencies.twilio.releasePhoneNumber) await dependencies.twilio.releasePhoneNumber({ providerPhoneId }).catch(() => undefined);
+        if (purchased && providerPhoneId && twilio.releasePhoneNumber) await twilio.releasePhoneNumber({ providerPhoneId }).catch(() => undefined);
         const { getTwilioProviderErrorCode } = await import("@lobbystack/providers/twilio/twilioProvider");
         await failNumberProvisioning(dependencies.domain, { businessId, claimId, unavailable: getTwilioProviderErrorCode(error) === 21422 });
         throw error;

@@ -515,7 +515,26 @@
       "loadFailed": "Trenutno ne možemo da učitamo brojeve.",
       "searchFailed": "Trenutno ne možemo da pretražimo brojeve.",
       "claimFailed": "Nismo uspeli da zamenimo broj telefona. Pokušajte ponovo.",
+      "getNumberFailed": "Nismo uspeli da dobijemo taj broj. Pokušajte ponovo.",
       "unavailable": "Taj broj je upravo zauzet. Izaberite drugi sa osvežene liste."
+    },
+    "errors": {
+      "offerExpired": "Ova lista brojeva je istekla. Pretražite ponovo, pa izaberite broj.",
+      "claimInProgress": "Drugi broj za ovaj radni prostor se još podešava. Sačekajte nekoliko minuta, pa pokušajte ponovo.",
+      "claimRateLimited": "Probali ste 3 broja u poslednjih sat vremena, što je ograničenje. Pokušajte ponovo kasnije.",
+      "dailyClaimQuota": "Dobili ste 2 broja u poslednja 24 sata, što je ograničenje. Pokušajte ponovo sutra.",
+      "monthlyClaimQuota": "Dobili ste 5 brojeva u poslednjih 30 dana, što je ograničenje. Pokušajte ponovo kasnije.",
+      "numberExists": "Ovaj radni prostor već ima broj telefona. Ponovo učitajte stranicu da biste ga videli.",
+      "invalidStage": "Završite prethodne korake podešavanja pre nego što izaberete broj.",
+      "paidPlanRequired": "Za namenski poslovni broj potreban je plaćeni paket.",
+      "replacementUsed": "Ovaj radni prostor je već iskoristio svoju jedinu promenu broja.",
+      "activeNumberRequired": "Vaš trenutni broj više nije aktivan, pa ne može da se promeni.",
+      "replacementMustDiffer": "Izaberite broj koji se razlikuje od trenutnog.",
+      "unsupportedCountry": "Brojevi telefona su dostupni u SAD, Kanadi, Ujedinjenom Kraljevstvu i Australiji.",
+      "searchRateLimited": "Previše pretraga. Sačekajte nekoliko minuta, pa pokušajte ponovo.",
+      "searchInvalid": "Operater nije mogao da pretraži sa tim pozivnim brojem. Proverite ga i pokušajte ponovo.",
+      "searchUnsupported": "Operater nema brojeve ove vrste u ovoj zemlji.",
+      "withErrorId": "{{message}} ID greške: {{errorId}}"
     },
     "toast": {
       "changed": "Broj telefona je promenjen. Prethodni broj ostaje aktivan još 30 dana.",

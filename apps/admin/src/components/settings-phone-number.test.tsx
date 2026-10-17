@@ -105,6 +105,31 @@ describe("phone-number replacement permissions", () => {
     expect(screen.queryByText("(416) 555-0200")).toBeNull();
     expect(fetchMock.mock.calls.at(-1)?.[0]).toContain("/search?");
   });
+  it("says why the server refused a claim", async () => {
+    const { fetchMock } = setup("starter", "business_owner", null, false);
+    await userEvent.click(screen.getByRole("button", { name: "phoneNumber.actions.getNumber" }));
+    const select = await screen.findAllByRole("button", { name: "phoneNumber.picker.select" });
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "Another number for this workspace is still being set up.", code: "number_claim_in_progress" }, { status: 409 }));
+    await userEvent.click(select[0]!);
+    await screen.findByText("phoneNumber.errors.claimInProgress");
+  });
+  it("names the error ID when loading more numbers fails on the server", async () => {
+    const { fetchMock } = setup("starter");
+    await userEvent.click(screen.getByRole("button", { name: "phoneNumber.actions.requestChange" }));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "phoneNumber.picker.select" })).toHaveLength(10));
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "Request failed.", errorId: "3f2b6c1e-9a1d-4e5f-8b7a-2c3d4e5f6a7b" }, { status: 500 }));
+    await userEvent.click(screen.getByRole("button", { name: "phoneNumber.picker.loadMore" }));
+    await screen.findByText("phoneNumber.errors.withErrorId");
+    expect(screen.queryByText("Request failed.")).toBeNull();
+  });
+  it("says a first number couldn't be gotten, not replaced, when its purchase fails", async () => {
+    const { fetchMock } = setup("starter", "business_owner", null, false);
+    await userEvent.click(screen.getByRole("button", { name: "phoneNumber.actions.getNumber" }));
+    const select = await screen.findAllByRole("button", { name: "phoneNumber.picker.select" });
+    fetchMock.mockResolvedValueOnce(Response.json({ claimId: "claim" })).mockResolvedValueOnce(Response.json({ claim: { status: "failed", phoneNumberId: null } }));
+    await userEvent.click(select[0]!);
+    await screen.findByText("phoneNumber.picker.getNumberFailed");
+  });
   it("shows an inventory error inline instead of redirecting to a retired verification step", async () => {
     const { fetchMock } = setup("starter", "business_owner", null, false);
     fetchMock.mockResolvedValue(Response.json({ error: "Inventory is temporarily unavailable." }, { status: 500 }));

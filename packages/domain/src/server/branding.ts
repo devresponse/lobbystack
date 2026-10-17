@@ -1,8 +1,10 @@
 import { sql } from "drizzle-orm";
 import {
+  DEFAULT_APP_NAME,
   MAX_BRAND_LOGO_BYTES,
   brandLogoContentType,
   normalizeAppName,
+  readBrandingEnvironment,
   type BrandLogoContentType,
   type SavedBranding,
 } from "@lobbystack/shared";
@@ -22,6 +24,39 @@ export async function getSavedBranding(db: Database): Promise<SavedBranding | nu
     .from(deploymentBranding)
     .limit(1);
   return row ?? null;
+}
+
+// Long enough to spare the database a read on every email and text, short
+// enough that a name saved in onboarding soon reaches every runtime.
+const APP_NAME_CACHE_MS = 30_000;
+
+let cachedSavedAppName: { promise: Promise<string | null>; expiresAt: number } | undefined;
+
+/**
+ * The name emails and texts call the deployment by, in the order the dashboard
+ * uses: BRAND_APP_NAME, then what onboarding saved, then LobbyStack. Admin and
+ * worker both call it, so each needs BRAND_APP_NAME when the environment sets
+ * the name. When the database can't be read, the default stands in.
+ */
+export async function deploymentAppName(db: Database, environment: Record<string, string | undefined> = process.env): Promise<string> {
+  const fromEnvironment = readBrandingEnvironment(environment).appName;
+  if (fromEnvironment) return fromEnvironment;
+  const now = Date.now();
+  if (!cachedSavedAppName || cachedSavedAppName.expiresAt <= now) {
+    cachedSavedAppName = { promise: getSavedBranding(db).then((saved) => normalizeAppName(saved?.appName)), expiresAt: now + APP_NAME_CACHE_MS };
+  }
+  const entry = cachedSavedAppName;
+  try {
+    return (await entry.promise) ?? DEFAULT_APP_NAME;
+  } catch {
+    if (cachedSavedAppName === entry) cachedSavedAppName = undefined;
+    return DEFAULT_APP_NAME;
+  }
+}
+
+/** Drops the cached name, so the next email or text uses what was just saved. */
+export function forgetCachedDeploymentAppName(): void {
+  cachedSavedAppName = undefined;
 }
 
 /** The saved logo's bytes, for the admin to serve. */

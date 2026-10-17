@@ -5,6 +5,7 @@ import { eq } from "drizzle-orm";
 import { enqueueOutbox, users, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { normalizeAuthEmail, type ApiUser, type ApiUserCreate, type InterfaceLocale } from "@lobbystack/shared";
 
+import { deploymentAppName } from "../branding";
 import { isSingleEmailAddress } from "../tenancy";
 import { conflict, invalidRequest, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
@@ -71,11 +72,11 @@ export async function createUserForApi(authDb: Database, input: { key: ResolvedP
   }
 }
 
-const SETUP_SUBJECTS: Record<InterfaceLocale, string> = {
-  en: "Set up your LobbyStack account",
-  fr: "Configurez votre compte LobbyStack",
-  es: "Configure su cuenta de LobbyStack",
-  sr: "Podesite svoj LobbyStack nalog",
+const SETUP_SUBJECTS: Record<InterfaceLocale, (appName: string) => string> = {
+  en: (appName) => `Set up your ${appName} account`,
+  fr: (appName) => `Configurez votre compte ${appName}`,
+  es: (appName) => `Configure su cuenta de ${appName}`,
+  sr: (appName) => `Podesite svoj ${appName} nalog`,
 };
 
 /**
@@ -84,13 +85,14 @@ const SETUP_SUBJECTS: Record<InterfaceLocale, string> = {
  */
 export async function enqueueAccountSetupEmail(appDb: Database, input: { user: ApiUser; appBaseUrl: string }): Promise<void> {
   const locale = (input.user.locale in SETUP_SUBJECTS ? input.user.locale : "en") as InterfaceLocale;
+  const appName = await deploymentAppName(appDb);
   await withBusinessTransaction(appDb, { actorType: "system" }, async (tx) => {
     await enqueueOutbox(tx, {
       topic: "email.send",
       aggregateType: "auth_email",
       aggregateId: input.user.id,
       dedupeKey: `auth-email:account-setup:${input.user.id}`,
-      payload: { template: "account_setup", to: input.user.email, subject: SETUP_SUBJECTS[locale], variables: { locale, email: input.user.email, url: new URL(`/${locale}/forgot-password`, input.appBaseUrl).href } },
+      payload: { template: "account_setup", to: input.user.email, subject: SETUP_SUBJECTS[locale](appName), variables: { locale, email: input.user.email, url: new URL(`/${locale}/forgot-password`, input.appBaseUrl).href } },
     });
   });
 }

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword, sharedSenderHelpReply } from "./sms";
+import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword, sharedSenderHelpReply, sharedSenderStartReply } from "./sms";
 
 describe("SMS consent classifiers", () => {
   it("normalizes keywords to alphanumeric uppercase", () => {
@@ -20,10 +20,10 @@ describe("SMS consent classifiers", () => {
   });
 
   it("returns compliance replies only for HELP and START", () => {
-    expect(classifySmsKeywordReply({ body: "help" })?.kind).toBe("help");
-    expect(classifySmsKeywordReply({ body: "start" })?.kind).toBe("start");
-    expect(classifySmsKeywordReply({ body: "stop" })).toBeNull();
-    expect(classifySmsKeywordReply({ body: "hello" })).toBeNull();
+    expect(classifySmsKeywordReply({ body: "help" }, "AlloPlace")?.kind).toBe("help");
+    expect(classifySmsKeywordReply({ body: "start" }, "AlloPlace")?.kind).toBe("start");
+    expect(classifySmsKeywordReply({ body: "stop" }, "AlloPlace")).toBeNull();
+    expect(classifySmsKeywordReply({ body: "hello" }, "AlloPlace")).toBeNull();
   });
 });
 
@@ -32,15 +32,17 @@ describe("SMS HELP replies", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keep LobbyStack's registered wording when the deployment sets no links", () => {
-    expect(classifySmsKeywordReply({ body: "help" })?.body).toBe("LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.");
-    expect(sharedSenderHelpReply()).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.");
+  it("keep LobbyStack's registered wording when the deployment sets no name or links", () => {
+    expect(classifySmsKeywordReply({ body: "help" }, "LobbyStack")?.body).toBe("LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.");
+    expect(sharedSenderHelpReply("LobbyStack")).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.");
   });
 
-  it("give the deployment's own address and website", () => {
+  it("give the deployment's own name, address and website", () => {
     vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com");
     vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "support@alloplace.com");
-    expect(classifySmsKeywordReply({ body: "HELP" })?.body).toBe("LobbyStack: For help, contact support@alloplace.com or visit https://alloplace.com. Reply STOP to opt out.");
-    expect(sharedSenderHelpReply()).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email support@alloplace.com. Reply STOP to opt out.");
+    expect(classifySmsKeywordReply({ body: "HELP" }, "AlloPlace")?.body).toBe("AlloPlace: For help, contact support@alloplace.com or visit https://alloplace.com. Reply STOP to opt out.");
+    expect(classifySmsKeywordReply({ body: "START" }, "AlloPlace")?.body).toBe("AlloPlace: You are subscribed again. Reply HELP for help or STOP to opt out.");
+    expect(sharedSenderHelpReply("AlloPlace")).toBe("AlloPlace: For help with an appointment, call the business you booked with. For anything else, email support@alloplace.com. Reply STOP to opt out.");
+    expect(sharedSenderStartReply("AlloPlace")).toBe("AlloPlace: You can get texts from this number again. Reply HELP for help or STOP to opt out.");
   });
 });

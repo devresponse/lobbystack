@@ -392,7 +392,7 @@ export { isBusinessOpen, isTransferPermitted, normalizeTransferMode } from "./tr
 export { openStatus, type OpenStatus } from "./openStatus";
 export * from "./publicProfile";
 
-export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEXT, OPERATOR_SMS_DISCLOSURE_VERSION } from "./operatorSmsConsent";
+export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEMPLATE, OPERATOR_SMS_DISCLOSURE_VERSION, operatorSmsDisclosureText } from "./operatorSmsConsent";
 export { canTextNumber, permanentSmsErrorCode } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";

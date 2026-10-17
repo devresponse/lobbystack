@@ -6,12 +6,15 @@ import { billingAccounts, businesses, enqueueOutbox, users, withBusinessTransact
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
+import { deploymentAppName } from "./branding";
 
-const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, string> = {
-  en: "How'd you like LobbyStack?",
-  fr: "Qu'avez-vous pensé de LobbyStack ?",
-  es: "¿Qué le pareció LobbyStack?",
-  sr: "Kako Vam se dopao LobbyStack?",
+// French puts no "de" before the name and Serbian never declines it, because
+// the name is configured (see docs/branding.md).
+const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, (appName: string) => string> = {
+  en: (appName) => `How'd you like ${appName}?`,
+  fr: (appName) => `Votre avis sur ${appName} ?`,
+  es: (appName) => `¿Qué le pareció ${appName}?`,
+  sr: (appName) => `Kako Vam se dopao servis ${appName}?`,
 };
 
 export type OnboardingStage =
@@ -248,7 +251,7 @@ export async function scheduleOnboardingFollowupInTransaction(tx: DatabaseTransa
 export const ONBOARDING_FOLLOWUP_DELAY_MS = 24 * 60 * 60_000;
 
 export type OnboardingFollowupSender = {
-  /** RFC 5322 sender, e.g. `Raphael from LobbyStack <raphael@lobbystack.com>`. Replies go here. */
+  /** RFC 5322 sender, e.g. `Yuri from AlloPlace <yuri@alloplace.com>`. Replies go here. */
   from: string;
   /** First name used in the greeting and signature. */
   name: string;
@@ -263,6 +266,7 @@ export async function queueOnboardingFollowupEmail(
   context: DomainContext,
   input: { businessId: string; completedAt: Date; sender: OnboardingFollowupSender },
 ): Promise<boolean> {
+  const appName = await deploymentAppName(context.db);
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const result = await tx.execute<{ user_id: string; email: string; name: string | null; preferred_locale: string; business_name: string }>(
       sql`select user_id, email, name, preferred_locale, business_name from app.resolve_onboarding_followup_recipient(${input.businessId}::uuid, ${input.completedAt.toISOString()}::timestamptz)`,
@@ -283,7 +287,7 @@ export async function queueOnboardingFollowupEmail(
         template: "onboarding_followup",
         to: recipient.email,
         from: input.sender.from,
-        subject: ONBOARDING_FOLLOWUP_SUBJECTS[locale],
+        subject: ONBOARDING_FOLLOWUP_SUBJECTS[locale](appName),
         variables: { locale, firstName, businessName: recipient.business_name, senderName: input.sender.name },
       },
     });

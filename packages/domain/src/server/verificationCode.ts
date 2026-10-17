@@ -19,14 +19,20 @@ export function newVerificationCode(): string {
   return String(randomInt(0, 1_000_000)).padStart(6, "0");
 }
 
-const verificationCodeMessages: Record<InterfaceLocale, (code: string, minutes: number) => string> = {
-  en: (code, minutes) => `LobbyStack verification code: ${code}. It expires in ${minutes} minutes.`,
-  fr: (code, minutes) => `Code de vérification LobbyStack : ${code}. Il expire dans ${minutes} minutes.`,
-  es: (code, minutes) => `Código de verificación de LobbyStack: ${code}. Caduca en ${minutes} minutos.`,
-  sr: (code, minutes) => `LobbyStack kod za potvrdu: ${code}. Ističe za ${minutes} minuta.`,
+// The sender's name never takes an article, an elision or a declension,
+// because it is configured (see docs/branding.md).
+const verificationCodeMessages: Record<InterfaceLocale, (code: string, minutes: number, senderName: string) => string> = {
+  en: (code, minutes, senderName) => `${senderName} verification code: ${code}. It expires in ${minutes} minutes.`,
+  fr: (code, minutes, senderName) => `Code de vérification ${senderName} : ${code}. Il expire dans ${minutes} minutes.`,
+  es: (code, minutes, senderName) => `Código de verificación de ${senderName}: ${code}. Caduca en ${minutes} minutos.`,
+  sr: (code, minutes, senderName) => `${senderName} kod za potvrdu: ${code}. Ističe za ${minutes} minuta.`,
 };
 
-/** The text that carries a verification code, in the recipient's language. */
-export function verificationCodeSmsBody(code: string, locale: InterfaceLocale = "en"): string {
-  return verificationCodeMessages[locale](code, Math.round(VERIFICATION_CODE_TTL_MS / 60_000));
+/**
+ * The text that carries a verification code, in the recipient's language. It
+ * opens with who sends it: the deployment's name for its own users, the
+ * business's name for its callers.
+ */
+export function verificationCodeSmsBody(code: string, senderName: string, locale: InterfaceLocale = "en"): string {
+  return verificationCodeMessages[locale](code, Math.round(VERIFICATION_CODE_TTL_MS / 60_000), senderName);
 }

@@ -61,6 +61,18 @@ The admin caches the branding for 30 seconds, so other admin replicas pick up a 
 
 A deployment still named LobbyStack with no logo of its own shows LobbyStack's mark. A renamed deployment with no logo shows its name on its own, so LobbyStack's mark never appears beside another name.
 
+## Emails and texts
+
+Every email and text the app sends calls it by the same name as the dashboard: verification codes, password resets, email changes, invitations, the "account was made for you" and "you already have an account" emails, the founder check-in, alert emails, the SMS HELP and START replies, and the operator's phone verification code. The text a caller gets when they change an appointment opens with the business's name instead, since the caller phoned the business, and falls back to the app name when the business has none.
+
+`deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: `BRAND_APP_NAME`, then the saved onboarding choice, then LobbyStack. It caches the saved choice for 30 seconds and uses LobbyStack when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `BRAND_APP_NAME` on the worker as well as the admin**. `Dockerfile.worker` and `docker-compose.yml` default it to AlloPlace, like the admin. On Railway, a shared variable keeps the two services in step.
+
+The verification email's HTML header shows the name as a wordmark rather than a logo, because Gmail and Outlook don't show SVG logos. Without `EMAIL_FROM`, the worker sends as `<app name> <no-reply@localhost>`.
+
+The SMS HELP and START replies are part of the registered SMS campaign or toll-free verification, so update the registration's sample messages when the name changes.
+
+The consent text for operator alert texts uses the app name too (`OPERATOR_SMS_DISCLOSURE_TEMPLATE` and `operatorSmsDisclosureText()` in `packages/shared/src/operatorSmsConsent.ts`, and `settings:notifications.phoneVerification.*.consent`). Each opt-in records the disclosure's version, `operator-alerts-2026-10-17` since the name became configurable; consent given under earlier versions stays valid. A test in `apps/admin/src/lib/locale-parity.test.ts` fails if any dashboard string names LobbyStack.
+
 ## Send the outside links to your own site
 
 The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. Five variables point them at a deployment's own site and inbox.
@@ -132,7 +144,6 @@ The sign-in, sign-up, and other public pages are prerendered at build time, befo
 
 ## Text that keeps LobbyStack on purpose
 
-- The consent text for operator alert texts (`OPERATOR_SMS_DISCLOSURE_TEXT` in `packages/shared/src/operatorSmsConsent.ts`, and `settings:notifications.phoneVerification.*.consent`). It's versioned, and each opt-in records it word for word, so a new name needs a new disclosure version. A test in `apps/admin/src/lib/locale-parity.test.ts` fails if any other dashboard string names LobbyStack.
 - Identifiers that stored data or the public API depend on. They don't appear in the interface, and renaming them would break existing deployments:
   - Pepper labels in `packages/domain/src/server/oauth/tokens.ts` and `publicApi/apiKeys.ts`.
   - UUID namespaces in `publicApi/operations.ts` and `publicApi/users.ts`.
@@ -147,10 +158,6 @@ These places still say LobbyStack or link to lobbystack.com. Variables marked "p
 
 | Area | Where | Proposed setting |
 | --- | --- | --- |
-| Email subjects and bodies | `apps/admin/src/lib/auth.ts` (verification, password reset, email change, existing account); `packages/providers/src/email/smtp.ts` (templates, the inline 48×48 logo, founder sign-offs); `packages/domain/src/server/onboarding.ts`, `publicApi/users.ts`, `feedback.ts`; the worker's default subject "LobbyStack notification", which invitations use | The worker reads the same branding as the admin. The email header uses the logo at `APP_BASE_URL` + `/api/branding/logo`. |
-| Email sender | `EMAIL_FROM` (an existing variable; defaults to `LobbyStack <no-reply@…>`) | Already configurable. Default the display name to the app name. |
-| Operator alert emails | `packages/domain/src/server/calendar.ts`, `publicApi/webhooks.ts` | The app name. |
-| SMS | The "LobbyStack:" opening of the HELP and START replies in `packages/domain/src/server/sms.ts` (the HELP replies take their address and website from the [outside links](#send-the-outside-links-to-your-own-site)); the verification code text in `verificationCode.ts`, which is also sent to callers who change an appointment, in English only | The app name. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when it changes. |
 | Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
 | AI and voice text | The prospect demo instructions (`packages/domain/src/server/demos.ts`); the placeholder summary "… uses LobbyStack to answer calls." (`tenancy.ts`, `businessSummary.ts`), which `agent-core/src/businessFacts.ts` and migration 0074 detect by its wording; the MCP server's title and instructions (`apps/admin/src/lib/mcp/server.ts`) | The app name. The placeholder detection has to keep matching the old wording. |
 | API and OAuth | The OpenAPI title "LobbyStack API" and descriptions such as "LobbyStack Cloud" (`packages/shared/src/publicApi/`); API error messages; the webhook test event; the `LobbyStack-Webhooks` and `LobbyStack-OAuth` user agents; the OAuth resource name and realm (`apps/admin/src/lib/mcp/oauth-config.ts`, `oauth-provider.ts`) | The app name, except the user agents. |

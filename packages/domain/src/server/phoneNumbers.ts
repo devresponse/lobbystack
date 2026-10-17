@@ -203,6 +203,8 @@ export async function completeNumberProvisioning(context: DomainContext, input: 
     } else {
       await tx.update(businesses).set({ onboardingStage: sql`CASE WHEN ${businesses.onboardingStage} = 'complete' THEN 'complete' ELSE 'attribution' END`, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
     }
+    // The receptionist's snapshot names the number it gives out, and the website widget offers calls from the browser only while it names one.
+    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "phone_number", aggregateId: number.id, dedupeKey: `phone-number:${number.id}:snapshot:added`, payload: { businessId: input.businessId, reason: "phone_number_added" } });
     return number.id;
   });
 }

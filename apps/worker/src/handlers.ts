@@ -949,7 +949,9 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           await dependencies.twilio.releasePhoneNumber({ providerPhoneId: claimed.providerPhoneId });
         }
         await withBusinessTransaction(dependencies.domain.db, { businessId, actorType: "worker" }, async (tx) => {
-          await tx.update(phoneNumbers).set({ status: "reclaimed", voiceEnabled: false, smsEnabled: false, reclaimScheduledAt: null, updatedAt: new Date() }).where(and(eq(phoneNumbers.id, claimed.id), eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "reclaiming")));
+          const released = await tx.update(phoneNumbers).set({ status: "reclaimed", voiceEnabled: false, smsEnabled: false, reclaimScheduledAt: null, updatedAt: new Date() }).where(and(eq(phoneNumbers.id, claimed.id), eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "reclaiming"))).returning({ id: phoneNumbers.id });
+          // The receptionist's snapshot names the number it gives out, so it drops this one.
+          if (released.length) await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId, aggregateType: "phone_number", aggregateId: claimed.id, dedupeKey: `phone-number:${claimed.id}:snapshot:released`, payload: { businessId, reason: "phone_number_released" } });
         });
         return { status: "completed", entityId: phoneNumberId };
       } catch (error) {

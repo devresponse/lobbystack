@@ -8,12 +8,14 @@ import { enqueueOutbox } from "@lobbystack/db";
 const mocks = vi.hoisted(() => {
   const numberId = "8b0f0f5e-3a43-4f4e-9d39-6f1f0c2b7a11";
   const query = { from: () => query, where: async () => [{ id: numberId }] };
-  return { numberId, select: () => query };
+  // Every update finds the number: active when it's claimed for release, then reclaiming once released.
+  const update = { set: () => update, where: () => update, returning: async () => [{ id: numberId, providerPhoneId: "PN123" }] };
+  return { numberId, select: () => query, update: () => update };
 });
 
 vi.mock("@lobbystack/db", async (importOriginal) => ({
   ...await importOriginal<typeof import("@lobbystack/db")>(),
-  withBusinessTransaction: async (_db: unknown, _scope: unknown, callback: (tx: unknown) => unknown) => await callback({ select: mocks.select }),
+  withBusinessTransaction: async (_db: unknown, _scope: unknown, callback: (tx: unknown) => unknown) => await callback({ select: mocks.select, update: mocks.update }),
   enqueueOutbox: vi.fn(async () => randomUUID()),
 }));
 
@@ -39,5 +41,17 @@ describe("phoneNumber.reclaim sweep", () => {
 
     const keys = vi.mocked(enqueueOutbox).mock.calls.map(([, input]) => input.dedupeKey);
     expect(keys).toEqual([`phone-number:${mocks.numberId}:reclaim:2026-10-09T14`, `phone-number:${mocks.numberId}:reclaim:2026-10-09T15`]);
+  });
+});
+
+describe("phoneNumber.reclaim release", () => {
+  it("refreshes the receptionist's snapshot once the number is released", async () => {
+    const businessId = randomUUID();
+    const releasePhoneNumber = vi.fn(async () => undefined);
+    const job: JobEnvelope = { jobId: randomUUID(), type: "phoneNumber.reclaim", queue: "maintenance", businessId, payload: { phoneNumberId: mocks.numberId }, trace: {}, idempotencyKey: `phone-number:${mocks.numberId}:reclaim`, scheduled: false };
+    expect(await handleJob(job, { domain: { db: {} as never }, twilio: { releasePhoneNumber } as never })).toMatchObject({ status: "completed" });
+
+    expect(releasePhoneNumber).toHaveBeenCalledWith({ providerPhoneId: "PN123" });
+    expect(vi.mocked(enqueueOutbox)).toHaveBeenCalledWith(expect.anything(), { topic: "snapshot.refresh", businessId, aggregateType: "phone_number", aggregateId: mocks.numberId, dedupeKey: `phone-number:${mocks.numberId}:snapshot:released`, payload: { businessId, reason: "phone_number_released" } });
   });
 });

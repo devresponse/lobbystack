@@ -104,6 +104,7 @@ export const SCHEMA_MIGRATIONS = [
   "0098_deployment_branding.sql",
   "0099_widget_live_chat.sql",
   "0100_business_public_profiles.sql",
+  "0101_phone_number_snapshot_refresh.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

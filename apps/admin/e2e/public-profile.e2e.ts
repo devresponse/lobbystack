@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 
 import { businessHours, businesses, createDatabaseClient, phoneNumbers, services } from "@lobbystack/db";
+import { refreshBusinessSnapshot } from "@lobbystack/domain";
 
 import onboarding from "../public/locales/en/onboarding.json" with { type: "json" };
 import profileCopy from "../public/locales/en/profile.json" with { type: "json" };
@@ -59,6 +60,8 @@ test("an owner publishes the business's public profile, where visitors read its 
     await database.db.insert(services).values({ businessId, name: "Check-up", slug: "check-up", durationMinutes: 30, description: "A cleaning and an exam." });
     const e164 = `+1416${String(Math.floor(Math.random() * 10_000_000)).padStart(7, "0")}`;
     await database.db.insert(phoneNumbers).values({ businessId, e164 });
+    // A claimed number refreshes the receptionist's snapshot; here the test does it.
+    await refreshBusinessSnapshot({ db: database.db }, { businessId });
     const slug = (await database.db.select({ slug: businesses.slug }).from(businesses).where(eq(businesses.id, businessId)))[0]!.slug;
 
     // A website widget for the page's chat.
@@ -117,6 +120,8 @@ test("an owner publishes the business's public profile, where visitors read its 
     const chat = visitorPage.frameLocator("#profile-chat iframe");
     await expect(chat.getByRole("textbox", { name: widgetCopy.chat.composerPlaceholder, exact: true })).toBeEnabled();
     await expect(chat.getByText(widgetCopy.errors.originDenied)).toHaveCount(0);
+    // With a number, visitors can also call from the browser, in the page as in a bubble.
+    await expect(chat.getByRole("button", { name: widgetCopy.chat.voiceStart, exact: true })).toBeVisible();
     expect(await visitorPage.locator(`script[src="/embed.js?key=${widgetKey}"]`).count()).toBe(1);
     // The chat sits in the page, not in a bubble.
     await expect(visitorPage.getByRole("button", { name: "Open chat", exact: true })).toHaveCount(0);

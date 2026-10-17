@@ -24,7 +24,7 @@ export async function register(): Promise<void> {
   }
   const invalidLinks = invalidBrandLinkVariables(brandLinkEnvironment());
   if (invalidLinks.length) {
-    console.warn(`[branding] Ignoring ${invalidLinks.join(", ")}: a site or page must be an http or https URL and the contact address a plain email address, so the app links to LobbyStack's instead.`);
+    console.warn(`[branding] Ignoring ${invalidLinks.join(", ")}: a site or page must be an http or https URL and the contact address a plain email address, so the app uses the brand's link instead.`);
   }
   const { initializeTelemetry } = await import("@lobbystack/telemetry/node");
   await initializeTelemetry({ serviceName: "lobbystack-admin" });

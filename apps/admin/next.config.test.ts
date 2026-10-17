@@ -80,7 +80,6 @@ describe("admin build links", () => {
     const config = await loadConfig({}) as NextConfig;
     for (const name of BRAND_LINK_VARIABLES) expect(config.env?.[name]).toBe("");
   });
-
 });
 
 describe("admin build brand", () => {

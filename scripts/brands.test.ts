@@ -13,7 +13,9 @@ describe("brands", () => {
   it("has generated.ts, the schemas and the admin's brand images up to date: run pnpm brands:build", () => {
     for (const [path, content] of brandOutputs(readBrandSources())) {
       const committed = readFileSync(join(repositoryRoot, path));
-      expect(committed.equals(Buffer.from(content)), `${path} is behind brands/`).toBe(true);
+      // A Windows checkout with core.autocrlf has CRLF line endings in text files.
+      const matches = typeof content === "string" ? committed.toString("utf8").replace(/\r\n/g, "\n") === content : committed.equals(Buffer.from(content));
+      expect(matches, `${path} is behind brands/`).toBe(true);
     }
   });
 });

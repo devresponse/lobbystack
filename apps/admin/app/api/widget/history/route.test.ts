@@ -80,8 +80,14 @@ describe("GET /api/widget/history", () => {
     expect(mocks.loadWidgetChatView).not.toHaveBeenCalled();
   });
 
-  it("marks a chat that went a day without messages instead of hiding it, so a page left open keeps it", async () => {
+  it("marks a chat that went a day without messages for the page that shows it, and hides it from a new visit", async () => {
     mocks.findCurrentWidgetChat.mockResolvedValue({ conversationId, idle: true });
+    const newVisit = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
+    expect(await newVisit.json()).toEqual({ messages: [] });
+    const otherChat = await GET(new Request("http://localhost/api/widget/history?chat=00000000-0000-4000-8000-000000000009", { headers: { authorization: "Bearer token" } }));
+    expect(await otherChat.json()).toEqual({ messages: [] });
+    expect(mocks.loadWidgetChatView).not.toHaveBeenCalled();
+
     mocks.loadWidgetChatView.mockResolvedValue({
       automationState: "ai_active",
       waitingForTeam: false,
@@ -92,7 +98,7 @@ describe("GET /api/widget/history", () => {
       ],
     });
 
-    const response = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
+    const response = await GET(new Request(`http://localhost/api/widget/history?chat=${conversationId}`, { headers: { authorization: "Bearer token" } }));
 
     expect(await response.json()).toEqual({
       conversationId,

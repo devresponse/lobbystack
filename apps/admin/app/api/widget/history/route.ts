@@ -27,11 +27,15 @@ export async function GET(request: Request) {
     const chat = await findCurrentWidgetChat(context, { businessId: session.businessId, widgetVisitorId: visitorId });
     if (!chat) return NextResponse.json({ messages: [] });
     const { conversationId } = chat;
+    // A chat that went a day without messages stays only on a page left open,
+    // which names the chat it shows. A new visit shows an empty chat and keeps
+    // no live updates open for it.
+    if (chat.idle && new URL(request.url).searchParams.get("chat") !== conversationId) return NextResponse.json({ messages: [] });
     const view = await loadWidgetChatView(context, { businessId: session.businessId, conversationId });
     return NextResponse.json({
       conversationId,
-      // A day passed without messages: a new visit shows an empty chat, a page
-      // left open keeps this one, and the visitor's next message starts a new one.
+      // A day passed without messages: the page keeps this chat, and the
+      // visitor's next message starts a new one.
       idle: chat.idle,
       automationState: view.automationState,
       waitingForTeam: view.waitingForTeam,

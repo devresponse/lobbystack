@@ -275,12 +275,16 @@ describe("a website chat after a day without messages", () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
     Element.prototype.scrollTo = () => {};
     const chat = { history: firstHistory };
-    const history = vi.fn(() => chat.history);
+    // As the server does, a chat that went idle comes back only to the page that shows it.
+    const history = vi.fn((url: string) => {
+      const { conversationId, idle } = chat.history as { conversationId?: string; idle?: boolean };
+      return idle && new URL(url).searchParams.get("chat") !== conversationId ? { messages: [] } : chat.history;
+    });
     const encoder = new TextEncoder();
     const streams: Array<{ signal: AbortSignal | null | undefined; send: (event: string) => void; end: () => void }> = [];
     vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
       const path = String(url);
-      if (path.includes("/api/widget/history")) return Response.json(history());
+      if (path.includes("/api/widget/history")) return Response.json(history(path));
       if (path.includes("/api/widget/chat")) return streamedReply("We're open until six today.");
       if (path.includes("/api/widget/stream")) {
         let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -307,12 +311,13 @@ describe("a website chat after a day without messages", () => {
   }
 
   it("keeps the chat on a page left open, and still shows a team member's late reply", async () => {
-    const { client, streams, update } = openChat({ automationState: "ai_active", idle: false, messages: [question, answer] });
+    const { client, history, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
     expect(await screen.findByText(answer.content)).toBeTruthy();
     await vi.waitFor(() => expect(streams).toHaveLength(1));
 
-    // A day passes without messages, and the stream's next "ready" reloads the history.
-    await update("ready", { automationState: "ai_active", idle: true, messages: [question, answer] });
+    // A day passes without messages, and the stream's next "ready" reloads the history of the chat on screen.
+    await update("ready", { conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
+    expect(new URL(history.mock.calls.at(-1)![0]).searchParams.get("chat")).toBe("c1");
     expect(screen.getByText(question.content)).toBeTruthy();
     expect(screen.getByText(answer.content)).toBeTruthy();
     expect(streams[0]!.signal?.aborted).toBe(false);
@@ -324,32 +329,28 @@ describe("a website chat after a day without messages", () => {
     vi.useRealTimers();
     await vi.waitFor(() => expect(streams).toHaveLength(2));
 
-    await update("message", { automationState: "human_handoff", teamMemberName: "Yuri", idle: false, messages: [question, answer, lateReply] });
+    await update("message", { conversationId: "c1", automationState: "human_handoff", teamMemberName: "Yuri", idle: false, messages: [question, answer, lateReply] });
     expect(screen.getByText(lateReply.content)).toBeTruthy();
     expect(screen.getByText("chat.teamMemberInChat Yuri")).toBeTruthy();
     expect(screen.getByText(answer.content)).toBeTruthy();
     client.clear();
   });
 
-  it("opens empty on a new visit, and shows the chat again when a team member replies late", async () => {
-    const { client, streams, update } = openChat({ automationState: "ai_active", idle: true, messages: [question, answer] });
+  it("opens empty on a new visit, and keeps no live updates open for the idle chat", async () => {
+    const { client, history, streams } = openChat({ conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
     expect(await screen.findByText("chat.welcome")).toBeTruthy();
     expect(screen.queryByText(answer.content)).toBeNull();
-    // The chat is still open, so the widget listens for a reply in it.
-    await vi.waitFor(() => expect(streams).toHaveLength(1));
-
-    await update("message", { automationState: "human_handoff", teamMemberName: "Yuri", idle: false, messages: [question, answer, lateReply] });
-    expect(screen.getByText(question.content)).toBeTruthy();
-    expect(screen.getByText(lateReply.content)).toBeTruthy();
-    expect(screen.queryByText("chat.welcome")).toBeNull();
+    expect(new URL(history.mock.calls[0]![0]).searchParams.has("chat")).toBe(false);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(streams).toHaveLength(0);
     client.clear();
   });
 
   it("starts a new chat with the visitor's next message, and follows that one", async () => {
-    const { client, streams, update } = openChat({ automationState: "ai_active", idle: false, messages: [question, answer] });
+    const { client, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
     expect(await screen.findByText(answer.content)).toBeTruthy();
     await vi.waitFor(() => expect(streams).toHaveLength(1));
-    await update("ready", { automationState: "ai_active", idle: true, messages: [question, answer] });
+    await update("ready", { conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
 
     const composer = screen.getByRole("textbox", { name: "chat.composerPlaceholder" });
     fireEvent.change(composer, { target: { value: "Are you open today?" } });
@@ -364,9 +365,28 @@ describe("a website chat after a day without messages", () => {
     // Once the server answered, the stream opens again for the new chat.
     await vi.waitFor(() => expect(streams).toHaveLength(2));
 
-    await update("ready", { automationState: "ai_active", idle: false, messages: [{ id: "n1", role: "user", content: "Are you open today?" }, { id: "n2", role: "assistant", content: "We're open until six today." }] });
+    await update("ready", { conversationId: "c2", automationState: "ai_active", idle: false, messages: [{ id: "n1", role: "user", content: "Are you open today?" }, { id: "n2", role: "assistant", content: "We're open until six today." }] });
     expect(screen.getByText("We're open until six today.")).toBeTruthy();
     expect(screen.queryByText(answer.content)).toBeNull();
+    client.clear();
+  });
+
+  it("follows a new chat the server started when the page hadn't heard the old one went idle", async () => {
+    const { client, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
+    expect(await screen.findByText(answer.content)).toBeTruthy();
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+
+    const composer = screen.getByRole("textbox", { name: "chat.composerPlaceholder" });
+    fireEvent.change(composer, { target: { value: "Are you open today?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+    expect(await screen.findByText("We're open until six today.")).toBeTruthy();
+
+    // The server closed the old chat, which its stream hears, and the history now has the new one.
+    await update("conversation", { conversationId: "c2", automationState: "ai_active", idle: false, messages: [{ id: "n1", role: "user", content: "Are you open today?" }, { id: "n2", role: "assistant", content: "We're open until six today." }] });
+    expect(screen.queryByText(answer.content)).toBeNull();
+    // The live updates move to the new chat.
+    await vi.waitFor(() => expect(streams).toHaveLength(2));
+    expect(streams[0]!.signal?.aborted).toBe(true);
     client.clear();
   });
 });

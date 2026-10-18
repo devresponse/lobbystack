@@ -50,6 +50,7 @@ type ChatHandling = { handoff: boolean; waitingForTeam: boolean; teamMemberName:
 const RECEPTIONIST_HANDLING: ChatHandling = { handoff: false, waitingForTeam: false, teamMemberName: null };
 
 type HistoryPayload = {
+  conversationId?: string;
   automationState?: string;
   waitingForTeam?: boolean;
   teamMemberName?: string | null;
@@ -175,6 +176,10 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   // updates still bring a team member's late reply, but the visitor's next
   // message starts a new chat.
   const chatIdleRef = useRef(false);
+  // The chat on screen, which the history keeps even once it goes idle, and a
+  // count that reopens the live updates when the server starts a new chat.
+  const shownChatRef = useRef<string | null>(null);
+  const [streamGeneration, setStreamGeneration] = useState(0);
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
@@ -284,6 +289,8 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
 
   const loadHistory = useCallback(async (signal?: AbortSignal) => {
     const url = new URL("/api/widget/history", window.location.origin);
+    // A chat that went a day without messages comes back only for the page that shows it.
+    if (shownChatRef.current) url.searchParams.set("chat", shownChatRef.current);
     try {
       const response = await fetch(url, { headers: { authorization: `Bearer ${sessionToken}`, "x-widget-parent-origin": parentOrigin ?? "" }, credentials: "include", signal: signal ?? null });
       if (!response.ok) return;
@@ -292,17 +299,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
       if (Array.isArray(data.messages)) {
         setChatSaved(data.messages.length > 0);
-        const idle = data.idle === true;
-        chatIdleRef.current = idle;
+        chatIdleRef.current = data.idle === true;
+        const shown = shownChatRef.current;
+        const current = data.messages.length > 0 ? data.conversationId ?? null : null;
+        shownChatRef.current = current;
+        // The live updates follow one chat, so a new one the server started
+        // in its place, as when the old one went idle, needs its own.
+        if (shown && current && shown !== current) setStreamGeneration((generation) => generation + 1);
         const saved = data.messages.map((message): WidgetMessage => ({
           id: message.id,
           role: message.role === "assistant" ? "assistant" : "user",
           parts: [{ type: "text", text: message.content }],
           ...(message.role === "assistant" && message.fromTeam ? { metadata: { fromTeam: true, teamMemberName: message.teamMemberName ?? null } } : {}),
         }));
-        // A chat idle for a day shows empty on a new visit, as the visitor's
-        // next message starts a new one, but stays on a page left open.
-        setMessages((shown) => idle && shown.length === 0 ? [] : saved);
+        setMessages(saved);
       }
     } catch {
       /* transcript resume is best effort */
@@ -372,9 +382,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
 
-  // Once the visitor has a chat, even one idle for a day, an open stream tells
-  // the widget when a team member writes or takes over. It pauses while the
-  // page is in the background.
+  // Once the visitor has a chat on screen, even one that went idle on a page
+  // left open, an open stream tells the widget when a team member writes or
+  // takes over. It pauses while the page is in the background.
   const configLoaded = configState !== null;
   useEffect(() => {
     if (!sessionToken || !parentOrigin || !configLoaded || !chatSaved || !pageVisible) return;
@@ -404,7 +414,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken]);
+  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken, streamGeneration]);
 
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs
@@ -444,6 +454,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       // thread shows from here, as a reload would. The live updates follow
       // the new chat once the server answers, as for a first message.
       chatIdleRef.current = false;
+      shownChatRef.current = null;
       setChatSaved(false);
       setMessages([]);
     }

@@ -390,25 +390,28 @@ export async function registerWidgetVisitor(
 }
 
 /**
- * A website chat with no message for this long is over: the visitor's next
- * visit shows an empty chat, and their next message closes the old one and
- * starts a new one, which the receptionist answers. Until then it stays open,
- * so a page left open keeps showing it and still gets a team member's late reply.
+ * A website chat with no message, or team member taking it over, for this
+ * long is over: the visitor's next visit shows an empty chat, and their next
+ * message closes the old one and starts a new one, which the receptionist
+ * answers. Until then it stays open, so a page left open keeps showing it and
+ * still gets a team member's late reply.
  */
 export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
 
 /**
- * The visitor's open website chat, and whether it went a day without messages.
- * A chat without messages yet stays, however old. With lock, a team member's
- * reply being saved finishes first and counts, and one that comes after sees
- * whether the chat closed.
+ * The visitor's open website chat, and whether it went a day without messages
+ * or a take-over. A chat without messages yet stays, however old. With lock, a
+ * team member's reply or take-over being saved finishes first and counts, and
+ * one that comes after sees whether the chat closed.
  */
 async function openWidgetChat(tx: DatabaseTransaction, input: { businessId: string; widgetVisitorId: string; now: Date; lock?: boolean }) {
-  const query = tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+  const query = tx.select({ id: conversations.id, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
   const [chat] = input.lock ? await query.for("update") : await query;
   if (!chat) return undefined;
   const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, chat.id))).orderBy(desc(messages.createdAt)).limit(1);
-  return { ...chat, wentIdle: lastMessage !== undefined && input.now.getTime() - lastMessage.createdAt.getTime() >= WIDGET_CHAT_IDLE_CLOSE_MS };
+  // A team member who joins a quiet chat is in it, as if they had written.
+  const lastActiveAt = Math.max(lastMessage?.createdAt.getTime() ?? 0, chat.automationState === "human_handoff" ? chat.automationPausedAt?.getTime() ?? 0 : 0);
+  return { id: chat.id, automationState: chat.automationState, wentIdle: lastMessage !== undefined && input.now.getTime() - lastActiveAt >= WIDGET_CHAT_IDLE_CLOSE_MS };
 }
 
 export async function getOrCreateWidgetConversation(

@@ -81,6 +81,13 @@ it.each([".", ",", ":", ";", "!", "?", "!?", "].", ")."])("leaves %s out of an a
   expect(rendered.text).toBe(`https://en.wikipedia.org/wiki/Mercury_(planet)${punctuation}`);
 });
 
+it("leaves a long run of closing parentheses out of an address", () => {
+  const text = `https://acme.example/a${")".repeat(4_000)}`;
+  const rendered = links(text);
+  expect(rendered.links.map((link) => link.href)).toEqual(["https://acme.example/a"]);
+  expect(rendered.text).toBe(text);
+});
+
 it("keeps quotes in an address with parentheses inert", () => {
   const element = document.createElement("div");
   element.innerHTML = renderSafeMarkdown('[x](https://acme.example/(b"onfocus="alert(1))) https://acme.example/(a"onmouseover="alert(1)) [y](https://acme.example/(c"onblur="d))');

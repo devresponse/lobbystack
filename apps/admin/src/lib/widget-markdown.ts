@@ -11,15 +11,24 @@ function link(href: string, text: string): string {
  * Where a plain address ends: before the punctuation after it, such as a full
  * stop, and before a closing parenthesis it didn't open, as when the address
  * is itself in parentheses. One it did open stays, as in .../Mercury_(planet).
+ * The parentheses are counted once, so a long run of them takes no longer
+ * than other text.
  */
 function plainAddressEnd(match: string): number {
+  let opened = 0;
+  let closed = 0;
+  for (const char of match) {
+    if (char === "(") opened += 1;
+    else if (char === ")") closed += 1;
+  }
   let end = match.length;
   for (;;) {
-    const address = match.slice(0, end);
     // An escaped & can end a query string.
-    if (address.endsWith("&amp;")) return end;
-    const unopened = address.endsWith(")") && address.split(")").length > address.split("(").length;
-    if (!unopened && !/[.,:;!?\]]$/.test(address)) return end;
+    if (match.endsWith("&amp;", end)) return end;
+    const last = match.charAt(end - 1);
+    const unopened = last === ")" && closed > opened;
+    if (!unopened && !/^[.,:;!?\]]$/.test(last)) return end;
+    if (last === ")") closed -= 1;
     end -= 1;
   }
 }

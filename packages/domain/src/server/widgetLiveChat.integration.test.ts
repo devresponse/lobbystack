@@ -330,6 +330,22 @@ describe.skipIf(!testUrl)("a website chat after a day without messages, against 
     });
   });
 
+  it("stays the visitor's chat when a team member joins it after a quiet day, so the visitor's next message reaches them", async () => {
+    await rollbackTest(async (chat) => {
+      const question = await chat.visitorWrites("Do you open on Sundays?");
+      await chat.writtenAt(question, new Date(Date.now() - 2 * WIDGET_CHAT_IDLE_CLOSE_MS));
+      expect(await chat.shownChat(chat.visitorId)).toEqual({ conversationId: chat.conversationId, idle: true });
+
+      await chat.teamSets("human_handoff");
+      expect(await chat.shownChat(chat.visitorId)).toEqual({ conversationId: chat.conversationId, idle: false });
+      expect(await chat.openChat(new Date())).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+
+      // A day after the take-over without a word, the visitor's next message starts a new chat.
+      const next = await chat.openChat(new Date(Date.now() + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000));
+      expect(next.conversationId).not.toBe(chat.conversationId);
+    });
+  });
+
   it("stops waiting for the team when the chat closes, so the old request's job changes nothing", async () => {
     await rollbackTest(async (chat) => {
       await chat.visitorWrites("Je voudrais parler à quelqu'un.");

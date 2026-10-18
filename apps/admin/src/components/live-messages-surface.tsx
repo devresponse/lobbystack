@@ -22,11 +22,20 @@ import { useTelemetry } from "@/components/product-analytics";
 
 const PAGE_SIZE = 50;
 
-type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; automationState: string | null; teamRequestedAt?: string | null; body: string; direction: string; status: string; createdAt: string };
+type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; conversationStatus?: string | null; automationState: string | null; teamRequestedAt?: string | null; body: string; direction: string; status: string; createdAt: string };
 
 /** A website visitor asked for a person and nobody from the team has joined yet. */
 function waitingForTeam(message: Message): boolean {
   return message.channel === "web_chat" && message.automationState === "human_handoff" && Boolean(message.teamRequestedAt);
+}
+
+/** A website chat that closed: the visitor's widget no longer shows it, so it takes no replies. */
+function closedChat(message: Message): boolean {
+  return message.channel === "web_chat" && message.conversationStatus === "closed";
+}
+
+function errorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : undefined;
 }
 
 function initials(name: string | null, fallback: string): string {
@@ -43,6 +52,11 @@ function conversationSubtitle(message: Message, t: (key: string) => string): str
     return message.visitorEmail ?? message.contactName ?? message.visitorName ?? t("page.noChannel");
   }
   return message.contactPhone ?? message.contactName ?? t("page.noChannel");
+}
+
+/** A conversation as the list shows it, from its latest message. */
+function conversationOf(latest: Message, locale: string, t: (key: string) => string) {
+  return { id: latest.conversationId, latest, displayName: conversationName(latest, locale, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" };
 }
 
 export function LiveMessagesSurface() {
@@ -67,30 +81,38 @@ export function LiveMessagesSurface() {
   });
   const thread = useQuery({
     queryKey: ["messages", business?.businessId, "thread", selectedId],
-    queryFn: () => requestJson<{ messages: Message[] }>(`/api/messages?conversationId=${encodeURIComponent(selectedId!)}`),
+    queryFn: () => requestJson<{ messages: Message[]; newerConversationId?: string | null }>(`/api/messages?conversationId=${encodeURIComponent(selectedId!)}`),
     enabled: Boolean(business && selectedId),
   });
+  // A refusal means the conversation changed since it loaded, such as a website chat that closed: show it as it is now.
+  const refreshAfterRefusal = (error: unknown) => {
+    if (errorCode(error) === "chat_closed") void queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] });
+  };
   const send = useMutation({
     mutationFn: async () => {
       if (!business || !selected) return;
-      const response = await fetch(`/api/messages?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: selectedId, body: draft.trim(), channel: selected.channel }) });
-      if (!response.ok) throw new Error(t("page.sendFailed"));
+      await requestJson(`/api/messages?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({ conversationId: selectedId, body: draft.trim(), channel: selected.channel }) });
     },
     onSuccess: async () => {
       if (business && selectedId && selected) telemetry.track("web.messages.reply_sent", { businessId: business.businessId, conversationId: selectedId, channel: selected.channel });
       setDraft("");
       await queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] });
     },
-    onError: () => toast.error(t("page.sendFailed")),
+    onError: (error) => {
+      toast.error(t(errorCode(error) === "chat_closed" ? "page.closedReplyRefused" : "page.sendFailed"));
+      refreshAfterRefusal(error);
+    },
   });
   const toggleAutomation = useMutation({
     mutationFn: async (state: "ai_active" | "human_handoff") => {
       if (!business || !selectedId) return;
-      const response = await fetch(`/api/messages?businessId=${encodeURIComponent(business.businessId)}`, { method: "PATCH", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ conversationId: selectedId, automationState: state }) });
-      if (!response.ok) throw new Error(t("page.automationUpdateFailed"));
+      await requestJson(`/api/messages?businessId=${encodeURIComponent(business.businessId)}`, { method: "PATCH", body: JSON.stringify({ conversationId: selectedId, automationState: state }) });
     },
     onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] }); },
-    onError: () => toast.error(t("page.automationUpdateFailed")),
+    onError: (error) => {
+      toast.error(t(errorCode(error) === "chat_closed" ? "page.closedTakeOverRefused" : "page.automationUpdateFailed"));
+      refreshAfterRefusal(error);
+    },
   });
 
   useEffect(() => {
@@ -102,16 +124,25 @@ export function LiveMessagesSurface() {
     // Offset pages can overlap when a new message moves a conversation up between page loads; keep the newer, earlier row.
     const latestByConversation = new Map<string, Message>();
     for (const latest of (latestMessages.data?.pages ?? []).flatMap((page) => page.messages)) if (!latestByConversation.has(latest.conversationId)) latestByConversation.set(latest.conversationId, latest);
-    return [...latestByConversation.values()].map((latest) => ({ id: latest.conversationId, latest, displayName: conversationName(latest, i18n.language, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" }));
+    return [...latestByConversation.values()].map((latest) => conversationOf(latest, i18n.language, t));
   }, [latestMessages.data, i18n.language, t]);
-  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? null;
   const selectedMessages = thread.data?.messages ?? [];
+  const threadLatest = selectedMessages.at(-1);
+  // A conversation opened from another, such as a visitor's newer chat, may not be on a loaded page of the list.
+  const selected = conversations.find((conversation) => conversation.id === selectedId) ?? (threadLatest?.conversationId === selectedId ? conversationOf(threadLatest, i18n.language, t) : null);
   const selectedAutomation = selected?.latest.automationState === "human_handoff" ? "human_handoff" : "ai_active";
   const selectedWaiting = selected ? waitingForTeam(selected.latest) : false;
+  const selectedClosed = selected ? closedChat(selected.latest) : false;
+  const newerConversationId = selectedClosed ? thread.data?.newerConversationId ?? null : null;
+
+  function openConversation(conversationId: string, channel: string) {
+    if (business) telemetry.track("web.messages.thread_opened", { businessId: business.businessId, conversationId, channel });
+    setSelectedId(conversationId);
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (draft.trim()) send.mutate();
+    if (draft.trim() && !selectedClosed) send.mutate();
   }
 
   return (
@@ -125,12 +156,12 @@ export function LiveMessagesSurface() {
           <div className="relative"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label={t("page.searchPlaceholder")} className="pl-10" onChange={(event) => setSearch(event.target.value)} placeholder={t("page.searchPlaceholder")} value={search} /></div>
         </div>
         <div className="-mx-3 no-scrollbar h-full overflow-y-auto p-3">
-          {conversations.map((conversation) => <div key={conversation.id}><button className={cn("group flex w-full rounded-md px-2 py-2 text-start text-sm hover:bg-accent hover:text-accent-foreground", selectedId === conversation.id && "bg-muted")} onClick={() => { if (business) telemetry.track("web.messages.thread_opened", { businessId: business.businessId, conversationId: conversation.id, channel: conversation.channel }); setSelectedId(conversation.id); }} type="button"><div className="flex w-full gap-2"><Avatar><AvatarFallback className="ph-mask">{initials(conversation.latest.visitorName ?? conversation.latest.contactName, conversation.displayName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2"><span className="ph-mask truncate font-semibold">{conversation.displayName}</span><span className="text-[11px] text-muted-foreground">{formatDateTime(conversation.latest.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</span></div><span className="ph-mask line-clamp-2 text-muted-foreground">{conversation.latest.body || t("page.emptyPreview")}</span>{waitingForTeam(conversation.latest) ? <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><User className="size-3" />{t("page.waitingBadge")}</span> : null}</div>{conversation.channel === "web_chat" ? <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary" title="Web chat"><Bot className="size-3" /></span> : null}</div></button><Separator className="my-1" /></div>)}
+          {conversations.map((conversation) => <div key={conversation.id}><button className={cn("group flex w-full rounded-md px-2 py-2 text-start text-sm hover:bg-accent hover:text-accent-foreground", selectedId === conversation.id && "bg-muted")} onClick={() => openConversation(conversation.id, conversation.channel)} type="button"><div className="flex w-full gap-2"><Avatar><AvatarFallback className="ph-mask">{initials(conversation.latest.visitorName ?? conversation.latest.contactName, conversation.displayName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2"><span className="ph-mask truncate font-semibold">{conversation.displayName}</span><span className="text-[11px] text-muted-foreground">{formatDateTime(conversation.latest.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</span></div><span className="ph-mask line-clamp-2 text-muted-foreground">{conversation.latest.body || t("page.emptyPreview")}</span>{closedChat(conversation.latest) ? <span className="mt-1 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{t("page.closedBadge")}</span> : waitingForTeam(conversation.latest) ? <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><User className="size-3" />{t("page.waitingBadge")}</span> : null}</div>{conversation.channel === "web_chat" ? <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary" title="Web chat"><Bot className="size-3" /></span> : null}</div></button><Separator className="my-1" /></div>)}
           {latestMessages.hasNextPage ? <Button className="w-full" loading={latestMessages.isFetchingNextPage} onClick={() => void latestMessages.fetchNextPage()} size="sm" variant="ghost">{t("page.loadMore")}</Button> : null}
         </div>
       </div>
       <div className={cn("hidden min-w-0 w-full flex-1 flex-col border bg-background sm:flex sm:rounded-md", selected && "flex")}>
-        {selected ? <><div className="flex items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div>{selected.channel === "web_chat" ? <div className="ml-auto flex items-center gap-2"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></div> : null}</div>{selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <div className={cn("flex", message.direction === "outbound" ? "justify-end" : "justify-start")} key={message.id}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", message.direction === "outbound" ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 text-[11px] opacity-70">{formatDateTime(message.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</p></div></div>)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" onChange={(event) => setDraft(event.target.value)} placeholder={selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim()} loading={send.isPending} size="icon-lg" type="submit"><Send /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
+        {selected ? <><div className="flex items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div>{selectedClosed ? <div className="ml-auto flex items-center"><span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{t("page.closedBadge")}</span></div> : selected.channel === "web_chat" ? <div className="ml-auto flex items-center gap-2"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></div> : null}</div>{selectedClosed ? <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"><p>{t(newerConversationId ? "page.closedNewerDescription" : "page.closedDescription")}</p>{newerConversationId ? <Button onClick={() => openConversation(newerConversationId, "web_chat")} size="sm" variant="outline">{t("page.openNewerChat")}</Button> : null}</div> : selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <div className={cn("flex", message.direction === "outbound" ? "justify-end" : "justify-start")} key={message.id}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", message.direction === "outbound" ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 text-[11px] opacity-70">{formatDateTime(message.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</p></div></div>)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" disabled={selectedClosed} onChange={(event) => setDraft(event.target.value)} placeholder={selectedClosed ? t("page.closedComposerPlaceholder") : selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim() || selectedClosed} loading={send.isPending} size="icon-lg" type="submit"><Send /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
       </div>
     </section>
   );

@@ -299,6 +299,9 @@ export async function setAutomationState(
     const [current] = await tx.select({ channel: conversations.channel, status: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
     if (!current) return null;
     if (input.state === "human_handoff" && current.channel === "web_chat" && current.status !== "open") await refuseClosedChat(tx, input);
+    // The first team member to join keeps the chat: a second Join, as from a
+    // screen that still showed the visitor waiting, changes nothing.
+    if (input.state === "human_handoff" && current.automationState === "human_handoff" && !current.teamRequestedAt) return null;
     const now = new Date();
     // Either way, a visitor waiting for a person no longer waits: someone joined, or the AI has the chat back.
     await tx.update(conversations).set({ automationState: input.state, automationPausedAt: input.state === "human_handoff" ? now : null, automationPausedByUserId: input.state === "human_handoff" ? input.userId : null, teamRequestedAt: null, updatedAt: now }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));

@@ -172,6 +172,7 @@
     "errors": {
       "email": "Unesite imejl adresu, na primer zdravo@primer.com.",
       "invalid": "Neki podaci ne mogu da se sačuvaju. Proverite ih i pokušajte ponovo.",
+      "plainText": "Ovaj tekst sadrži skrivene znakove koji mogu da promene kako se čita. Otkucajte ga ponovo ili ga nalepite kao običan tekst.",
       "widgetUnavailable": "Taj vidžet je pauziran ili opozvan. Izaberite drugi ili bez četa.",
       "saveFailed": "Javni profil nije sačuvan. Pokušajte ponovo."
     }

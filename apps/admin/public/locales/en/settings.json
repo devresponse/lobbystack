@@ -172,6 +172,7 @@
     "errors": {
       "email": "Enter an email address such as hello@example.com.",
       "invalid": "Some details can't be saved. Check them and try again.",
+      "plainText": "This has hidden characters that can change how text reads. Type it again, or paste it as plain text.",
       "widgetUnavailable": "That widget is paused or revoked. Choose another one, or no chat.",
       "saveFailed": "The public profile couldn't be saved. Try again."
     }

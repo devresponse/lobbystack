@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
 import { auditLogs, businesses, businessHours, businessMemberships, businessPublicProfiles, closures, phoneNumbers, receptionistProfiles, services, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { normalizeBookingMode, normalizePageUrl, normalizeTransferMode, PUBLIC_PROFILE_LIMITS, type BookingMode, type HoursWindow, type PublicProfileAddress, type PublicProfileSettings, type RuntimeLocale } from "@lobbystack/shared";
+import { normalizeBookingMode, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type PublicProfileAddress, type PublicProfileSettings, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { checkAvailability } from "./booking";
@@ -83,7 +83,7 @@ function defaultProfileRow(businessId: string): ProfileRow {
 
 /** The receptionist's summary, which describes a business that never saved its page, when AI or a person wrote it. */
 function summaryDescription(receptionist: { summary: string; summarySource: string } | null | undefined): string | null {
-  return receptionist && receptionist.summarySource !== "placeholder" ? receptionist.summary.trim().slice(0, PUBLIC_PROFILE_LIMITS.description) || null : null;
+  return receptionist && receptionist.summarySource !== "placeholder" ? publicProfileDescriptionFrom(receptionist.summary) : null;
 }
 
 function addressOf(row: ProfileRow): PublicProfileAddress {
@@ -355,8 +355,10 @@ export type PublicProfileAudit = { actorUserId: string | null; payload?: Record<
  */
 export async function savePublicProfileInTransaction(tx: DatabaseTransaction, input: { businessId: string; settings: PublicProfileSettings; audit: PublicProfileAudit }): Promise<void> {
   const { settings } = input;
-  // Locks the row, so two saves can't both record the same publish.
-  const previous = (await tx.select({ published: businessPublicProfiles.published, widgetKeyId: businessPublicProfiles.widgetKeyId }).from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1).for("update"))[0];
+  // One save at a time per business, so two saves can't both record the same
+  // publish, even the first two, before there's a row to lock.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('public-profile:' || ${input.businessId}::uuid::text, 0))`);
+  const previous = (await tx.select({ published: businessPublicProfiles.published, widgetKeyId: businessPublicProfiles.widgetKeyId }).from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1))[0];
   if (settings.widgetKeyId && settings.widgetKeyId !== previous?.widgetKeyId) {
     const keys = await profileWidgetKeyOptions(tx, input.businessId);
     if (!keys.some((key) => key.id === settings.widgetKeyId)) throw Object.assign(new Error(PUBLIC_PROFILE_WIDGET_UNAVAILABLE), { status: 400, code: "widget_key_unavailable" });

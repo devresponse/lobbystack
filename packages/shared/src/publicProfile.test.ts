@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { brandAccentColor, normalizeAccentColor, readableTextOn } from "./branding";
-import { formatPublicProfileAddress, hasMappableAddress, publicProfilePath, publicProfileSettingsSchema } from "./publicProfile";
+import { formatPublicProfileAddress, hasMappableAddress, publicProfileDescriptionFrom, publicProfilePath, publicProfileSettingsSchema } from "./publicProfile";
 
 const settings = {
   published: true,
@@ -35,6 +35,27 @@ describe("public profile settings", () => {
     expect(publicProfileSettingsSchema.safeParse({ ...settings, category: "Dental‮clinic" }).success).toBe(false);
     expect(publicProfileSettingsSchema.safeParse({ ...settings, address: { ...settings.address, countryCode: "CAN" } }).success).toBe(false);
     expect(publicProfileSettingsSchema.safeParse({ ...settings, widgetKeyId: "not-a-uuid" }).success).toBe(false);
+  });
+
+  it("keeps emoji and the joiners of other scripts, takes out pasted invisible characters, and refuses ones that hide or reorder text", () => {
+    const text = (category: string) => publicProfileSettingsSchema.safeParse({ ...settings, category });
+    const doctor = "\u{1F469}\u200D\u2695\uFE0F";
+    const rainbow = "\u{1F3F3}\uFE0F\u200D\u{1F308}";
+    const scotland = "\u{1F3F4}\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}";
+    // Persian keeps its zero-width non-joiner.
+    for (const category of [`Clinic ${doctor} ${rainbow}`, `Pub ${scotland}`, "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"]) expect(text(category).data?.category, category).toBe(category);
+    expect(text("Den\u00ADtal\u200B clinic\uFEFF").data?.category).toBe("Dental clinic");
+    expect(publicProfileSettingsSchema.parse({ ...settings, description: "Line one\u200B\n\nLine\u2060 two" }).description).toBe("Line one\n\nLine two");
+    for (const unsafe of ["Dental\u202Eclinic", "Dental\u2066clinic\u2069", "Dental\u200Fclinic", "Dental\uFFF9clinic\uFFFB", "Dental\u{E0061}clinic", `Dental \u{1F3F4}\u{E0067}`]) {
+      expect(text(unsafe).success, JSON.stringify(unsafe)).toBe(false);
+      expect(publicProfileSettingsSchema.safeParse({ ...settings, description: unsafe }).success, JSON.stringify(unsafe)).toBe(false);
+    }
+  });
+
+  it("makes a description of text no one typed, taking out what the field refuses", () => {
+    expect(publicProfileDescriptionFrom("  A family\u202E dental clinic.\r\n\r\n\r\nSame-week visits \u{1F9B7}\u00AD  ")).toBe("A family dental clinic.\n\nSame-week visits \u{1F9B7}");
+    expect(publicProfileDescriptionFrom("a".repeat(800))).toHaveLength(750);
+    expect(publicProfileDescriptionFrom(" \u200B\u202E ")).toBeNull();
   });
 
   it("reads a missing text field as empty", () => {

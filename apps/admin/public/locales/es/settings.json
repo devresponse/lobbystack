@@ -172,6 +172,7 @@
     "errors": {
       "email": "Escriba un correo como hola@ejemplo.com.",
       "invalid": "Algunos datos no se pueden guardar. Revíselos e inténtelo de nuevo.",
+      "plainText": "Este texto tiene caracteres ocultos que pueden cambiar cómo se lee. Vuelva a escribirlo o péguelo como texto sin formato.",
       "widgetUnavailable": "Ese widget está en pausa o revocado. Elija otro, o sin chat.",
       "saveFailed": "No se pudo guardar el perfil público. Inténtelo de nuevo."
     }

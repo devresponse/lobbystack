@@ -279,4 +279,35 @@ describe.skipIf(!client)("public profile pages", () => {
       expect(await fixture.resolve()).toBe(fixture.businessId);
     });
   });
+
+  it("records one publish when the first two saves land at once", async () => {
+    // Two admins' first saves, each on its own connection, so the rows are committed and removed after.
+    const db = client!.db;
+    const businessId = randomUUID();
+    const adminIds = [randomUUID(), randomUUID()];
+    await db.insert(businesses).values({ id: businessId, slug: `pp-race-${businessId}`, name: "Race Dental", timezone: "UTC", businessType: "test", telemetryEnabled: false });
+    for (const id of adminIds) await db.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` });
+    await db.insert(businessMemberships).values(adminIds.map((userId) => ({ businessId, userId, role: "business_admin" })));
+    const settings: PublicProfileSettings = { published: true, category: null, description: null, address: { line1: null, line2: null, city: "Vancouver", region: null, postalCode: null, countryCode: null }, publicEmail: null, showPhone: true, showHours: true, showServices: true, showMap: true, widgetKeyId: null };
+    const save = (userId: string) => withBusinessTransaction(db, { businessId, userId, actorType: "operator" }, async (inner) => {
+      await inner.execute(sql`set local role lobbystack_app`);
+      return await updateBusinessPublicProfile(inner, { businessId, userId, settings });
+    });
+    try {
+      // Holding the table back lines both saves up at their first read of it.
+      const saves = await db.transaction(async (hold) => {
+        await hold.execute(sql`lock table business_public_profiles in access exclusive mode`);
+        const pending = adminIds.map((userId) => save(userId));
+        const waiting = async () => Number((await db.execute<{ count: string }>(sql`select count(*) as count from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and (query like '%business_public_profiles%' or query like '%public-profile:%')`)).rows[0]?.count ?? 0);
+        for (let attempt = 0; attempt < 100 && await waiting() < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+        return pending;
+      });
+      await Promise.all(saves);
+      const published = await db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "public_profile.published")));
+      expect(published).toHaveLength(1);
+    } finally {
+      await db.delete(businesses).where(eq(businesses.id, businessId));
+      for (const id of adminIds) await db.delete(users).where(eq(users.id, id));
+    }
+  });
 });

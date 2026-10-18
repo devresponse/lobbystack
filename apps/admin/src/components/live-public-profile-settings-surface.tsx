@@ -56,6 +56,15 @@ type Form = {
 
 type Toggle = "showPhone" | "showHours" | "showServices" | "showMap";
 
+const TEXT_FIELDS = ["category", "description", "publicEmail", "line1", "line2", "city", "region", "postalCode"] as const;
+type TextField = (typeof TEXT_FIELDS)[number];
+
+/** The form field a settings issue is about, when it's one the owner types in. */
+function issueField(path: readonly PropertyKey[] | undefined): TextField | null {
+  const key = path?.[0] === "address" ? path[1] : path?.[0];
+  return TEXT_FIELDS.find((field) => field === key) ?? null;
+}
+
 function formFromView(view: PublicProfileSettingsResponse): Form {
   const { settings } = view;
   return {
@@ -125,7 +134,7 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
   const [view, setView] = useState(initialView);
   const [form, setForm] = useState(() => formFromView(initialView));
   const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<{ field: "publicEmail" | null; message: string } | null>(null);
+  const [error, setError] = useState<{ field: TextField | null; message: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const countries = useMemo(() => getPhoneCountryOptions(locale), [locale]);
   const readOnly = !view.canEdit;
@@ -156,8 +165,10 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
     event.preventDefault();
     const parsed = publicProfileSettingsSchema.safeParse(settingsFromForm(form));
     if (!parsed.success) {
-      const field = parsed.error.issues[0]?.path[0] === "publicEmail" ? "publicEmail" : null;
-      setError({ field, message: t(field ? "publicPage.errors.email" : "publicPage.errors.invalid") });
+      const issue = parsed.error.issues[0];
+      const field = issueField(issue?.path);
+      // Text fields refuse characters that hide or reorder text; a too-long one can't be typed.
+      setError({ field, message: t(field === "publicEmail" ? "publicPage.errors.email" : field && issue?.code === "custom" ? "publicPage.errors.plainText" : "publicPage.errors.invalid") });
       return;
     }
     setError(null);
@@ -173,10 +184,14 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
     }
   }
 
+  const invalid = (key: TextField) => (error?.field === key ? true : undefined);
+  const fieldError = (key: TextField) => (error?.field === key ? <FieldError>{error.message}</FieldError> : null);
+
   const textField = (key: "category" | "line1" | "line2" | "city" | "region" | "postalCode", label: string, maxLength: number, options: { placeholder?: string; autoComplete?: string; className?: string } = {}) => (
-    <Field className={options.className}>
+    <Field className={options.className} data-invalid={invalid(key)}>
       <FieldLabel htmlFor={`public-profile-${key}`}>{label}</FieldLabel>
-      <Input autoComplete={options.autoComplete} disabled={readOnly} id={`public-profile-${key}`} maxLength={maxLength} onChange={(event) => update(key, event.target.value)} placeholder={options.placeholder} value={form[key]} />
+      <Input aria-invalid={invalid(key)} autoComplete={options.autoComplete} disabled={readOnly} id={`public-profile-${key}`} maxLength={maxLength} onChange={(event) => update(key, event.target.value)} placeholder={options.placeholder} value={form[key]} />
+      {fieldError(key)}
     </Field>
   );
 
@@ -222,15 +237,16 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
         </CardHeader>
         <CardContent className="grid gap-5 sm:grid-cols-2">
           {textField("category", t("publicPage.details.category"), PUBLIC_PROFILE_LIMITS.category, { placeholder: t("publicPage.details.categoryPlaceholder") })}
-          <Field data-invalid={error?.field === "publicEmail" ? true : undefined}>
+          <Field data-invalid={invalid("publicEmail")}>
             <FieldLabel htmlFor="public-profile-email">{t("publicPage.details.email")}</FieldLabel>
-            <Input aria-invalid={error?.field === "publicEmail" ? true : undefined} autoComplete="email" disabled={readOnly} id="public-profile-email" maxLength={PUBLIC_PROFILE_LIMITS.email} onChange={(event) => update("publicEmail", event.target.value)} placeholder={t("publicPage.details.emailPlaceholder")} type="email" value={form.publicEmail} />
-            {error?.field === "publicEmail" ? <FieldError>{error.message}</FieldError> : null}
+            <Input aria-invalid={invalid("publicEmail")} autoComplete="email" disabled={readOnly} id="public-profile-email" maxLength={PUBLIC_PROFILE_LIMITS.email} onChange={(event) => update("publicEmail", event.target.value)} placeholder={t("publicPage.details.emailPlaceholder")} type="email" value={form.publicEmail} />
+            {fieldError("publicEmail")}
           </Field>
-          <Field className="sm:col-span-2">
+          <Field className="sm:col-span-2" data-invalid={invalid("description")}>
             <FieldLabel htmlFor="public-profile-description">{t("publicPage.details.about")}</FieldLabel>
-            <Textarea className="min-h-28" disabled={readOnly} id="public-profile-description" maxLength={PUBLIC_PROFILE_LIMITS.description} onChange={(event) => update("description", event.target.value)} placeholder={t("publicPage.details.aboutPlaceholder")} value={form.description} />
+            <Textarea aria-invalid={invalid("description")} className="min-h-28" disabled={readOnly} id="public-profile-description" maxLength={PUBLIC_PROFILE_LIMITS.description} onChange={(event) => update("description", event.target.value)} placeholder={t("publicPage.details.aboutPlaceholder")} value={form.description} />
             <FieldDescription>{t("publicPage.details.aboutCount", { count: form.description.length, max: PUBLIC_PROFILE_LIMITS.description })}</FieldDescription>
+            {fieldError("description")}
           </Field>
           <FieldSet className="grid gap-5 sm:col-span-2 sm:grid-cols-2">
             <FieldLegend className="sm:col-span-2" variant="label">{t("publicPage.details.address")}</FieldLegend>

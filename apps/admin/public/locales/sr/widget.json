@@ -25,6 +25,7 @@
     "voiceConnected": "Razgovarate sa recepcionerom.",
     "voiceEnded": "Glasovna veza je završena. Možete nastaviti da pišete ispod.",
     "voiceUnavailable": "Razgovor uživo nije dostupan. Pokušajte kasnije.",
+    "voiceRateLimited": "Pokrenuto je previše poziva. Pokušajte kasnije ili nastavite da pišete ispod.",
     "voiceConnecting": "Povezivanje…",
     "voiceRequestingMic": "Dozvolite pristup mikrofonu da biste nastavili.",
     "voiceEnd": "Završi poziv",

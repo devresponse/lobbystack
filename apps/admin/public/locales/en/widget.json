@@ -25,6 +25,7 @@
     "voiceConnected": "You are speaking with the receptionist.",
     "voiceEnded": "The voice connection ended. You can keep chatting below.",
     "voiceUnavailable": "Live voice is unavailable. Try again later.",
+    "voiceRateLimited": "Too many calls have been started. Try again later, or keep chatting below.",
     "voiceConnecting": "Connecting…",
     "voiceRequestingMic": "Allow microphone access to continue.",
     "voiceEnd": "End call",

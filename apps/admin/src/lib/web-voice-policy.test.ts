@@ -11,6 +11,20 @@ describe("web voice policy", () => {
     expect(names).toEqual(["ip-hour", "ip-day", "visitor-hour", "visitor-day", "origin-10m", "business-hour", "business-day", "global-minute"]);
   });
 
+  it("gives an IP address more website calls than one visitor", () => {
+    const limits = buildWebVoiceRateLimits({ businessId: "business", origin: "https://example.test", ipHash: "ip", visitorId: "visitor" });
+    expect(limits.map((entry) => [entry.name, entry.limit, entry.windowSeconds])).toEqual([
+      ["ip-hour", 20, 3_600],
+      ["ip-day", 100, 86_400],
+      ["visitor-hour", 10, 3_600],
+      ["visitor-day", 30, 86_400],
+      ["origin-10m", 30, 600],
+      ["business-hour", 60, 3_600],
+      ["business-day", 300, 86_400],
+      ["global-minute", 120, 60],
+    ]);
+  });
+
   it("restricts demos to global and durable visitor identities", () => {
     const limits = buildWebVoiceRateLimits({ businessId: "business", origin: "https://example.test", prospectDemoId: "demo", visitorId: "visitor" });
     expect(limits.map((entry) => [entry.name, entry.limit, entry.windowSeconds])).toEqual([

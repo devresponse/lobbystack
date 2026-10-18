@@ -585,6 +585,26 @@ describe("widget call button", () => {
     expect(startCall).toHaveBeenCalledTimes(1);
     client.clear();
   });
+
+  it.each([
+    ["rateLimited", "chat.voiceRateLimited"],
+    ["connectionDropped", "chat.voiceEnded"],
+    ["generic", "chat.voiceUnavailable"],
+  ])("tells the visitor what happened to the call (%s)", async (errorKey, message) => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({ status: "error", errorKey, remoteAudioRef: { current: null }, transcript: [], startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    expect(await screen.findByText(message)).toBeTruthy();
+    client.clear();
+  });
 });
 
 describe("widget loading state", () => {

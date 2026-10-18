@@ -187,7 +187,7 @@ describe("texts the team sends", () => {
   }
 
   it("shows how each one is going, and why a failed one never went out", async () => {
-    showCallerThread(() => ({ messages: [note, text("m1", "We can see you Friday at 3.", "delivered"), text("m2", "Does 4 work instead?", "failed", "opted_out"), text("m3", "Or Saturday?", "failed"), text("m4", "See you then.", "queued")], newerConversationId: null, smsReplyHold: null }));
+    showCallerThread(() => ({ messages: [note, text("m1", "We can see you Friday at 3.", "delivered"), text("m2", "Does 4 work instead?", "failed", "opted_out"), text("m3", "Or Saturday?", "failed"), text("m4", "See you then.", "queued"), text("m5", "Are you still there?", "failed", "region_blocked"), text("m6", "Please call us back.", "failed", "unsent")], newerConversationId: null, smsReplyHold: null }));
 
     await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
 
@@ -198,6 +198,9 @@ describe("texts the team sends", () => {
     // A text the carrier failed has its status, and no reason to give.
     expect(screen.getByText("Or Saturday?").parentElement!.textContent).not.toContain("page.smsHold");
     expect(screen.getByText("See you then.").parentElement!.textContent).toContain("page.statusSending");
+    // Twilio won't text the contact's country, or every try to send failed.
+    expect(screen.getByText("Are you still there?").parentElement!.textContent).toContain("page.smsHold.regionBlocked");
+    expect(screen.getByText("Please call us back.").parentElement!.textContent).toContain("page.smsHold.unsent");
     // A voice message the receptionist took isn't a text. (The list shows it too, above the thread.)
     expect(screen.getAllByText("Please call me back about Friday.").at(-1)!.parentElement!.textContent).not.toContain("page.status");
   });

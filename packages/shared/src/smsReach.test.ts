@@ -38,6 +38,11 @@ describe("smsFailureReason", () => {
     expect(smsFailureReason(failedSmsProviderStatus({ held: "no_consent" }))).toBe("no_consent");
     expect(smsFailureReason(failedSmsProviderStatus({ rejected: 21610 }))).toBe("rejected");
     expect(failedSmsProviderStatus({ rejected: 21610 })).toBe("rejected:21610");
+    // A country the business's number can't text is the number's setting, not the contact's.
+    expect(smsFailureReason(failedSmsProviderStatus({ rejected: 21408 }))).toBe("region_blocked");
+    expect(failedSmsProviderStatus({ unsent: 21617 })).toBe("unsent:21617");
+    expect(smsFailureReason(failedSmsProviderStatus({ unsent: 21617 }))).toBe("unsent");
+    expect(smsFailureReason(failedSmsProviderStatus({ unsent: undefined }))).toBe("unsent");
   });
 
   it("has no reason for a text the carrier failed, or one Twilio still has", () => {

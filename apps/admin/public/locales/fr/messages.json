@@ -61,9 +61,11 @@
       "noPhone": "Ce contact n'a aucun numéro de téléphone où envoyer un texto.",
       "blocked": "Ce contact est bloqué : il ne reçoit pas de textos.",
       "optedOut": "Ce contact a répondu STOP : il ne reçoit pas de textos.",
-      "noConsent": "Ce contact ne vous a pas écrit par texto et n'a pas accepté les textos : vous ne pouvez pas lui en envoyer.",
+      "noConsent": "Ce contact n'a pas accepté les textos et ne vous a pas écrit par texto dans cette conversation : vous ne pouvez pas lui en envoyer.",
       "noSender": "Votre entreprise n'a aucun numéro qui peut envoyer des textos.",
-      "rejected": "Ce numéro ne peut pas recevoir de textos."
+      "rejected": "Ce numéro ne peut pas recevoir de textos.",
+      "regionBlocked": "Le numéro de votre entreprise n'est pas autorisé à envoyer des textos vers ce pays.",
+      "unsent": "Le texto n'a pas pu être envoyé."
     }
   },
   "outcome": {

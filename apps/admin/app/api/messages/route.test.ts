@@ -59,7 +59,7 @@ describe("POST /api/messages", () => {
   });
 
   it("refuses a text that can't reach the contact, saying why", async () => {
-    const noConsent = Object.assign(new Error("This contact hasn't texted you or agreed to texts, so you can't text them."), { status: 409, code: "sms_no_consent" });
+    const noConsent = Object.assign(new Error("This contact hasn't agreed to texts or texted you in this conversation, so you can't text them."), { status: 409, code: "sms_no_consent" });
     mocks.appendMessage.mockRejectedValue(noConsent);
 
     const response = await POST(request("POST", { conversationId, body: "We can see you Friday at 3.", channel: "sms" }));

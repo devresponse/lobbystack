@@ -44,7 +44,7 @@ function errorCode(error: unknown): string | undefined {
 const textStatusKeys: Record<string, string> = { queued: "page.statusSending", sending: "page.statusSending", sent: "page.statusSent", delivered: "page.statusDelivered", undelivered: "page.statusUndelivered", failed: "page.deliveryFailed" };
 
 /** Why a text can't reach a contact, or why one failed before it went out, as keys in the messages namespace. */
-const smsHoldKeys: Record<SmsFailureReason, string> = { no_phone: "page.smsHold.noPhone", blocked: "page.smsHold.blocked", opted_out: "page.smsHold.optedOut", no_consent: "page.smsHold.noConsent", no_sender: "page.smsHold.noSender", rejected: "page.smsHold.rejected" };
+const smsHoldKeys: Record<SmsFailureReason, string> = { no_phone: "page.smsHold.noPhone", blocked: "page.smsHold.blocked", opted_out: "page.smsHold.optedOut", no_consent: "page.smsHold.noConsent", no_sender: "page.smsHold.noSender", rejected: "page.smsHold.rejected", region_blocked: "page.smsHold.regionBlocked", unsent: "page.smsHold.unsent" };
 
 /** Why the server refused a reply, as a key: the chat closed, or the text can't reach the contact ("sms_opted_out"). */
 function refusalKey(error: unknown): string | undefined {

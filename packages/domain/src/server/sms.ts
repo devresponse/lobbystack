@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 import { contacts, conversationSessions, conversations, enqueueOutbox, messages, phoneNumbers, providerEvents, smsConsentEvents, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { brandLinks, contactEmailFor, failedSmsProviderStatus, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition, type SmsHoldReason } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, failedSmsProviderStatus, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition, type SmsFailure, type SmsHoldReason } from "@lobbystack/shared";
 
 import { deploymentAppName } from "./branding";
 import { findOrCreateContactByPhone } from "./contacts";
@@ -241,7 +241,7 @@ const smsHoldMessages: Record<SmsHoldReason, string> = {
   no_phone: "This contact has no phone number to text.",
   blocked: "This contact is blocked, so they don't get texts.",
   opted_out: "This contact texted STOP, so they don't get texts.",
-  no_consent: "This contact hasn't texted you or agreed to texts, so you can't text them.",
+  no_consent: "This contact hasn't agreed to texts or texted you in this conversation, so you can't text them.",
   no_sender: "This business has no number that can send texts.",
 };
 
@@ -313,10 +313,10 @@ async function queueSmsFailedAlertInTransaction(tx: DatabaseTransaction, input: 
 /**
  * Fails a claimed text that won't go out, keeping why in its provider status
  * (see failedSmsProviderStatus): the contact can't get texts now, such as
- * after texting STOP, or Twilio refused the number. The thread shows the
- * reason, and the team gets the failed-text alert.
+ * after texting STOP, Twilio refused the number, or the last try to send it
+ * failed. The thread shows the reason, and the team gets the failed-text alert.
  */
-export async function markSmsFailed(context: DomainContext, input: { businessId: string; messageId: string; failure: { held: SmsHoldReason } | { rejected: number } }): Promise<void> {
+export async function markSmsFailed(context: DomainContext, input: { businessId: string; messageId: string; failure: SmsFailure }): Promise<void> {
   await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const [failed] = await tx.update(messages)
       .set({ status: "failed", providerStatus: failedSmsProviderStatus(input.failure), revision: sql`${messages.revision} + 1`, updatedAt: new Date() })

@@ -396,7 +396,7 @@ export { openStatus, type OpenStatus } from "./openStatus";
 export * from "./publicProfile";
 
 export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEMPLATE, OPERATOR_SMS_DISCLOSURE_VERSION, operatorSmsDisclosureText } from "./operatorSmsConsent";
-export { canTextNumber, failedSmsProviderStatus, permanentSmsErrorCode, smsFailureReason, type SmsFailureReason, type SmsHoldReason } from "./smsReach";
+export { canTextNumber, failedSmsProviderStatus, permanentSmsErrorCode, smsErrorCode, smsFailureReason, type SmsFailure, type SmsFailureReason, type SmsHoldReason } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";
 

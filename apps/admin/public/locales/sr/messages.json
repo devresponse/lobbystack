@@ -61,9 +61,11 @@
       "noPhone": "Ovaj kontakt nema broj telefona na koji se može poslati SMS.",
       "blocked": "Ovaj kontakt je blokiran, pa ne prima SMS poruke.",
       "optedOut": "Ovaj kontakt je poslao STOP, pa ne prima SMS poruke.",
-      "noConsent": "Ovaj kontakt Vam nije pisao putem SMS-a niti je pristao na SMS poruke, pa mu ne možete poslati poruku.",
+      "noConsent": "Ovaj kontakt nije pristao na SMS poruke niti Vam je pisao putem SMS-a u ovom razgovoru, pa mu ne možete poslati poruku.",
       "noSender": "Vaše preduzeće nema broj sa kog može da šalje SMS poruke.",
-      "rejected": "Ovaj broj ne može da prima SMS poruke."
+      "rejected": "Ovaj broj ne može da prima SMS poruke.",
+      "regionBlocked": "Broj Vašeg preduzeća nema dozvolu da šalje SMS poruke u ovu zemlju.",
+      "unsent": "SMS poruka nije mogla da se pošalje."
     }
   },
   "outcome": {

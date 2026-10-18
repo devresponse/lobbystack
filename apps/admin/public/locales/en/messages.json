@@ -61,9 +61,11 @@
       "noPhone": "This contact has no phone number to text.",
       "blocked": "This contact is blocked, so they don't get texts.",
       "optedOut": "This contact texted STOP, so they don't get texts.",
-      "noConsent": "This contact hasn't texted you or agreed to texts, so you can't text them.",
+      "noConsent": "This contact hasn't agreed to texts or texted you in this conversation, so you can't text them.",
       "noSender": "Your business has no number that can send texts.",
-      "rejected": "This number can't get texts."
+      "rejected": "This number can't get texts.",
+      "regionBlocked": "Your business's number isn't allowed to text this country.",
+      "unsent": "The text couldn't be sent."
     }
   },
   "outcome": {

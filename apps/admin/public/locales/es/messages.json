@@ -61,9 +61,11 @@
       "noPhone": "Este contacto no tiene un número de teléfono al que enviar SMS.",
       "blocked": "Este contacto está bloqueado, así que no recibe SMS.",
       "optedOut": "Este contacto respondió STOP, así que no recibe SMS.",
-      "noConsent": "Este contacto no le ha escrito por SMS ni ha aceptado recibirlos, así que no puede enviarle uno.",
+      "noConsent": "Este contacto no ha aceptado recibir SMS ni le ha escrito por SMS en esta conversación, así que no puede enviarle uno.",
       "noSender": "Su negocio no tiene ningún número que pueda enviar SMS.",
-      "rejected": "Este número no puede recibir SMS."
+      "rejected": "Este número no puede recibir SMS.",
+      "regionBlocked": "El número de su negocio no tiene permiso para enviar SMS a este país.",
+      "unsent": "No se pudo enviar el SMS."
     }
   },
   "outcome": {

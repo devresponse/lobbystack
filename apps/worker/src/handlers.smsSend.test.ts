@@ -58,6 +58,29 @@ describe("sms.send", () => {
     expect(markSmsSent).not.toHaveBeenCalled();
   });
 
+  it("fails a text after its last try when Twilio keeps refusing it for another reason, but never one that went out", async () => {
+    const businessId = randomUUID();
+    const messageId = randomUUID();
+    const tooLong = Object.assign(new Error("The concatenated message body exceeds the 1600 character limit"), { code: 21617, status: 400 });
+    const twilio = { sendSms: vi.fn().mockRejectedValueOnce(tooLong).mockRejectedValueOnce(tooLong).mockResolvedValueOnce({ providerMessageId: "SM123" }) };
+    vi.mocked(claimSmsDelivery).mockResolvedValue(true);
+    vi.mocked(loadSmsDeliveryTarget).mockResolvedValue({ ok: true, to: "+14165550134", from: "+14375550100", body: "We're open 9 to 5." });
+
+    await expect(handleJob(sendJob(businessId, messageId), { domain, twilio }, { isFinalAttempt: false })).rejects.toThrow("1600 character limit");
+    expect(releaseSmsDelivery).toHaveBeenCalledTimes(1);
+    expect(markSmsFailed).not.toHaveBeenCalled();
+
+    await expect(handleJob(sendJob(businessId, messageId), { domain, twilio }, { isFinalAttempt: true })).rejects.toThrow("1600 character limit");
+    expect(markSmsFailed).toHaveBeenCalledWith(domain, { businessId, messageId, failure: { unsent: 21617 } });
+    expect(releaseSmsDelivery).toHaveBeenCalledTimes(1);
+
+    // Twilio took it but saving that failed: it's released as before, not failed.
+    vi.mocked(markSmsSent).mockRejectedValueOnce(new Error("connection terminated"));
+    await expect(handleJob(sendJob(businessId, messageId), { domain, twilio }, { isFinalAttempt: true })).rejects.toThrow("connection terminated");
+    expect(markSmsFailed).toHaveBeenCalledTimes(1);
+    expect(releaseSmsDelivery).toHaveBeenCalledTimes(2);
+  });
+
   it("sends a text that can go out", async () => {
     const businessId = randomUUID();
     const messageId = randomUUID();

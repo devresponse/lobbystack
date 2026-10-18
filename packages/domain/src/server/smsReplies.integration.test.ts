@@ -155,7 +155,7 @@ describe.skipIf(!testUrl)("replies to customer texts", () => {
     await rollbackTest(async (shop) => {
       const caller = phone();
       const conversationId = await shop.voiceMessage(caller, "Please call me back about Friday.");
-      await expect(shop.write(conversationId)).rejects.toMatchObject({ status: 409, code: "sms_no_consent", message: expect.stringContaining("hasn't texted you or agreed to texts") });
+      await expect(shop.write(conversationId)).rejects.toMatchObject({ status: 409, code: "sms_no_consent", message: expect.stringContaining("hasn't agreed to texts or texted you in this conversation") });
       await shop.answerTexts(caller, "agreed");
       expect(await shop.reply(conversationId)).toMatchObject({ ok: true, to: caller });
     });

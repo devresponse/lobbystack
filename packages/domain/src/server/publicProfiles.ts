@@ -307,10 +307,13 @@ async function profileWidgetKeyOptions(tx: DatabaseTransaction, businessId: stri
  * The page settings for the dashboard and the API. A business that never
  * saved them gets the defaults: unpublished, every section shown, the
  * receptionist's summary as the description when AI or a person wrote one,
- * and the most recently used widget. lock holds the saved row until the
- * transaction ends, for a change made from these settings.
+ * and the most recently used widget. lock holds the business's page saves
+ * and its saved row until the transaction ends, for a change made from these
+ * settings.
  */
 export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, input: { businessId: string; lock?: boolean }): Promise<PublicProfileSettingsView> {
+  // The save lock comes before the row's, in the order a save takes them.
+  if (input.lock) await lockPublicProfileSaves(tx, input.businessId);
   const profileQuery = tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1);
   const [business, profile, receptionist, keys] = await Promise.all([
     tx.select({ slug: businesses.slug, name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).then((rows) => rows[0]),
@@ -342,6 +345,12 @@ export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, 
   };
 }
 
+// One save at a time per business, so two saves can't both record the same
+// publish, even the first two, before there's a row to lock.
+async function lockPublicProfileSaves(tx: DatabaseTransaction, businessId: string): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('public-profile:' || ${businessId}::uuid::text, 0))`);
+}
+
 export const PUBLIC_PROFILE_WIDGET_UNAVAILABLE = "Choose one of this business's active website widgets.";
 
 /** Who changed the page, for the audit log: the account, and the API key or grant that acted for it. */
@@ -355,9 +364,7 @@ export type PublicProfileAudit = { actorUserId: string | null; payload?: Record<
  */
 export async function savePublicProfileInTransaction(tx: DatabaseTransaction, input: { businessId: string; settings: PublicProfileSettings; audit: PublicProfileAudit }): Promise<void> {
   const { settings } = input;
-  // One save at a time per business, so two saves can't both record the same
-  // publish, even the first two, before there's a row to lock.
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('public-profile:' || ${input.businessId}::uuid::text, 0))`);
+  await lockPublicProfileSaves(tx, input.businessId);
   const previous = (await tx.select({ published: businessPublicProfiles.published, widgetKeyId: businessPublicProfiles.widgetKeyId }).from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1))[0];
   if (settings.widgetKeyId && settings.widgetKeyId !== previous?.widgetKeyId) {
     const keys = await profileWidgetKeyOptions(tx, input.businessId);

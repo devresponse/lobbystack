@@ -1168,8 +1168,9 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const coOwnerId = randomUUID();
     const demotedId = randomUUID();
     const leaverId = randomUUID();
+    const racerId = randomUUID();
     const customerEmail = `${customerId}@example.invalid`;
-    for (const userId of [customerId, viewerId, coOwnerId, demotedId, leaverId]) await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: userId === viewerId ? "Vic" : "Cam" });
+    for (const userId of [customerId, viewerId, coOwnerId, demotedId, leaverId, racerId]) await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: userId === viewerId ? "Vic" : "Cam" });
     await admin!.db.insert(businesses).values({ id: businessId, slug: `api-team-${businessId}`, name: "Team test", timezone: "UTC", businessType: "test" });
     // The operator owns what its platform key set up, until it hands it over.
     // Two statements, so the owner joined first.
@@ -1229,6 +1230,31 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await isRevoked(leaverKey)).toBe(true);
       await removeTeamMemberForApi(context, platform, demoted);
 
+      // A demotion still being saved holds the team: a change with the
+      // demoted admin's key waits for it, then is refused.
+      await admin!.db.insert(businessMemberships).values({ businessId, userId: racerId, role: "business_admin" });
+      const racer = await membershipOf(racerId);
+      const asRacer: ApiKeyCaller = { businessId, apiKeyId: await keyBy(racerId) };
+      let commit: () => void = () => undefined;
+      const committing = new Promise<void>((resolve) => { commit = resolve; });
+      let held: () => void = () => undefined;
+      const isHeld = new Promise<void>((resolve) => { held = resolve; });
+      const demotion = admin!.db.transaction(async (hold) => {
+        await hold.execute(sql`select pg_advisory_xact_lock(hashtextextended('team:' || ${businessId}::uuid::text, 0))`);
+        await hold.update(businessMemberships).set({ role: "viewer" }).where(eq(businessMemberships.id, racer));
+        held();
+        await committing;
+      });
+      await isHeld;
+      const restore = updateTeamMemberForApi(context, asRacer, racer, { role: "business_admin" });
+      const waiting = async () => Number((await admin!.db.execute<{ count: string }>(sql`select count(*) as count from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%team:%'`)).rows[0]?.count ?? 0);
+      for (let attempt = 0; attempt < 100 && await waiting() < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      commit();
+      await demotion;
+      await expectApiError(restore, 403, "key_owner_inactive");
+      expect((await getTeamForApi(context, platform)).members.find((member) => member.id === racer)?.role).toBe("viewer");
+      await removeTeamMemberForApi(context, platform, racer);
+
       // Only an owner hands the business over, and a link stops working once its sender isn't one.
       await expectApiError(createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: viewerId }), 409, "conflict");
       const accept = async (url: string) => await acceptInvitation({ db: app!.db }, { userId: customerId, tokenHash: createHash("sha256").update(new URL(url).searchParams.get("token")!).digest("hex"), email: customerEmail, emailVerified: true });
@@ -1282,7 +1308,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
-      await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId, demotedId, leaverId]));
+      await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId, demotedId, leaverId, racerId]));
     }
   });
 

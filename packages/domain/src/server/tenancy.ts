@@ -436,9 +436,11 @@ export async function removeMemberInTransaction(tx: DatabaseTransaction, input: 
   if (!membership) return "not_found";
   if (await isFinalOwner(tx, input.businessId, membership.role)) return "final_owner";
   const email = await memberEmail();
-  await tx.update(businessMemberships).set({ status: "removed", updatedAt: new Date() }).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active")));
+  // Invitations and keys go first: a member removing themselves can't reach
+  // the business's rows once their membership is gone.
   await tx.update(businessInvitations).set({ status: "revoked", updatedAt: new Date() }).where(and(eq(businessInvitations.businessId, input.businessId), eq(businessInvitations.status, "pending"), or(eq(businessInvitations.invitedByUserId, membership.userId), email ? eq(businessInvitations.normalizedEmail, normalizeAuthEmail(email)) : undefined)));
   await revokeMemberApiKeys(tx, { businessId: input.businessId, userId: membership.userId, revokedByUserId: input.actorUserId });
+  await tx.update(businessMemberships).set({ status: "removed", updatedAt: new Date() }).where(and(eq(businessMemberships.id, input.membershipId), eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.status, "active")));
   return "changed";
 }
 

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import type { PublicProfileSettings } from "@lobbystack/shared";
 
-import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, updateBusinessPublicProfile } from "./publicProfiles";
+import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, savePublicProfileInTransaction, updateBusinessPublicProfile } from "./publicProfiles";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -281,7 +281,7 @@ describe.skipIf(!client)("public profile pages", () => {
     });
   });
 
-  it("records one publish when the first two saves land at once", async () => {
+  it("records one publish when the first two saves land at once, and lets an API save and a dashboard save wait for each other", async () => {
     // Two admins' first saves, each on its own connection, so the rows are committed and removed after.
     const db = client!.db;
     const businessId = randomUUID();
@@ -306,6 +306,26 @@ describe.skipIf(!client)("public profile pages", () => {
       await Promise.all(saves);
       const published = await db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "public_profile.published")));
       expect(published).toHaveLength(1);
+
+      // An API save holds the saved page while it works out the change, and a
+      // dashboard save waits for it instead of locking the two in a deadlock.
+      let locked: () => void = () => undefined;
+      let release: () => void = () => undefined;
+      const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      const api = withBusinessTransaction(db, { businessId, userId: adminIds[0]!, actorType: "operator" }, async (inner) => {
+        await inner.execute(sql`set local role lobbystack_app`);
+        const view = await getBusinessPublicProfileSettings(inner, { businessId, lock: true });
+        locked();
+        await released;
+        await savePublicProfileInTransaction(inner, { businessId, settings: { ...view.settings, showMap: false }, audit: { actorUserId: adminIds[0]! } });
+      });
+      await isLocked;
+      const dashboard = save(adminIds[1]!);
+      const waiting = async () => Number((await db.execute<{ count: string }>(sql`select count(*) as count from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and (query like '%business_public_profiles%' or query like '%public-profile:%')`)).rows[0]?.count ?? 0);
+      for (let attempt = 0; attempt < 100 && await waiting() < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      release();
+      await Promise.all([api, dashboard]);
     } finally {
       await db.delete(businesses).where(eq(businesses.id, businessId));
       for (const id of adminIds) await db.delete(users).where(eq(users.id, id));

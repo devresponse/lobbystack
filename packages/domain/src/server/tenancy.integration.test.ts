@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
+import { generateApiKey } from "./publicApi/apiKeys";
 import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, removeMember } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -140,6 +141,25 @@ describe.skipIf(!client)("team membership", () => {
       await tx.execute(sql`reset role`);
       const revoked = await tx.select({ status: businessInvitations.status }).from(businessInvitations).where(and(eq(businessInvitations.businessId, businessId), eq(businessInvitations.status, "revoked")));
       expect(revoked).toHaveLength(2);
+    });
+  });
+
+  it("revokes the pending invitations and API keys of an admin who removes themselves", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, admin, alt], invite, accept, listMembers } = await seedTeam(tx, ["Ana", "Ben", "Alt"]);
+      await accept(admin!, await invite(owner!.id, admin!.email, "business_admin"));
+      const sentByAdmin = await invite(admin!.id, alt!.email, "viewer");
+      const generated = generateApiKey();
+      await withBusinessTransaction(context.db, { userId: admin!.id, businessId, actorType: "operator" }, (inner) => inner.insert(apiKeys).values({ businessId, name: "Ben's key", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["calls:read"], createdByUserId: admin!.id }));
+
+      const adminMembership = (await listMembers(owner!.id)).find((row) => row.user_id === admin!.id)!;
+      await removeMember(context, { userId: admin!.id, businessId, membershipId: adminMembership.membership_id });
+
+      expect((await listMembers(owner!.id)).map((row) => row.user_id)).toEqual([owner!.id]);
+      await expect(accept(alt!, sentByAdmin)).rejects.toThrow("Invitation is invalid or expired.");
+      await tx.execute(sql`reset role`);
+      const keys = await tx.select({ revokedAt: apiKeys.revokedAt, revokedBy: apiKeys.revokedByUserId }).from(apiKeys).where(eq(apiKeys.businessId, businessId));
+      expect(keys).toEqual([{ revokedAt: expect.any(Date), revokedBy: admin!.id }]);
     });
   });
 

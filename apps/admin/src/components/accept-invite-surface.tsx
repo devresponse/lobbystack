@@ -16,6 +16,8 @@ import { resolveLocale } from "@/lib/locale";
 import { localizePublicPath } from "@/lib/locale-path";
 
 type Invitation = { businessName: string; email: string; expired: boolean; status: string };
+/** What a handover turned off that the previous manager had set up. */
+type TurnedOff = { webhookEndpoints: number; calendarConnections: number };
 
 export function AcceptInviteSurface() {
   const { t, i18n } = useTranslation("auth");
@@ -65,7 +67,13 @@ export function AcceptInviteSurface() {
         return;
       }
       if (!response.ok) throw new Error();
+      const { turnedOff } = await response.json().catch(() => ({})) as { turnedOff?: TurnedOff };
       toast.success(t("acceptInvite.success", { businessName: invitation?.businessName ?? t("acceptInvite.workspaceFallback") }));
+      const notes = [
+        turnedOff?.webhookEndpoints ? t("acceptInvite.handover.webhooksOff", { count: turnedOff.webhookEndpoints }) : null,
+        turnedOff?.calendarConnections ? t("acceptInvite.handover.calendarsOff", { count: turnedOff.calendarConnections }) : null,
+      ].filter((note) => note !== null);
+      if (notes.length) toast.info(t("acceptInvite.handover.title"), { description: <>{notes.map((note) => <p key={note}>{note}</p>)}</>, duration: 20_000, action: { label: t("acceptInvite.handover.review"), onClick: () => router.push("/integrations") } });
       router.replace("/settings/team");
       router.refresh();
     } catch {

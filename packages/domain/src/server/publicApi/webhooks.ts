@@ -102,8 +102,8 @@ export async function createWebhookEndpoint(
       events,
       encryptedSecret: encryptWebhookSecret(secret),
       ...(input.description?.trim() ? { description: input.description.trim().slice(0, 200) } : {}),
-      // A platform key has no api_keys row; the audit row records which key created the endpoint.
-      ...(input.manager.kind === "operator" ? { createdByUserId: input.manager.userId } : input.manager.kind === "api_key" ? { createdByApiKeyId: input.manager.apiKeyId } : {}),
+      // A platform key has no api_keys row, so the endpoint records its entry and partner. A handover turns such endpoints off.
+      ...(input.manager.kind === "operator" ? { createdByUserId: input.manager.userId } : input.manager.kind === "api_key" ? { createdByApiKeyId: input.manager.apiKeyId } : { createdByPlatformKeyId: input.manager.platformKeyId, createdByPartnerId: input.manager.partnerId }),
     }).returning();
     if (!row) throw new Error("The webhook endpoint could not be created.");
     const actor = auditActor(input.manager);

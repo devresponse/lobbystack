@@ -1166,8 +1166,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const customerId = randomUUID();
     const viewerId = randomUUID();
     const coOwnerId = randomUUID();
+    const demotedId = randomUUID();
+    const leaverId = randomUUID();
     const customerEmail = `${customerId}@example.invalid`;
-    for (const userId of [customerId, viewerId, coOwnerId]) await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: userId === viewerId ? "Vic" : "Cam" });
+    for (const userId of [customerId, viewerId, coOwnerId, demotedId, leaverId]) await admin!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: userId === viewerId ? "Vic" : "Cam" });
     await admin!.db.insert(businesses).values({ id: businessId, slug: `api-team-${businessId}`, name: "Team test", timezone: "UTC", businessType: "test" });
     // The operator owns what its platform key set up, until it hands it over.
     // Two statements, so the owner joined first.
@@ -1199,6 +1201,34 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await expectApiError(removeTeamMemberForApi(context, platform, owner.id), 409, "conflict");
       await expectApiError(updateTeamMemberForApi(context, platform, randomUUID(), { role: "viewer" }), 404, "not_found");
 
+      // An admin who is demoted or removed loses the API keys they made, and a
+      // key whose creator is no longer an owner or admin can't change the team.
+      const keyBy = async (userId: string) => {
+        const generated = generateApiKey();
+        return (await admin!.db.insert(apiKeys).values({ businessId, name: "admin", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["team:manage"], createdByUserId: userId }).returning({ id: apiKeys.id }))[0]!.id;
+      };
+      const isRevoked = async (keyId: string) => (await admin!.db.select({ revokedAt: apiKeys.revokedAt }).from(apiKeys).where(eq(apiKeys.id, keyId)))[0]?.revokedAt instanceof Date;
+      await admin!.db.insert(businessMemberships).values({ businessId, userId: demotedId, role: "business_admin" });
+      await admin!.db.insert(businessMemberships).values({ businessId, userId: leaverId, role: "business_admin" });
+      const demotedKey = await keyBy(demotedId);
+      const leaverKey = await keyBy(leaverId);
+      const membershipOf = async (userId: string) => (await getTeamForApi(context, platform)).members.find((member) => member.user_id === userId)!.id;
+      const demoted = await membershipOf(demotedId);
+      const leaver = await membershipOf(leaverId);
+      const asDemoted: ApiKeyCaller = { businessId, apiKeyId: demotedKey };
+      expect(await updateTeamMemberForApi(context, asDemoted, demoted, { role: "business_admin" })).toMatchObject({ role: "business_admin" });
+      expect(await isRevoked(demotedKey)).toBe(false);
+      await updateTeamMemberForApi(context, platform, demoted, { role: "viewer" });
+      expect(await isRevoked(demotedKey)).toBe(true);
+      expect((await admin!.db.select({ revokedBy: apiKeys.revokedByUserId }).from(apiKeys).where(eq(apiKeys.id, demotedKey)))[0]?.revokedBy).toBe(ownerId);
+      await expectApiError(updateTeamMemberForApi(context, asDemoted, demoted, { role: "business_admin" }), 403, "key_owner_inactive");
+      await expectApiError(removeTeamMemberForApi(context, asDemoted, leaver), 403, "key_owner_inactive");
+      await expectApiError(revokeTeamInvitationForApi(context, asDemoted, randomUUID()), 403, "key_owner_inactive");
+      expect((await getTeamForApi(context, platform)).members.find((member) => member.id === demoted)?.role).toBe("viewer");
+      await removeTeamMemberForApi(context, platform, leaver);
+      expect(await isRevoked(leaverKey)).toBe(true);
+      await removeTeamMemberForApi(context, platform, demoted);
+
       // Only an owner hands the business over, and a link stops working once its sender isn't one.
       await expectApiError(createClaimLinkForApi(context, platform, { email: customerEmail }, { userId: viewerId }), 409, "conflict");
       const accept = async (url: string) => await acceptInvitation({ db: app!.db }, { userId: customerId, tokenHash: createHash("sha256").update(new URL(url).searchParams.get("token")!).digest("hex"), email: customerEmail, emailVerified: true });
@@ -1220,9 +1250,27 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const [operatorKey] = await admin!.db.insert(apiKeys).values({ businessId, name: "operator", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["business:read"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
       const partnerAccess = () => requirePlatformBusinessAccess(context, { businessId, partnerId: "acme", access: "partner" });
       await partnerAccess();
+      // Webhooks the operator made in the dashboard, with its key or with a platform key, and a calendar it connected.
+      const hook = (path: string) => ({ businessId, url: `https://hooks.example.com/${path}`, events: ["call.completed"] });
+      const byOperator = (await createWebhookEndpoint({ db: app!.db }, { ...hook("operator"), manager: { kind: "operator", userId: ownerId } })).endpoint.id;
+      const byOperatorKey = (await createWebhookEndpoint(context, { ...hook("operator-key"), manager: { kind: "api_key", apiKeyId: operatorKey!.id } })).endpoint.id;
+      const byPlatformKey = (await createWebhookEndpoint(context, { ...hook("partner"), manager: { kind: "platform_key", platformKeyId: platform.platformKeyId, partnerId: "acme", actingUserId: ownerId } })).endpoint.id;
+      const [byViewer] = await admin!.db.insert(webhookEndpoints).values({ ...hook("viewer"), encryptedSecret: encryptWebhookSecret("whsec_viewer"), createdByUserId: viewerId }).returning({ id: webhookEndpoints.id });
+      expect((await admin!.db.select({ platformKeyId: webhookEndpoints.createdByPlatformKeyId, partnerId: webhookEndpoints.createdByPartnerId }).from(webhookEndpoints).where(eq(webhookEndpoints.id, byPlatformKey)))[0]).toEqual({ platformKeyId: platform.platformKeyId, partnerId: "acme" });
+      const [operatorCalendar, viewerCalendar] = await admin!.db.insert(calendarConnections).values([
+        { businessId, ownerUserId: ownerId, provider: "google", externalAccountId: `operator-${businessId}`, encryptedAccessToken: "access", encryptedRefreshToken: "refresh" },
+        { businessId, ownerUserId: viewerId, provider: "google", externalAccountId: `viewer-${businessId}`, encryptedAccessToken: "access", encryptedRefreshToken: "refresh" },
+      ]).returning({ id: calendarConnections.id });
 
       // The owner accepts it in the dashboard: the business is theirs and opens for them, and the operator loses its access.
-      expect(await accept(link.url)).toEqual({ businessId, role: "business_owner" });
+      expect(await accept(link.url)).toEqual({ businessId, role: "business_owner", turnedOff: { webhookEndpoints: 3, calendarConnections: 1 } });
+      const endpointStatus = new Map((await admin!.db.select({ id: webhookEndpoints.id, status: webhookEndpoints.status }).from(webhookEndpoints).where(eq(webhookEndpoints.businessId, businessId))).map((row) => [row.id, row.status]));
+      expect([byOperator, byOperatorKey, byPlatformKey, byViewer!.id].map((id) => endpointStatus.get(id))).toEqual(["disabled", "disabled", "disabled", "enabled"]);
+      const calendars = new Map((await admin!.db.select({ id: calendarConnections.id, status: calendarConnections.status, token: calendarConnections.encryptedRefreshToken }).from(calendarConnections).where(eq(calendarConnections.businessId, businessId))).map((row) => [row.id, row]));
+      expect(calendars.get(operatorCalendar!.id)).toMatchObject({ status: "disconnected", token: null });
+      expect(calendars.get(viewerCalendar!.id)).toMatchObject({ status: "connected", token: "refresh" });
+      expect(await audited("webhook_endpoint.updated")).toBe(3);
+      expect(await audited("calendar_connection.disconnected")).toBe(1);
       expect((await admin!.db.select({ active: users.activeBusinessId }).from(users).where(eq(users.id, customerId)))[0]?.active).toBe(businessId);
       await expectApiError(partnerAccess(), 404, "not_found");
       expect((await admin!.db.select({ revokedAt: apiKeys.revokedAt }).from(apiKeys).where(eq(apiKeys.id, operatorKey!.id)))[0]?.revokedAt).toBeInstanceOf(Date);
@@ -1234,7 +1282,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
-      await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId]));
+      await admin!.db.delete(users).where(inArray(users.id, [customerId, viewerId, coOwnerId, demotedId, leaverId]));
     }
   });
 

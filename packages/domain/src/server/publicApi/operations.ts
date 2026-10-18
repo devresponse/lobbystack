@@ -749,19 +749,27 @@ export async function createTeamInvitationForApi(context: DomainContext, caller:
   });
 }
 
+/**
+ * Team changes, like invitations, need a per-business key whose creator is
+ * still an owner or admin, so a demoted or removed admin's key can't restore
+ * their role or change anyone else's.
+ */
 export async function revokeTeamInvitationForApi(context: DomainContext, caller: ApiCaller, invitationId: string): Promise<void> {
+  await resolveActingUserId(context, caller);
   await inBusiness(context, caller, async (tx) => {
     if (!await revokeInvitationInTransaction(tx, { businessId: caller.businessId, invitationId })) throw notFound("Invitation");
     await audit(tx, caller, { eventType: "api.team.invitation_revoked", entityType: "business_invitation", entityId: invitationId });
   });
 }
 
+/** Changes a member's role, as revokeTeamInvitationForApi checks. A member demoted below admin loses their API keys. */
 export async function updateTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string, input: ApiTeamMemberUpdate): Promise<ApiTeamMember> {
+  const actorUserId = await resolveActingUserId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const current = await loadTeamMember(tx, caller.businessId, membershipId);
     if (!current) throw notFound("Team member");
     if (current.role === input.role) return current;
-    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role });
+    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role, actorUserId });
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
     await audit(tx, caller, { eventType: "api.team.member_updated", entityType: "business_membership", entityId: membershipId, payload: { role: input.role, previousRole: current.role } });
@@ -769,9 +777,11 @@ export async function updateTeamMemberForApi(context: DomainContext, caller: Api
   });
 }
 
+/** Takes a member off the team with their API keys, as revokeTeamInvitationForApi checks. */
 export async function removeTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string): Promise<void> {
+  const actorUserId = await resolveActingUserId(context, caller);
   await inBusiness(context, caller, async (tx) => {
-    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
+    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId, actorUserId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
     await audit(tx, caller, { eventType: "api.team.member_removed", entityType: "business_membership", entityId: membershipId });

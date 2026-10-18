@@ -60,6 +60,9 @@ export const users = pgTable(
     platformRole: varchar("platform_role", { length: 32 }).default("operator").notNull(),
     activeBusinessId: uuid("active_business_id"),
     preferredLocale: varchar("preferred_locale", { length: 8 }).default("en").notNull(),
+    // The PLATFORM_API_KEYS entry and partner whose POST /users made the account. Keys are not rows.
+    createdByPlatformKeyId: uuid("created_by_platform_key_id"),
+    createdByPartnerId: varchar("created_by_partner_id", { length: 40 }),
     ...legacyId,
     ...timestamps,
   },
@@ -1411,6 +1414,9 @@ export const webhookEndpoints = pgTable(
     disabledReason: varchar("disabled_reason", { length: 16 }),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
     createdByApiKeyId: uuid("created_by_api_key_id").references(() => apiKeys.id, { onDelete: "set null" }),
+    // A platform key has no api_keys row, so its PLATFORM_API_KEYS entry and partner are recorded instead.
+    createdByPlatformKeyId: uuid("created_by_platform_key_id"),
+    createdByPartnerId: varchar("created_by_partner_id", { length: 40 }),
     consecutiveFailures: integer("consecutive_failures").default(0).notNull(),
     lastSuccessAt: timestamp("last_success_at", { withTimezone: true }),
     lastFailureAt: timestamp("last_failure_at", { withTimezone: true }),

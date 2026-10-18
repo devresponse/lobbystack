@@ -202,6 +202,16 @@ async function requireInvitationAllowed(userId: string): Promise<void> {
   throw new PublicApiError(429, "rate_limited", `Too many invitations. The account this key acts as can invite 20 people an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
+/** Each new account sends a setup email, so a platform key can make 20 accounts an hour. */
+async function requireAccountCreationAllowed(platformKeyId: string): Promise<void> {
+  const result = await enforceFixedWindow([fixedWindowLimit("platform-user-create", "key-hour", platformKeyId, 20, 60 * 60, "rate_limit_key_hour")]);
+  if (result.allowed) return;
+  if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Account creation is unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
+  // The limit counts in fixed one-hour windows.
+  const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
+  throw new PublicApiError(429, "rate_limited", `Too many new accounts. A platform key can create 20 accounts an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
+}
+
 /** The dashboard's public address, or this request's origin without one. The widget's script, the calendar link and profile pages are served there. */
 function appOrigin(request: Request): string {
   try {
@@ -273,7 +283,7 @@ export const v1 = {
     if (!idempotencyKey) throw new Error("POST /users requires an Idempotency-Key.");
     const body = await readApiBody(request, apiUserCreateSchema);
     // Only the auth role may write accounts.
-    const result = await createUserForApi(getAuthDatabase().db, { key: credential, idempotencyKey, body });
+    const result = await createUserForApi(getAuthDatabase().db, { key: credential, idempotencyKey, body, beforeCreate: () => requireAccountCreationAllowed(credential.platformKeyId) });
     // A retry queues the setup email the first try may have missed; the account's dedupe key sends it once.
     if (!result.user.email_verified) await enqueueAccountSetupEmail(getDatabase("lobbystack_app").db, { user: result.user, appBaseUrl: appOrigin(request) });
     return { body: data(result.user), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };

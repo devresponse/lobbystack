@@ -647,7 +647,7 @@
       "post": {
         "operationId": "createUser",
         "summary": "Create a user",
-        "description": "Platform keys only. Creates an account with no password and an unverified email, and emails the person a link to set a password, which also verifies the email. Use it for an owner who has no account yet, then send them a claim link. An email that already has an account is a 409. Idempotency-Key is required: a retry with the same value returns the account it created, and a different email with that value is a 422.",
+        "description": "Platform keys only. Creates an account with no password and an unverified email, and emails the person a link to set a password, which also verifies the email. Use it for an owner who has no account yet, then send them a claim link. An email that already has an account is a 409. Idempotency-Key is required: a retry with the same value returns the account it created, and a different email with that value is a 422. A platform key can create 20 accounts an hour; a retry doesn't count.",
         "tags": [
           "Platform"
         ],
@@ -3911,7 +3911,7 @@
       "patch": {
         "operationId": "updateTeamMember",
         "summary": "Change someone's role",
-        "description": "A business keeps at least one owner, so demoting the last one is a 409.",
+        "description": "A business keeps at least one owner, so demoting the last one is a 409. Someone moved below admin loses the API keys they made for the business.",
         "tags": [
           "Team"
         ],
@@ -4044,7 +4044,7 @@
       "delete": {
         "operationId": "removeTeamMember",
         "summary": "Remove someone from the team",
-        "description": "Also revokes the invitations they sent or received. A business keeps at least one owner, so removing the last one is a 409.",
+        "description": "Also revokes the invitations they sent or received and the API keys they made for the business. A business keeps at least one owner, so removing the last one is a 409.",
         "tags": [
           "Team"
         ],

@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The statements carry the role passwords, so psql prints nothing on success.
+# Errors still go to stderr, and ON_ERROR_STOP still stops the script.
 psql_args=(
   --set=ON_ERROR_STOP=1
+  --quiet
+  --output=/dev/null
   --username "${POSTGRES_USER:-postgres}"
   --dbname "${POSTGRES_DB:-lobbystack}"
 )
@@ -18,13 +22,16 @@ ensure_role() {
   local role_name="$1"
   local role_password="$2"
 
+  # Each \gexec sends the SELECT above it and runs the statement it returns.
+  # Ending the SELECT with ";" would also run it as a plain query that outputs
+  # the statement.
   psql "${psql_args[@]}" \
     --set="role_name=$role_name" \
     --set="role_password=$role_password" <<'SQL'
 SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', :'role_name', :'role_password')
-WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role_name');
+WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role_name')
 \gexec
-SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOBYPASSRLS', :'role_name', :'role_password');
+SELECT format('ALTER ROLE %I LOGIN PASSWORD %L NOBYPASSRLS', :'role_name', :'role_password')
 \gexec
 SQL
 }

@@ -99,11 +99,15 @@ Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. U
 
 `POST /team/claim-link` remet une entreprise à son propriétaire. Une fois qu'il l'accepte, la clé d'un partenaire n'atteint plus l'entreprise, alors que celle d'un exploitant l'atteint toujours. Dans les deux cas, `GET /businesses` ne la liste plus.
 
-Seul un compte LobbyStack vérifié peut accepter un lien de réclamation. Pour un propriétaire qui n'en a pas, `POST /users` crée un compte avec son adresse et lui envoie un lien pour choisir un mot de passe, ce qui vérifie aussi l'adresse. Envoyez ensuite le lien de réclamation.
+L'acceptation désactive aussi les points de terminaison de webhook créés par l'expéditeur ou par une clé de plateforme, et déconnecte les calendriers que l'expéditeur avait connectés, pour que les données de l'entreprise ne leur parviennent plus. Le propriétaire voit ce qui a été désactivé et peut réactiver un point de terminaison dans le tableau de bord.
+
+Seul un compte LobbyStack vérifié peut accepter un lien de réclamation. Pour un propriétaire qui n'en a pas, `POST /users` crée un compte avec son adresse et lui envoie un lien pour choisir un mot de passe, ce qui vérifie aussi l'adresse. Envoyez ensuite le lien de réclamation. Une clé de plateforme peut créer 20 comptes par heure.
 
 ## Révoquer une clé
 
 Dans **Réglages** > **Clés API**, cliquez sur **Révoquer** à côté de la clé. Les requêtes qui l'utilisent échouent immédiatement, et vous ne pouvez pas annuler cette action. Créez une nouvelle clé si vous avez encore besoin d'accès.
+
+LobbyStack révoque aussi les clés qu'une personne a créées pour une entreprise quand elle quitte son équipe, quand son rôle passe sous Administrateur et quand elle remet l'entreprise avec un lien de réclamation. Si la personne qui a créé une clé propre à l'entreprise n'est plus propriétaire ni administratrice, la clé ne peut plus modifier l'équipe ni définir de code PIN : elle reçoit `403` avec le code `key_owner_inactive`.
 
 ## Limites de débit
 

@@ -99,11 +99,15 @@ Sin ese encabezado, la solicitud devuelve `400` con el código `business_require
 
 `POST /team/claim-link` entrega un negocio a su propietario. Cuando lo acepta, la clave de un socio ya no llega al negocio, mientras que la de un operador sigue llegando. En ambos casos, `GET /businesses` deja de listarlo.
 
-Solo una cuenta de LobbyStack verificada puede aceptar un enlace de reclamación. Para un propietario que no tiene una, `POST /users` crea una cuenta con su dirección y le envía un enlace para elegir una contraseña, lo que también verifica la dirección. Después, envíe el enlace de reclamación.
+Al aceptarlo, también se desactivan los endpoints de webhook que creó el remitente o una clave de plataforma, y se desconectan los calendarios que conectó el remitente, para que los datos del negocio dejen de llegarles. El propietario ve lo que se desactivó y puede volver a activar un endpoint en el panel.
+
+Solo una cuenta de LobbyStack verificada puede aceptar un enlace de reclamación. Para un propietario que no tiene una, `POST /users` crea una cuenta con su dirección y le envía un enlace para elegir una contraseña, lo que también verifica la dirección. Después, envíe el enlace de reclamación. Una clave de plataforma puede crear 20 cuentas por hora.
 
 ## Revoque una clave
 
 En **Configuración** > **Claves de API**, haga clic en **Revocar** junto a la clave. Las solicitudes que la usen fallan de inmediato, y no se puede deshacer. Cree una nueva clave si todavía necesita acceso.
+
+LobbyStack también revoca las claves que una persona creó para un negocio cuando deja su equipo, cuando su rol pasa a uno inferior a Administrador y cuando entrega el negocio con un enlace de reclamación. Si quien creó una clave del negocio ya no es propietario ni administrador, la clave no puede cambiar el equipo ni configurar PIN del teclado: recibe `403` con el código `key_owner_inactive`.
 
 ## Límites de frecuencia
 

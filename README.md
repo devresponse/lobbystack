@@ -164,7 +164,7 @@ pnpm dev
 
 `pnpm env:generate` writes `.env` from `.env.example` with new random secrets. The admin loads `@lobbystack/telemetry` from its build output, so build it again after you pull changes to `packages/telemetry`.
 
-Open the dashboard at `http://localhost:13000`. Use `localhost`, not `127.0.0.1`, or sign-in fails with `Invalid origin`.
+Open the dashboard at `http://localhost:13000`. Use `localhost`, not `127.0.0.1`. From any other address, sign-in says "Incorrect email or password" and the admin logs `Invalid origin`.
 
 Local development stores recordings and uploads under `.lobbystack/storage`. Set `STORAGE_PROVIDER=s3` when you need to test an S3-compatible service.
 

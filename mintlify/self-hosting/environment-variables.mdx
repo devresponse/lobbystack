@@ -26,8 +26,8 @@ Cloudflare Turnstile checks that a person, not a bot, fills in the sign-up form.
 
 | Variable | Purpose |
 | --- | --- |
-| `TURNSTILE_SECRET_KEY` | The secret key of your Turnstile widget. The admin uses it to check each email sign-up. Without it, email sign-up fails with `Turnstile is not configured.`, unless `APP_BASE_URL` starts with `http://localhost:` or `http://127.0.0.1:`. |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | The widget's site key. The browser reads it to show the challenge on the sign-up form. Next.js writes it into the browser code when the admin is built, so the admin build needs it as a Docker build argument. Rebuild the admin after you change it. Compose passes it to the build from `.env`. |
+| `TURNSTILE_SECRET_KEY` | The secret key of your Turnstile widget. The admin uses it to check each email sign-up. Without it, every email sign-up fails unless `APP_BASE_URL` starts with `http://localhost:` or `http://127.0.0.1:`. The form then says "We couldn't create your account. Please try again.", and the admin's response says `Turnstile is not configured.` |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | The widget's site key. The browser reads it to show the challenge on the sign-up form. Next.js writes it into the browser code when the admin is built, so the admin build needs it as a Docker build argument. Rebuild the admin after you change it. Compose passes it to the build from `.env`. If the build has no site key while the secret key is set, the form shows no challenge and every sign-up fails with the same message. |
 
 ## Branding
 

@@ -26,8 +26,8 @@ Cloudflare Turnstile comprueba que quien completa el formulario de registro es u
 
 | Variable | Función |
 | --- | --- |
-| `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico. Sin ella, el registro con correo electrónico falla con `Turnstile is not configured.`, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. |
-| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clave del sitio del widget. El navegador la lee para mostrar la verificación en el formulario de registro. Next.js la escribe en el código del navegador al compilar el servicio de administración, así que esa compilación la necesita como argumento de compilación de Docker. Vuelva a compilar el servicio de administración después de cambiarla. Compose la pasa a la compilación desde `.env`. |
+| `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico. Sin ella, todo registro con correo electrónico falla, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. El formulario muestra entonces "No pudimos crear su cuenta. Inténtelo de nuevo.", y la respuesta del servicio de administración indica `Turnstile is not configured.` |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clave del sitio del widget. El navegador la lee para mostrar la verificación en el formulario de registro. Next.js la escribe en el código del navegador al compilar el servicio de administración, así que esa compilación la necesita como argumento de compilación de Docker. Vuelva a compilar el servicio de administración después de cambiarla. Compose la pasa a la compilación desde `.env`. Si la compilación no tiene clave del sitio y la clave secreta está configurada, el formulario no muestra ninguna verificación y todos los registros fallan con el mismo mensaje. |
 
 ## Imagen de marca
 

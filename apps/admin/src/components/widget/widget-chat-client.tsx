@@ -164,6 +164,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const [handling, setHandling] = useState<ChatHandling>(RECEPTIONIST_HANDLING);
   const handoff = handling.handoff;
   const [voiceCaptions, setVoiceCaptions] = useState<VoiceCaptions>({ live: false, turns: [] });
+  // Whether the chat is on screen. The loader loads it when its panel first
+  // opens, or in the page's own element, and says when the panel opens or closes.
+  const [panelOpen, setPanelOpen] = useState(true);
   // Whether the server has the visitor's chat, which their first message
   // starts. The history says whether they have one; once the server answers a
   // message they most likely do, and the live updates stop if they don't.
@@ -231,6 +234,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       if (data && data.type === "visitor" && typeof data.visitorId === "string") {
         setParentVisitorId(data.visitorId);
       }
+      if (data && (data.type === "open" || data.type === "close")) setPanelOpen(data.type === "open");
       if (data && data.type === "session" && typeof data.token === "string" && typeof data.parentOrigin === "string" && event.origin === data.parentOrigin) {
         setSessionToken(data.token);
         setParentOrigin(data.parentOrigin);
@@ -412,13 +416,15 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     if (thread && followThreadRef.current) thread.scrollTop = thread.scrollHeight;
   }, [chatLoaded, messages, status, voiceCaptions, submitError]);
 
-  // A live voice call or its captions are on screen. Typed messages come back
-  // from history after a reload; these don't, so the loader asks the visitor
-  // before the page reloads or closes.
+  // Leaving or reloading the page hangs up a live voice call, and its captions,
+  // unlike typed messages, don't come back from history. So the loader asks the
+  // visitor first while a call is live, or while the panel shows the captions
+  // of one. Captions in a closed panel aren't worth a prompt on every link.
   const voiceTranscriptShown = voiceCaptions.live || voiceCaptions.turns.length > 0;
+  const warnBeforeLeaving = voiceCaptions.live || (voiceCaptions.turns.length > 0 && panelOpen);
   useEffect(() => {
-    window.parent?.postMessage({ type: "leave-warning", enabled: voiceTranscriptShown }, "*");
-  }, [voiceTranscriptShown]);
+    window.parent?.postMessage({ type: "leave-warning", enabled: warnBeforeLeaving }, "*");
+  }, [warnBeforeLeaving]);
 
   // The loader's color holds until the settings arrive, so the chat never flashes the default color.
   const color = configState ? configState.config?.color ?? initialColor ?? DEFAULT_COLOR : initialColor ?? LOADING_COLOR;

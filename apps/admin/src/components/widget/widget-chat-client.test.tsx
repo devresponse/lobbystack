@@ -403,6 +403,50 @@ describe("widget voice captions", () => {
     postMessage.mockRestore();
     client.clear();
   });
+
+  it("asks before leaving during a call, and after it only while the panel shows its captions", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const postMessage = vi.spyOn(window, "postMessage");
+    Element.prototype.scrollTo = () => {};
+    const transcript = [{ speaker: "assistant", text: "Hi, how can I help?" }, { speaker: "caller", text: "Are you open Sunday?" }];
+    const call = (status: "connected" | "idle") => vi.mocked(useWebVoiceCall).mockReturnValue({ status, errorKey: null, remoteAudioRef: { current: null }, transcript, startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+    call("connected");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const widget = () => <QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>;
+    const view = render(widget());
+    const fromLoader = (data: object) => act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data }));
+    });
+    /** What the chat last told the loader: whether to ask before the page closes. */
+    const warns = () => postMessage.mock.calls.map(([message]) => message as { type?: string; enabled?: boolean }).filter((message) => message.type === "leave-warning").at(-1)?.enabled;
+    const callIs = (status: "connected" | "idle") => act(() => {
+      call(status);
+      view.rerender(widget());
+    });
+    fromLoader({ type: "session", token: "token", parentOrigin: "https://business.test", visitorId });
+
+    expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
+    await vi.waitFor(() => expect(warns()).toBe(true));
+    // The chat opens with its panel, so a finished call's captions are on screen.
+    callIs("idle");
+    expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
+    expect(warns()).toBe(true);
+    // With the panel closed, links on the site leave without asking, until it opens again.
+    fromLoader({ type: "close" });
+    expect(warns()).toBe(false);
+    fromLoader({ type: "open" });
+    expect(warns()).toBe(true);
+
+    // Leaving during a call hangs up, so the panel being closed doesn't matter then.
+    callIs("connected");
+    fromLoader({ type: "close" });
+    expect(warns()).toBe(true);
+    callIs("idle");
+    expect(warns()).toBe(false);
+    postMessage.mockRestore();
+    client.clear();
+  });
 });
 
 describe("widget composer", () => {

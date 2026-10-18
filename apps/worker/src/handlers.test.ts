@@ -152,6 +152,10 @@ describe("worker handlers", () => {
     const invitation = { invitationId: randomUUID(), email: "agent@example.test", token: "token", template: "invitation", url: "https://app.example.test/invite/token" };
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: invitation, trace: {}, idempotencyKey: "invitation:x:send", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
     expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "invitation", to: "agent@example.test", subject: "You're invited to join AlloPlace", appName: "AlloPlace" }));
+    // An invitation that names its business says so, in the inviter's language.
+    const named = { ...invitation, variables: { url: invitation.url, businessName: "Maple Dental", role: "viewer", transfersOwnership: "false", locale: "fr" } };
+    await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: named, trace: {}, idempotencyKey: "invitation:y:send", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
+    expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ template: "invitation", subject: "Invitation à rejoindre Maple Dental sur AlloPlace", variables: named.variables }));
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: { template: "operator_alert", to: "owner@example.test", message: "Hi" }, trace: {}, idempotencyKey: "alert:x", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
     expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "AlloPlace notification", appName: "AlloPlace" }));
   });
@@ -884,20 +888,28 @@ describe("worker handlers", () => {
     const deliveryId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: "Maple Dental" });
+    vi.stubEnv("APP_BASE_URL", "https://app.example.test");
     const sendTemplate = vi.fn().mockResolvedValue({ messageId: "email-123" });
 
     const result = await handleJob({ ...notificationJob({ operatorDeliveryId: deliveryId }), businessId }, { domain, email: { sendTemplate } });
 
     expect(result).toEqual({ status: "completed", entityId: deliveryId });
-    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ to: "operator@example.test", idempotencyKey: `operator-notification:${deliveryId}` }));
+    // The email names the business and the alert, and links into the dashboard.
+    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      template: "operator_alert",
+      to: "operator@example.test",
+      subject: "New message",
+      variables: { message: "A caller left a message.", eventKind: "voiceMessage", appUrl: "https://app.example.test", businessName: "Maple Dental" },
+      idempotencyKey: `operator-notification:${deliveryId}`,
+    }));
     expect(markOperatorNotificationSent).toHaveBeenCalledWith(domain, { businessId, deliveryId, providerMessageId: "email-123" });
   });
 
   it("uses separate main-account credentials only for the configured operator alert sender", async () => {
     const businessId = randomUUID(); const deliveryId = randomUUID(); const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "sms", status: "processing", destination: "+14165550100", sender: "+14165550101", subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "sms", status: "processing", destination: "+14165550100", sender: "+14165550101", subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: null });
     const mainSend = vi.fn().mockResolvedValue({ providerMessageId: "SMmain" });
     const stagingSend = vi.fn().mockResolvedValue({ providerMessageId: "SMstaging" });
     const job = { ...notificationJob({ operatorDeliveryId: deliveryId }), businessId };
@@ -1158,7 +1170,7 @@ describe("worker handlers", () => {
     const deliveryId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: "Maple Dental" });
     const error = new Error("smtp down");
     const sendTemplate = vi.fn().mockRejectedValue(error);
 

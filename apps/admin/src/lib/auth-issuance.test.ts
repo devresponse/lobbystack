@@ -4,7 +4,7 @@ import { getCurrentAdapter, runWithAdapter } from "@better-auth/core/context";
 const mocks = vi.hoisted(() => ({
   config: undefined as any,
   createOtp: vi.fn(), enqueue: vi.fn(), allowed: vi.fn(), role: vi.fn(), challenge: vi.fn(),
-  select: vi.fn(), acquired: true, lockHeld: false, adapter: vi.fn(),
+  select: vi.fn(), acquired: true, lockHeld: false, adapter: vi.fn(), emailOtp: undefined as any,
 }));
 vi.mock("server-only", () => ({}));
 vi.mock("better-auth", () => ({ betterAuth: (config: unknown) => {
@@ -13,6 +13,7 @@ vi.mock("better-auth", () => ({ betterAuth: (config: unknown) => {
 } }));
 vi.mock("better-auth/api", async importOriginal => ({ ...await importOriginal<typeof import("better-auth/api")>(), createAuthMiddleware: (handler: unknown) => handler }));
 vi.mock("better-auth/adapters/drizzle", () => ({ drizzleAdapter: mocks.adapter }));
+vi.mock("better-auth/plugins/email-otp", () => ({ emailOTP: (options: unknown) => { mocks.emailOtp = options; return { id: "email-otp" }; } }));
 vi.mock("./turnstile", () => ({ verifyTurnstile: mocks.challenge }));
 vi.mock("./email-verification-policy", async importOriginal => ({ ...await importOriginal<typeof import("./email-verification-policy")>(), assertEmailVerificationSendAllowed: mocks.allowed }));
 vi.mock("./databases", () => {
@@ -230,4 +231,27 @@ it("caps reset sends per recipient and answers a capped request as if it were se
   expect(mocks.allowed).toHaveBeenCalledWith({ email: "owner@example.invalid", remoteIp: "203.0.113.10", scope: "password-reset" });
   mocks.allowed.mockRejectedValueOnce(new Error("offline"));
   await expect(request("/email-otp/request-password-reset")).rejects.toThrow("offline");
+});
+
+it("writes verification and reset codes in the account's language", async () => {
+  const { getAuth, issueEmailVerificationCode } = await import("./auth"); getAuth();
+  mocks.select.mockResolvedValue([{ id: "user-1", emailVerified: false, preferredLocale: "es" }]);
+  await issueEmailVerificationCode("owner@example.invalid");
+  expect(mocks.enqueue.mock.calls[0]![1].payload).toMatchObject({ template: "verify_email", subject: expect.stringContaining("Su código de verificación de "), variables: { code: "123456", locale: "es" } });
+  mocks.select.mockResolvedValue([{ id: "user-1", preferredLocale: "fr" }]);
+  await mocks.emailOtp.sendVerificationOTP({ email: "owner@example.invalid", otp: "654321", type: "forget-password" });
+  expect(mocks.enqueue.mock.calls[1]![1].payload).toMatchObject({ template: "password_reset", subject: expect.stringContaining("Réinitialisez votre mot de passe "), variables: { code: "654321", locale: "fr" } });
+});
+
+it("names the new address in an email change and sends both emails in the account's language", async () => {
+  const { getAuth } = await import("./auth"); getAuth();
+  mocks.select.mockResolvedValue([{ preferredLocale: "sr" }]);
+  await mocks.config.user.changeEmail.sendChangeEmailConfirmation({ user: { id: "user-1", email: "owner@example.invalid" }, newEmail: "new@example.invalid", url: "https://app.example.test/api/auth/verify-email?token=t" });
+  expect(mocks.enqueue.mock.calls[0]![1].payload).toMatchObject({ template: "verify_email", to: "owner@example.invalid", subject: expect.stringContaining("Potvrdite promenu imejl adrese"), variables: { purpose: "email_change", newEmail: "new@example.invalid", locale: "sr" } });
+  // Once the current address approves, the new one gets its own link.
+  mocks.select.mockResolvedValue([{ email: "owner@example.invalid", preferredLocale: "sr" }]);
+  await mocks.config.emailVerification.sendVerificationEmail({ user: { id: "user-1", email: "new@example.invalid" }, url: "https://app.example.test/api/auth/verify-email?token=t2" });
+  const second = mocks.enqueue.mock.calls[1]![1].payload;
+  expect(second).toMatchObject({ template: "verify_email", to: "new@example.invalid", subject: expect.stringContaining("Potvrdite novu imejl adresu"), variables: { locale: "sr", url: expect.stringContaining("/sr/confirm-email-change?token=t2") } });
+  expect(second.variables).not.toHaveProperty("purpose");
 });

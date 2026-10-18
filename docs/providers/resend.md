@@ -26,6 +26,14 @@ For local development, start Mailpit with `docker compose --env-file .env --prof
 5. Repeat with signup verification and email change.
 6. Submit dashboard feedback and confirm asynchronous delivery to `FEEDBACK_TO_EMAIL`.
 
+## What the emails look like
+
+`packages/providers/src/email/templates.ts` writes each email twice: as plain text, with a blank line between paragraphs and every link on a line of its own, and as HTML with the brand header (see [branding](../branding.md#emails-and-texts)). The founder check-in and dashboard feedback are plain text only. Every email ends by saying why the reader got it.
+
+- Account emails (verification and reset codes, email changes, "you already have an account", the account a platform key made) use the account's dashboard language.
+- An invitation uses the inviter's dashboard language, or English when it comes from the API. It names the business, who sent it and the role.
+- Alerts and the daily summary are in English, like their texts. They name the business and link to the dashboard page to act on, and to Settings > Notifications, at `APP_BASE_URL`.
+
 ## Operate email in production
 
 - Use a verified sender domain with SPF and DKIM.

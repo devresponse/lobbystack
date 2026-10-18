@@ -1189,7 +1189,11 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       // An invitation emails its link, and can be revoked once.
       const invitation = await createTeamInvitationForApi(context, platform, { email: " Sam@Example.com ", role: "scheduler" }, { userId: ownerId });
       expect(invitation).toMatchObject({ email: "sam@example.com", role: "scheduler", status: "pending", transfers_ownership: false });
-      expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "email.send"), eq(outboxMessages.aggregateId, invitation.id)))).toHaveLength(1);
+      const invitationEmails = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "email.send"), eq(outboxMessages.aggregateId, invitation.id)));
+      expect(invitationEmails).toHaveLength(1);
+      // It names the business and the account the key acts as, which the worker's role can read.
+      expect(invitationEmails[0]!.payload).toMatchObject({ template: "invitation", variables: { businessName: "Team test", inviterEmail: owner.email, role: "scheduler", transfersOwnership: "false" } });
+      expect(invitationEmails[0]!.payload).not.toHaveProperty("variables.locale");
       await expectApiError(createTeamInvitationForApi(context, platform, { email: "sam@example.com, kai@example.com", role: "viewer" }, { userId: ownerId }), 400, "invalid_request");
       await revokeTeamInvitationForApi(context, platform, invitation.id);
       await expectApiError(revokeTeamInvitationForApi(context, platform, invitation.id), 404, "not_found");

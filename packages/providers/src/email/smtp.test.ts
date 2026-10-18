@@ -36,14 +36,19 @@ describe("SMTP delivery", () => {
     expect(french.text).toContain("Je suis Raphael, fondateur du service AlloPlace.");
     expect(french.text).toContain("Raphael\nFondateur, AlloPlace");
   });
-  it("tells someone a platform key made an account for how to set its password", async () => {
+  it("sends account emails as plain text with line breaks and as branded HTML", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
     const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test" }, { sendMail } as never);
     await provider.sendTemplate({ template: "account_setup", appName: "AlloPlace", to: "owner@example.test", subject: "Set up your AlloPlace account", variables: { locale: "en", email: "owner@example.test", url: "https://app.example.test/en/forgot-password" } });
     await provider.sendTemplate({ template: "account_setup", appName: "AlloPlace", to: "owner@example.test", subject: "Configurez votre compte AlloPlace", variables: { locale: "fr", email: "owner@example.test", url: "https://app.example.test/fr/forgot-password" } });
-    const [english, french] = sendMail.mock.calls.map((call) => call[0].text as string);
-    expect(english).toBe("An account on AlloPlace was made for you with owner@example.test. To choose your password, open https://app.example.test/en/forgot-password, enter this address, and type in the code we send you. If you weren't expecting this, ignore this email.");
-    expect(french).toContain("ouvrez https://app.example.test/fr/forgot-password");
+    const [english, french] = sendMail.mock.calls.map((call) => call[0]);
+    expect(english.subject).toBe("Set up your AlloPlace account");
+    expect(english.text).toMatch(/^Your AlloPlace account is ready\n\nAn account on AlloPlace was created for you with owner@example.test\./);
+    expect(english.text).toContain("Choose a password:\nhttps://app.example.test/en/forgot-password\n\n");
+    expect(english.html).toContain('href="https://app.example.test/en/forgot-password"');
+    expect(english.html).toContain(">AlloPlace</p>");
+    expect(french.text).toContain("Choisir un mot de passe :\nhttps://app.example.test/fr/forgot-password");
+    expect(french.html).toContain('<html lang="fr">');
   });
 
   it("localizes the onboarding follow-up and existing-account emails in Spanish and Serbian", async () => {
@@ -60,22 +65,24 @@ describe("SMTP delivery", () => {
     expect(serbian).toContain("recepcionera za Ordinacija Javor");
     expect(serbian).toContain("Ja sam Raphael, osnivač servisa AlloPlace.");
     expect(serbian).not.toMatch(/[Ѐ-ӿ]/);
-    expect(spanishAccount).toContain("Inicie sesión para continuar: https://app.example.test/es/login");
-    expect(serbianAccount).toContain("Prijavite se da biste nastavili: https://app.example.test/sr/login");
+    expect(spanishAccount).toContain("Iniciar sesión en AlloPlace:\nhttps://app.example.test/es/login");
+    expect(serbianAccount).toContain("Prijavite se na svoj AlloPlace nalog:\nhttps://app.example.test/sr/login");
+    expect(serbianAccount).not.toMatch(/[Ѐ-ӿ]/);
   });
   it("sends reset codes as codes while preserving previously issued reset links", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
     const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test" }, { sendMail } as never);
     await provider.sendTemplate({ template: "password_reset", appName: "AlloPlace", to: "recipient@example.test", subject: "Reset", variables: { code: "123456" } });
-    expect(sendMail.mock.calls[0]?.[0].text).toBe("Your AlloPlace password reset code is: 123456. It expires in 10 minutes.");
+    expect(sendMail.mock.calls[0]?.[0].text).toContain("Enter this code on the AlloPlace password reset page to choose a new password.\n\n123456\n\nThe code works for 10 minutes.");
+    expect(sendMail.mock.calls[0]?.[0].html).toContain(">123456</p>");
     await provider.sendTemplate({ template: "password_reset", appName: "AlloPlace", to: "recipient@example.test", subject: "Reset", variables: { url: "https://example.test/reset" } });
-    expect(sendMail.mock.calls[1]?.[0].text).toContain("using this link: https://example.test/reset");
+    expect(sendMail.mock.calls[1]?.[0].text).toContain("Choose a new password:\nhttps://example.test/reset\n\nThe link expires in 1 hour.");
   });
   it("sends email verification codes while preserving email-change links", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
     const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test" }, { sendMail } as never);
     await provider.sendTemplate({ template: "verify_email", appName: "AlloPlace", to: "recipient@example.test", subject: "Verify", variables: { code: "123456" } });
-    expect(sendMail.mock.calls[0]?.[0].text).toBe("Your AlloPlace email verification code is: 123456. It expires in 10 minutes.");
+    expect(sendMail.mock.calls[0]?.[0].text).toContain("Enter this code to finish setting up your AlloPlace account.\n\n123456\n\n");
     expect(sendMail.mock.calls[0]?.[0].html).toContain(">AlloPlace</p>");
     expect(sendMail.mock.calls[0]?.[0].html).toContain("finish setting up your AlloPlace account.");
     expect(sendMail.mock.calls[0]?.[0].html).not.toContain("<svg");
@@ -83,8 +90,8 @@ describe("SMTP delivery", () => {
     expect(sendMail.mock.calls[0]?.[0].html).toContain("Verify your email address");
     expect(sendMail.mock.calls[0]?.[0].html).toContain(">123456</p>");
     await provider.sendTemplate({ template: "verify_email", appName: "AlloPlace", to: "recipient@example.test", subject: "Verify", variables: { url: "https://example.test/verify" } });
-    expect(sendMail.mock.calls[1]?.[0].text).toContain("using this link: https://example.test/verify");
-    expect(sendMail.mock.calls[1]?.[0].html).toBeUndefined();
+    expect(sendMail.mock.calls[1]?.[0].text).toContain("Confirm email address:\nhttps://example.test/verify");
+    expect(sendMail.mock.calls[1]?.[0].html).toContain('href="https://example.test/verify"');
   });
   it("shows the brand's email logo above the name, scaled to 48 pixels tall", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });

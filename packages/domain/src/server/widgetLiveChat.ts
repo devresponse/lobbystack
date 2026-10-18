@@ -70,7 +70,7 @@ export async function requestTeamForWidgetChat(
       body: [
         `Someone chatting on your website asked to talk with a person. Reply from Messages within ${TEAM_REQUEST_WAIT_MS / 60_000} minutes to take over the chat. After that, the receptionist offers to take a message.`,
         reason ? `What they need: ${reason}` : "",
-      ].filter(Boolean).join(" "),
+      ].filter(Boolean).join("\n\n"),
     });
     // The worker hands the chat back to the receptionist if this request is still open then.
     await enqueueOutbox(tx, {

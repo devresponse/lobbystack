@@ -41,6 +41,7 @@ export async function submitFeedback(
       businessName = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0]?.name;
     }
     const recipientEmail = process.env.FEEDBACK_TO_EMAIL?.trim() || undefined;
+    const pagePath = optionalText(input.pagePath, MAX_PAGE_PATH_LENGTH);
     const [submission] = await tx.insert(feedbackSubmissions).values({
       userId: input.userId,
       ...(user.email ? { userEmail: user.email } : {}),
@@ -48,7 +49,7 @@ export async function submitFeedback(
       ...(input.businessId ? { businessId: input.businessId } : {}),
       ...(businessName ? { businessName } : {}),
       message,
-      ...(optionalText(input.pagePath, MAX_PAGE_PATH_LENGTH) ? { pagePath: optionalText(input.pagePath, MAX_PAGE_PATH_LENGTH) } : {}),
+      ...(pagePath ? { pagePath } : {}),
       ...(optionalText(input.userAgent, MAX_USER_AGENT_LENGTH) ? { userAgent: optionalText(input.userAgent, MAX_USER_AGENT_LENGTH) } : {}),
       emailStatus: recipientEmail ? "pending_email" : "email_failed",
       ...(recipientEmail ? { recipientEmail } : {}),
@@ -67,7 +68,13 @@ export async function submitFeedback(
           feedbackSubmissionId: submission.id,
           to: recipientEmail,
           subject: `${appName} feedback from ${safeSubjectText(businessName ?? user.name ?? user.email)}`,
-          variables: { body: message },
+          variables: {
+            body: message,
+            ...(user.name ? { userName: user.name } : {}),
+            ...(user.email ? { userEmail: user.email } : {}),
+            ...(businessName ? { businessName } : {}),
+            ...(pagePath ? { pagePath } : {}),
+          },
         },
       });
     }

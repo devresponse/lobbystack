@@ -20,6 +20,15 @@ Use `.env.example` como fuente de referencia. Guarde los valores de producción 
 | `ENCRYPTION_KEY` | Cifra las credenciales de la aplicación almacenadas. |
 | `OTP_HASH_SECRET` | Genera el hash de los códigos de verificación de un solo uso y de los PIN de quienes llaman. Configure el mismo valor en el servicio de administración y en el worker. Si lo cambia, todos los PIN guardados dejan de funcionar. |
 
+## Protección del formulario de registro
+
+Cloudflare Turnstile comprueba que quien completa el formulario de registro es una persona y no un bot. Configure ambas claves en el servicio de administración.
+
+| Variable | Función |
+| --- | --- |
+| `TURNSTILE_SECRET_KEY` | La clave secreta de su widget de Turnstile. El servicio de administración la usa para verificar cada registro con correo electrónico. Sin ella, el registro con correo electrónico falla con `Turnstile is not configured.`, a menos que `APP_BASE_URL` empiece por `http://localhost:` o `http://127.0.0.1:`. |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clave del sitio del widget. El navegador la lee para mostrar la verificación en el formulario de registro. Next.js la escribe en el código del navegador al compilar el servicio de administración, así que esa compilación la necesita como argumento de compilación de Docker. Vuelva a compilar el servicio de administración después de cambiarla. Compose la pasa a la compilación desde `.env`. |
+
 ## Imagen de marca
 
 El nombre, el logo, el color y los enlaces externos vienen de una carpeta de marca en `brands/` del repositorio, elegida por el dominio de `APP_BASE_URL`: `alloplace.com` y sus subdominios reciben los de AlloPlace. Para añadir su propia marca, añada una carpeta, reclame su dominio en `brands/index.json` y ejecute `pnpm brands:build`. El archivo `docs/branding.md` del repositorio enumera los campos.

@@ -83,6 +83,8 @@ Para revisar el correo electrónico en local, inicie Mailpit:
 docker compose --env-file .env --profile development up -d mailpit
 ```
 
+Para que el worker envíe sus correos a Mailpit, configure `SMTP_HOST=mailpit` y `SMTP_PORT=1025` en `.env`. Luego ejecute `docker compose --env-file .env up -d` para volver a crear el worker. Mailpit muestra los mensajes en `http://localhost:8025`.
+
 ## Exporte datos de OpenTelemetry
 
 La exportación de OpenTelemetry está desactivada cuando `OTEL_EXPORTER_OTLP_ENDPOINT` está vacía. Para enviar trazas, métricas y registros de OpenTelemetry a PostHog, agregue estos valores a `.env`:
@@ -105,8 +107,8 @@ Las analíticas de producto directas y el reporte de errores usan su propia conf
 ## Verifique la implementación
 
 ```bash
-curl -fsS http://127.0.0.1:3000/api/health/ready
-curl -fsS http://127.0.0.1:3002/health/ready
+curl -fsS http://127.0.0.1:13000/api/health/ready
+curl -fsS http://127.0.0.1:13002/health/ready
 docker compose logs --since=10m admin worker
 ```
 
@@ -116,6 +118,7 @@ Los puertos predeterminados de los servicios se vinculan a localhost. Haga pasar
 
 - reemplace todas las credenciales de desarrollo y restrinja los permisos de `.env`
 - use un valor HTTPS de producción para `APP_BASE_URL`
+- configure `TURNSTILE_SECRET_KEY` y `NEXT_PUBLIC_TURNSTILE_SITE_KEY` con las claves de un widget de Cloudflare Turnstile. Sin ellas, el registro con correo electrónico falla. Vuelva a compilar el servicio de administración después de cambiar la clave del sitio. Las [variables de protección del formulario de registro](/es/self-hosting/environment-variables#protección-del-formulario-de-registro) explican ambas
 - configure `OPENAI_WEBHOOK_SECRET` y `TWILIO_SIP_TRUNK_SID` para contestar llamadas telefónicas. El worker no aprovisiona un número de teléfono sin `TWILIO_SIP_TRUNK_SID`. Las [variables de llamadas de voz](/es/self-hosting/environment-variables#llamadas-de-voz) explican para qué sirve cada una
 - configure `WEB_CALL_ALLOWED_ORIGINS` con los sitios exactos que alojan su llamada de demostración pública, si tiene una
 - configure copias de seguridad de PostgreSQL y del almacenamiento de archivos fuera del host

@@ -17,8 +17,10 @@
 ## Development commands
 
 - `pnpm install`: install workspace dependencies.
+- `pnpm env:generate`: write `.env` from `.env.example` with new random secrets.
 - `docker compose up -d postgres redis`: start local infrastructure. Add `--profile minio` when testing the optional MinIO storage backend.
 - `pnpm db:migrate`: apply PostgreSQL migrations.
+- `pnpm --filter @lobbystack/telemetry build`: build the telemetry package, which the admin loads from its build output. Run it again after you change `packages/telemetry`.
 - `pnpm dev`: run admin, worker, and landing apps. Browser calls need `LIVE_PROTOTYPE_ENABLED=true` and `OPENAI_API_KEY` on admin and worker.
 - `pnpm typecheck`: typecheck all active workspaces and scripts.
 - `pnpm test`: run all Vitest suites.
@@ -31,7 +33,7 @@
 `.mcp.json` registers `next-devtools`, a Model Context Protocol (MCP) server from the `next-devtools-mcp` package. It works with `apps/admin`, the only Next.js app. `apps/landing` runs on Astro, so the server doesn't cover it. Use it like this:
 
 - Call `nextjs_docs` before you write Next.js code or answer a Next.js question, then read the guide it points to in `apps/admin/node_modules/next/dist/docs/`. Those docs match the installed Next.js version, so use them over memory or web results.
-- Start the admin dev server with `pnpm dev:admin` or `pnpm dev`. It listens on `ADMIN_PORT`, which defaults to 3000.
+- Start the admin dev server with `pnpm dev:admin` or `pnpm dev`. It listens on `ADMIN_PORT`, which the generated `.env` sets to 13000.
 - Call `nextjs_index` to find the running server and list its tools. Then run a tool with `nextjs_call`: `get_errors`, `get_routes`, `get_page_metadata`, `get_logs`, `get_compilation_issues`, or `compile_route`.
 - Before you change admin pages, layouts, route handlers, or Server Actions, check `get_routes` and `get_errors`. Call `get_errors` again after the change.
 - If `nextjs_index` finds no server, start the admin dev server and call it again. Pass `port` when the server runs on a port other than 3000.

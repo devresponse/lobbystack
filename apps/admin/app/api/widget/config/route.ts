@@ -36,7 +36,9 @@ export async function GET(request: Request) {
       greeting: session.config.greeting ?? snapshot?.greeting ?? undefined,
       snapshotPresent: snapshot !== null,
       businessSlug: session.businessSlug,
-      voiceEnabled: Boolean(snapshot?.contactChannels?.phoneNumber),
+      // A call button shows only when a call can start: the business has a
+      // number, this deployment runs live calls, and it has minutes left.
+      voiceEnabled: Boolean(snapshot?.contactChannels?.phoneNumber) && process.env.LIVE_PROTOTYPE_ENABLED === "true" && Boolean(process.env.OPENAI_API_KEY) && voiceBilling.allowed,
     });
   } catch (error) {
     return asApiResponse(error);

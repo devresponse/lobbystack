@@ -689,6 +689,8 @@ export const appointmentChangeVerifications = pgTable(
     codeHash: text("code_hash"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     attemptCount: integer("attempt_count").default(0).notNull(),
+    // The call that asked for it. A keypad PIN accepted on a call counts again only on that call.
+    callId: uuid("call_id").references(() => calls.id, { onDelete: "set null" }),
     ...timestamps,
   },
   (table) => [index("appointment_verifications_appointment_idx").on(table.appointmentId), index("appointment_verifications_business_idx").on(table.businessId)],

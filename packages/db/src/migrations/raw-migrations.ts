@@ -106,6 +106,7 @@ export const SCHEMA_MIGRATIONS = [
   "0100_business_public_profiles.sql",
   "0101_phone_number_snapshot_refresh.sql",
   "0102_placeholder_summary_name.sql",
+  "0104_appointment_change_verification_call.sql",
   "0105_platform_key_records.sql",
 ] as const;
 

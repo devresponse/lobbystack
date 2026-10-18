@@ -44,7 +44,7 @@ GPT-Live never hears key presses, so the worker takes the PIN:
 - The PIN ends at the pound key, at 8 digits, or 6 seconds after the last key once it has 4 digits. The star key starts it over. With no key for 60 seconds, the controller stops taking a PIN.
 - The digits go only to the domain check. The transcript gets `[typed a PIN]`, GPT-Live gets the outcome with `session.instructions.append`, and the next delegated request sees the check's result with the verification and appointment ids, never the PIN.
 - Each change allows 3 tries. Five wrong PINs in a row, across calls, lock the contact's PIN until an operator sets a new one. A caller without a PIN, or with a locked one, can't change appointments on a call, and the agent passes a cancellation to the team.
-- An accepted PIN counts for that appointment and caller until the verification expires (10 minutes), so the agent doesn't ask for it again for the other change.
+- An accepted PIN counts for that appointment and caller on the same call until the verification expires (10 minutes), so the agent doesn't ask for it again for the other change. Each verification records its call in `call_id`, and another call from the same number, which may be spoofed, has to type the PIN again.
 
 ## Greet the caller before they speak
 

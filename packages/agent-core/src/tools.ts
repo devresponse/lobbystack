@@ -445,6 +445,8 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
         action: input.action,
         ...(input.appointmentStartsAt ? { appointmentStartsAt: input.appointmentStartsAt } : {}),
         ...(input.serviceName ? { serviceName: input.serviceName } : {}),
+        // A PIN accepted earlier on this call counts; one from another call doesn't.
+        ...(context.callId ? { callId: context.callId } : {}),
       })),
     });
     if (passcodeRequired && collectPasscode) {

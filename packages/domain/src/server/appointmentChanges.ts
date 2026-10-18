@@ -34,9 +34,13 @@ async function auditAppointmentChange(tx: DatabaseTransaction, input: { business
   await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: input.eventType, entityType: "appointment_change", entityId: input.appointmentId, payload: { ...(input.verificationId ? { verificationId: input.verificationId } : {}), ...(input.payload ?? {}) } });
 }
 
+/**
+ * Starts verifying a caller's change to one appointment. `callId` is the call
+ * asking: a keypad PIN accepted on a call counts again only on that call.
+ */
 export async function createAppointmentChangeVerification(
   context: DomainContext,
-  input: { businessId: string; appointmentId?: string; callerPhone: string; action: "cancel" | "reschedule"; appointmentStartsAt?: string; serviceName?: string },
+  input: { businessId: string; appointmentId?: string; callerPhone: string; action: "cancel" | "reschedule"; appointmentStartsAt?: string; serviceName?: string; callId?: string },
 ): Promise<{ verificationId: string; appointmentId: string; contactId: string; status: string; expiresAt: string; smsConsent: SmsConsentOnFile } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const profile = (await tx.select({ policy: receptionistProfiles.appointmentChangePolicy }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1))[0];
@@ -61,9 +65,11 @@ export async function createAppointmentChangeVerification(
     let status = policy.verificationMode === "otp_required" ? "otp_pending" : "facts_verified";
     let expiresAt = new Date(now.getTime() + OTP_TTL_MS);
     if (policy.verificationMode === "passcode_required") {
-      // A PIN accepted for this appointment and number counts until it expires,
-      // so verifying again, or for the other change, doesn't ask for it twice.
-      const accepted = (await tx.select({ id: appointmentChangeVerifications.id, action: appointmentChangeVerifications.action, expiresAt: appointmentChangeVerifications.expiresAt }).from(appointmentChangeVerifications).where(and(eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.appointmentId, appointment.id), eq(appointmentChangeVerifications.callerPhone, input.callerPhone), eq(appointmentChangeVerifications.status, "passcode_verified"), gt(appointmentChangeVerifications.expiresAt, now))).orderBy(desc(appointmentChangeVerifications.createdAt)).limit(1))[0];
+      // A PIN accepted for this appointment and number on this call counts
+      // until it expires, so verifying again, or for the other change, doesn't
+      // ask for it twice. Another call, even from the same number, may not be
+      // the caller's, so it asks again.
+      const accepted = input.callId ? (await tx.select({ id: appointmentChangeVerifications.id, action: appointmentChangeVerifications.action, expiresAt: appointmentChangeVerifications.expiresAt }).from(appointmentChangeVerifications).where(and(eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.appointmentId, appointment.id), eq(appointmentChangeVerifications.callerPhone, input.callerPhone), eq(appointmentChangeVerifications.callId, input.callId), eq(appointmentChangeVerifications.status, "passcode_verified"), gt(appointmentChangeVerifications.expiresAt, now))).orderBy(desc(appointmentChangeVerifications.createdAt)).limit(1))[0] : undefined;
       if (accepted?.action === input.action) return { verificationId: accepted.id, appointmentId: appointment.id, contactId: appointment.contactId, status: "passcode_verified", expiresAt: accepted.expiresAt.toISOString(), smsConsent: smsConsentOnFile(appointment) };
       if (accepted) {
         status = "passcode_verified";
@@ -75,7 +81,7 @@ export async function createAppointmentChangeVerification(
       }
     }
     await tx.update(appointmentChangeVerifications).set({ status: "superseded", updatedAt: now }).where(and(eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.appointmentId, appointment.id), eq(appointmentChangeVerifications.callerPhone, input.callerPhone), inArray(appointmentChangeVerifications.status, ["pending", "facts_verified", "otp_verified", "otp_pending", "otp_queued", "otp_sent", "passcode_pending", "passcode_verified"])));
-    const [verification] = await tx.insert(appointmentChangeVerifications).values({ businessId: input.businessId, appointmentId: appointment.id, contactId: appointment.contactId, callerPhone: input.callerPhone, action: input.action, status, expiresAt, attemptCount: 0 }).returning({ id: appointmentChangeVerifications.id });
+    const [verification] = await tx.insert(appointmentChangeVerifications).values({ businessId: input.businessId, appointmentId: appointment.id, contactId: appointment.contactId, callerPhone: input.callerPhone, action: input.action, status, expiresAt, attemptCount: 0, ...(input.callId ? { callId: input.callId } : {}) }).returning({ id: appointmentChangeVerifications.id });
     if (!verification) throw new Error("Appointment change verification could not be created.");
     await auditAppointmentChange(tx, { businessId: input.businessId, appointmentId: appointment.id, verificationId: verification.id, eventType: "appointment_change.verification_created", payload: { action: input.action, ...(status.startsWith("passcode_") ? { status } : {}) } });
     return { verificationId: verification.id, appointmentId: appointment.id, contactId: appointment.contactId, status, expiresAt: expiresAt.toISOString(), smsConsent: smsConsentOnFile(appointment) };

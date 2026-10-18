@@ -32,6 +32,22 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
 
 const DAY_MS = 86_400_000;
 
+/**
+ * The fixture's transaction as a database whose transactions run one at a
+ * time. The page checks several opening times at once, each in a transaction
+ * on its own connection; here they all share the fixture's connection, which
+ * runs one query at a time.
+ */
+function oneTransactionAtATime(tx: DatabaseTransaction): Database {
+  let previous: Promise<unknown> = Promise.resolve();
+  const transaction: DatabaseTransaction["transaction"] = (run) => {
+    const next = previous.then(() => tx.transaction(run));
+    previous = next.catch(() => undefined);
+    return next;
+  };
+  return new Proxy(tx, { get: (target, property) => property === "transaction" ? transaction : Reflect.get(target, property) }) as unknown as Database;
+}
+
 async function addUser(tx: DatabaseTransaction): Promise<string> {
   const id = randomUUID();
   await tx.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` });
@@ -106,7 +122,7 @@ async function seed(tx: DatabaseTransaction) {
     page: async (input: { previewUserId?: string } = {}) => {
       await as("lobbystack_worker");
       try {
-        return await getPublicBusinessProfile({ db }, { slug, ...input });
+        return await getPublicBusinessProfile({ db: oneTransactionAtATime(tx) }, { slug, ...input });
       } finally {
         await as(null);
       }

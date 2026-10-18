@@ -26,7 +26,7 @@ beforeEach(() => {
   fixture.save.mockResolvedValue(undefined);
   fixture.load.mockResolvedValue({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" });
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; });
+afterEach(() => { vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; });
 
 describe("initial branding route", () => {
   it("saves the name and the decoded logo, then answers with what pages now show", async () => {
@@ -45,10 +45,9 @@ describe("initial branding route", () => {
     expect(fixture.save).not.toHaveBeenCalled();
   });
 
-  it("leaves out a field the environment already sets", async () => {
-    vi.stubEnv("BRAND_APP_NAME", "Operator Desk");
-    await post(JSON.stringify({ appName: "Acme Desk", logo: PNG.toString("base64") }));
-    expect(fixture.save).toHaveBeenCalledWith({ db: {} }, { userId: "owner", appName: null, logo: PNG });
+  it("saves neither field when the owner skips", async () => {
+    expect((await post("{}")).status).toBe(200);
+    expect(fixture.save).toHaveBeenCalledWith({ db: {} }, { userId: "owner", appName: null, logo: null });
   });
 
   it("refuses a body that isn't a name and a base64 logo", async () => {

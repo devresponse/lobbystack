@@ -71,7 +71,7 @@ export default async function PublicProfileRoute({ params }: ProfileRouteProps) 
   if (!loaded) notFound();
   const { profile, now } = loaded;
   const languageName = serverTranslator(locale, "common", branding.appName);
-  const accent = brandAccentColor(process.env);
+  const accent = brandAccentColor();
   return (
     <ProfilePage
       profile={profile}

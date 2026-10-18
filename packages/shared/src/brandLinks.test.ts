@@ -2,9 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   LOBBYSTACK_CONTACT_EMAILS,
-  brandLinks,
   contactEmailFor,
-  invalidBrandLinkVariables,
   normalizeEmailAddress,
   normalizePageUrl,
   normalizeSiteUrl,
@@ -65,22 +63,16 @@ describe("normalizeEmailAddress", () => {
 });
 
 describe("resolveBrandLinks", () => {
-  it("links to LobbyStack's site, docs and addresses when nothing is set", () => {
-    const links = resolveBrandLinks({});
+  it("links to LobbyStack's site, docs and addresses without a brand", () => {
+    const links = resolveBrandLinks();
     expect(links).toEqual({ siteUrl: "https://lobbystack.com", termsUrl: null, privacyUrl: null, docsUrl: "https://docs.lobbystack.com", contactEmail: null });
     expect(contactEmailFor(links, "support")).toBe("support@lobbystack.com");
     expect(contactEmailFor(links, "sales")).toBe("hello@lobbystack.ai");
     expect(contactEmailFor(links, "sms")).toBe("hello@lobbystack.com");
   });
 
-  it("uses the deployment's own links and one address for every purpose", () => {
-    const links = resolveBrandLinks({
-      NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com",
-      NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms",
-      NEXT_PUBLIC_PRIVACY_URL: "https://alloplace.com/legal/privacy",
-      NEXT_PUBLIC_DOCS_SITE_URL: "https://alloplace.com",
-      NEXT_PUBLIC_CONTACT_EMAIL: "support@alloplace.com",
-    });
+  it("uses the brand's own links and one address for every purpose", () => {
+    const links = resolveBrandLinks(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }).links);
     expect(links).toEqual({
       siteUrl: "https://alloplace.com",
       termsUrl: "https://alloplace.com/legal/terms",
@@ -93,30 +85,23 @@ describe("resolveBrandLinks", () => {
     }
   });
 
-  it("takes the brand's links where no variable sets one", () => {
-    const brand = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }).links;
-    expect(resolveBrandLinks({}, brand)).toEqual({
-      siteUrl: "https://alloplace.com",
-      termsUrl: "https://alloplace.com/legal/terms",
-      privacyUrl: "https://alloplace.com/legal/privacy",
-      docsUrl: "https://alloplace.com",
-      contactEmail: "support@alloplace.com",
+  it("fills in LobbyStack's site and docs where the brand has none", () => {
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: "https://example.com/terms", privacyUrl: null, docsUrl: null, contactEmail: null })).toEqual({
+      siteUrl: "https://lobbystack.com",
+      termsUrl: "https://example.com/terms",
+      privacyUrl: null,
+      docsUrl: "https://docs.lobbystack.com",
+      contactEmail: null,
     });
-    expect(resolveBrandLinks({ NEXT_PUBLIC_CONTACT_EMAIL: "help@example.com", NEXT_PUBLIC_TERMS_URL: "" }, brand)).toMatchObject({ contactEmail: "help@example.com", termsUrl: "https://alloplace.com/legal/terms" });
-  });
-
-  it("falls back to LobbyStack's link for an empty or unusable value, and names the unusable ones", () => {
-    const environment = { NEXT_PUBLIC_LANDING_SITE_URL: "alloplace.com", NEXT_PUBLIC_DOCS_SITE_URL: "", NEXT_PUBLIC_CONTACT_EMAIL: "support at alloplace" };
-    expect(resolveBrandLinks(environment)).toMatchObject({ siteUrl: "https://lobbystack.com", docsUrl: "https://docs.lobbystack.com", contactEmail: null });
-    expect(invalidBrandLinkVariables(environment)).toEqual(["NEXT_PUBLIC_LANDING_SITE_URL", "NEXT_PUBLIC_CONTACT_EMAIL"]);
-    expect(invalidBrandLinkVariables({ NEXT_PUBLIC_LANDING_SITE_URL: "https://alloplace.com", NEXT_PUBLIC_TERMS_URL: "  " })).toEqual([]);
   });
 });
 
 describe("brandLinks", () => {
-  it("reads the deployment's variables from the environment", () => {
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com/");
-    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "support@alloplace.com");
-    expect(brandLinks()).toMatchObject({ siteUrl: "https://alloplace.com", docsUrl: "https://docs.lobbystack.com", contactEmail: "support@alloplace.com" });
+  it("follows the brand the deployment's address picks", async () => {
+    // The brand is resolved once per process, so this test loads the module afresh.
+    vi.resetModules();
+    vi.stubEnv("APP_BASE_URL", "https://demo.alloplace.com");
+    const fresh = await import("./brandLinks");
+    expect(fresh.brandLinks()).toMatchObject({ siteUrl: "https://alloplace.com", docsUrl: "https://alloplace.com", contactEmail: "support@alloplace.com" });
   });
 });

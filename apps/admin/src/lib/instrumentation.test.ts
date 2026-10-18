@@ -97,30 +97,3 @@ describe("production database role startup validation", () => {
     expect(mocks.getDatabase).not.toHaveBeenCalled();
   });
 });
-
-describe("brand link startup check", () => {
-  beforeEach(() => {
-    vi.stubEnv("NEXT_RUNTIME", "nodejs");
-    vi.stubEnv("NODE_ENV", "development");
-  });
-  afterEach(() => {
-    vi.unstubAllEnvs();
-    vi.restoreAllMocks();
-  });
-
-  it("names the link variables it can't use", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "alloplace.com");
-    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "support@alloplace.com");
-    await expect(register()).resolves.toBeUndefined();
-    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/^\[branding\] Ignoring NEXT_PUBLIC_LANDING_SITE_URL: /));
-  });
-
-  it("stays quiet when every link variable is usable", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com");
-    vi.stubEnv("NEXT_PUBLIC_TERMS_URL", "https://alloplace.com/legal/terms");
-    await expect(register()).resolves.toBeUndefined();
-    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining("[branding]"));
-  });
-});

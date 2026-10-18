@@ -67,12 +67,13 @@ describe("public profile helpers", () => {
 });
 
 describe("the deployment's accent colour", () => {
-  it("reads BRAND_ACCENT_COLOR and falls back to the widget's default", () => {
-    expect(brandAccentColor({ BRAND_ACCENT_COLOR: "#FFD100" })).toBe("#ffd100");
-    expect(brandAccentColor({ BRAND_ACCENT_COLOR: "#fd0" })).toBe("#ffdd00");
-    expect(brandAccentColor({ BRAND_ACCENT_COLOR: "yellow" })).toBe("#0f766e");
-    expect(brandAccentColor({})).toBe("#0f766e");
+  it("takes the brand's colour, in lowercase #rrggbb, and falls back to the widget's default", () => {
+    expect(normalizeAccentColor("#FFD100")).toBe("#ffd100");
+    expect(normalizeAccentColor("#fd0")).toBe("#ffdd00");
+    expect(normalizeAccentColor("yellow")).toBeNull();
     expect(normalizeAccentColor("#12345")).toBeNull();
+    expect(brandAccentColor({ accentColor: "#ffd100" })).toBe("#ffd100");
+    expect(brandAccentColor({ accentColor: null })).toBe("#0f766e");
   });
 
   it("puts black text on yellow and white text on dark colours", () => {

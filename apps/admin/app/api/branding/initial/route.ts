@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { saveInitialBranding } from "@lobbystack/domain";
-import { MAX_BRAND_LOGO_BYTES, brandFileMatched, currentBrand, readBrandingEnvironment } from "@lobbystack/shared";
+import { MAX_BRAND_LOGO_BYTES, brandFileMatched, currentBrand } from "@lobbystack/shared";
 
 import { asApiResponse, getAppDatabase, jsonError, requireApiSession } from "@/lib/api-helpers";
 import { forgetCachedBranding, loadBranding } from "@/lib/branding";
@@ -42,8 +42,8 @@ async function readBody(request: Request): Promise<unknown> {
 /**
  * Saves the name and logo the deployment's first owner chose in onboarding:
  * `{ appName, logo }`, the logo in base64. Leaving both out keeps LobbyStack
- * and ends the choice. A field the environment sets is not theirs to choose,
- * and neither is anything on a deployment whose brand file sets them.
+ * and ends the choice. Nothing is theirs to choose on a deployment whose brand
+ * file sets the name and logo.
  */
 export async function POST(request: Request) {
   try {
@@ -58,11 +58,10 @@ export async function POST(request: Request) {
     if (!fields || (appName !== null && typeof appName !== "string") || (logo !== null && (typeof logo !== "string" || !BASE64.test(logo)))) {
       throw jsonError("Send the name as text and the logo as base64.", 400, "invalid_branding");
     }
-    const environment = readBrandingEnvironment(process.env);
     await saveInitialBranding({ db: getAppDatabase().db }, {
       userId: session.user.id,
-      appName: environment.appName ? null : appName,
-      logo: environment.logoUrl || !logo ? null : Buffer.from(logo, "base64"),
+      appName,
+      logo: logo ? Buffer.from(logo, "base64") : null,
     });
     forgetCachedBranding();
     const branding = await loadBranding();

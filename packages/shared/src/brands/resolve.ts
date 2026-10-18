@@ -134,24 +134,11 @@ export function currentBrand(): ResolvedBrand {
   return current;
 }
 
-/** Variables that still override the brand file for one more release, then go away. */
-export const DEPRECATED_BRAND_VARIABLES = [
-  "BRAND_APP_NAME",
-  "BRAND_LOGO_URL",
-  "BRAND_ACCENT_COLOR",
-  "NEXT_PUBLIC_LANDING_SITE_URL",
-  "NEXT_PUBLIC_TERMS_URL",
-  "NEXT_PUBLIC_PRIVACY_URL",
-  "NEXT_PUBLIC_DOCS_SITE_URL",
-  "NEXT_PUBLIC_CONTACT_EMAIL",
-] as const;
-
 /**
  * What a deployment should hear about its brand at start: a preset the
- * domain overrides, a preset that names no brand, an address no brand
- * claims, or a variable that will go away. `error` is set when
- * BRAND_REQUIRED=true and no brand file matched, and the process should
- * refuse to start.
+ * domain overrides, a preset that names no brand, or an address no brand
+ * claims. `error` is set when BRAND_REQUIRED=true and no brand file matched,
+ * and the process should refuse to start.
  */
 export function brandStartupReport(brand: ResolvedBrand, environment: Record<string, string | undefined> = process.env): { info: string; warnings: string[]; error: string | null } {
   const warnings: string[] = [];
@@ -159,10 +146,6 @@ export function brandStartupReport(brand: ResolvedBrand, environment: Record<str
   if (brand.unknownPreset) warnings.push(`[brand] brand.preset_unknown: BRAND_PRESET=${brand.unknownPreset} names no folder under brands/, so the ${brand.id} brand stands in.`);
   if (brand.source === "default" && brand.host && environment.NODE_ENV === "production") {
     warnings.push(`[brand] brand.unmatched: no brand in brands/index.json claims ${brand.host}, so the default ${brand.id} brand stands in.`);
-  }
-  const deprecated = DEPRECATED_BRAND_VARIABLES.filter((name) => environment[name]?.trim());
-  if (deprecated.length) {
-    warnings.push(`[brand] brand.deprecated_variables: ${deprecated.join(", ")} still override the brand file, but will be removed in a later release. Put the values in a folder under brands/ instead.`);
   }
   const required = environment.BRAND_REQUIRED === "true" && !brandFileMatched(brand);
   return {

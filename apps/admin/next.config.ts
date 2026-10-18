@@ -39,14 +39,6 @@ const nextConfig: NextConfig = {
     // show the same brand. The admin warns at start when they no longer match.
     NEXT_PUBLIC_BRAND_BASE_URL: process.env.APP_BASE_URL ?? "",
     NEXT_PUBLIC_BRAND_PRESET: process.env.BRAND_PRESET ?? "",
-    // Old overrides for the brand file's outside links (packages/shared/src/brandLinks.ts),
-    // to be removed. Fixed at build even when unset, so a value set only at run
-    // time can't make the server render a link the browser then disagrees with.
-    NEXT_PUBLIC_LANDING_SITE_URL: process.env.NEXT_PUBLIC_LANDING_SITE_URL ?? "",
-    NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL ?? "",
-    NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL ?? "",
-    NEXT_PUBLIC_DOCS_SITE_URL: process.env.NEXT_PUBLIC_DOCS_SITE_URL ?? "",
-    NEXT_PUBLIC_CONTACT_EMAIL: process.env.NEXT_PUBLIC_CONTACT_EMAIL ?? "",
     // No NEXT_PUBLIC_DEPLOYMENT_MODE: browser telemetry gets the mode from the
     // server at runtime (src/lib/deployment-mode.ts).
   },

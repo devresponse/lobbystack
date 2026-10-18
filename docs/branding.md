@@ -42,7 +42,7 @@ The admin and the worker resolve the brand once when they start (`packages/share
 2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace`. Use it for `localhost` and for platform addresses such as `*.up.railway.app`. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
 3. Otherwise the default brand, LobbyStack. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
 
-For one more release, `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR` and the five `NEXT_PUBLIC_*` link variables still win over the brand file, field by field. Nothing sets them by default any more, and they'll be removed. While any of them is set, both services log `brand.deprecated_variables` at start, naming them.
+Earlier releases let `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` and `NEXT_PUBLIC_CONTACT_EMAIL` override the brand file. They no longer do anything, so put their values in a brand folder.
 
 When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
 
@@ -57,7 +57,7 @@ At start, each service logs the brand it picked, such as `[brand] alloplace (ape
 
 ### The onboarding step
 
-On a deployment no brand file matches, the first owner sees a **Make this app your own** step before naming their business. It asks only for the fields the environment leaves unset. It never appears where a brand file matches, and `POST /api/branding/initial` answers 409 there. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
+On a deployment no brand file matches, the first owner sees a **Make this app your own** step before naming their business. It never appears where a brand file matches, and `POST /api/branding/initial` answers 409 there. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
 
 The step is shown only when both of these are true. `app.can_save_initial_branding()` checks them in the database, and `app.save_initial_branding()` checks them again when the choice is saved:
 
@@ -93,11 +93,11 @@ A deployment still named LobbyStack with no logo of its own shows LobbyStack's m
 
 Every email and text the app sends calls it by the same name as the dashboard: verification codes, password resets, email changes, invitations, the "account was made for you" and "you already have an account" emails, the founder check-in, alert emails, the SMS HELP and START replies, and the operator's phone verification code. The text a caller gets when they change an appointment opens with the business's name instead, since the caller phoned the business, and falls back to the app name when the business has none.
 
-`deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: `BRAND_APP_NAME` while it lasts, then a matched brand file, then the saved onboarding choice, then the default brand. It caches the saved choice for 30 seconds and uses the default brand when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `APP_BASE_URL` on the worker as well as the admin**: the worker picks its brand from it the same way.
+`deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: a matched brand file, then the saved onboarding choice, then the default brand. It caches the saved choice for 30 seconds and uses the default brand when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `APP_BASE_URL` on the worker as well as the admin**: the worker picks its brand from it the same way.
 
-The verification email's HTML header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text. While `BRAND_LOGO_URL` sets a different logo, emails show the name alone.
+The verification email's HTML header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text.
 
-When `EMAIL_FROM` holds only an address, the worker puts the deployment's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`, if `BRAND_APP_NAME` or a matched brand file names the deployment. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
+When `EMAIL_FROM` holds only an address and a brand file matches, the worker puts the brand's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
 
 The SMS HELP and START replies are part of the registered SMS campaign or toll-free verification, so update the registration's sample messages when the name changes.
 
@@ -105,44 +105,42 @@ The consent text for operator alert texts uses the app name too (`OPERATOR_SMS_D
 
 ## Send the outside links to your own site
 
-The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. The brand file's `links` and `contactEmail` point them at the brand's own site and inbox. Five variables still override them for one more release:
+The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. The brand file's `links` and `contactEmail` point them at the brand's own site and inbox, with the values the [brand file table](#brand-files) accepts:
 
-| Link | Environment variable | Accepted values | When neither sets it |
-| --- | --- | --- | --- |
-| Website | `NEXT_PUBLIC_LANDING_SITE_URL` | An `http://` or `https://` URL without credentials, a query, or a fragment. | `https://lobbystack.com` |
-| Terms of service | `NEXT_PUBLIC_TERMS_URL` | An `http://` or `https://` URL without credentials. | `/terms` on the website |
-| Privacy policy | `NEXT_PUBLIC_PRIVACY_URL` | An `http://` or `https://` URL without credentials. | `/privacy` on the website |
-| Docs | `NEXT_PUBLIC_DOCS_SITE_URL` | Like the website. | `https://docs.lobbystack.com` |
-| Contact address | `NEXT_PUBLIC_CONTACT_EMAIL` | A plain address, such as `support@example.com`. | LobbyStack's address for each place: `support@lobbystack.com` in the feedback panel, `hello@lobbystack.ai` for Enterprise plans, and `hello@lobbystack.com` in text messages. |
-
-An empty variable counts as unset. When a variable holds a value it can't use, the admin logs a warning at startup and uses the brand's link in its place.
+| Link | Field in `brand.json` | Without it |
+| --- | --- | --- |
+| Website | `links.site` | `https://lobbystack.com` |
+| Terms of service | `links.terms` | `/terms` on the website |
+| Privacy policy | `links.privacy` | `/privacy` on the website |
+| Docs | `links.docs` | `https://docs.lobbystack.com` |
+| Contact address | `contactEmail` | LobbyStack's address for each place: `support@lobbystack.com` in the feedback panel, `hello@lobbystack.ai` for Enterprise plans, and `hello@lobbystack.com` in text messages. |
 
 Where each one appears:
 
-- **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when their own variables are unset. On lobbystack.com the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
-- **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `NEXT_PUBLIC_TERMS_URL` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
+- **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when the brand file has no page for them. On lobbystack.com the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
+- **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `links.terms` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
 - **Docs**: the "see docs" and Help Center links in the dashboard's feedback panel, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`.
 - **Contact address**: the feedback panel's "Contact us" link, the Enterprise plan's contact button in onboarding and billing, and both SMS HELP replies. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when the address or the website changes.
 
-### Set them for the build
+### The brand is part of the build
 
-Next.js writes `NEXT_PUBLIC_` variables into the admin's build, both the browser's code and the server's, so a change takes a rebuild. `next.config.ts` fixes the five old link variables at build time, even the unset ones, and writes in the address and preset the brand comes from (`NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`), so the server and the browser always agree. When the admin starts with an `APP_BASE_URL` or `BRAND_PRESET` that would pick another brand than its build did, it logs `brand.build_mismatch`: rebuild it.
+`next.config.ts` writes the address and preset the brand comes from into the admin's build, both the browser's code and the server's, as `NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`. The server and the browser always agree, and a change takes a rebuild. When the admin starts with an `APP_BASE_URL` or `BRAND_PRESET` that would pick another brand than its build did, it logs `brand.build_mismatch`: rebuild it.
 
 alloplace.com has no docs yet, so AlloPlace's docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
 
-`packages/shared/src/brandLinks.ts` holds the variable names, the checks, and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
+`packages/shared/src/brandLinks.ts` holds the checks and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
 
 ## Color the public pages
 
-Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it, and `BRAND_ACCENT_COLOR` still overrides it for one more release. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, gets black text. Without either, the pages use the website widget's default teal, `#0f766e`.
+Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, gets black text. Without it, the pages use the website widget's default teal, `#0f766e`.
 
 ## How it works
 
 - `brands/`: the brand folders and the domain index. `packages/shared/src/brands/schema.ts` checks and compiles them; `scripts/write-brands.ts` writes `packages/shared/src/brands/generated.ts`; `packages/shared/src/brands/resolve.ts` picks the brand (`resolveBrand`, `currentBrand`).
-- `packages/shared/src/branding.ts`: the variable names, the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
+- `packages/shared/src/branding.ts`: the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
-- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file matches, it never reads the database. If the database can't be read, pages fall back to the environment and the default brand, and the error is reported at most once a minute.
+- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file matches, it never reads the database. If the database can't be read, pages fall back to the default brand, and the error is reported at most once a minute.
 - Routes:
   - `GET /api/branding` returns `{ appName, logoUrl }` and is never cached.
   - `GET /api/branding/logo` serves the saved logo. Its URL carries the logo's SHA-256 (`?v=`), so browsers can keep it for good.

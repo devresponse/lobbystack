@@ -11,6 +11,10 @@ export type RealtimeListener = {
 
 type Channel = { businessId: string; listeners: Set<RealtimeListener>; subscribed: Promise<unknown> };
 
+// How often the hub checks that Redis still answers, and how long an answer may take.
+const PING_INTERVAL_MS = 15_000;
+const PING_TIMEOUT_MS = 5_000;
+
 /**
  * One Redis subscriber shared by every website chat stream in this process, so
  * an open chat costs a listener instead of a Redis connection. Visitors can open
@@ -20,10 +24,11 @@ class RealtimeHub {
   private readonly subscriber: Redis;
   private readonly connected: Promise<void>;
   private readonly channels = new Map<string, Channel>();
+  private readonly heartbeat: ReturnType<typeof setInterval>;
   private closed = false;
 
   constructor(redisUrl: string, private readonly prefix: string, private readonly onClose: (hub: RealtimeHub) => void) {
-    this.subscriber = new Redis(redisUrl, { protocol: 2, maxRetriesPerRequest: 1, lazyConnect: true, connectionName: "lobbystack:widget-sse" });
+    this.subscriber = new Redis(redisUrl, { protocol: 2, maxRetriesPerRequest: 1, commandTimeout: PING_TIMEOUT_MS, lazyConnect: true, connectionName: "lobbystack:widget-sse" });
     this.subscriber.on("message", (name: string, rawMessage: string) => this.dispatch(name, rawMessage));
     // A drop ends this hub: its listeners reset and the next one connects afresh.
     this.subscriber.once("close", () => this.close());
@@ -31,6 +36,12 @@ class RealtimeHub {
     this.subscriber.on("error", () => undefined);
     this.connected = this.subscriber.connect();
     this.connected.catch(() => this.close());
+    // A connection that died without closing never says so, and its chats would
+    // hear nothing more. A ping it leaves unanswered ends this hub the same way.
+    this.heartbeat = setInterval(() => {
+      void this.connected.then(() => this.subscriber.ping()).catch(() => this.close());
+    }, PING_INTERVAL_MS);
+    this.heartbeat.unref?.();
   }
 
   async listen(businessId: string, listener: RealtimeListener): Promise<() => void> {
@@ -74,6 +85,7 @@ class RealtimeHub {
   private close(): void {
     if (this.closed) return;
     this.closed = true;
+    clearInterval(this.heartbeat);
     this.onClose(this);
     this.subscriber.disconnect(false);
     const listeners = [...this.channels.values()].flatMap((channel) => [...channel.listeners]);

@@ -263,6 +263,65 @@ describe("widget chat live updates", () => {
     await vi.waitFor(() => expect(streamRequests).toHaveBeenCalledTimes(2));
     client.clear();
   });
+
+  it("opens a new stream when the open one goes silent, and keeps one the server writes to", async () => {
+    const encoder = new TextEncoder();
+    const streams: Array<(text: string) => void> = [];
+    const { client } = openChat(async (url) => {
+      if (url.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [visitorMessage, teamReply] });
+      if (url.includes("/api/widget/stream")) {
+        const body = new ReadableStream<Uint8Array>({ start(controller) { streams.push((text) => controller.enqueue(encoder.encode(text))); } });
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      }
+      return Response.json(config);
+    });
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    // The server writes every 15 seconds, so the stream stays.
+    for (let beat = 0; beat < 6; beat += 1) {
+      await act(async () => { streams[0]!(": keepalive\n\n"); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    }
+    expect(streams).toHaveLength(1);
+    // Then it goes silent, as when a proxy lost the server, and the widget opens a new one.
+    await act(async () => { await vi.advanceTimersByTimeAsync(46_000); });
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(streams).toHaveLength(2));
+    client.clear();
+  });
+
+  it("reloads the chat after the visitor's message when that message cut a reload short", async () => {
+    const joined = { id: "m4", role: "assistant", content: "Hi, this is Yuri. How can I help?", fromTeam: true, teamMemberName: "Yuri" };
+    const cutShort = held();
+    const encoder = new TextEncoder();
+    let push: (text: string) => void = () => {};
+    const histories = [
+      async () => Response.json({ automationState: "ai_active", messages: [visitorMessage, teamReply] }),
+      async () => await cutShort.response,
+    ];
+    const history = vi.fn(async () => await (histories.shift() ?? (async () => Response.json({ automationState: "human_handoff", teamMemberName: "Yuri", messages: [visitorMessage, teamReply, { id: "m3", role: "user", content: "Is anyone there?" }, joined] })))());
+    const { client, streamRequests } = openChat(async (url) => {
+      if (url.includes("/api/widget/history")) return await history();
+      if (url.includes("/api/widget/chat")) return streamedReply("Let me check.");
+      if (url.includes("/api/widget/stream")) return new Response(new ReadableStream<Uint8Array>({ start(controller) { push = (text) => controller.enqueue(encoder.encode(text)); } }), { headers: { "content-type": "text/event-stream" } });
+      return Response.json(config);
+    });
+    expect(await screen.findByText(teamReply.content)).toBeTruthy();
+    await vi.waitFor(() => expect(streamRequests).toHaveBeenCalledTimes(1));
+
+    // A team member writes, and the widget starts reloading the chat just as the visitor sends a message.
+    await act(async () => { push("event: message\ndata: {}\n\n"); });
+    await vi.waitFor(() => expect(history).toHaveBeenCalledTimes(2));
+    await send("Is anyone there?");
+
+    // The reload runs again once the reply is in, so the team member's message shows.
+    expect(await screen.findByText(joined.content)).toBeTruthy();
+    expect(history).toHaveBeenCalledTimes(3);
+    // The reload the message cut short changes nothing when its answer comes late.
+    await act(async () => { cutShort.send(Response.json({ automationState: "ai_active", messages: [visitorMessage] })); });
+    expect(screen.getByText(joined.content)).toBeTruthy();
+    client.clear();
+  });
 });
 
 describe("a website chat after a day without messages", () => {

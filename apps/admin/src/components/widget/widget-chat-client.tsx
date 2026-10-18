@@ -119,6 +119,10 @@ function localVisitorId(widgetKey: string): string {
 /** How a live update stream ended: on its own, on an error worth retrying, for good, or because the visitor has no open chat. */
 type WidgetStreamOutcome = "ended" | "failed" | "stopped" | "no_chat";
 
+// The server writes to the stream every 15 seconds. One silent for longer than
+// this died without the browser noticing, as behind a proxy that lost the server.
+const SILENT_STREAM_MS = 45_000;
+
 /** Reads the chat's live updates until the stream ends. Only the event names matter: events carry no text. */
 async function readWidgetStream(input: { token: string; parentOrigin: string; signal: AbortSignal; onEvent: (name: string) => void }): Promise<WidgetStreamOutcome> {
   const response = await fetch(new URL("/api/widget/stream", window.location.origin), {
@@ -135,7 +139,17 @@ async function readWidgetStream(input: { token: string; parentOrigin: string; si
   const decoder = new TextDecoder();
   let buffer = "";
   for (;;) {
-    const { value, done } = await reader.read();
+    let silence: number | undefined;
+    const read = await Promise.race([
+      reader.read(),
+      new Promise<null>((resolve) => { silence = window.setTimeout(() => resolve(null), SILENT_STREAM_MS); }),
+    ]).finally(() => window.clearTimeout(silence));
+    // A silent stream ends like one that ran its course: the next one reloads the history.
+    if (!read) {
+      void reader.cancel().catch(() => undefined);
+      return "ended";
+    }
+    const { value, done } = read;
     if (done) return "ended";
     buffer += decoder.decode(value, { stream: true });
     for (let end = buffer.indexOf("\n\n"); end >= 0; end = buffer.indexOf("\n\n")) {
@@ -362,12 +376,19 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     refreshRef.current?.abort();
     const controller = new AbortController();
     refreshRef.current = controller;
-    void loadHistory(controller.signal);
+    void loadHistory(controller.signal).finally(() => {
+      if (refreshRef.current === controller) refreshRef.current = null;
+    });
   }, [loadHistory]);
   useEffect(() => {
     sendingRef.current = sending;
     if (sending) {
-      refreshRef.current?.abort();
+      // A reload the visitor's message cut short runs again once the reply is in.
+      if (refreshRef.current) {
+        refreshRef.current.abort();
+        refreshRef.current = null;
+        refreshPendingRef.current = true;
+      }
     } else if (refreshPendingRef.current) {
       refreshPendingRef.current = false;
       refreshHistory();

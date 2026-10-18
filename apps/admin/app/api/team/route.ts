@@ -1,9 +1,11 @@
 import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { businessInvitations } from "@lobbystack/db";
+import { businessInvitations, users } from "@lobbystack/db";
 import { inviteMember, removeMember, revokeInvitation, updateMemberRole } from "@lobbystack/domain";
+import { normalizeInterfaceLocale } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
+import { getAuthDatabase } from "@/lib/auth";
 import { createDomainContext } from "@/lib/domain-context";
 import { enforceFixedWindow, fixedWindowLimit } from "@/lib/fixed-window-limit";
 
@@ -64,7 +66,10 @@ export async function POST(request: Request) {
     // Each invite sends an email, so cap how many one account can send.
     const limit = await enforceFixedWindow([fixedWindowLimit("team-invite", "user-hour", session.user.id, 20, 60 * 60, "rate_limit_user_hour")]);
     if (!limit.allowed) return jsonError(limit.status === 429 ? "Too many invitations. Try again later." : "Invitation abuse protection is unavailable.", limit.status);
-    return NextResponse.json(await inviteMember(createDomainContext(), { userId: session.user.id, businessId, email: input.email, role: input.role as InviteRole }), { status: 201 });
+    // The email goes out in the inviter's dashboard language, which only the auth role can read.
+    const [inviter] = await getAuthDatabase().db.select({ locale: users.preferredLocale }).from(users).where(eq(users.id, session.user.id)).limit(1);
+    const locale = normalizeInterfaceLocale(inviter?.locale) ?? undefined;
+    return NextResponse.json(await inviteMember(createDomainContext(), { userId: session.user.id, businessId, email: input.email, role: input.role as InviteRole, locale }), { status: 201 });
   } catch (error) {
     return asApiResponse(error);
   }

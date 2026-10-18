@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
 import { generateApiKey } from "./publicApi/apiKeys";
 import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, removeMember } from "./tenancy";
@@ -160,6 +160,20 @@ describe.skipIf(!client)("team membership", () => {
       await tx.execute(sql`reset role`);
       const keys = await tx.select({ revokedAt: apiKeys.revokedAt, revokedBy: apiKeys.revokedByUserId }).from(apiKeys).where(eq(apiKeys.businessId, businessId));
       expect(keys).toEqual([{ revokedAt: expect.any(Date), revokedBy: admin!.id }]);
+    });
+  });
+
+  it("queues an invitation email that names the business and who sent it, in the inviter's language", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, people: [owner, invitee] } = await seedTeam(tx, ["Ana Owner", "Ben"]);
+      const { invitationId } = await inviteMember(context, { userId: owner!.id, businessId, email: invitee!.email, role: "viewer", locale: "fr" });
+      await tx.execute(sql`reset role`);
+      const [queued] = await tx.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "email.send"), eq(outboxMessages.aggregateId, invitationId)));
+      expect(queued?.payload).toMatchObject({
+        template: "invitation",
+        email: invitee!.email,
+        variables: { businessName: "Team Dental", inviterName: "Ana Owner", inviterEmail: owner!.email, role: "viewer", transfersOwnership: "false", locale: "fr", url: expect.stringContaining("/accept-invite?token=") },
+      });
     });
   });
 

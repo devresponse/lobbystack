@@ -45,6 +45,7 @@ async function main(): Promise<void> {
     const claimed = await claimOperatorNotificationDelivery({ db: worker.db }, { businessId, deliveryId: deliveryIds[0]! });
     const target = await loadOperatorNotificationDelivery({ db: worker.db }, { businessId, deliveryId: deliveryIds[0]! });
     assert(claimed && target?.channel === "email" && target.destination.endsWith("@example.test"), "Operator delivery could not be claimed and resolved.");
+    assert(target.businessName === `notifications-${businessId}`, "An alert email didn't load the name of its business.");
     await markOperatorNotificationSent({ db: worker.db }, { businessId, deliveryId: deliveryIds[0]!, providerMessageId: "certification-message" });
     const persisted = await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async (tx) => ({ delivery: (await tx.select().from(operatorNotificationDeliveries).where(eq(operatorNotificationDeliveries.id, deliveryIds[0]!)))[0], outbox: await tx.select().from(outboxMessages).where(eq(outboxMessages.aggregateId, deliveryIds[0]!)) }));
     assert(persisted.delivery?.status === "sent" && persisted.outbox.length === 1, "Operator delivery completion or outbox intent was not durable.");
@@ -85,7 +86,9 @@ async function main(): Promise<void> {
     const duplicateSummary = await queueDailyOperatorSummaries({ db: worker.db }, { businessId, now: at(9, 45) });
     assert(duplicateSummary.queued === 0, "Daily operator summary was not idempotent.");
     const digest = await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async (tx) => (await tx.select().from(operatorNotificationDeliveries).where(and(eq(operatorNotificationDeliveries.businessId, businessId), eq(operatorNotificationDeliveries.eventKind, "dailyDigest"))))[0]);
-    assert(digest?.body.includes("operational summary") && !digest.body.includes("Paused SMS certification") && !digest.body.includes("Certification message"), "Daily summary contained customer content.");
+    assert(digest?.body.includes("alert") && !digest.body.includes("Paused SMS certification") && !digest.body.includes("Certification message"), "Daily summary contained customer content.");
+    // The email lists each kind of alert on a line of its own.
+    assert(digest && (digest.channel !== "email" || /^On .+ had \d+ alerts?:\n\n/.test(digest.body)), "The daily summary email isn't laid out as a list.");
     console.log(JSON.stringify({ defaultsResolved: true, preferencesPersisted: true, crossTenantDenied: true, operatorDeliveryDurable: true, duplicateSafe: true, productionSourcesWired: true, sourceEventKeysContentSafe: true, dailySummaryQueued: true, dailySummaryIdempotent: true, dailySummaryContentSafe: true, staleSmsLeaseRecovered: true, callbackFirstStatusMonotonic: true }));
   } finally {
     for (const id of [businessId, foreignBusinessId]) await withBusinessTransaction(worker.db, { businessId: id, actorType: "worker" }, async (tx) => await tx.delete(businesses).where(eq(businesses.id, id))).catch(() => undefined);

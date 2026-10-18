@@ -16,7 +16,7 @@ import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type Webh
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
-import type { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import { invitationSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import type OpenAI from "openai";
@@ -470,7 +470,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           const sent = await dependencies.email.sendTemplate({
             template,
             to: String(job.payload.to ?? job.payload.email ?? ""),
-            subject: String(job.payload.subject ?? (template === "invitation" ? `You're invited to join ${appName}` : `${appName} notification`)),
+            subject: String(job.payload.subject ?? (template === "invitation" ? invitationSubject(variables, appName) : `${appName} notification`)),
             variables,
             appName,
             idempotencyKey: job.idempotencyKey,
@@ -758,7 +758,9 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
           } else {
             if (!dependencies.email) throw new Error("Operator email delivery is not configured.");
-            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables: { message: delivery.body }, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
+            // The email says which business and alert it's about, and links to where to act on it.
+            const variables = { message: delivery.body, eventKind: delivery.eventKind, appUrl: process.env.APP_BASE_URL ?? "http://localhost:3000", ...(delivery.businessName ? { businessName: delivery.businessName } : {}) };
+            providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           }
           await markOperatorNotificationSent(dependencies.domain, { businessId, deliveryId: delivery.id, providerMessageId });
           if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });

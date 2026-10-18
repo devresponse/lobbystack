@@ -440,14 +440,18 @@ function assertDailySummaryTime(value: string | null | undefined): void {
   }
 }
 
-function buildDailySummary(input: { businessName: string; date: string; counts: Record<OperatorNotificationEventKey, number>; total: number }): { subject: string; body: string } {
-  const details = operatorNotificationEventKeys
+/** The day's alert counts: one line for a text, and a list with the day written out for an email. */
+function buildDailySummary(input: { businessName: string; day: DateTime; counts: Record<OperatorNotificationEventKey, number>; total: number }): { subject: string; body: string; emailBody: string } {
+  const lines = operatorNotificationEventKeys
     .filter((key) => input.counts[key] > 0)
-    .map((key) => `${dailySummaryLabels[key]}: ${input.counts[key]}`)
-    .join("; ");
+    .map((key) => `${dailySummaryLabels[key]}: ${input.counts[key]}`);
+  const alerts = `${input.total} alert${input.total === 1 ? "" : "s"}`;
+  // Alerts are written in English, so the day is too.
+  const day = input.day.setLocale("en").toLocaleString(DateTime.DATE_HUGE);
   return {
-    subject: `${input.businessName} daily operator summary`,
-    body: `${input.businessName} operational summary for ${input.date}: ${input.total} alert${input.total === 1 ? "" : "s"}. ${details}`,
+    subject: `Daily summary for ${input.businessName}`,
+    body: `${input.businessName} operational summary for ${input.day.toISODate() ?? "previous day"}: ${alerts}. ${lines.join("; ")}`,
+    emailBody: `On ${day}, ${input.businessName} had ${alerts}:\n\n${lines.join("\n")}`,
   };
 }
 
@@ -525,7 +529,7 @@ export async function queueDailyOperatorSummaries(context: DomainContext, input:
       if (uniqueAlerts.size === 0) continue;
       const counts = Object.fromEntries(operatorNotificationEventKeys.map((key) => [key, 0])) as Record<OperatorNotificationEventKey, number>;
       for (const eventKind of uniqueAlerts.values()) counts[eventKind] += 1;
-      const message = buildDailySummary({ businessName: business.name, date: previousDayStart.toISODate() ?? "previous day", counts, total: uniqueAlerts.size });
+      const message = buildDailySummary({ businessName: business.name, day: previousDayStart, counts, total: uniqueAlerts.size });
       const smsConsent = hasOperatorSmsConsent(preference, preference.phone);
       const channels = [
         preference.emailEnabled ? { channel: "email", destination: preference.email } : null,
@@ -541,7 +545,7 @@ export async function queueDailyOperatorSummaries(context: DomainContext, input:
           destination: channel.destination,
           ...(channel.sender ? { sender: channel.sender } : {}),
           subject: message.subject,
-          body: message.body,
+          body: channel.channel === "email" ? message.emailBody : message.body,
           scheduledFor: now,
           contentExpiresAt: new Date(now.getTime() + 30 * 86_400_000),
         }).onConflictDoNothing().returning({ id: operatorNotificationDeliveries.id });
@@ -601,8 +605,11 @@ export async function loadOperatorNotificationDelivery(context: DomainContext, i
       const recipient = (result.rows as Recipient[]).find((row) => row.userId === delivery.userId);
       const consent = hasOperatorSmsConsent(recipient, recipient?.phone);
       if (!recipient?.smsEnabled || !consent || !recipient.phone || recipient.phone !== delivery.destination || !delivery.sender) return null;
+      return { ...delivery, businessName: null };
     }
-    return delivery;
+    // An email names the business it is about, for people on more than one team.
+    const business = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
+    return { ...delivery, businessName: business?.name ?? null };
   });
 }
 

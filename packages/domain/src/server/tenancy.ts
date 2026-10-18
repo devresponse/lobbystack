@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, normalizeAuthEmail, parseDeploymentMode } from "@lobbystack/shared";
+import { defaultAppointmentChangePolicy, normalizeAuthEmail, parseDeploymentMode, type InterfaceLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
@@ -226,10 +226,14 @@ export function invitationUrl(token: string): string {
   return `${process.env.APP_BASE_URL ?? "http://localhost"}/accept-invite?token=${encodeURIComponent(token)}`;
 }
 
-/** Records an invitation the caller may send and queues its email. The email must already be normalized and valid. */
+/**
+ * Records an invitation the caller may send and queues its email. The email
+ * must already be normalized and valid. It names the business and whoever sent
+ * it, and is written in `locale`, or in English without one.
+ */
 export async function insertInvitationInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; invitedByUserId: string; normalizedEmail: string; role: BusinessRole; transfersOwnership?: boolean },
+  input: { businessId: string; invitedByUserId: string; normalizedEmail: string; role: BusinessRole; transfersOwnership?: boolean; locale?: InterfaceLocale | undefined },
 ): Promise<{ invitationId: string; token: string; expiresAt: Date }> {
   const token = randomBytes(32).toString("base64url");
   const tokenHash = createHash("sha256").update(token).digest("hex");
@@ -246,20 +250,39 @@ export async function insertInvitationInTransaction(
     expiresAt,
     transfersOwnership: input.transfersOwnership ?? false,
   });
+  const business = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
+  const inviter = (await tx.select({ name: users.name, email: users.email }).from(users).where(eq(users.id, input.invitedByUserId)).limit(1))[0];
+  const url = invitationUrl(token);
   await enqueueOutbox(tx, {
     topic: "email.send",
     businessId: input.businessId,
     aggregateType: "business_invitation",
     aggregateId: invitationId,
     dedupeKey: `invitation:${invitationId}:send`,
-    payload: { invitationId, email: input.normalizedEmail, token, template: "invitation", url: invitationUrl(token) },
+    payload: {
+      invitationId,
+      email: input.normalizedEmail,
+      token,
+      template: "invitation",
+      url,
+      variables: {
+        url,
+        role: input.role,
+        transfersOwnership: String(input.transfersOwnership ?? false),
+        ...(input.locale ? { locale: input.locale } : {}),
+        ...(business?.name ? { businessName: business.name } : {}),
+        ...(inviter?.name ? { inviterName: inviter.name } : {}),
+        ...(inviter?.email ? { inviterEmail: inviter.email } : {}),
+      },
+    },
   });
   return { invitationId, token, expiresAt };
 }
 
+/** `locale` is the inviter's dashboard language, which the email is written in. */
 export async function inviteMember(
   context: DomainContext,
-  input: { userId: string; businessId: string; email: string; role: BusinessRole },
+  input: { userId: string; businessId: string; email: string; role: BusinessRole; locale?: InterfaceLocale | undefined },
 ): Promise<{ invitationId: string; token: string }> {
   const normalizedEmail = normalizeAuthEmail(input.email);
   if (!isSingleEmailAddress(normalizedEmail)) {
@@ -271,7 +294,7 @@ export async function inviteMember(
     actorType: "operator",
   }, async (tx) => {
     await requireBusinessAdmin(tx, { userId: input.userId, businessId: input.businessId });
-    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: input.businessId, invitedByUserId: input.userId, normalizedEmail, role: input.role });
+    const { invitationId, token } = await insertInvitationInTransaction(tx, { businessId: input.businessId, invitedByUserId: input.userId, normalizedEmail, role: input.role, locale: input.locale });
     return { invitationId, token };
   });
 }

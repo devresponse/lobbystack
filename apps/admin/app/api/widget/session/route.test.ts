@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ access: vi.fn(), mint: vi.fn(), limit: vi.fn(), ip: vi.fn(), register: vi.fn(), touch: vi.fn() }));
+const mocks = vi.hoisted(() => ({ access: vi.fn(), mint: vi.fn(), limit: vi.fn(), ip: vi.fn(), register: vi.fn(), touch: vi.fn(), report: vi.fn() }));
 vi.mock("@/lib/api-helpers", () => ({ readJson: (request: Request) => request.json() }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
+vi.mock("@/lib/error-reporting", () => ({ reportServerError: mocks.report }));
 vi.mock("@/lib/widget-access", () => ({ resolveWidgetAccess: mocks.access }));
 vi.mock("@/lib/widget-keys", () => ({ createWidgetSessionToken: mocks.mint, requestIpHash: mocks.ip, touchWidgetKeyLastUsed: mocks.touch }));
 vi.mock("@/lib/widget-policy", () => ({ enforceWidgetRateLimits: mocks.limit }));
@@ -50,6 +51,9 @@ describe("widget session admission", () => {
     expect(response.status).toBe(503);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://business.test");
     expect(await response.json()).toMatchObject({ code: "widget_unavailable" });
+    // A refusal is an answer, not a failure to report.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.report).not.toHaveBeenCalled();
   });
   it("consumes the tenant, visitor and trusted IP budget before signing", async () => {
     mocks.limit.mockResolvedValue({ allowed: true });
@@ -66,13 +70,28 @@ describe("widget session admission", () => {
     expect(mocks.register.mock.invocationCallOrder[0]).toBeLessThan(mocks.mint.mock.invocationCallOrder[0]!);
     expect(mocks.touch.mock.invocationCallOrder[0]).toBeLessThan(mocks.mint.mock.invocationCallOrder[0]!);
   });
-  it("signs no session when the visitor can't be saved", async () => {
+  it("signs no session when the visitor can't be saved, and reports why", async () => {
     mocks.limit.mockResolvedValue({ allowed: true });
-    mocks.register.mockRejectedValue(new Error("database unavailable"));
+    const failure = new Error("database unavailable");
+    mocks.register.mockRejectedValue(failure);
     const response = await POST(request());
     expect(response.status).toBe(500);
     expect(response.headers.get("access-control-allow-origin")).toBe("https://business.test");
-    expect(await response.json()).toMatchObject({ code: "widget_session_failed" });
+    const body = await response.json() as { code: string; errorId: string };
+    expect(body).toMatchObject({ code: "widget_session_failed", errorId: expect.any(String) });
+    expect(response.headers.get("x-error-id")).toBe(body.errorId);
     expect(mocks.mint).not.toHaveBeenCalled();
+    // Logged and reported like any route's server error, under the ID the response carries.
+    await vi.waitFor(() => expect(mocks.report).toHaveBeenCalledExactlyOnceWith(failure, { operation: "widget_session", errorId: body.errorId, route: "/api/widget/session" }));
+  });
+  it("still signs the session when the key's last use can't be saved, and reports that", async () => {
+    mocks.limit.mockResolvedValue({ allowed: true });
+    const failure = new Error("lock timeout");
+    mocks.touch.mockRejectedValue(failure);
+    const response = await POST(request());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ token: "signed", expiresAt: "2026-10-01T00:00:00.000Z", visitorId });
+    expect(mocks.register).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(mocks.report).toHaveBeenCalledExactlyOnceWith(failure, { operation: "widget_key_last_used", route: "/api/widget/session" }));
   });
 });

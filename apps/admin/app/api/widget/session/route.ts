@@ -2,14 +2,18 @@ import { NextResponse } from "next/server";
 
 import { registerWidgetVisitor } from "@lobbystack/domain";
 import { widgetSessionRequestSchema, widgetSessionResponseSchema } from "@lobbystack/shared";
+import { runAfterResponse } from "@/lib/after-response";
 import { readJson } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
+import { reportServerError } from "@/lib/error-reporting";
 import { createWidgetSessionToken, requestIpHash, touchWidgetKeyLastUsed } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
 import { resolveWidgetAccess } from "@/lib/widget-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+const ROUTE = "/api/widget/session";
 
 function corsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get("origin");
@@ -45,10 +49,14 @@ export async function POST(request: Request) {
     const { businessId, widgetKeyId } = access.session;
     const origin = access.session.origin!;
     // The visitor and the key's last use are saved once per session, here,
-    // rather than by each request the chat makes with it.
+    // rather than by each request the chat makes with it. Those requests need
+    // the visitor; the last use only shows on the dashboard, so failing to
+    // save it doesn't stop the chat.
     await Promise.all([
       registerWidgetVisitor(createWorkerDomainContext(), { businessId, visitorId, metadata: { userAgent: request.headers.get("user-agent") ?? undefined, pageUrl: origin } }),
-      touchWidgetKeyLastUsed({ businessId, widgetKeyId }),
+      touchWidgetKeyLastUsed({ businessId, widgetKeyId }).catch((error: unknown) => {
+        runAfterResponse(() => reportServerError(error, { operation: "widget_key_last_used", route: ROUTE }));
+      }),
     ]);
     const token = createWidgetSessionToken({ widgetKeyId, businessId, visitorId, origin });
     return NextResponse.json(widgetSessionResponseSchema.parse({ token: token.token, expiresAt: token.expiresAt, visitorId }), { headers: corsHeaders(request) });
@@ -56,6 +64,9 @@ export async function POST(request: Request) {
     if (error instanceof Response) {
       return withCors(error, request);
     }
-    return NextResponse.json({ error: "The widget session could not be created.", code: "widget_session_failed" }, { status: 500, headers: corsHeaders(request) });
+    // The visitor only learns that the chat can't start; the report says why.
+    const errorId = crypto.randomUUID();
+    runAfterResponse(() => reportServerError(error, { operation: "widget_session", errorId, route: ROUTE }));
+    return NextResponse.json({ error: "The widget session could not be created.", code: "widget_session_failed", errorId }, { status: 500, headers: { ...corsHeaders(request), "x-error-id": errorId } });
   }
 }

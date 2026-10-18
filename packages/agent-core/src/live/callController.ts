@@ -127,7 +127,8 @@ export type LiveCallSetup = {
   /**
    * The business takes PINs on the keypad, so key presses reach the transcript
    * as "[pressed a key]", without the key: a PIN typed before the receptionist
-   * asks for it stays out of the transcript too.
+   * asks for it stays out of the transcript too. A phone call's presses are
+   * masked until the setup arrives, since the business may take PINs.
    */
   maskKeypad?: boolean;
 };
@@ -393,7 +394,7 @@ export class LiveCallController {
   private passcode: { check: KeypadPasscodeCheck; digits: string; checking: boolean; timer?: ReturnType<typeof setTimeout> } | undefined;
   private passcodeNotices = 0;
   private latestPasscode: string | undefined;
-  private maskKeypad = false;
+  private maskKeypad: boolean;
   // The session timeline, to tell when the receptionist's audio has played out.
   private timelineOrigin: number | undefined;
   // The receptionist's speech, from output transcript text: where it ends on
@@ -426,6 +427,9 @@ export class LiveCallController {
 
   constructor(private readonly options: LiveCallControllerOptions) {
     this.ready = Promise.resolve(options.setup);
+    // Keys a caller presses while the business is still loading may be a PIN,
+    // so a phone call leaves them out of the transcript until it knows.
+    this.maskKeypad = options.phone;
     // A failed setup ends the call; the worker reports it.
     this.ready.then((setup) => {
       this.callerDone = setup.callerDone;

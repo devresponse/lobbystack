@@ -1268,6 +1268,20 @@ describe("LiveCallController keypad input", () => {
     expect(prompt).toContain("Caller: I want to cancel. [pressed a key] [pressed a key] [pressed a key] [pressed a key]");
     expect(prompt).not.toMatch(/pressed [0-9]/);
   });
+
+  it("leaves the key out of a phone call's transcript until the business has loaded, in case it's a PIN", async () => {
+    fakeTimers();
+    let load: (loaded: LiveCallSetup) => void = () => undefined;
+    const { socket, turns } = setup({ setup: new Promise<LiveCallSetup>((resolve) => { load = resolve; }) });
+    socket.emit("session.input_transcript.delta", { delta: "Hi,", start_ms: 500, end_ms: 1_000 });
+    for (const key of ["4", "8"]) socket.emit("transport.dtmf.received", { type: "transport.dtmf.received", event: key, event_id: `evt_${key}` });
+    // This business doesn't take PINs, so a key pressed once it has loaded shows.
+    load({ agent: { generate: vi.fn<Generate>() } as never, greeting: "Hi." });
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("transport.dtmf.received", { type: "transport.dtmf.received", event: "1", event_id: "evt_1" });
+    socket.emit("session.closed", { reason: "remote_hangup" });
+    expect(turns).toEqual([{ sequence: 1, speaker: "caller", text: "Hi, [pressed a key] [pressed a key] [pressed 1]" }]);
+  });
 });
 
 describe("LiveCallController keypad PIN", () => {

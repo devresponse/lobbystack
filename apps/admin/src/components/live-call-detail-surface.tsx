@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import {
   CheckCircle2,
   Circle,
@@ -30,6 +31,7 @@ import { getChannelLabel, getContactDisplayName, hasDisplayablePhone, normalizeC
 import { formatPhoneNumberDisplay } from "@/lib/phone";
 import { useTelemetry } from "@/components/product-analytics";
 import { formatDateTime } from "@/lib/locale";
+import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
 type Detail = {
   call: {
@@ -105,6 +107,12 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
     enabled: detail.data?.recording.state === "available",
   });
   const completeFollowUp = useMutation({ mutationFn: (inboxItemId: string) => requestJson<{ completed: number }>(`/api/calls/${encodeURIComponent(callId)}?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ action: "complete_follow_up", inboxItemId }) }), onSuccess: async (_, inboxItemId) => { if (business) telemetry.track("web.voice.follow_up_completed", { businessId: business.businessId, callId, inboxItemId }); await Promise.all([queryClient.invalidateQueries({ queryKey: ["call", business?.businessId, callId] }), queryClient.invalidateQueries({ queryKey: ["dashboard"] })]); } });
+
+  useEffect(() => {
+    if (!business?.businessId) return;
+    // The call ends, then gets its summary, caller name and recording.
+    return subscribeRealtimeQuery(queryClient, business.businessId, ["call", business.businessId, callId], ["call.updated", "call.completed", "recording.available", "conversation.updated"]);
+  }, [business?.businessId, callId, queryClient]);
 
   if (businesses.isLoading || detail.isLoading) return <DetailPageSkeleton />;
   if (businesses.isError || detail.isError || !detail.data) {

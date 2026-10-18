@@ -111,7 +111,8 @@ export function LiveCallsSurface() {
 
   useEffect(() => {
     if (!business?.businessId) return;
-    return subscribeRealtimeQuery(queryClient, business?.businessId, ["calls", business?.businessId], ["call.started", "call.updated", "call.completed", "recording.available"]);
+    // A call's summary and the caller's name are saved after it ends, with conversation.updated.
+    return subscribeRealtimeQuery(queryClient, business?.businessId, ["calls", business?.businessId], ["call.started", "call.updated", "call.completed", "recording.available", "conversation.updated"]);
   }, [business?.businessId, queryClient]);
 
   useEffect(() => {

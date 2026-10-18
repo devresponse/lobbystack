@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   hangup: vi.fn(),
   openaiHangup: vi.fn(async () => undefined),
+  sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1" })),
+  recordedGreeting: vi.fn(async (..._args: unknown[]): Promise<{ text: string; play: boolean } | undefined> => undefined),
 }));
 
 vi.mock("@lobbystack/domain", () => ({
@@ -34,7 +36,8 @@ vi.mock("@/lib/live-prototype", () => ({
   endLiveBrowserSession: mocks.hangup,
   getLiveClient: () => ({ live: { create: mocks.create, sessions: { hangup: mocks.openaiHangup } } }),
 }));
-vi.mock("@lobbystack/agent-core/live/session", () => ({ buildBrowserSessionConfig: () => ({ model: "gpt-live-1" }) }));
+vi.mock("@lobbystack/agent-core/live/session", () => ({ buildBrowserSessionConfig: mocks.sessionConfig }));
+vi.mock("@/lib/live-greeting", () => ({ recordedGreetingFor: mocks.recordedGreeting }));
 
 import { POST } from "./route";
 
@@ -56,7 +59,10 @@ beforeEach(() => {
   mocks.recordProspectDemoCallError.mockResolvedValue(undefined);
   mocks.recordProspectDemoCallStarted.mockResolvedValue(undefined);
   mocks.attach.mockResolvedValue(undefined);
+  mocks.recordedGreeting.mockResolvedValue(undefined);
 });
+
+const widget = { businessId: "biz_1", origin: "https://client.example", widgetId: "lobbystack-widget", dashboardTestCall: false };
 
 describe("POST /api/voice/live/session", () => {
   it("records a prospect demo call as intake-only and unbilled", async () => {
@@ -140,6 +146,42 @@ describe("POST /api/voice/live/session", () => {
     mocks.access.mockResolvedValue({ businessId: "biz_1", origin: "https://admin.lobbystack.test", widgetId: "lobbystack-dashboard-test-call", dashboardTestCall: true });
     const response = await start("lobbystack-dashboard-test-call");
     await expect(response.json()).resolves.toMatchObject({ sessionId: "live_1", endToken: "token-for-live_1", sdp: "answer" });
+  });
+
+  // GPT-Live hears the greeting as already said, and the worker plays its recording.
+  it("opens the call with the greeting's recording once the worker has made one", async () => {
+    mocks.access.mockResolvedValue(widget);
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: true });
+    const response = await start("lobbystack-widget");
+    expect(response.status).toBe(201);
+    expect(mocks.recordedGreeting).toHaveBeenCalledWith(snapshot);
+    expect(mocks.sessionConfig).toHaveBeenCalledWith(snapshot, { greetingRecorded: true });
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: true } }));
+  });
+
+  it("opens the call as before when LIVE_RECORDED_GREETING is off or the recording isn't made yet", async () => {
+    mocks.access.mockResolvedValue(widget);
+    await start("lobbystack-widget");
+    expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
+    expect(mocks.attach.mock.lastCall![0]).not.toHaveProperty("recordedGreeting");
+    // The worker records it for the next call.
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: false });
+    await start("lobbystack-widget");
+    expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
+    expect(mocks.attach).toHaveBeenLastCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: false } }));
+  });
+
+  // The Server-Timing header only reaches the caller's browser.
+  it("logs how long each stage of the start took", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.access.mockResolvedValue(widget);
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: true });
+    const response = await start("lobbystack-widget");
+    const lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    const stage = expect.any(Number);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_start", businessId: "biz_1", sessionId: "live_1", callId: "call_1", widgetId: "lobbystack-widget", accessMs: stage, checksMs: stage, greetingMs: stage, openaiMs: stage, recordMs: stage, attachMs: stage, greetingRecording: true }));
+    expect(response.headers.get("server-timing")).toMatch(/^access;dur=[\d.]+, checks;dur=[\d.]+, greeting;dur=[\d.]+, openai;dur=[\d.]+, record;dur=[\d.]+, attach;dur=[\d.]+$/);
+    info.mockRestore();
   });
 
   it("rejects unknown callers", async () => {

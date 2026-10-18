@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   hangup: vi.fn(async (..._args: unknown[]) => undefined),
   lastLiveCallSequence: vi.fn(async (..._args: unknown[]) => 0),
   extendLiveCallReservation: vi.fn(async (..._args: unknown[]) => 300),
+  recordGreeting: vi.fn(async (..._args: unknown[]) => "UklGRg=="),
 }));
 
 vi.mock("@lobbystack/agent-core", () => ({
@@ -33,6 +34,11 @@ vi.mock("@lobbystack/agent-core", () => ({
   agentModelId: () => ({ provider: "openai", model: "gpt-6-luna" }),
   describeAgentUsage: (usage: { inputTokens: number; outputTokens: number }, latencyMs: number) => ({ provider: "openai", model: "gpt-6-luna", latencyMs, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalCostUsd: 0.00021 }),
   WRAP_UP_MAX_MS: 30_000,
+  GREETING_RECORDING_TTL_SECONDS: 604_800,
+  LIVE_VOICE: "marin",
+  greetingRecordingKey: (greeting: string) => `recording:${greeting}`,
+  recordingMs: () => 2_400,
+  recordGreeting: mocks.recordGreeting,
   LiveCallController: class {
     endSession = vi.fn();
     endAfterGoodbye = vi.fn();
@@ -481,6 +487,70 @@ describe("re-attaching after a retried webhook delivery", () => {
     expect(mocks.lastLiveCallSequence).not.toHaveBeenCalled();
     expect(sequence).toBe(1);
     expect(setup).toMatchObject({ greeting: "Hi" });
+  });
+});
+
+describe("greeting recordings on browser calls", () => {
+  // Redis with the recording of "Thanks for calling." when `audio` is given.
+  function recordingStore(audio?: string) {
+    return { get: vi.fn(async (_key: string): Promise<string | null> => audio ?? null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 1), exists: vi.fn(async () => (audio ? 1 : 0)) };
+  }
+
+  async function attach(body: Record<string, unknown>, store: ReturnType<typeof recordingStore>, reply = response()) {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.recordGreeting.mockClear();
+    const handler = createLiveCallHandler({ domain: { db: {} as never }, greetingRecordings: store });
+    await handler.handle(attachRequest({ businessId: "biz_1", callId: "call_recording", channel: "web_voice", ...body }), reply);
+    return { setup: mocks.controllers_.at(-1)!.options.setup as Promise<Record<string, unknown>> };
+  }
+
+  // The admin's words win over a snapshot this worker cached before the greeting changed.
+  it("plays the recording the admin opened the call with", async () => {
+    const store = recordingStore("UklGRg==");
+    const { setup } = await attach({ sessionId: "live_recorded", recordedGreeting: { text: "Thanks for calling.", play: true } }, store);
+    await expect(setup).resolves.toMatchObject({ greeting: "Thanks for calling.", greetingRecording: { audio: "UklGRg==" } });
+    expect(store.get).toHaveBeenCalledWith("recording:Thanks for calling.");
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+  });
+
+  it("records the greeting for the next call when the call opened without a recording", async () => {
+    const store = recordingStore();
+    const setup = await (await attach({ sessionId: "live_unrecorded", recordedGreeting: { text: "Thanks for calling.", play: false } }, store)).setup;
+    expect(setup).toMatchObject({ greeting: "Thanks for calling." });
+    expect(setup).not.toHaveProperty("greetingRecording");
+    await vi.waitFor(() => expect(store.set).toHaveBeenCalledWith("recording:Thanks for calling.", "UklGRg==", "EX", 604_800));
+  });
+
+  // The call opened with the greeting as already said, so the command must go out at once.
+  it("has no audio to play when the recording is gone", async () => {
+    const setup = await (await attach({ sessionId: "live_recording_gone", recordedGreeting: { text: "Thanks for calling.", play: true } }, recordingStore())).setup;
+    expect(setup.greetingRecording).toEqual({});
+  });
+
+  it("answers the attach before the recording has loaded", async () => {
+    const store = recordingStore();
+    store.get.mockReturnValue(new Promise(() => undefined));
+    const reply = response();
+    const { setup } = await attach({ sessionId: "live_recording_slow", recordedGreeting: { text: "Thanks for calling.", play: true } }, store, reply);
+    expect(reply.writeHead).toHaveBeenCalledWith(202, expect.anything());
+    let loaded = false;
+    void setup.then(() => { loaded = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(loaded).toBe(false);
+    // Past a second, the call opens with the greeting command.
+    expect((await setup).greetingRecording).toEqual({});
+  });
+
+  it("plays nothing on a call already under way", async () => {
+    const store = recordingStore("UklGRg==");
+    mocks.lastLiveCallSequence.mockResolvedValueOnce(3);
+    const setup = await (await attach({ sessionId: "live_recording_resume", resume: true, recordedGreeting: { text: "Thanks for calling.", play: true } }, store)).setup;
+    expect(setup).not.toHaveProperty("greeting");
+    expect(setup).not.toHaveProperty("greetingRecording");
+    expect(store.get).not.toHaveBeenCalled();
   });
 });
 
@@ -1054,5 +1124,13 @@ describe("parseAttachRequest", () => {
 
   it("marks a retried delivery's attach as a resume", () => {
     expect(parseAttachRequest(JSON.stringify({ sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "voice", resume: true }))).toMatchObject({ resume: true });
+  });
+
+  it("keeps the greeting a browser call opened with, and whether its recording plays", () => {
+    const call = { sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "web_voice" };
+    expect(parseAttachRequest(JSON.stringify({ ...call, recordedGreeting: { text: " Thanks for calling. ", play: true } }))).toMatchObject({ recordedGreeting: { text: "Thanks for calling.", play: true } });
+    expect(parseAttachRequest(JSON.stringify({ ...call, recordedGreeting: { text: "Thanks for calling.", play: "yes" } }))).toMatchObject({ recordedGreeting: { text: "Thanks for calling.", play: false } });
+    expect(parseAttachRequest(JSON.stringify({ ...call, recordedGreeting: { text: " " } }))).not.toHaveProperty("recordedGreeting");
+    expect(parseAttachRequest(JSON.stringify({ ...call, recordedGreeting: "Thanks for calling." }))).not.toHaveProperty("recordedGreeting");
   });
 });

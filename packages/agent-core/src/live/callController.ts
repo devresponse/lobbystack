@@ -10,6 +10,7 @@ import type { ReceptionistAgent } from "../agent";
 import type { KeypadPasscodeCheck, KeypadPasscodeOutcome } from "../tools";
 import { CALL_ENDING, DIRECT_ANSWER_TOOLS, directToolAnswer, fitToAppend, type DirectAnswerStep } from "./directAnswer";
 import { greetingCommand } from "./greeting";
+import { recordingMs } from "./greetingRecording";
 import { LiveLatencyTracker, type LiveCallLatency } from "./latency";
 
 type Turn = { role: "caller" | "receptionist"; text: string; endMs: number };
@@ -95,12 +96,15 @@ export type GreetingEvent = {
    * "spoken": the receptionist's voice was heard; attempt 0 means the greeting
    * in the session's starting history did it, and attempt N that it followed
    * the Nth greeting command. "sent", "acknowledged" and "failed" track each
-   * command.
+   * command, and the recording of the greeting.
    */
   step: "sent" | "acknowledged" | "spoken" | "failed";
   attempt: number;
-  /** What sent the command: the first fallback, or a retry after an acknowledged command went unspoken. */
-  trigger?: "fallback" | "retry";
+  /**
+   * What the step is about: the recording of the greeting, the first
+   * fallback command, or a retry after an acknowledged command went unspoken.
+   */
+  trigger?: "recording" | "fallback" | "retry";
   /** Milliseconds since the worker attached to the call. */
   sinceAttachMs: number;
   /**
@@ -120,6 +124,14 @@ export type LiveCallSetup = {
    * history; the controller only sends it again as a fallback.
    */
   greeting?: string;
+  /**
+   * Set when a recording of the greeting opens the call, and the session's
+   * starting history has the greeting as already said. The controller plays
+   * `audio` (base64 16-bit PCM at 24 kHz) as soon as the session starts.
+   * Without `audio`, or when OpenAI doesn't play it, the greeting command
+   * goes out at once, since GPT-Live won't say the greeting on its own.
+   */
+  greetingRecording?: { audio?: string };
   /**
    * Whether a caller who spoke after the agent ended the call is only saying
    * goodbye (live/callerDone.ts), so the call still ends. Without it, any
@@ -196,6 +208,11 @@ const GREETING_FALLBACK_MS = 4_000;
 // worker sends it again, up to this many commands in all.
 const GREETING_RETRY_MS = 4_500;
 const GREETING_COMMANDS = 3;
+// OpenAI confirms a recording it plays with session.output_audio.fixture.playing
+// once it has checked the audio. Without that by this long, the greeting
+// command goes out instead.
+const RECORDING_START_MS = 3_000;
+const GREETING_RECORDING = "greeting_recording";
 // Reflected audio is 16-bit PCM at 24 kHz. A chunk this loud is voice;
 // silence on staging calls stayed far below it.
 const VOICE_RMS = 400;
@@ -312,7 +329,9 @@ const PROGRESS: Record<string, string> = {
   searchKnowledge: "searched the business's documents",
 };
 
-type PendingAppend = { kind: "greeting" | "answer" | "update" | "wrap_up"; delegationId?: string };
+type PendingAppend = { kind: "greeting" | "recording" | "answer" | "update" | "wrap_up"; delegationId?: string };
+// OpenAI's sideband reference documents this command; the SDK's types don't have it yet.
+type AudioFixturePlay = { type: "session.output_audio.fixture.play"; audio: string; event_id: string };
 // A hangup waiting for the caller to be done. afterMs is where the request
 // that ended the call was made on the session timeline: the caller speaking
 // after it holds the hangup until a check says whether they're only saying
@@ -377,6 +396,8 @@ export class LiveCallController {
   // When OpenAI acknowledged the wrap-up command, in performance.now() time.
   private wrapUpAckedAt: number | undefined;
   private started = false;
+  // When the worker saw session.started, in performance.now() time.
+  private startedSeenAt: number | undefined;
   // The session has sent this sideband an event, so a dropped connection is no
   // longer retried.
   private sessionEventSeen = false;
@@ -384,6 +405,9 @@ export class LiveCallController {
   private greetingAttempts = 0;
   private greetingFallbackStarted = false;
   private greetingSpoken = false;
+  // The recording of the greeting OpenAI was asked to play: its words, for
+  // the transcript, how long it plays, and whether OpenAI started it.
+  private recording: { text: string; ms: number; playing?: boolean } | undefined;
   private readonly pendingAppends = new Map<string, PendingAppend>();
   // Delegations run one at a time in arrival order. A newer request supersedes
   // an unfinished older one: its result goes to GPT-Live as background facts
@@ -517,6 +541,10 @@ export class LiveCallController {
     socket.on("session.instructions.appended", (event) => this.acknowledge(event.client_event_id));
     socket.on("session.commentary.appended", (event) => this.acknowledge(event.client_event_id));
     socket.on("session.thinking.appended", (event) => this.acknowledge(event.client_event_id));
+    // OpenAI's sideband reference: fixture.playing confirms it took the
+    // recording, and fixture.played that it finished and GPT-Live listens again.
+    untyped.on<{ client_event_id?: string }>("session.output_audio.fixture.playing", (event) => this.recordingPlaying(event.client_event_id));
+    untyped.on<{ client_event_id?: string }>("session.output_audio.fixture.played", (event) => this.recordingPlayed(event.client_event_id));
     socket.on("error", (error) => this.handleError(error));
     // The connection ended before session.closed: final usage is unconfirmed.
     socket.on("close", () => this.finish("sideband_closed"));
@@ -531,8 +559,10 @@ export class LiveCallController {
     socket.on("session.started", () => {
       if (this.started) return;
       this.started = true;
+      this.startedSeenAt = performance.now();
       clearTimeout(this.greetingTimer);
       this.greetingTimer = setTimeout(() => this.sendGreetingFallback(), GREETING_FALLBACK_MS);
+      void this.ready.then((setup) => { if (setup.greetingRecording) this.playGreetingRecording(setup.greeting, setup.greetingRecording.audio); }, () => undefined);
       this.options.onStarted?.();
     });
     // A phone call's session starts before the worker attaches, so an attach
@@ -653,6 +683,13 @@ export class LiveCallController {
       this.reportGreeting("failed", undefined, error.message);
       return;
     }
+    // GPT-Live won't say the greeting on its own, so the command goes out at once.
+    if (pending.kind === "recording") {
+      this.reportGreeting("failed", "recording", error.message);
+      this.recording = undefined;
+      this.sendGreetingFallback();
+      return;
+    }
     // A rejected answer leaves the caller in silence: send a short failure
     // instead, once. A rejected fallback isn't retried again.
     if (pending.kind === "answer" && pending.delegationId && !clientEventId!.endsWith("_fallback")) {
@@ -699,12 +736,57 @@ export class LiveCallController {
     }, () => undefined);
   }
 
+  // Plays the recording of the greeting; the session's starting history has
+  // the greeting as already said. Without a recording, or when OpenAI rejects
+  // it or doesn't start it in time, the greeting command goes out instead.
+  private playGreetingRecording(greeting: string | undefined, audio: string | undefined): void {
+    if (this.greetingSpoken || this.greetingFallbackStarted || this.callerSpoke() || this.finished || this.ending) return;
+    clearTimeout(this.greetingTimer);
+    const text = greeting?.trim();
+    if (!audio || !text) {
+      this.sendGreetingFallback();
+      return;
+    }
+    this.recording = { text, ms: recordingMs(audio) };
+    const play: AudioFixturePlay = { type: "session.output_audio.fixture.play", audio, event_id: GREETING_RECORDING };
+    this.send(play as unknown as Parameters<SidebandWS["send"]>[0], { kind: "recording" });
+    this.reportGreeting("sent", "recording");
+    this.greetingTimer = setTimeout(() => {
+      if (this.pendingAppends.delete(GREETING_RECORDING)) this.sendGreetingFallback();
+    }, RECORDING_START_MS);
+  }
+
+  // OpenAI took the recording, so the caller hears the greeting now. A
+  // recording that starts after the command went out still stops its retries.
+  private recordingPlaying(clientEventId: string | undefined): void {
+    const recording = this.recording;
+    if (clientEventId !== GREETING_RECORDING || !recording || recording.playing) return;
+    recording.playing = true;
+    this.pendingAppends.delete(GREETING_RECORDING);
+    this.reportGreeting("acknowledged", "recording");
+    this.greetingDone("recording");
+    // GPT-Live writes no transcript for a recording, so its words go into the
+    // call's here. Its place on the session timeline is estimated from when
+    // the worker saw the session start.
+    const startMs = Math.round(performance.now() - (this.startedSeenAt ?? this.attachedAt));
+    const endMs = startMs + recording.ms;
+    this.measure(() => this.latency.receptionistTranscript(startMs, endMs));
+    this.appendTranscript("receptionist", recording.text, endMs);
+    this.heardSpeech(endMs);
+  }
+
+  // The recording finished, so the silence timer and a goodbye count from here.
+  private recordingPlayed(clientEventId: string | undefined): void {
+    if (clientEventId !== GREETING_RECORDING || !this.recording?.playing) return;
+    this.heardSpeech(undefined);
+  }
+
   /** The receptionist started speaking, so the greeting worked or isn't needed. */
-  private greetingDone(): void {
+  private greetingDone(trigger?: GreetingEvent["trigger"]): void {
     if (this.greetingSpoken) return;
     this.greetingSpoken = true;
     clearTimeout(this.greetingTimer);
-    this.reportGreeting("spoken");
+    this.reportGreeting("spoken", trigger);
   }
 
   private reportGreeting(step: GreetingEvent["step"], trigger?: GreetingEvent["trigger"], error?: string): void {

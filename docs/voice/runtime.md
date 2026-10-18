@@ -62,7 +62,7 @@ The worker logs each step as `live.greeting` with these fields:
 
 - `step`: `sent`, `acknowledged`, `spoken` or `failed`
 - `attempt`: the number of commands sent so far. A `spoken` step with `attempt` 0 means the starting history worked, and with `attempt` 2 that the second command did.
-- `trigger`: `fallback` for the first command and `retry` for the others
+- `trigger`: `fallback` for the first command and `retry` for the others. `recording` marks the steps of a recorded greeting (see [Open browser calls with a recording](#open-browser-calls-with-a-recording)): `sent` when the worker asked OpenAI to play it, and `acknowledged` and `spoken` when OpenAI started it.
 - `sinceAttachMs`: milliseconds since the worker attached
 - `inputAudioMs`: milliseconds of caller audio OpenAI has reflected to the sideband so far
 
@@ -78,7 +78,25 @@ The two calls whose greeting command was never acknowledged had no audio at all:
 
 To check whether audio reaches GPT-Live while a phone caller is silent, compare `inputAudioMs` on the call's `live.greeting` steps with `sinceAttachMs`, and `inputAudio.coveredMs` on `live.closed` with `durationMs`. Coverage close to the elapsed time means audio flowed through the silence. Coverage that grows only while the caller talks means the trunk or the carrier stops sending audio in silence. Zero on browser calls too means OpenAI isn't reflecting the caller's audio.
 
-OpenAI's [Live conversations guide](https://developers.openai.com/api/docs/guides/live-conversations) recommends a recorded or rendered clip for exact wording and a known end. On phone calls, Twilio sends the audio straight to OpenAI, so LobbyStack has no way to play one. Twilio would have to play the clip before it connects the call to OpenAI, or LobbyStack would have to relay the call's audio itself. The browser controls its own playback, so a browser call could play a clip while it holds back GPT-Live's audio.
+OpenAI's [Live conversations guide](https://developers.openai.com/api/docs/guides/live-conversations) recommends a recorded or rendered clip for exact wording and a known end. Browser calls can open with one, as the next section describes.
+
+### Open browser calls with a recording
+
+With `LIVE_RECORDED_GREETING=true` on the admin, a browser call opens with a recording of the business greeting instead of waiting for GPT-Live to say it. The worker sends the recording with `session.output_audio.fixture.play`, and OpenAI plays it through the session's output. A call goes like this:
+
+1. The admin checks Redis for a recording of the greeting in GPT-Live's voice. The key comes from the greeting's words and the voice, so a changed greeting gets a new recording, and businesses with the same greeting share one.
+2. When there is one, the session's starting history has the greeting as already said, so GPT-Live waits for the caller. The worker loads the recording while the caller's browser connects and plays it as soon as the session starts.
+3. When there isn't one, the call opens with the greeting command, as without the setting. Once the call is under way, the worker renders the greeting with OpenAI's speech model, `gpt-4o-mini-tts`, so the next call plays it. A recording stays in Redis for a week after the last call that played it, and takes about 64 KB of Redis memory per second of speech.
+
+OpenAI mutes the caller's audio while a recording plays and drops what the caller says over it. GPT-Live writes no transcript for a recording, so the worker adds the greeting's words to the call's transcript itself. The speech model uses GPT-Live's voice name (`marin`), but the two models may not sound exactly alike.
+
+If OpenAI rejects the recording or doesn't start it within 3 seconds, or the worker can't load it from Redis within a second, the worker sends the greeting command at once. It logs these lines about recordings:
+
+- `live.greeting_recorded`: a new recording, with its length (`recordingMs`) and how long the speech model took (`renderMs`)
+- `live.greeting_recording_failed`: the speech model failed, or the recording came back silent or longer than the 30 seconds OpenAI plays
+- `live.greeting_recording_unread`: Redis failed to return a recording the admin had found
+
+The Live API plays a recording sent over a phone call's sideband too, but phone calls still open with the greeting command.
 
 ## Follow a phone call
 
@@ -105,13 +123,15 @@ Dashboard test calls, the website widget, prospect demos, and the landing site d
 3. creates the GPT-Live session, records the call, and asks the worker to attach
 4. returns OpenAI's answer so the browser connects its audio
 
+The caller hears nothing until step 4. The admin logs `live.browser_start` with the milliseconds each stage took: `accessMs`, `checksMs` (rate limits, minutes and the snapshot), `greetingMs` (the recording check), `openaiMs`, `recordMs` and `attachMs`. The response's `Server-Timing` header shows the browser the same stages. With `LIVE_RECORDED_GREETING=true`, `greetingRecording` says whether the call opened with a recording.
+
 The browser can only close the session. It can't change instructions or answer delegations. Before it sends its WebRTC offer, the browser waits for ICE candidate gathering to finish, for up to 10 seconds. When the caller hangs up, it sends `session.close` and mutes the microphone. It keeps the connection open until `session.closed` arrives, for up to 15 seconds. Prospect demos don't count against minutes, and their agent can only answer questions and take messages.
 
 ## What the worker does during a call
 
 Once attached, the worker owns the call until OpenAI closes the session. It:
 
-- speaks the business greeting as soon as the session starts
+- speaks the business greeting, or plays its recording, as soon as the session starts
 - saves each caller and receptionist turn to the transcript
 - transfers phone calls with a SIP REFER to the destination number, once GPT-Live has told the caller
 - hangs up after the receptionist's goodbye has played, when the agent ends the call
@@ -231,6 +251,7 @@ The admin and worker read these variables:
 | `WORKER_INTERNAL_URL` | admin | Private URL of the worker's HTTP port, for example `http://worker:3002`. |
 | `TWILIO_SIP_TRUNK_SID` | worker | Adds new phone numbers to the SIP trunk. The worker refuses to provision a number without it. |
 | `WEB_CALL_MAX_DURATION_MS` | admin | Optional cap on browser call length. |
+| `LIVE_RECORDED_GREETING` | admin | Set to `true` to open browser calls with a recording of the greeting. The admin and worker need the same `REDIS_URL` and `REDIS_PREFIX`. See [Open browser calls with a recording](#open-browser-calls-with-a-recording). |
 | `RAILWAY_DEPLOYMENT_DRAINING_SECONDS` | worker | Railway's time between SIGTERM and SIGKILL. Set it to `1860` so calls can finish during a deploy. See [Deploy the worker during calls](#deploy-the-worker-during-calls). |
 | `LIVE_DRAIN_TIMEOUT_MS` | worker | Optional. How long a shutdown lets calls finish on their own before it ends them with a goodbye. Overrides the timeout derived from `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`. |
 | `WEB_CALL_PUBLIC_BUSINESS_SLUG`, `WEB_CALL_ALLOWED_ORIGINS` | admin | The business the landing demo calls, and the sites allowed to start it. |

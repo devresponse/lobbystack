@@ -17,6 +17,14 @@ describe("GPT-Live session config", () => {
     expect(buildPhoneSessionConfig({ ...demoSnapshot, greeting: " " })).not.toHaveProperty("input");
   });
 
+  // A recording of the greeting opens the call, so GPT-Live mustn't say it again.
+  it("puts the greeting in the history as already said when a recording plays it", () => {
+    expect(buildBrowserSessionConfig(demoSnapshot, { greetingRecorded: true }).input).toEqual([
+      { role: "assistant", content: [{ type: "output_text", text: demoSnapshot.greeting }] },
+    ]);
+    expect(buildBrowserSessionConfig({ ...demoSnapshot, greeting: " " }, { greetingRecorded: true })).not.toHaveProperty("input");
+  });
+
   // Only a phone call can be transferred, so a browser call gives the number to call instead.
   it("tells GPT-Live whether it's on a phone call or a browser call", () => {
     const browser = buildBrowserSessionConfig(demoSnapshot).instructions;

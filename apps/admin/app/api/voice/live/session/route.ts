@@ -7,6 +7,7 @@ import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemet
 import { asApiResponse, readJson } from "@/lib/api-helpers";
 import { loadValidBusinessSnapshot } from "@/lib/business-snapshot";
 import { createWorkerDomainContext } from "@/lib/domain-context";
+import { recordedGreetingFor } from "@/lib/live-greeting";
 import { attachWorkerToLiveSession, endLiveBrowserSession, getLiveClient, requireLivePrototype } from "@/lib/live-prototype";
 import { LIVE_WEB_CALL_WIDGET_IDS, liveSessionEndToken, publicCallCorsHeaders, resolveLiveWebCallAccess, type LiveWebCallRequest } from "@/lib/live-web-call";
 import { requestIpHash } from "@/lib/widget-keys";
@@ -37,15 +38,17 @@ function parse(body: unknown): LiveWebCallRequest | undefined {
  * browser's network panel shows where the wait before the greeting goes.
  */
 function createServerTiming() {
-  const entries: string[] = [];
+  const entries: Array<[string, number]> = [];
   let last = performance.now();
   return {
     mark(name: string) {
       const now = performance.now();
-      entries.push(`${name};dur=${(now - last).toFixed(1)}`);
+      entries.push([name, now - last]);
       last = now;
     },
-    header: () => entries.join(", "),
+    header: () => entries.map(([name, ms]) => `${name};dur=${ms.toFixed(1)}`).join(", "),
+    /** The same stages for the log line, in whole milliseconds. */
+    stages: () => Object.fromEntries(entries.map(([name, ms]) => [`${name}Ms`, Math.round(ms)])),
   };
 }
 
@@ -106,9 +109,11 @@ async function startBrowserCall(request: Request) {
     if (access.widgetId === "lobbystack-widget" && !snapshot.contactChannels?.phoneNumber) return denied(403, "voice_unavailable", cors);
     // Telemetry only; the call doesn't wait for it.
     void Promise.resolve(recordVoiceSnapshotLoaded(domain, { businessId: access.businessId, channel: "web_voice", provider: "openai_live" })).catch(() => undefined);
+    const recordedGreeting = await recordedGreetingFor(snapshot);
+    timing.mark("greeting");
 
     const client = getLiveClient();
-    const live = await client.live.create({ session: buildBrowserSessionConfig(snapshot), transport: { type: "webrtc", sdp: body.sdp } });
+    const live = await client.live.create({ session: buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }), transport: { type: "webrtc", sdp: body.sdp } });
     timing.mark("openai");
     const sessionId = live.session.id;
     addToCallContext({ sessionId });
@@ -138,9 +143,12 @@ async function startBrowserCall(request: Request) {
           channel: "web_voice",
           ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}),
           ...(access.prospectDemoId ? { intakeOnly: true } : {}),
+          ...(recordedGreeting ? { recordedGreeting } : {}),
         }),
       ]);
       timing.mark("attach");
+      // Where the wait before the call connects went, for the logs.
+      logEvent("info", "live.browser_start", { widgetId: access.widgetId, ...timing.stages(), ...(recordedGreeting ? { greetingRecording: recordedGreeting.play } : {}) });
       return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
     } catch (error) {
       // The session exists at OpenAI; end it so nothing talks or bills without us.

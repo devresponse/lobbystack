@@ -4,12 +4,12 @@
 // that runs on calls. Agent tools that need the database fail, as they would
 // with the database down. See docs/voice/testing.md.
 //
-// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json>] [--browser]
+// OPENAI_API_KEY=... pnpm voice:eval [--scenario <name>]... [--runs <n>] [--concurrency <n>] [--snapshot <file.json>] [--browser [--recorded-greeting]]
 
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
-import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
+import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
 import { demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
 import OpenAI from "openai";
 import type { SidebandWS } from "openai/resources/live/sideband/ws";
@@ -37,12 +37,17 @@ const { values } = parseArgs({
     snapshot: { type: "string" },
     // A browser call, as from the website widget: its own instructions, and full-band audio.
     browser: { type: "boolean", default: false },
+    // A browser call that opens with a recording of the greeting, as with LIVE_RECORDED_GREETING=true.
+    "recorded-greeting": { type: "boolean", default: false },
   },
 });
 if (!process.env.OPENAI_API_KEY) throw new Error("Set OPENAI_API_KEY.");
+if (values["recorded-greeting"] && !values.browser) throw new Error("--recorded-greeting needs --browser: only browser calls open with a recording.");
 const scenarios = findScenarios(values.scenario);
 const snapshot: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Rendered once, as the worker does for the calls after the first.
+const greetingRecording = values["recorded-greeting"] ? await recordGreeting(client, snapshot.greeting, LIVE_VOICE) : undefined;
 const model = createAgentModel(liveDelegationEnvironment());
 if (!model) throw new Error("No delegation model: set OPENAI_API_KEY or the AI_CHAT_* variables.");
 
@@ -84,14 +89,14 @@ async function speak(text: string): Promise<Buffer> {
 // The call's session, with WebSocket audio instead of SIP or WebRTC.
 function sessionConfig() {
   if (values.browser) {
-    const { store: _store, client: _client, ...session } = buildBrowserSessionConfig(snapshot);
+    const { store: _store, client: _client, ...session } = buildBrowserSessionConfig(snapshot, { greetingRecorded: greetingRecording !== undefined });
     return session;
   }
   const { type: _type, store: _store, ...session } = buildPhoneSessionConfig(snapshot);
   return session;
 }
 
-type RunResult = { scenario: CallScenario; passed: boolean; greetedAfterMs?: number; greetingCommands: number; ended: boolean; endedAfterMs?: number; handOvers: string[]; checks: boolean[]; goodbyes: number; replies: string[]; forbidden?: string; error?: string };
+type RunResult = { scenario: CallScenario; passed: boolean; greetedAfterMs?: number; greetingCommands: number; recordingPlayed: boolean; afterRecording?: string; ended: boolean; endedAfterMs?: number; handOvers: string[]; checks: boolean[]; goodbyes: number; replies: string[]; forbidden?: string; error?: string };
 
 async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentModel: NonNullable<typeof model>): Promise<RunResult> {
   const ws = new LiveWS(client);
@@ -103,6 +108,9 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   // When the receptionist first spoke, if it did before the caller.
   let greetedAfterMs: number | undefined;
   let greetingCommands = 0;
+  // The recording of the greeting played, and what the receptionist said after it before the caller spoke.
+  let recordingPlayed = false;
+  let afterRecording = "";
   let callerSpoke = false;
   let reply = "";
   let replyEndMs = -1;
@@ -119,6 +127,7 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     lastReplyEndMs = Math.max(lastReplyEndMs, event.end_ms);
     replied = true;
     if (!callerSpoke && greetedAfterMs === undefined && event.delta.trim()) greetedAfterMs = sessionMs;
+    if (!callerSpoke && recordingPlayed) afterRecording += event.delta;
     if (event.start_ms < scenarioStartMs) return;
     if (replyEndMs >= 0 && event.start_ms - replyEndMs > 700) flushReply();
     reply += event.delta;
@@ -143,10 +152,19 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       client,
       sessionId: `eval_${scenario.name}`,
       phone: false,
-      setup: { agent, greeting: snapshot.greeting, callerDone: async (conversation, abortSignal) => { const done = await callerIsDone(agentModel, conversation, abortSignal); checks.push(done); return done; } },
+      setup: { agent, greeting: snapshot.greeting, ...(greetingRecording ? { greetingRecording: { audio: greetingRecording } } : {}), callerDone: async (conversation, abortSignal) => { const done = await callerIsDone(agentModel, conversation, abortSignal); checks.push(done); return done; } },
       connect: () => ws as unknown as SidebandWS,
       onDelegation: (timing) => { if (timing.offsetMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
-      onGreeting: (event) => { if (event.step === "sent") greetingCommands += 1; },
+      onGreeting: (event) => {
+        if (event.step === "sent" && event.trigger !== "recording") greetingCommands += 1;
+        // A recording writes no transcript, so the greeting counts from when OpenAI started it.
+        if (event.step === "spoken" && event.trigger === "recording" && greetingRecording) {
+          recordingPlayed = true;
+          greetedAfterMs ??= sessionMs;
+          replied = true;
+          lastReplyEndMs = Math.max(lastReplyEndMs, sessionMs + recordingMs(greetingRecording));
+        }
+      },
       onClose: resolve,
     });
   });
@@ -201,10 +219,12 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     const goodbyes = replies.filter((line) => GOODBYE.test(line)).length;
     const endedAfterMs = ended === undefined ? undefined : Math.max(0, ended - lastLineAt);
     const forbidden = scenario.mustNotSay ? replies.find((line) => scenario.mustNotSay!.test(line)) : undefined;
-    const passed = (scenario.expect === "ends" ? ended !== undefined : ended === undefined) && forbidden === undefined;
-    return { scenario, passed, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, ended: ended !== undefined, ...(endedAfterMs !== undefined ? { endedAfterMs } : {}), handOvers, checks, goodbyes, replies, ...(forbidden ? { forbidden } : {}) };
+    // After the recording, GPT-Live should wait for the caller instead of greeting again.
+    const spokeAfterRecording = afterRecording.trim();
+    const passed = (scenario.expect === "ends" ? ended !== undefined : ended === undefined) && forbidden === undefined && !spokeAfterRecording;
+    return { scenario, passed, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, recordingPlayed, ...(spokeAfterRecording ? { afterRecording: spokeAfterRecording } : {}), ended: ended !== undefined, ...(endedAfterMs !== undefined ? { endedAfterMs } : {}), handOvers, checks, goodbyes, replies, ...(forbidden ? { forbidden } : {}) };
   } catch (error) {
-    return { scenario, passed: false, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, ended: false, handOvers, checks, goodbyes: 0, replies, error: error instanceof Error ? error.message : String(error) };
+    return { scenario, passed: false, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, recordingPlayed, ended: false, handOvers, checks, goodbyes: 0, replies, error: error instanceof Error ? error.message : String(error) };
   } finally {
     clearInterval(pump);
     setTimeout(() => ws.close(), 1_000);
@@ -221,7 +241,7 @@ await Promise.all(Array.from({ length: Math.min(Number(values.concurrency), jobs
   while (next < jobs.length) {
     const result = await run(jobs[next++]!, audio, model);
     results.push(result);
-    const greeting = `${result.greetedAfterMs === undefined ? "no greeting in 15 s" : `greeted at ${(result.greetedAfterMs / 1000).toFixed(1)} s`}${result.greetingCommands ? ` after ${result.greetingCommands} command${result.greetingCommands > 1 ? "s" : ""}` : ""}`;
+    const greeting = `${result.greetedAfterMs === undefined ? "no greeting in 15 s" : `greeted at ${(result.greetedAfterMs / 1000).toFixed(1)} s`}${result.recordingPlayed ? " by the recording" : ""}${result.greetingCommands ? ` after ${result.greetingCommands} command${result.greetingCommands > 1 ? "s" : ""}` : ""}${result.afterRecording ? `, then said: "${result.afterRecording}"` : ""}`;
     const outcome = `${result.error ? `error: ${result.error}` : result.ended ? `ended ${((result.endedAfterMs ?? 0) / 1000).toFixed(1)} s after the caller` : "still open"}${result.forbidden ? ` | said what it mustn't: "${result.forbidden}"` : ""}`;
     console.log(`${result.passed ? "PASS" : "FAIL"} ${result.scenario.name.padEnd(17)} ${greeting} | ${outcome} | hand-overs: ${result.handOvers.join(", ") || "none"} | checks: ${result.checks.map((done) => (done ? "done" : "continue")).join(", ") || "none"} | goodbyes: ${result.goodbyes} | receptionist: ${result.replies.map((line) => `"${line}"`).join(" / ")}`);
   }

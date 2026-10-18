@@ -58,6 +58,7 @@ El modelo GPT-Live de OpenAI contesta las llamadas desde el navegador y las llam
 | `OPENAI_WEBHOOK_SECRET` | Verifica el webhook de llamadas entrantes de OpenAI en `/api/webhooks/openai/live`. Solo para llamadas telefónicas. |
 | `TWILIO_SIP_TRUNK_SID` | El trunk Elastic SIP de Twilio que envía las llamadas a su proyecto de OpenAI. Los números nuevos se agregan a él, y el worker no aprovisiona un número sin esta variable. |
 | `WEB_CALL_MAX_DURATION_MS` | Límite opcional de la duración de las llamadas desde el navegador. |
+| `LIVE_RECORDED_GREETING` | Configúrela como `true` en el servicio de administración para que las llamadas desde el navegador empiecen con una grabación del saludo del negocio, de modo que quien llama lo oiga en cuanto se conecta la llamada. La primera llamada después de un cambio de saludo empieza como antes, y el worker graba el saludo para la siguiente. El servicio de administración y el worker deben usar el mismo `REDIS_URL`. |
 | `WEB_CALL_PUBLIC_BUSINESS_SLUG` | Negocio que contesta la llamada de demostración pública en su sitio de marketing. |
 | `WEB_CALL_ALLOWED_ORIGINS` | Sitios, separados por comas, autorizados a iniciar esa llamada de demostración pública. Las llamadas del widget del sitio web usan en su lugar los orígenes permitidos de cada clave de widget. |
 

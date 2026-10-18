@@ -15,6 +15,7 @@ import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhon
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
+import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import type { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
@@ -23,7 +24,7 @@ import type OpenAI from "openai";
 import { extractDocumentTextInThread, type OcrRecorder } from "./documentExtraction";
 import { isLivePrototypeEnabled, type LiveRecoveryOutcome } from "./liveCalls";
 import { reconcileBusinessCalendar, syncAppointmentCalendar, type CalendarOperations } from "./calendarJobs";
-import { getMeter, logEvent, reportError, withCallContext } from "@lobbystack/telemetry/node";
+import { getMeter, logEvent, reportError, reportWarning, withCallContext } from "@lobbystack/telemetry/node";
 import { bucketOutboxBacklog, getPostHogDistinctIdForBusinessSystem, redactTelemetryProperties, type TelemetryProperties } from "@lobbystack/telemetry";
 
 const ragMeter = getMeter("lobbystack-rag");
@@ -93,6 +94,21 @@ export type JobResult = { status: "completed" | "skipped"; entityId?: string } |
 // before the lease ends. Run it again once the lease ends instead of dropping it.
 function retryAfterLease(leaseEndsAt: Date | null, entityId: string): JobResult {
   return leaseEndsAt ? { status: "deferred", entityId, retryAt: leaseEndsAt } : { status: "skipped", entityId };
+}
+
+// Twilio fills in a text's or call's price some time after it ends, so a
+// missing price means "look again later", not a failed job. Once the rechecks
+// run out, it's reported as a warning: the only loss is a figure in the cost
+// reports.
+async function handleMissingPrice(dependencies: WorkerDependencies, job: JobEnvelope, execution: JobExecution, input: { topic: "sms.syncPrice" | "call.syncPrice"; entityId: string; missing: Error }): Promise<JobResult> {
+  const businessId = businessIdOrThrow(job);
+  const recheck = Number(job.payload.priceRecheck) || 0;
+  if (recheck < PROVIDER_PRICE_RECHECKS) {
+    await recheckProviderPrice(dependencies.domain, { topic: input.topic, businessId, entityId: input.entityId, payload: job.payload, recheck: recheck + 1 });
+    return { status: "skipped", entityId: `${input.entityId}:recheck:${recheck + 1}` };
+  }
+  await reportWarning(input.missing, { operation: `job.${input.topic}`, jobType: input.topic, ...(execution.queueJobId ? { jobId: execution.queueJobId } : {}), rechecks: recheck });
+  return { status: "skipped", entityId: input.entityId };
 }
 
 function businessIdOrThrow(job: JobEnvelope): string {
@@ -556,7 +572,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const providerStatus = String(job.payload.providerStatus ?? "").trim();
       if (!dependencies.twilio?.getMessagePricing || !providerMessageId || !isTerminalSmsStatus(providerStatus)) return { status: "skipped", entityId: providerMessageId };
       const pricing = await dependencies.twilio.getMessagePricing({ providerMessageId });
-      if (pricing.providerCostUsd === undefined || pricing.providerNumSegments === undefined) throw new Error(`Twilio SMS pricing is incomplete for ${providerMessageId}.`);
+      if (pricing.providerCostUsd === undefined || pricing.providerNumSegments === undefined) return await handleMissingPrice(dependencies, job, execution, { topic: "sms.syncPrice", entityId: providerMessageId, missing: new Error(`Twilio SMS pricing is incomplete for ${providerMessageId}.`) });
       const businessId = businessIdOrThrow(job);
       const notificationId = typeof job.payload.notificationId === "string" ? job.payload.notificationId : undefined;
       const operatorDeliveryId = typeof job.payload.operatorDeliveryId === "string" ? job.payload.operatorDeliveryId : undefined;
@@ -577,9 +593,9 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         const call = await loadLiveCallForPricing(dependencies.domain, { businessId, callId: liveCallId });
         if (!call) return { status: "skipped", entityId: liveCallId };
         const twilioCallId = await dependencies.twilio.findTrunkCall({ trunkSid, near: call.startedAt, ...(call.callerPhone ? { from: call.callerPhone } : {}) });
-        if (!twilioCallId) throw new Error(`No Twilio call found yet for live call ${liveCallId}.`);
+        if (!twilioCallId) return await handleMissingPrice(dependencies, job, execution, { topic: "call.syncPrice", entityId: liveCallId, missing: new Error(`No Twilio call found yet for live call ${liveCallId}.`) });
         const pricing = await dependencies.twilio.getCallPricing({ providerCallId: twilioCallId });
-        if (pricing.providerCostUsd === undefined) throw new Error(`Twilio call pricing is incomplete for ${twilioCallId}.`);
+        if (pricing.providerCostUsd === undefined) return await handleMissingPrice(dependencies, job, execution, { topic: "call.syncPrice", entityId: liveCallId, missing: new Error(`Twilio call pricing is incomplete for ${twilioCallId}.`) });
         const recorded = await recordCallProviderPricing(dependencies.domain, { businessId, providerCallId: twilioCallId, callId: liveCallId, ...pricing });
         return { status: recorded ? "completed" : "skipped", entityId: liveCallId };
       }
@@ -587,7 +603,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const providerCallStatus = String(job.payload.providerCallStatus ?? "").trim();
       if (!dependencies.twilio?.getCallPricing || !providerCallId || !isTerminalCallStatus(providerCallStatus)) return { status: "skipped", entityId: providerCallId };
       const pricing = await dependencies.twilio.getCallPricing({ providerCallId });
-      if (pricing.providerCostUsd === undefined) throw new Error(`Twilio call pricing is incomplete for ${providerCallId}.`);
+      if (pricing.providerCostUsd === undefined) return await handleMissingPrice(dependencies, job, execution, { topic: "call.syncPrice", entityId: providerCallId, missing: new Error(`Twilio call pricing is incomplete for ${providerCallId}.`) });
       const recorded = await recordCallProviderPricing(dependencies.domain, { businessId: businessIdOrThrow(job), providerCallId, ...pricing });
       return { status: recorded ? "completed" : "skipped", entityId: providerCallId };
     }

@@ -4,6 +4,8 @@ The admin app and the worker report unexpected server errors to PostHog Error Tr
 
 The worker reports a job's last failed attempt (`operation = job.<type>`), an outbox message it gives up on (`outbox.dispatch`), and failures during a call: the attach (`live.attach`), a request the agent couldn't answer (`live.delegation`), a tool that threw (`tool.<name>`), minutes that couldn't be added before the call's limit (`live.top_up`), saving the transcript (`live.transcript_save`), finishing the call (`live.finish`), and recovering one (`live.recover`). Both services read the project key from `POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN` or `POSTHOG_API_KEY`, and the host from `POSTHOG_HOST` or `NEXT_PUBLIC_POSTHOG_HOST`. Without a key, errors are only logged.
 
+A text's or call's Twilio price that's still missing after about 17 hours of rechecks reaches Error Tracking as a warning (`$exception_level = warning`, `alertable = false`, `operation = job.sms.syncPrice` or `job.call.syncPrice`), so the notification below skips it. Only that figure is missing from the cost reports.
+
 ## Configure the PostHog notification
 
 Create an Error Tracking notification for alertable errors:

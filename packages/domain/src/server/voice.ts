@@ -81,6 +81,8 @@ export async function startCall(
     to: string;
     transport: string;
     gatewaySessionId?: string;
+    /** Twilio's SID for the phone leg, when the provider's call ID is something else. */
+    twilioCallSid?: string;
     startedAt?: string;
     originUrl?: string;
     userAgent?: string;
@@ -128,6 +130,7 @@ export async function startCall(
       ...(input.billable === false ? { billingExcluded: true } : {}),
       ...(blocked ? { status: "blocked", disposition: "blocked_contact" } : {}),
       gatewaySessionId: input.gatewaySessionId,
+      ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}),
       startedAt: new Date(input.startedAt ?? Date.now()),
     }).returning({ id: calls.id }))[0]?.id;
     if (!callId) {
@@ -527,6 +530,7 @@ export async function getCallDetail(
       endedAt: calls.endedAt,
       providerDurationSeconds: calls.providerDurationSeconds,
       gatewaySessionId: calls.gatewaySessionId,
+      twilioCallSid: calls.twilioCallSid,
       contactId: calls.contactId,
       recordingObjectId: calls.recordingObjectId,
       recordingStatus: storageObjects.status,
@@ -570,6 +574,8 @@ export async function getCallDetail(
         endedAt: row.endedAt,
         providerDurationSeconds: row.providerDurationSeconds,
         gatewaySessionId: row.gatewaySessionId,
+        // A Twilio call's own ID is its SID.
+        twilioCallSid: row.twilioCallSid ?? (row.provider === "twilio" ? row.providerCallId : null),
       },
       contact: row.contactId ? { id: row.contactId, name: row.contactName, phone: row.contactPhone, email: row.contactEmail, blockedAt: row.contactBlockedAt } : null,
       outcome: row.reason === row.disposition ? null : row.reason,

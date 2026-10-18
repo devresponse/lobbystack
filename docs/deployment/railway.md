@@ -32,7 +32,7 @@ Telemetry exporter failure must not affect readiness. Configure retention and sa
 
 When the dashboard shows an error ID, search the admin service's logs for it. The admin logs each server failure as one JSON line whose message starts with `[admin] exception:`, with the request's `route`, its `errorId`, and the underlying `cause`: a database error's SQLSTATE, or a provider's HTTP status and error code.
 
-The worker logs each failed job attempt as one `job.failed` JSON line with the job type, the attempt, and the reason. Buying a phone number needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_SIP_TRUNK_SID` on worker. Without them the worker ends the number claim at once and its `job.failed` line names the missing variable.
+The worker logs each failed job attempt as one `job.failed` JSON line with the job type, the attempt, and the reason, plus the call's `callId` and `sessionId` when the job works on a call. Buying a phone number needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_SIP_TRUNK_SID` on worker. Without them the worker ends the number claim at once and its `job.failed` line names the missing variable.
 
 ## Twilio callback signatures
 

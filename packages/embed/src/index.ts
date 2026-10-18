@@ -244,30 +244,57 @@ export function initWidget(): boolean {
   let sessionMessage: WidgetMessage | null = null;
   let sessionRefreshTimer: number | undefined;
   let sessionState: "idle" | "pending" | "ready" | "error" = "idle";
+  let sessionExpiresAtMs = 0;
+  let renewalFailures = 0;
+
+  /**
+   * Tries a failed renewal again a little later while the current session
+   * still works, so a chat left open through a deploy keeps going. False for
+   * a refusal that won't change, such as a revoked key, or when the session
+   * would expire first.
+   */
+  function retryRenewal(status: number): boolean {
+    const delay = Math.min(60_000, 2_000 * 2 ** renewalFailures);
+    if (!(status === 0 || status === 429 || status >= 500) || Date.now() + delay >= sessionExpiresAtMs) return false;
+    renewalFailures += 1;
+    sessionState = "ready";
+    sessionRefreshTimer = window.setTimeout(() => void refreshSession(visitorId), delay);
+    return true;
+  }
 
   async function refreshSession(nextVisitorId: string): Promise<void> {
     visitorId = nextVisitorId;
+    const renewing = sessionState === "ready" && Date.now() < sessionExpiresAtMs;
     sessionState = "pending";
+    // 0 until the server answers, as when the network is down.
+    let status = 0;
     try {
       const response = await fetch(`${adminOrigin}/api/widget/session`, {
         method: "POST",
         headers: { "content-type": "text/plain" },
         body: JSON.stringify({ widgetKey, visitorId }),
       });
+      status = response.status;
       const payload = await response.json() as { token?: string; expiresAt?: string; code?: string };
       if (!response.ok || !payload.token) {
+        if (renewing && retryRenewal(status)) return;
         sessionState = "error";
         sessionMessage = { type: "session-error", code: payload.code ?? "widget_session_failed" };
         if (frameLoaded) postToFrame(sessionMessage);
         return;
       }
       sessionState = "ready";
+      renewalFailures = 0;
       sessionMessage = { type: "session", token: payload.token, expiresAt: payload.expiresAt, visitorId, parentOrigin: window.location.origin };
       if (frameLoaded) postToFrame(sessionMessage);
       if (sessionRefreshTimer !== undefined) window.clearTimeout(sessionRefreshTimer);
       const expiresAtMs = payload.expiresAt ? Date.parse(payload.expiresAt) : Date.now() + 3_600_000;
-      sessionRefreshTimer = window.setTimeout(() => void refreshSession(visitorId), Math.max(30_000, expiresAtMs - Date.now() - 60_000));
+      sessionExpiresAtMs = expiresAtMs;
+      // Renewing five minutes early leaves time to try again through an outage.
+      sessionRefreshTimer = window.setTimeout(() => void refreshSession(visitorId), Math.max(30_000, expiresAtMs - Date.now() - 5 * 60_000));
     } catch {
+      // An error page, such as a deploy's 502, isn't JSON and lands here with its status.
+      if (renewing && retryRenewal(status)) return;
       sessionState = "error";
       sessionMessage = { type: "session-error", code: "widget_session_failed" };
       if (frameLoaded) postToFrame(sessionMessage);

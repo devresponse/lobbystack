@@ -27,15 +27,13 @@ export type WidgetAccessResult = WidgetAccessSuccess | WidgetAccessFailure;
 
 async function loadWidgetSession(businessId: string, widgetKeyId: string) {
   return await withBusinessTransaction(getWorkerDatabase().db, { businessId, actorType: "worker" }, async (tx) => {
-    const [keyRow, business] = await Promise.all([
-      // The business's profile page comes with the key, in the same query.
-      tx.select({ key: widgetKeys, profilePublished: businessPublicProfiles.published, profileWidgetKeyId: businessPublicProfiles.widgetKeyId })
-        .from(widgetKeys)
-        .leftJoin(businessPublicProfiles, eq(businessPublicProfiles.businessId, widgetKeys.businessId))
-        .where(and(eq(widgetKeys.id, widgetKeyId), eq(widgetKeys.businessId, businessId))).limit(1).then((rows) => rows[0]),
-      tx.select({ name: businesses.name, slug: businesses.slug, defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, businessId)).limit(1).then((rows) => rows[0]),
-    ]);
+    // The business's profile page comes with the key, in the same query.
+    const [keyRow] = await tx.select({ key: widgetKeys, profilePublished: businessPublicProfiles.published, profileWidgetKeyId: businessPublicProfiles.widgetKeyId })
+      .from(widgetKeys)
+      .leftJoin(businessPublicProfiles, eq(businessPublicProfiles.businessId, widgetKeys.businessId))
+      .where(and(eq(widgetKeys.id, widgetKeyId), eq(widgetKeys.businessId, businessId))).limit(1);
     if (!keyRow) return null;
+    const [business] = await tx.select({ name: businesses.name, slug: businesses.slug, defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
     const key = serializeWidgetKeyConfig(keyRow.key as unknown as Parameters<typeof serializeWidgetKeyConfig>[0]);
     return {
       session: {

@@ -157,17 +157,15 @@ export function toPublicBusinessProfile(rows: PublicProfileRows, input: { now: D
 }
 
 async function loadPublicProfileRows(tx: DatabaseTransaction, businessId: string): Promise<PublicProfileRows | null> {
-  const [business, profile, receptionist, hours, closureRows, serviceRows, phone] = await Promise.all([
-    tx.select({ slug: businesses.slug, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale, websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, businessId)).limit(1).then((rows) => rows[0]),
-    tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, businessId)).limit(1).then((rows) => rows[0]),
-    tx.select({ bookingMode: receptionistProfiles.bookingMode, transferMode: receptionistProfiles.transferMode, transferNumber: receptionistProfiles.transferNumber, summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1).then((rows) => rows[0] ?? null),
-    tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes)),
-    tx.select({ startsAt: closures.startsAt, endsAt: closures.endsAt, reason: closures.reason }).from(closures).where(and(eq(closures.businessId, businessId), gt(closures.endsAt, sql`now()`), lt(closures.startsAt, sql`now() + make_interval(days => ${CLOSURE_LOOKAHEAD_DAYS})`))).orderBy(asc(closures.startsAt)).limit(MAX_CLOSURES),
-    tx.select({ id: services.id, name: services.name, localizedNames: services.localizedNames, description: services.description, durationMinutes: services.durationMinutes }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true), isNull(services.deletedAt))).orderBy(asc(services.name), asc(services.id)).limit(MAX_SERVICES),
-    // The receptionist's own number, chosen as the business snapshot chooses it.
-    tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.voiceEnabled, true))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id)).limit(1).then((rows) => rows[0]?.e164 ?? null),
-  ]);
+  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale, websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) return null;
+  const [profile] = await tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, businessId)).limit(1);
+  const receptionist = (await tx.select({ bookingMode: receptionistProfiles.bookingMode, transferMode: receptionistProfiles.transferMode, transferNumber: receptionistProfiles.transferNumber, summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1))[0] ?? null;
+  const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
+  const closureRows = await tx.select({ startsAt: closures.startsAt, endsAt: closures.endsAt, reason: closures.reason }).from(closures).where(and(eq(closures.businessId, businessId), gt(closures.endsAt, sql`now()`), lt(closures.startsAt, sql`now() + make_interval(days => ${CLOSURE_LOOKAHEAD_DAYS})`))).orderBy(asc(closures.startsAt)).limit(MAX_CLOSURES);
+  const serviceRows = await tx.select({ id: services.id, name: services.name, localizedNames: services.localizedNames, description: services.description, durationMinutes: services.durationMinutes }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true), isNull(services.deletedAt))).orderBy(asc(services.name), asc(services.id)).limit(MAX_SERVICES);
+  // The receptionist's own number, chosen as the business snapshot chooses it.
+  const phone = (await tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.voiceEnabled, true))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id)).limit(1))[0]?.e164 ?? null;
   // A page that was never saved previews with the defaults its settings tab offers.
   const profileRow = profile ?? { ...defaultProfileRow(businessId), description: summaryDescription(receptionist), widgetKeyId: (await profileWidgetKeyOptions(tx, businessId))[0]?.id ?? null };
   const widgetKey = profileRow.widgetKeyId
@@ -315,13 +313,11 @@ export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, 
   // The save lock comes before the row's, in the order a save takes them.
   if (input.lock) await lockPublicProfileSaves(tx, input.businessId);
   const profileQuery = tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1);
-  const [business, profile, receptionist, keys] = await Promise.all([
-    tx.select({ slug: businesses.slug, name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).then((rows) => rows[0]),
-    (input.lock ? profileQuery.for("update") : profileQuery).then((rows) => rows[0]),
-    tx.select({ summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1).then((rows) => rows[0]),
-    profileWidgetKeyOptions(tx, input.businessId),
-  ]);
+  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
   if (!business) throw Object.assign(new Error("Business not found."), { status: 404 });
+  const [profile] = await (input.lock ? profileQuery.for("update") : profileQuery);
+  const [receptionist] = await tx.select({ summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
+  const keys = await profileWidgetKeyOptions(tx, input.businessId);
   const row = profile ?? defaultProfileRow(input.businessId);
   return {
     saved: Boolean(profile),

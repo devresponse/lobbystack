@@ -446,8 +446,8 @@ function operatorAlert({ app, heading }: { app: string; heading: string }, varia
   const business = variables.businessName?.trim();
   const kind = variables.eventKind ?? "";
   const alert = ALERTS[kind];
-  const base = variables.appUrl?.replace(/\/+$/, "");
-  const paragraphs = message.split(/\n\s*\n/).map((text) => text.trim()).filter(Boolean);
+  const base = variables.appUrl ? withoutTrailingSlashes(variables.appUrl) : undefined;
+  const paragraphs = paragraphsOf(message);
   const blocks: Block[] = kind === "widgetChat"
     ? [
       { kind: "paragraph", text: "A visitor wrote this in the chat on your website:" },
@@ -465,6 +465,30 @@ function operatorAlert({ app, heading }: { app: string; heading: string }, varia
       : { text: `You're receiving this email because your ${app} account has email alerts on for ${alert.about} at ${business}. To choose which alerts you get, ${goTo}`, link: settings };
   // A heading that already names the business needs no line above it.
   return { locale: "en", eyebrow: business && !heading.includes(business) ? business : undefined, heading, blocks, reason };
+}
+
+// The two helpers below loop instead of using regular expressions, which
+// backtrack on long runs of slashes or blank space in a message.
+
+/** The message's paragraphs: its runs of lines between blank ones. */
+function paragraphsOf(message: string): string[] {
+  const paragraphs: string[] = [];
+  let lines: string[] = [];
+  for (const line of [...message.split("\n"), ""]) {
+    if (line.trim()) {
+      lines.push(line);
+    } else if (lines.length > 0) {
+      paragraphs.push(lines.join("\n").trim());
+      lines = [];
+    }
+  }
+  return paragraphs;
+}
+
+function withoutTrailingSlashes(url: string): string {
+  let end = url.length;
+  while (end > 0 && url[end - 1] === "/") end -= 1;
+  return url.slice(0, end);
 }
 
 /** Feedback from the dashboard, to the deployment's own inbox, as plain text. */

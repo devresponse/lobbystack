@@ -152,6 +152,11 @@ describe("alerts", () => {
     expect(html).toContain("Voice messages: 1<br />Website chat messages: 2");
   });
 
+  it("split a message at blank lines, whatever ends its lines", () => {
+    const { text } = alert({ message: "First line\r\nsame paragraph\r\n \r\n\r\nSecond", eventKind: "voiceMessage", businessName: "Maple Dental", appUrl: `${base}///` });
+    expect(text.split("\n\n").slice(1, 4)).toEqual(["First line\r\nsame paragraph", "Second", `Open the dashboard:\n${base}/`]);
+  });
+
   it("are just the message when queued without the business or kind", () => {
     const { text, html } = alert({ message: "Hi" }, "Test");
     expect(text).toBe("Test\n\nHi");

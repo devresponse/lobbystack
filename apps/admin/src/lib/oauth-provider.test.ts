@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { consentReferenceId, isDisabledOAuthEndpoint, registrationWithApplicationType, withSelectedBusiness } from "./oauth-provider";
+const naming = vi.hoisted(() => ({ deploymentAppName: vi.fn() }));
+vi.mock("@lobbystack/domain", async (importOriginal) => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), deploymentAppName: naming.deploymentAppName }));
+
+import { consentReferenceId, ensureMcpResource, isDisabledOAuthEndpoint, registrationWithApplicationType, withSelectedBusiness } from "./oauth-provider";
 
 describe("OAuth provider endpoint allowlist", () => {
   it.each(["/oauth2/authorize", "/oauth2/consent", "/oauth2/continue", "/oauth2/token", "/oauth2/revoke", "/oauth2/introspect", "/oauth2/register", "/oauth2/public-client"])("serves %s", (path) => {
@@ -53,5 +56,17 @@ describe("business selection for consent", () => {
     });
     expect(seen).toEqual([businessId, businessId]);
     expect(consentReferenceId()).toMatch(/^unselected:/);
+  });
+});
+
+describe("the MCP server's OAuth resource", () => {
+  it("is named after the app name, read with the role that can read what onboarding saved", async () => {
+    const appDb = {};
+    const values = vi.fn(() => ({ onConflictDoUpdate: vi.fn(async () => undefined) }));
+    const authDb = { insert: vi.fn(() => ({ values })) };
+    naming.deploymentAppName.mockImplementation(async (db: unknown) => (db === appDb ? "Saved Name" : "LobbyStack"));
+    await ensureMcpResource(authDb as never, appDb as never);
+    expect(naming.deploymentAppName).toHaveBeenCalledWith(appDb);
+    expect(values).toHaveBeenCalledWith(expect.objectContaining({ name: "Saved Name MCP server" }));
   });
 });

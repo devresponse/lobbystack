@@ -27,7 +27,7 @@ El nombre, el logo, el color y los enlaces externos vienen de una carpeta de mar
 | Variable | Función |
 | --- | --- |
 | `APP_BASE_URL` | Configúrela en el servicio de administración y en el worker, y pásela a la compilación del servicio de administración como argumento de compilación de Docker, para que las páginas de inicio de sesión prerrenderizadas muestren la marca sin consultar antes al servidor. |
-| `BRAND_PRESET` | La carpeta de marca que se usa donde ninguna marca reclama el dominio, como `alloplace` en `localhost` o en una dirección de la plataforma. En un dominio reclamado no tiene efecto. Pásela también a la compilación del servicio de administración. |
+| `BRAND_PRESET` | La carpeta de marca que se usa donde ninguna marca reclama el dominio, como `alloplace` en `localhost` o en una dirección de la plataforma. En un dominio reclamado no tiene efecto. Configúrela en el servicio de administración y en el worker, porque el worker nombra los mensajes de texto y los correos según la marca, y pásela también a la compilación del servicio de administración. |
 | `BRAND_REQUIRED` | `true` impide que el servicio de administración y el worker se inicien cuando ningún archivo de marca coincide. |
 
 Donde ninguna marca reclama el dominio y `BRAND_PRESET` está vacía, la implementación muestra LobbyStack, y su primer propietario elige un nombre y un logo durante la incorporación.

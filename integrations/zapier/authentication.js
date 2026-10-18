@@ -34,10 +34,12 @@ module.exports = {
         `In ${APP_NAME}, go to **Settings > API keys** and create a key for Zapier. It starts with \`lsk_\`. Any key connects; give it the scopes for the steps you plan to use. Triggers need \`webhooks:manage\` plus the read scope for their data, such as \`calls:read\` for new calls. [Learn more](${DOCS_URL}/api/authentication).`,
     },
     {
+      // Required, so every connection stores its address and never depends on
+      // the running integration's ZAPIER_DEFAULT_URL to know where its key goes.
       key: 'baseUrl',
       label: `${APP_NAME} URL`,
       type: 'string',
-      required: false,
+      required: true,
       default: DEFAULT_BASE_URL,
       helpText:
         `Leave as is unless you sign in to ${APP_NAME} at another address. If you host it yourself, enter the address you use to sign in, for example \`https://app.yourcompany.com\`.`,

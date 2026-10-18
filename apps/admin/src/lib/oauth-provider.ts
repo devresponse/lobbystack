@@ -78,12 +78,14 @@ let resourceReady: Promise<void> | undefined;
 /**
  * Upserts the oauth_resources row for /api/mcp (its identifier comes from
  * APP_BASE_URL, so a migration can't write it). Runs once per process;
- * a failure is retried on the next request.
+ * a failure is retried on the next request. The auth role writes the row,
+ * but only the app role can read the app name onboarding saved, so the name
+ * is read with brandingDb.
  */
-export async function ensureMcpResource(db: Database): Promise<void> {
+export async function ensureMcpResource(db: Database, brandingDb: Database = db): Promise<void> {
   resourceReady ??= (async () => {
     const now = new Date();
-    const name = `${await deploymentAppName(db)} MCP server`;
+    const name = `${await deploymentAppName(brandingDb)} MCP server`;
     await db.insert(oauthResources)
       .values({ identifier: mcpResourceUrl(), name, allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, createdAt: now, updatedAt: now })
       .onConflictDoUpdate({ target: oauthResources.identifier, set: { name, allowedScopes: [...MCP_OAUTH_SCOPES], disabled: false, updatedAt: now } });

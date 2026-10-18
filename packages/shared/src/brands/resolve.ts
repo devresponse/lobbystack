@@ -136,16 +136,19 @@ export function currentBrand(): ResolvedBrand {
 
 /**
  * What a deployment should hear about its brand at start: a preset the
- * domain overrides, a preset that names no brand, or an address no brand
- * claims. `error` is set when BRAND_REQUIRED=true and no brand file matched,
- * and the process should refuse to start.
+ * domain overrides, a preset that names no brand, an address no brand
+ * claims, or no address to read a brand from. `error` is set when
+ * BRAND_REQUIRED=true and no brand file matched, and the process should
+ * refuse to start.
  */
 export function brandStartupReport(brand: ResolvedBrand, environment: Record<string, string | undefined> = process.env): { info: string; warnings: string[]; error: string | null } {
   const warnings: string[] = [];
   if (brand.ignoredPreset) warnings.push(`[brand] brand.preset_ignored: BRAND_PRESET=${brand.ignoredPreset} has no effect, because ${brand.domain} belongs to the ${brand.id} brand.`);
   if (brand.unknownPreset) warnings.push(`[brand] brand.preset_unknown: BRAND_PRESET=${brand.unknownPreset} names no folder under brands/, so the ${brand.id} brand stands in.`);
-  if (brand.source === "default" && brand.host && environment.NODE_ENV === "production") {
-    warnings.push(`[brand] brand.unmatched: no brand in brands/index.json claims ${brand.host}, so the default ${brand.id} brand stands in.`);
+  if (brand.source === "default" && environment.NODE_ENV === "production") {
+    warnings.push(brand.host
+      ? `[brand] brand.unmatched: no brand in brands/index.json claims ${brand.host}, so the default ${brand.id} brand stands in.`
+      : `[brand] brand.base_url_missing: APP_BASE_URL is missing or isn't a URL, so the default ${brand.id} brand stands in. Set it to the dashboard's address, such as https://app.example.com.`);
   }
   const required = environment.BRAND_REQUIRED === "true" && !brandFileMatched(brand);
   return {

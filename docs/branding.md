@@ -46,7 +46,7 @@ Earlier releases let `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `
 
 When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
 
-At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`. In production it also logs `brand.unmatched` when no brand claims the address. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked.
+At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`. In production it also logs `brand.unmatched` when no brand claims the address, and `brand.base_url_missing` when `APP_BASE_URL` is missing or isn't a URL and no `BRAND_PRESET` names a brand. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked.
 
 ### Add a brand
 

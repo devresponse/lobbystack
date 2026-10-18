@@ -66,10 +66,10 @@ The script tests the connection, subscribes and unsubscribes all six triggers, l
 
 ## Name and address
 
-The integration calls the product LobbyStack and connects to `https://app.lobbystack.com` unless three variables say otherwise. A deployment that publishes its own integration, such as AlloPlace, sets them in the shell that runs `zapier-platform push` (field labels and help text are read then) and with `zapier-platform env:set` for the running integration (error messages are read then):
+The integration calls the product LobbyStack and connects to `https://app.lobbystack.com` unless three variables say otherwise. A deployment that publishes its own integration, such as AlloPlace, sets them in the shell that runs `zapier-platform push` (field labels, help text and the address field's default are read then) and with `zapier-platform env:set` for the running integration (error messages, and the address of a connection that has none, are read then):
 
 - `ZAPIER_APP_NAME`: the name users see, for example `AlloPlace`.
-- `ZAPIER_DEFAULT_URL`: the dashboard address a new connection starts with.
+- `ZAPIER_DEFAULT_URL`: the dashboard address a new connection starts with. Set it with `env:set` too. Every connection must give an address, but the running integration sends a connection without one, such as one made before the field was required, to this address, and without it that's `https://app.lobbystack.com`, which would receive the connection's API key.
 - `ZAPIER_DOCS_URL`: where the API key help links, without a trailing slash.
 
 Register it under that name too, in step 2 below.

@@ -75,6 +75,11 @@ describe('deployment name', () => {
 });
 
 describe('base URL', () => {
+  it('is a required field that starts with the default address', () => {
+    const field = App.authentication.fields.find((entry) => entry.key === 'baseUrl');
+    expect(field).toMatchObject({ required: true, default: 'https://app.lobbystack.com' });
+  });
+
   it('defaults to LobbyStack Cloud', () => {
     expect(resolveBaseUrl({})).toBe('https://app.lobbystack.com');
     expect(resolveBaseUrl({ baseUrl: '  ' })).toBe('https://app.lobbystack.com');

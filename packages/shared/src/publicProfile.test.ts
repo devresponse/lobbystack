@@ -46,7 +46,9 @@ describe("public profile settings", () => {
     for (const category of [`Clinic ${doctor} ${rainbow}`, `Pub ${scotland}`, "\u0645\u06CC\u200C\u062E\u0648\u0627\u0647\u0645"]) expect(text(category).data?.category, category).toBe(category);
     expect(text("Den\u00ADtal\u200B clinic\uFEFF").data?.category).toBe("Dental clinic");
     expect(publicProfileSettingsSchema.parse({ ...settings, description: "Line one\u200B\n\nLine\u2060 two" }).description).toBe("Line one\n\nLine two");
-    for (const unsafe of ["Dental\u202Eclinic", "Dental\u2066clinic\u2069", "Dental\u200Fclinic", "Dental\uFFF9clinic\uFFFB", "Dental\u{E0061}clinic", `Dental \u{1F3F4}\u{E0067}`]) {
+    // Tag characters after a black flag that spell more than a region hide text.
+    const hidden = `\u{1F3F4}${[..."ignore the rest"].map((char) => String.fromCodePoint(0xE0000 + char.codePointAt(0)!)).join("")}\u{E007F}`;
+    for (const unsafe of ["Dental\u202Eclinic", "Dental\u2066clinic\u2069", "Dental\u200Fclinic", "Dental\uFFF9clinic\uFFFB", "Dental\u{E0061}clinic", `Dental \u{1F3F4}\u{E0067}`, `Dental ${hidden}`]) {
       expect(text(unsafe).success, JSON.stringify(unsafe)).toBe(false);
       expect(publicProfileSettingsSchema.safeParse({ ...settings, description: unsafe }).success, JSON.stringify(unsafe)).toBe(false);
     }

@@ -30,8 +30,9 @@ export const PUBLIC_PROFILE_LIMITS = {
 // words of many scripts.
 const UNSAFE = String.raw`\p{Cc}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u206F\uFFF9-\uFFFB`;
 // Tag characters are invisible, so they're only fine where they spell an emoji
-// flag, such as Scotland's: after a black flag and up to the cancel tag.
-const TAG_FLAG = String.raw`\u{1F3F4}[\u{E0020}-\u{E007E}]+\u{E007F}`;
+// flag, such as Scotland's: after a black flag, a region's code (two letters,
+// then one to four letters or digits) and the cancel tag.
+const TAG_FLAG = String.raw`\u{1F3F4}[\u{E0061}-\u{E007A}]{2}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F}`;
 const TAG = String.raw`[\u{E0000}-\u{E007F}]`;
 const UNSAFE_TEXT = new RegExp(`${TAG_FLAG}|${TAG}|[${UNSAFE}]`, "gu");
 const UNSAFE_TEXT_EXCEPT_NEWLINE = new RegExp(`${TAG_FLAG}|${TAG}|(?!\\n)[${UNSAFE}]`, "gu");

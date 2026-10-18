@@ -243,11 +243,12 @@ export async function lookupCallerAppointments(context: DomainContext, input: { 
  * Verifies the appointment a caller wants to change. Once a cancellation is
  * verified, it says whether the caller gets texts (smsConsentOnFile), so the
  * agent knows whether to ask about a cancellation text. Before that, it
- * reveals nothing about them.
+ * reveals nothing about them. A keypad PIN the caller already typed counts
+ * only on the call that took it, `callId`.
  */
 export async function verifyCallerForChange(
   context: DomainContext,
-  input: { businessId: string; callerPhone: string; action: "cancel" | "reschedule"; appointmentId?: string; appointmentStartsAt?: string; serviceName?: string },
+  input: { businessId: string; callerPhone: string; action: "cancel" | "reschedule"; appointmentId?: string; appointmentStartsAt?: string; serviceName?: string; callId?: string },
 ) {
   const verification = await createAppointmentChangeVerification(context, input);
   if (!verification) return { ok: false as const, verified: false, reason: "The appointment could not be verified." };

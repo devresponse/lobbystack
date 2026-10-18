@@ -172,6 +172,7 @@
     "errors": {
       "email": "Entrez une adresse courriel comme bonjour@exemple.com.",
       "invalid": "Certains renseignements ne peuvent pas être enregistrés. Vérifiez-les et réessayez.",
+      "plainText": "Ce texte contient des caractères cachés qui peuvent modifier sa lecture. Saisissez-le de nouveau ou collez-le en texte brut.",
       "widgetUnavailable": "Ce widget est en pause ou révoqué. Choisissez-en un autre, ou aucun clavardage.",
       "saveFailed": "Le profil public n'a pas pu être enregistré. Réessayez."
     }

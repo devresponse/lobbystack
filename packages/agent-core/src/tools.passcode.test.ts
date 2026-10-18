@@ -11,7 +11,7 @@ vi.mock("@lobbystack/domain", async () => ({
   issueAppointmentChangeOtp: vi.fn(),
 }));
 
-import { verifyCallerChangePasscode } from "@lobbystack/domain";
+import { verifyCallerChangePasscode, verifyCallerForChange } from "@lobbystack/domain";
 import { cancelsDirectly, createReceptionistTools, verifiesWithKeypadPin, type CallControl, type KeypadPasscodeCheck } from "./tools";
 
 type Execute = (input: object, options: object) => Promise<Record<string, unknown>>;
@@ -69,6 +69,13 @@ describe("appointment change tools when the business requires a keypad PIN", () 
       expect(set).toHaveProperty("sendAppointmentChangeOtp");
       expect(set).not.toHaveProperty("requestKeypadPasscode");
     }
+  });
+
+  it("verifies the appointment for this call, so a PIN accepted on another call doesn't count", async () => {
+    const pending = { ok: true, verified: false, requiresOtp: false, requiresPasscode: true, verificationId: "ver_1", appointmentId: "apt_1", status: "passcode_pending" };
+    vi.mocked(verifyCallerForChange).mockResolvedValueOnce(pending as never);
+    await expect(tools({ callControl: keypadCall().callControl }).run("verifyAppointmentForChange", { action: "cancel", serviceName: "Cut" })).resolves.toEqual(pending);
+    expect(verifyCallerForChange).toHaveBeenCalledWith(expect.anything(), { businessId: demoSnapshot.businessId, callerPhone, action: "cancel", serviceName: "Cut", callId: "call_1" });
   });
 
   it("hands the call a check that verifies the PIN, without giving the agent the PIN", async () => {

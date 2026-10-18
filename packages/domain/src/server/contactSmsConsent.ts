@@ -8,7 +8,7 @@ import type { DomainContext } from "./context";
 // texts), "declined" (asked and said no), "opted_out" (texted STOP), or null
 // (never asked). Only "subscribed" gets texts the business starts. A reply in
 // a conversation the contact texted also reaches a contact who was never
-// asked or who declined (see loadSmsDeliveryTarget). STOP always wins: no
+// asked or who declined (see loadSmsReachInTransaction). STOP always wins: no
 // answer given to the agent, the API or MCP changes an opted-out contact.
 
 /** The answer to "Can I text you?" that a booking through the API or MCP passes. */

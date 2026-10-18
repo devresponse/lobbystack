@@ -23,10 +23,30 @@ export const PUBLIC_PROFILE_LIMITS = {
   email: 254,
 } as const;
 
-// Control and format characters, and line or paragraph separators, would let
-// text on a public page hide or rearrange what's around it.
-const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
-const UNSAFE_CHARACTERS_EXCEPT_NEWLINE = /(?!\n)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
+// Characters that would let text on a public page hide or rearrange what's
+// around it: control characters, line and paragraph separators, bidirectional
+// controls, interlinear annotations and the deprecated format characters.
+// Other format characters are fine, such as the joiners inside emoji and the
+// words of many scripts.
+const UNSAFE = String.raw`\p{Cc}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u206F\uFFF9-\uFFFB`;
+// Tag characters are invisible, so they're only fine where they spell an emoji
+// flag, such as Scotland's: after a black flag, a region's code (two letters,
+// then one to four letters or digits) and the cancel tag.
+const TAG_FLAG = String.raw`\u{1F3F4}[\u{E0061}-\u{E007A}]{2}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,4}\u{E007F}`;
+const TAG = String.raw`[\u{E0000}-\u{E007F}]`;
+const UNSAFE_TEXT = new RegExp(`${TAG_FLAG}|${TAG}|[${UNSAFE}]`, "gu");
+const UNSAFE_TEXT_EXCEPT_NEWLINE = new RegExp(`${TAG_FLAG}|${TAG}|(?!\\n)[${UNSAFE}]`, "gu");
+
+const isTagFlag = (match: string) => match.startsWith("\u{1F3F4}");
+
+function isPlainText(value: string, pattern: RegExp): boolean {
+  return [...value.matchAll(pattern)].every(([match]) => isTagFlag(match));
+}
+
+// Invisible characters pasted text often brings along: soft hyphens, zero-width
+// spaces, word joiners, invisible math operators and byte order marks. They're
+// taken out rather than refused.
+const INVISIBLE = /[\u00AD\u200B\u2060-\u2064\uFEFF]/g;
 
 // Each field cleans up its text before checking it, and keeps an empty value
 // as null. They stay plain strings to zod, so the API documents them as text.
@@ -34,20 +54,34 @@ const UNSAFE_CHARACTERS_EXCEPT_NEWLINE = /(?!\n)[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u;
 /** One line of text: whitespace runs become one space; empty becomes null. */
 function singleLine(max: number) {
   return z.string()
-    .overwrite((value) => value.replace(/\s+/g, " ").trim())
+    .overwrite((value) => value.replace(INVISIBLE, "").replace(/\s+/g, " ").trim())
     .max(max)
-    .refine((value) => !UNSAFE_CHARACTERS.test(value), "Use plain text.")
+    .refine((value) => isPlainText(value, UNSAFE_TEXT), "Use plain text.")
     .nullable()
     .transform((value) => value || null);
 }
 
+function tidyDescription(value: string): string {
+  return value.replace(INVISIBLE, "").replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /** Plain text that keeps its paragraphs, with at most one blank line between them. */
 const description = z.string()
-  .overwrite((value) => value.replace(/\r\n?/g, "\n").replace(/[^\S\n]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim())
+  .overwrite(tidyDescription)
   .max(PUBLIC_PROFILE_LIMITS.description)
-  .refine((value) => !UNSAFE_CHARACTERS_EXCEPT_NEWLINE.test(value), "Use plain text.")
+  .refine((value) => isPlainText(value, UNSAFE_TEXT_EXCEPT_NEWLINE), "Use plain text.")
   .nullable()
   .transform((value) => value || null);
+
+/**
+ * Text no one typed into the profile, such as the receptionist's summary, as a
+ * description: what the description field refuses is taken out instead, and it
+ * is cut to the field's length. Empty becomes null.
+ */
+export function publicProfileDescriptionFrom(text: string): string | null {
+  const cleaned = tidyDescription(text.replace(UNSAFE_TEXT_EXCEPT_NEWLINE, (match) => (isTagFlag(match) ? match : ""))).slice(0, PUBLIC_PROFILE_LIMITS.description).trim();
+  return cleaned || null;
+}
 
 const countryCode = z.string()
   .overwrite((value) => value.trim().toUpperCase())

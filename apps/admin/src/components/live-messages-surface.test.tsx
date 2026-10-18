@@ -108,3 +108,125 @@ describe("a website visitor waiting for a person", () => {
     expect(screen.getByText("page.automationHumanHandoff")).toBeTruthy();
   });
 });
+
+describe("a website chat that closed", () => {
+  const chat = (conversationId: string, conversationStatus: string, body: string) => ({ id: `m-${conversationId}`, conversationId, contactName: null, contactPhone: null, visitorName: "Ada Visitor", visitorEmail: null, channel: "web_chat", conversationStatus, automationState: "ai_active", teamRequestedAt: null, body, direction: "inbound", status: "received", createdAt: "2026-09-01T12:00:00Z" });
+
+  it("is marked closed, takes no reply, and opens the visitor's newer chat", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      const params = new URL(url, "http://admin.test").searchParams;
+      // The newer chat isn't on the loaded page of the list, so the thread alone shows it.
+      if (params.get("conversationId") === "old") return Response.json({ messages: [chat("old", "closed", "Do you open on Sundays?")], newerConversationId: "new" });
+      if (params.get("conversationId") === "new") return Response.json({ messages: [chat("new", "open", "Hello again")], newerConversationId: null });
+      return Response.json({ messages: [chat("old", "closed", "Do you open on Sundays?")], hasNext: false });
+    }));
+    render(<QueryClientProvider client={client}><LiveMessagesSurface /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Visitor.*page\.closedBadge/ }));
+    expect(await screen.findByText("page.closedNewerDescription")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.closedComposerPlaceholder") as HTMLInputElement).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "page.takeOver" })).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "page.openNewerChat" }));
+    expect(await screen.findByText("Hello again")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.composerPlaceholderWeb") as HTMLInputElement).disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "page.takeOver" })).toBeTruthy();
+    telemetryRef.current!.expectEvent("web.messages.thread_opened", { businessId: "business", conversationId: "new", channel: "web_chat" });
+  });
+
+  it("says why a reply wasn't sent when the chat closed after it loaded", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    let closed = false;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        closed = true;
+        return Response.json({ error: "This website chat is closed, so the visitor won't see a reply here.", code: "chat_closed" }, { status: 409 });
+      }
+      return Response.json({ messages: [chat("old", closed ? "closed" : "open", "Do you open on Sundays?")], hasNext: false, newerConversationId: null });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { toast } = await import("sonner");
+    const toastError = vi.spyOn(toast, "error");
+    render(<QueryClientProvider client={client}><LiveMessagesSurface /></QueryClientProvider>);
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Visitor/ }));
+    await userEvent.type(screen.getByPlaceholderText("page.composerPlaceholderWeb"), "Yes, from 10 to 4.");
+    await userEvent.click(screen.getByRole("button", { name: "page.send" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("page.closedReplyRefused"));
+    // The thread reloads and shows the chat as it is now, keeping the draft for the visitor's new chat.
+    expect(await screen.findByText("page.closedDescription")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.closedComposerPlaceholder") as HTMLInputElement).value).toBe("Yes, from 10 to 4.");
+  });
+});
+
+describe("texts the team sends", () => {
+  const voice = { conversationId: "caller", contactName: "Ada Caller", contactPhone: "+14165550134", visitorName: null, visitorEmail: null, channel: "voice", conversationStatus: "closed", automationState: "ai_active", createdAt: "2026-09-01T12:00:00Z" };
+  const text = (id: string, body: string, status: string, failureReason: string | null = null) => ({ ...voice, id, messageChannel: "sms", body, direction: "outbound", status, failureReason });
+  const note = { ...voice, id: "m-note", messageChannel: "dashboard", body: "Please call me back about Friday.", direction: "inbound", status: "received", failureReason: null };
+
+  /** Shows the inbox with a caller's voice-message thread, as the server returns it on each load, and its answer to a reply. */
+  function showCallerThread(thread: (loads: number) => Record<string, unknown>, post?: () => Response) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    let threadLoads = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return post!();
+      if (new URL(url, "http://admin.test").searchParams.get("conversationId")) return Response.json(thread(threadLoads++));
+      return Response.json({ messages: [note], hasNext: false });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveMessagesSurface /></QueryClientProvider>);
+    return fetchMock;
+  }
+
+  it("shows how each one is going, and why a failed one never went out", async () => {
+    showCallerThread(() => ({ messages: [note, text("m1", "We can see you Friday at 3.", "delivered"), text("m2", "Does 4 work instead?", "failed", "opted_out"), text("m3", "Or Saturday?", "failed"), text("m4", "See you then.", "queued"), text("m5", "Are you still there?", "failed", "region_blocked"), text("m6", "Please call us back.", "failed", "unsent")], newerConversationId: null, smsReplyHold: null }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+
+    expect((await screen.findByText("We can see you Friday at 3.")).parentElement!.textContent).toContain("page.statusDelivered");
+    const held = screen.getByText("Does 4 work instead?").parentElement!.textContent;
+    expect(held).toContain("page.deliveryFailed");
+    expect(held).toContain("page.smsHold.optedOut");
+    // A text the carrier failed has its status, and no reason to give.
+    expect(screen.getByText("Or Saturday?").parentElement!.textContent).not.toContain("page.smsHold");
+    expect(screen.getByText("See you then.").parentElement!.textContent).toContain("page.statusSending");
+    // Twilio won't text the contact's country, or every try to send failed.
+    expect(screen.getByText("Are you still there?").parentElement!.textContent).toContain("page.smsHold.regionBlocked");
+    expect(screen.getByText("Please call us back.").parentElement!.textContent).toContain("page.smsHold.unsent");
+    // A voice message the receptionist took isn't a text. (The list shows it too, above the thread.)
+    expect(screen.getAllByText("Please call me back about Friday.").at(-1)!.parentElement!.textContent).not.toContain("page.status");
+  });
+
+  it("says why a caller who left a voice message can't be texted, and takes no reply", async () => {
+    showCallerThread(() => ({ messages: [note], newerConversationId: null, smsReplyHold: "no_consent" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+
+    expect(await screen.findByText("page.smsHold.noConsent")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.smsHoldPlaceholder") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("says why a reply wasn't sent when the contact can no longer get texts", async () => {
+    const fetchMock = showCallerThread((loads) => ({ messages: [note], newerConversationId: null, smsReplyHold: loads === 0 ? null : "opted_out" }), () => Response.json({ error: "This contact texted STOP, so they don't get texts.", code: "sms_opted_out" }, { status: 409 }));
+    const { toast } = await import("sonner");
+    const toastError = vi.spyOn(toast, "error");
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+    await userEvent.type(screen.getByPlaceholderText("page.composerPlaceholderSms"), "We can see you Friday at 3.");
+    await userEvent.click(screen.getByRole("button", { name: "page.send" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("page.smsHold.optedOut"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/messages?businessId=business", expect.objectContaining({ method: "POST", body: JSON.stringify({ conversationId: "caller", body: "We can see you Friday at 3.", channel: "sms" }) }));
+    // The thread reloads with the reason, and keeps the draft.
+    expect(await screen.findByText("page.smsHold.optedOut")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.smsHoldPlaceholder") as HTMLInputElement).value).toBe("We can see you Friday at 3.");
+  });
+});

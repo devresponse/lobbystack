@@ -27,7 +27,7 @@ Le nom, le logo, la couleur et les liens externes viennent d'un dossier de marqu
 | Variable | Rôle |
 | --- | --- |
 | `APP_BASE_URL` | Définissez-la sur l'admin et le worker, et passez-la à la compilation de l'admin comme argument de compilation Docker, pour que les pages de connexion prérendues affichent la marque sans d'abord interroger le serveur. |
-| `BRAND_PRESET` | Le dossier de marque à utiliser là où aucune marque ne réclame le domaine, comme `alloplace` sur `localhost` ou une adresse de plateforme. Sur un domaine réclamé, elle est sans effet. Passez-la aussi à la compilation de l'admin. |
+| `BRAND_PRESET` | Le dossier de marque à utiliser là où aucune marque ne réclame le domaine, comme `alloplace` sur `localhost` ou une adresse de plateforme. Sur un domaine réclamé, elle est sans effet. Définissez-la sur l'admin et le worker, car le worker nomme les textos et les courriels d'après la marque, et passez-la aussi à la compilation de l'admin. |
 | `BRAND_REQUIRED` | `true` empêche l'admin et le worker de démarrer quand aucun fichier de marque ne correspond. |
 
 Là où aucune marque ne réclame le domaine et où `BRAND_PRESET` est vide, le déploiement affiche LobbyStack, et son premier propriétaire choisit un nom et un logo pendant l'intégration.

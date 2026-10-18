@@ -24,7 +24,7 @@ import {
   type SmsConsentOnFile,
   type UnavailableReason,
 } from "@lobbystack/domain";
-import { canTextNumber, isBusinessOpen, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, openStatus, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
+import { canTextNumber, isBusinessOpen, isTransferPermitted, normalizeAppointmentChangePolicy, normalizeBookingMode, openStatus, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { tool, type ToolSet } from "ai";
 import { DateTime } from "luxon";
@@ -91,11 +91,11 @@ export type AgentToolContext = {
   intakeOnly?: boolean;
   /**
    * Website chats whose widget has live chat on: the visitor can ask for
-   * someone from the team to join. `locale` is the chat's language, for what
-   * the receptionist says if nobody joins in time. `onTeamRequested` hears
-   * when the team was asked.
+   * someone from the team to join. `locale` is the widget's language, for
+   * what the receptionist says if nobody joins in time. `onTeamRequested`
+   * hears when the team was asked.
    */
-  liveChat?: { locale: RuntimeLocale; onTeamRequested?: () => void };
+  liveChat?: { locale: InterfaceLocale; onTeamRequested?: () => void };
 };
 
 // A plural always counts ("fee" finds "fees"). Other endings only count for terms of four
@@ -447,6 +447,8 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
         action: input.action,
         ...(input.appointmentStartsAt ? { appointmentStartsAt: input.appointmentStartsAt } : {}),
         ...(input.serviceName ? { serviceName: input.serviceName } : {}),
+        // A PIN accepted earlier on this call counts; one from another call doesn't.
+        ...(context.callId ? { callId: context.callId } : {}),
       })),
     });
     if (passcodeRequired && collectPasscode) {

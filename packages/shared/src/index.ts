@@ -340,7 +340,8 @@ export const widgetChatRequestSchema = z.object({
   visitorId: z.guid(),
   messageId: z.guid(),
   content: z.string().min(1).max(4_000),
-  locale: z.enum(runtimeLocales).optional(),
+  /** The widget's language, which the receptionist replies in. */
+  locale: z.enum(interfaceLocales).optional(),
 });
 
 export type WidgetChatRequest = z.infer<typeof widgetChatRequestSchema>;
@@ -395,7 +396,7 @@ export { openStatus, type OpenStatus } from "./openStatus";
 export * from "./publicProfile";
 
 export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEMPLATE, OPERATOR_SMS_DISCLOSURE_VERSION, operatorSmsDisclosureText } from "./operatorSmsConsent";
-export { canTextNumber, permanentSmsErrorCode } from "./smsReach";
+export { canTextNumber, failedSmsProviderStatus, permanentSmsErrorCode, smsErrorCode, smsFailureReason, type SmsFailure, type SmsFailureReason, type SmsHoldReason } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";
 

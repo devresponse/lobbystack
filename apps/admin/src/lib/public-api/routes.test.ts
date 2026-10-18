@@ -1264,8 +1264,23 @@ describe("platform keys on v1 routes", () => {
       const response = await post({ email: " owner@acmeplumbing.ca ", name: "Ana Owner", locale: "fr" });
       expect(response.status).toBe(201);
       expect(await response.json()).toEqual({ data: user });
-      expect(domain.createUserForApi).toHaveBeenCalledWith("auth", { key: expect.objectContaining({ kind: "platform_key", platformKeyId: entry.id }), idempotencyKey: "owner-acme", body: { email: "owner@acmeplumbing.ca", name: "Ana Owner", locale: "fr" } });
+      expect(domain.createUserForApi).toHaveBeenCalledWith("auth", { key: expect.objectContaining({ kind: "platform_key", platformKeyId: entry.id }), idempotencyKey: "owner-acme", body: { email: "owner@acmeplumbing.ca", name: "Ana Owner", locale: "fr" }, beforeCreate: expect.any(Function) });
       expect(domain.enqueueAccountSetupEmail).toHaveBeenCalledWith("lobbystack_app", { user, appBaseUrl: expect.any(String) });
+    });
+
+    it("counts each new account against the key's limit of 20 an hour", async () => {
+      // As the domain does: an account about to be made is counted first.
+      domain.createUserForApi.mockImplementation(async (...args: unknown[]) => { await (args[1] as { beforeCreate?: () => Promise<void> }).beforeCreate?.(); return { user, replayed: false }; });
+      expect((await post({ email: "owner@acmeplumbing.ca" })).status).toBe(201);
+      expect(invites.limit).toHaveBeenCalledWith([["platform-user-create", "key-hour", entry.id, 20, 3_600, "rate_limit_key_hour"]]);
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_key_hour" });
+      const limited = await post({ email: "kai@acmeplumbing.ca" }, { "Idempotency-Key": "owner-kai" });
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toMatchObject({ error: { code: "rate_limited" } });
+      expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 503, reason: "rate_limit_unavailable" });
+      expect((await post({ email: "lee@acmeplumbing.ca" }, { "Idempotency-Key": "owner-lee" })).status).toBe(503);
+      expect(domain.enqueueAccountSetupEmail).toHaveBeenCalledTimes(1);
     });
 
     it("marks a replay, and queues the email again only while the account is unverified", async () => {

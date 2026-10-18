@@ -47,7 +47,8 @@ export async function GET(request: Request) {
       const recentCalls = await listRecentCalls(tx, businessId);
       const upcoming = await listUpcomingAppointments(tx, businessId, now);
       const liveCallCount = await tx.select({ count: count() }).from(calls).where(and(eq(calls.businessId, businessId), eq(calls.status, "started")));
-      const handoffConversations = await tx.select({ id: conversations.id, contactName: contacts.name, summary: conversations.summary, currentIntent: conversations.currentIntent, updatedAt: conversations.updatedAt }).from(conversations).leftJoin(contacts, eq(conversations.contactId, contacts.id)).where(and(eq(conversations.businessId, businessId), eq(conversations.automationState, "human_handoff"))).orderBy(desc(conversations.updatedAt)).limit(6);
+      // Closing a conversation ends its take-over; the status check also drops ones closed before that.
+      const handoffConversations = await tx.select({ id: conversations.id, contactName: contacts.name, summary: conversations.summary, currentIntent: conversations.currentIntent, updatedAt: conversations.updatedAt }).from(conversations).leftJoin(contacts, eq(conversations.contactId, contacts.id)).where(and(eq(conversations.businessId, businessId), eq(conversations.automationState, "human_handoff"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(6);
       const voiceFollowUps = await listOpenVoiceFollowUps(tx, businessId);
 
       const monthlyTotals = new Map((aggregates?.monthlyCalls ?? []).map((bucket) => [bucket.month, bucket.total]));

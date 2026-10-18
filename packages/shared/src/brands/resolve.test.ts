@@ -123,6 +123,14 @@ describe("brandStartupReport", () => {
     expect(brandStartupReport(unmatched, { NODE_ENV: "development" }).warnings).toEqual([]);
   });
 
+  it("warns in production when APP_BASE_URL is missing or isn't a URL and no preset names a brand", () => {
+    for (const appBaseUrl of [undefined, " ", "app.example.com"]) {
+      expect(brandStartupReport(resolveBrand({ appBaseUrl }, data), { NODE_ENV: "production" }).warnings, String(appBaseUrl)).toEqual(["[brand] brand.base_url_missing: APP_BASE_URL is missing or isn't a URL, so the default lobbystack brand stands in. Set it to the dashboard's address, such as https://app.example.com."]);
+    }
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: undefined }, data), { NODE_ENV: "development" }).warnings).toEqual([]);
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: undefined, preset: "alloplace" }, data), { NODE_ENV: "production" }).warnings).toEqual([]);
+  });
+
   it("refuses to start under BRAND_REQUIRED=true only when no brand file matched", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://app.example.com" }, data), { BRAND_REQUIRED: "true" }).error).toContain("BRAND_REQUIRED=true");
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();

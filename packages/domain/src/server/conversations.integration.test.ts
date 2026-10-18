@@ -109,6 +109,18 @@ describe.skipIf(!testUrl)("call summaries against PostgreSQL under worker RLS", 
     });
   });
 
+  it("closes the call's conversation with nobody holding it, so it leaves Action required", async () => {
+    await rollbackTest(async (tx) => {
+      const fixture = await seedCall(tx, { turns: fridayCall });
+      await tx.execute(sql`reset role`);
+      await tx.update(conversations).set({ automationState: "human_handoff", automationPausedAt: new Date() }).where(eq(conversations.id, fixture.conversationId));
+      await tx.execute(sql`set local role lobbystack_worker`);
+      await finalizeConversationSession({ db: fixture.db }, fixture);
+      const [conversation] = await withBusinessTransaction(fixture.db, { businessId: fixture.businessId, actorType: "worker" }, async (workerTx) => await workerTx.select({ status: conversations.status, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt }).from(conversations).where(eq(conversations.id, fixture.conversationId)));
+      expect(conversation).toEqual({ status: "closed", automationState: "ai_active", automationPausedAt: null });
+    });
+  });
+
   it("falls back to the French heuristic when no summary was generated", async () => {
     await rollbackTest(async (tx) => {
       const fixture = await seedCall(tx, { locale: "fr", turns: [["assistant", "Bonjour, comment puis-je vous aider?"], ["caller", "Oui"]] });

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import type { PublicProfileSettings } from "@lobbystack/shared";
 
-import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, updateBusinessPublicProfile } from "./publicProfiles";
+import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, savePublicProfileInTransaction, updateBusinessPublicProfile } from "./publicProfiles";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -170,10 +170,11 @@ describe.skipIf(!client)("public profile pages", () => {
       expect(await fixture.resolve()).toBeNull();
       expect(await fixture.page()).toBeNull();
 
+      // Rows from one transaction share a timestamp, so sort them by name.
       const events = await tx.select({ eventType: auditLogs.eventType, actorUserId: auditLogs.actorUserId, entityId: auditLogs.entityId })
         .from(auditLogs)
         .where(and(eq(auditLogs.businessId, fixture.businessId), sql`${auditLogs.eventType} like 'public_profile.%'`))
-        .orderBy(auditLogs.createdAt);
+        .orderBy(auditLogs.eventType);
       expect(events).toEqual([
         { eventType: "public_profile.published", actorUserId: fixture.adminId, entityId: fixture.businessId },
         { eventType: "public_profile.unpublished", actorUserId: fixture.ownerId, entityId: fixture.businessId },
@@ -278,5 +279,56 @@ describe.skipIf(!client)("public profile pages", () => {
       expect(named).toEqual([]);
       expect(await fixture.resolve()).toBe(fixture.businessId);
     });
+  });
+
+  it("records one publish when the first two saves land at once, and lets an API save and a dashboard save wait for each other", async () => {
+    // Two admins' first saves, each on its own connection, so the rows are committed and removed after.
+    const db = client!.db;
+    const businessId = randomUUID();
+    const adminIds = [randomUUID(), randomUUID()];
+    await db.insert(businesses).values({ id: businessId, slug: `pp-race-${businessId}`, name: "Race Dental", timezone: "UTC", businessType: "test", telemetryEnabled: false });
+    for (const id of adminIds) await db.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` });
+    await db.insert(businessMemberships).values(adminIds.map((userId) => ({ businessId, userId, role: "business_admin" })));
+    const settings: PublicProfileSettings = { published: true, category: null, description: null, address: { line1: null, line2: null, city: "Vancouver", region: null, postalCode: null, countryCode: null }, publicEmail: null, showPhone: true, showHours: true, showServices: true, showMap: true, widgetKeyId: null };
+    const save = (userId: string) => withBusinessTransaction(db, { businessId, userId, actorType: "operator" }, async (inner) => {
+      await inner.execute(sql`set local role lobbystack_app`);
+      return await updateBusinessPublicProfile(inner, { businessId, userId, settings });
+    });
+    try {
+      // Holding the table back lines both saves up at their first read of it.
+      const saves = await db.transaction(async (hold) => {
+        await hold.execute(sql`lock table business_public_profiles in access exclusive mode`);
+        const pending = adminIds.map((userId) => save(userId));
+        const waiting = async () => Number((await db.execute<{ count: string }>(sql`select count(*) as count from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and (query like '%business_public_profiles%' or query like '%public-profile:%')`)).rows[0]?.count ?? 0);
+        for (let attempt = 0; attempt < 100 && await waiting() < 2; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+        return pending;
+      });
+      await Promise.all(saves);
+      const published = await db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "public_profile.published")));
+      expect(published).toHaveLength(1);
+
+      // An API save holds the saved page while it works out the change, and a
+      // dashboard save waits for it instead of locking the two in a deadlock.
+      let locked: () => void = () => undefined;
+      let release: () => void = () => undefined;
+      const isLocked = new Promise<void>((resolve) => { locked = resolve; });
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      const api = withBusinessTransaction(db, { businessId, userId: adminIds[0]!, actorType: "operator" }, async (inner) => {
+        await inner.execute(sql`set local role lobbystack_app`);
+        const view = await getBusinessPublicProfileSettings(inner, { businessId, lock: true });
+        locked();
+        await released;
+        await savePublicProfileInTransaction(inner, { businessId, settings: { ...view.settings, showMap: false }, audit: { actorUserId: adminIds[0]! } });
+      });
+      await isLocked;
+      const dashboard = save(adminIds[1]!);
+      const waiting = async () => Number((await db.execute<{ count: string }>(sql`select count(*) as count from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and (query like '%business_public_profiles%' or query like '%public-profile:%')`)).rows[0]?.count ?? 0);
+      for (let attempt = 0; attempt < 100 && await waiting() < 1; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+      release();
+      await Promise.all([api, dashboard]);
+    } finally {
+      await db.delete(businesses).where(eq(businesses.id, businessId));
+      for (const id of adminIds) await db.delete(users).where(eq(users.id, id));
+    }
   });
 });

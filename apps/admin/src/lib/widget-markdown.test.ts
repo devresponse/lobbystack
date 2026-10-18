@@ -52,6 +52,54 @@ it("ends a plain web address at a quote or angle bracket, so it can't add attrib
   expect([...element.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"))).toEqual(["https://acme.example/", "https://acme.example/", "https://acme.example/", "https://acme.example/x"]);
 });
 
+it("keeps a plain address's own parentheses, and leaves out a closing one it didn't open", () => {
+  const text = "See https://en.wikipedia.org/wiki/Mercury_(planet) for details (or https://en.wikipedia.org/wiki/Venus_(planet)), (https://acme.example/a) and https://acme.example/b).";
+  const rendered = links(text);
+  expect(rendered.links.map((link) => link.href)).toEqual([
+    "https://en.wikipedia.org/wiki/Mercury_(planet)",
+    "https://en.wikipedia.org/wiki/Venus_(planet)",
+    "https://acme.example/a",
+    "https://acme.example/b",
+  ]);
+  expect(rendered.links.every((link) => link.text === link.href)).toBe(true);
+  // Nothing goes missing or shows twice around the links.
+  expect(rendered.text).toBe(text);
+});
+
+it("keeps a Markdown link's parentheses in its address, without a stray one after it", () => {
+  const rendered = links("[Mercury](https://en.wikipedia.org/wiki/Mercury_(planet)) or ([Venus](https://en.wikipedia.org/wiki/Venus_(planet))).");
+  expect(rendered.links).toEqual([
+    { text: "Mercury", href: "https://en.wikipedia.org/wiki/Mercury_(planet)", target: "_blank" },
+    { text: "Venus", href: "https://en.wikipedia.org/wiki/Venus_(planet)", target: "_blank" },
+  ]);
+  expect(rendered.text).toBe("Mercury or (Venus).");
+});
+
+it.each([".", ",", ":", ";", "!", "?", "!?", "].", ")."])("leaves %s out of an address that ends in parentheses", (punctuation) => {
+  const rendered = links(`https://en.wikipedia.org/wiki/Mercury_(planet)${punctuation}`);
+  expect(rendered.links.map((link) => link.href)).toEqual(["https://en.wikipedia.org/wiki/Mercury_(planet)"]);
+  expect(rendered.text).toBe(`https://en.wikipedia.org/wiki/Mercury_(planet)${punctuation}`);
+});
+
+it("leaves a long run of closing parentheses out of an address", () => {
+  const text = `https://acme.example/a${")".repeat(4_000)}`;
+  const rendered = links(text);
+  expect(rendered.links.map((link) => link.href)).toEqual(["https://acme.example/a"]);
+  expect(rendered.text).toBe(text);
+});
+
+it("keeps quotes in an address with parentheses inert", () => {
+  const element = document.createElement("div");
+  element.innerHTML = renderSafeMarkdown('[x](https://acme.example/(b"onfocus="alert(1))) https://acme.example/(a"onmouseover="alert(1)) [y](https://acme.example/(c"onblur="d))');
+  expect(element.querySelector("[onfocus], [onmouseover], [onblur], script")).toBeNull();
+  expect([...element.querySelectorAll("a")].map((anchor) => anchor.getAttribute("href"))).toEqual([
+    "https://acme.example/(b",
+    "https://acme.example/(a",
+    'https://acme.example/(c"onblur="d)',
+  ]);
+  expect(element.querySelectorAll("a[href]:not([rel='noreferrer noopener'])")).toHaveLength(0);
+});
+
 it("doesn't link addresses with other schemes or without one", () => {
   expect(links("javascript:alert(1) data:text/html,hi mailto:hello@acme.example www.acme.example ftp://acme.example").links).toEqual([]);
 });

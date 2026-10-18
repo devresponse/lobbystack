@@ -40,12 +40,14 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
- * Creates an account for a platform key. The Idempotency-Key decides the
- * account's id, so a retry returns the account it made, and a different
- * email with the same key is idempotency_key_reused. An email that already
- * has an account is a 409.
+ * Creates an account for a platform key, recording the key and its partner on
+ * it. The Idempotency-Key decides the account's id, so a retry returns the
+ * account it made, and a different email with the same key is
+ * idempotency_key_reused. An email that already has an account is a 409.
+ * beforeCreate runs only when an account is about to be made, so a retry
+ * isn't counted against the key's limit.
  */
-export async function createUserForApi(authDb: Database, input: { key: ResolvedPlatformKey; idempotencyKey: string; body: ApiUserCreate }): Promise<{ user: ApiUser; replayed: boolean }> {
+export async function createUserForApi(authDb: Database, input: { key: ResolvedPlatformKey; idempotencyKey: string; body: ApiUserCreate; beforeCreate?: (() => Promise<void>) | undefined }): Promise<{ user: ApiUser; replayed: boolean }> {
   // Stored lowercased, as Better Auth stores and looks up addresses, so the forgot-password page finds the account.
   const normalizedEmail = normalizeAuthEmail(input.body.email);
   if (!isSingleEmailAddress(normalizedEmail)) throw invalidRequest("email must be one email address.", [{ path: "email", message: "Use one address, such as owner@example.com." }]);
@@ -58,9 +60,10 @@ export async function createUserForApi(authDb: Database, input: { key: ResolvedP
   };
   const existing = await made();
   if (existing) return { user: existing, replayed: true };
+  await input.beforeCreate?.();
   try {
     // The database sets normalized_email from email.
-    const [row] = await authDb.insert(users).values({ id, email: normalizedEmail, normalizedEmail: "", name: input.body.name ?? null, preferredLocale: input.body.locale ?? "en", emailVerified: false }).returning(userColumns);
+    const [row] = await authDb.insert(users).values({ id, email: normalizedEmail, normalizedEmail: "", name: input.body.name ?? null, preferredLocale: input.body.locale ?? "en", emailVerified: false, createdByPlatformKeyId: input.key.platformKeyId, createdByPartnerId: input.key.partnerId }).returning(userColumns);
     if (!row) throw new Error("The new account could not be read back.");
     return { user: toApiUser(row), replayed: false };
   } catch (error) {

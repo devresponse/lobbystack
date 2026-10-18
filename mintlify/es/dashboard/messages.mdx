@@ -44,13 +44,17 @@ Abra una conversación para ver la cronología de sus mensajes. El hilo muestra 
   </Step>
 </Steps>
 
-Una respuesta por SMS llega al cliente que le escribió al número de su negocio, salvo que haya respondido `STOP` o que usted haya bloqueado el contacto. Para enviar un SMS a un cliente que no le ha escrito, como alguien que dejó un mensaje de voz, este debe haber aceptado recibir SMS.
+Una respuesta por SMS llega al cliente que le escribió al número de su negocio, salvo que haya respondido `STOP` o que usted haya bloqueado el contacto. Para enviar un SMS a un cliente que no le ha escrito en esa conversación, como alguien que dejó un mensaje de voz, este debe haber aceptado recibir SMS.
+
+Cuando un SMS no puede llegar al cliente, la conversación indica por qué y no admite respuestas. Si eso cambia después de que escriba una respuesta, por ejemplo cuando el cliente responde `STOP`, el SMS no se envía y el hilo indica por qué.
+
+Debajo de cada SMS que envía su equipo, el hilo muestra cómo va: **Enviando**, **Enviado**, **Entregado**, **No entregado** o **Error al enviar**. Su equipo recibe una alerta cuando un SMS falla.
 
 ## Tomar el control o reanudar la IA
 
 Los hilos del chat del sitio web muestran su estado de automatización en el encabezado. Haga clic en **Tomar el control** cuando una persona del equipo deba atender la conversación. Enviar una respuesta en un chat del sitio web también toma el control, para que la IA no responda a la vez que usted. Haga clic en **Reanudar IA** cuando el asistente del sitio web deba volver a responder.
 
-Mientras su equipo tiene un chat del sitio web, la IA no lo responde y el visitante ve que una persona del equipo le responderá. Si el visitante todavía tiene el chat abierto, sus respuestas aparecen allí de inmediato. Una dirección web completa, que empiece por `https://`, aparece allí como un enlace que el visitante puede abrir en una pestaña nueva. Un chat sigue a cargo de su equipo, y en **Acción requerida** en la página de inicio, hasta que alguien haga clic en **Reanudar IA**. Si nadie de su equipo ha escrito en él ni ha tomado el control en 10 minutos, la recepcionista responde el siguiente mensaje del visitante y retoma el chat. Cuando un chat del sitio web lleva un día sin mensajes, el siguiente mensaje del visitante abre un chat nuevo.
+Mientras su equipo tiene un chat del sitio web, la IA no lo responde y el visitante ve que una persona del equipo le responderá. Si el visitante todavía tiene el chat abierto, sus respuestas aparecen allí de inmediato. Una dirección web completa, que empiece por `https://`, aparece allí como un enlace que el visitante puede abrir en una pestaña nueva. Un chat sigue a cargo de su equipo, y en **Acción requerida** en la página de inicio, hasta que alguien haga clic en **Reanudar IA** o el chat se cierre. Si nadie de su equipo ha escrito en él ni ha tomado el control en 10 minutos, la recepcionista responde el siguiente mensaje del visitante y retoma el chat.
 
 Los hilos de SMS no muestran el control de traspaso de la IA. Las respuestas que envíe desde esta página son manuales.
 
@@ -59,3 +63,7 @@ Los hilos de SMS no muestran el control de traspaso de la IA. Las respuestas que
 Cuando una clave de widget tiene activado el [chat en vivo con su equipo](/es/settings/widget#chat-en-vivo-con-su-equipo), un visitante que pide hablar con una persona espera a su equipo. La conversación muestra **Pide una persona** en la lista y **Visitante esperando** en su encabezado, y su equipo recibe una alerta.
 
 Responda, o haga clic en **Unirse al chat**, en 3 minutos para quedarse con el chat. El visitante ve que usted se unió, con el nombre de pila de su perfil. Haga clic en **Reanudar IA** para devolverle el chat a la recepcionista. Si nadie se une a tiempo, la recepcionista retoma el chat y le ofrece al visitante devolverle la llamada.
+
+## Chats cerrados
+
+Cuando un chat del sitio web lleva un día sin mensajes, y nadie de su equipo tomó el control en ese tiempo, el siguiente mensaje del visitante abre un chat nuevo y cierra el anterior. El widget del visitante solo muestra el chat nuevo, así que el anterior muestra **Cerrado** en la lista y en su encabezado, y sale de **Acción requerida**. Como el visitante ya no lo ve, no puede responder en él ni tomar el control. Haga clic en **Abrir el chat nuevo** para responder en el chat nuevo del visitante.

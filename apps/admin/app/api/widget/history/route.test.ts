@@ -5,7 +5,7 @@ const visitorId = "00000000-0000-4000-8000-000000000002";
 const conversationId = "00000000-0000-4000-8000-000000000003";
 
 const mocks = vi.hoisted(() => ({
-  findCurrentWidgetConversationId: vi.fn(),
+  findCurrentWidgetChat: vi.fn(),
   getOrCreateWidgetConversation: vi.fn(),
   loadWidgetChatView: vi.fn(),
   registerWidgetVisitor: vi.fn(),
@@ -20,7 +20,7 @@ vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }
 vi.mock("@/lib/api-helpers", () => ({ asApiResponse: (error: unknown) => { throw error; } }));
 vi.mock("@lobbystack/domain", () => ({
   registerWidgetVisitor: mocks.registerWidgetVisitor,
-  findCurrentWidgetConversationId: mocks.findCurrentWidgetConversationId,
+  findCurrentWidgetChat: mocks.findCurrentWidgetChat,
   getOrCreateWidgetConversation: mocks.getOrCreateWidgetConversation,
   loadWidgetChatView: mocks.loadWidgetChatView,
 }));
@@ -30,7 +30,7 @@ import { GET } from "./route";
 const at = new Date("2026-10-14T21:00:00.000Z");
 
 beforeEach(() => {
-  mocks.findCurrentWidgetConversationId.mockReset().mockResolvedValue(conversationId);
+  mocks.findCurrentWidgetChat.mockReset().mockResolvedValue({ conversationId, idle: false });
   mocks.getOrCreateWidgetConversation.mockReset().mockResolvedValue({ conversationId, automationState: "ai_active" });
   mocks.loadWidgetChatView.mockReset();
   mocks.registerWidgetVisitor.mockReset();
@@ -54,6 +54,7 @@ describe("GET /api/widget/history", () => {
 
     expect(await response.json()).toEqual({
       conversationId,
+      idle: false,
       automationState: "human_handoff",
       waitingForTeam: false,
       teamMemberName: "Yuri",
@@ -64,12 +65,12 @@ describe("GET /api/widget/history", () => {
         { id: "m4", role: "assistant", content: "One moment.", createdAt: at.toISOString(), fromTeam: true, teamMemberName: null },
       ],
     });
-    expect(mocks.findCurrentWidgetConversationId).toHaveBeenCalledWith({}, { businessId, widgetVisitorId: visitorId });
+    expect(mocks.findCurrentWidgetChat).toHaveBeenCalledWith({}, { businessId, widgetVisitorId: visitorId });
     expect(mocks.loadWidgetChatView).toHaveBeenCalledWith({}, { businessId, conversationId });
   });
 
   it("shows a visitor without a chat an empty one, and leaves starting it to their first message", async () => {
-    mocks.findCurrentWidgetConversationId.mockResolvedValue(null);
+    mocks.findCurrentWidgetChat.mockResolvedValue(null);
 
     const response = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
 
@@ -77,6 +78,40 @@ describe("GET /api/widget/history", () => {
     expect(await response.json()).toEqual({ messages: [] });
     expect(mocks.getOrCreateWidgetConversation).not.toHaveBeenCalled();
     expect(mocks.loadWidgetChatView).not.toHaveBeenCalled();
+  });
+
+  it("marks a chat that went a day without messages for the page that shows it, and hides it from a new visit", async () => {
+    mocks.findCurrentWidgetChat.mockResolvedValue({ conversationId, idle: true });
+    const newVisit = await GET(new Request("http://localhost/api/widget/history", { headers: { authorization: "Bearer token" } }));
+    expect(await newVisit.json()).toEqual({ messages: [] });
+    const otherChat = await GET(new Request("http://localhost/api/widget/history?chat=00000000-0000-4000-8000-000000000009", { headers: { authorization: "Bearer token" } }));
+    expect(await otherChat.json()).toEqual({ messages: [] });
+    expect(mocks.loadWidgetChatView).not.toHaveBeenCalled();
+
+    mocks.loadWidgetChatView.mockResolvedValue({
+      automationState: "ai_active",
+      waitingForTeam: false,
+      teamMemberName: null,
+      messages: [
+        { id: "m1", direction: "inbound", body: "Do you open on Sundays?", createdAt: at, fromTeam: false, teamMemberName: null },
+        { id: "m2", direction: "outbound", body: "We open at ten.", createdAt: at, fromTeam: false, teamMemberName: null },
+      ],
+    });
+
+    const response = await GET(new Request(`http://localhost/api/widget/history?chat=${conversationId}`, { headers: { authorization: "Bearer token" } }));
+
+    expect(await response.json()).toEqual({
+      conversationId,
+      idle: true,
+      automationState: "ai_active",
+      waitingForTeam: false,
+      teamMemberName: null,
+      messages: [
+        { id: "m1", role: "user", content: "Do you open on Sundays?", createdAt: at.toISOString() },
+        { id: "m2", role: "assistant", content: "We open at ten.", createdAt: at.toISOString() },
+      ],
+    });
+    expect(mocks.getOrCreateWidgetConversation).not.toHaveBeenCalled();
   });
 
   it("reads the chat without saving the visitor, which its session did", async () => {

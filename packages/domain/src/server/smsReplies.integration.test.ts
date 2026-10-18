@@ -2,11 +2,11 @@ import { randomInt, randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { businessMemberships, businesses, contacts, conversations, createDatabaseClient, phoneNumbers, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { businessMemberships, businesses, contacts, conversations, createDatabaseClient, messages, operatorNotificationDeliveries, outboxMessages, phoneNumbers, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { recordSmsConsentAnswerInTransaction, type SmsConsentAnswer } from "./contactSmsConsent";
 import { appendMessage, getOrCreateConversation } from "./conversations";
-import { claimSmsDelivery, loadSmsDeliveryTarget, receiveInboundSms, setContactSmsManualBlock } from "./sms";
+import { claimSmsDelivery, loadSmsDeliveryTarget, markSmsFailed, receiveInboundSms, setContactSmsManualBlock } from "./sms";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -57,9 +57,19 @@ async function seedBusiness(tx: DatabaseTransaction) {
   await tx.insert(businessMemberships).values({ businessId, userId, role: "business_owner" });
   await tx.insert(phoneNumbers).values({ businessId, e164: number, providerPhoneId: `PN-${randomUUID()}` });
   const contactOf = async (contactPhone: string) => (await tx.select({ id: contacts.id, smsConsentStatus: contacts.smsConsentStatus, operatorBlockedAt: contacts.operatorBlockedAt }).from(contacts).where(and(eq(contacts.businessId, businessId), eq(contacts.phone, contactPhone))).limit(1))[0]!;
+  /** An operator's reply from Messages. Returns the saved text. */
+  const write = async (conversationId: string) => await as(tx, "app", (db) => appendMessage({ db }, { userId, businessId, conversationId, body: "We're open 9 to 5.", direction: "outbound", channel: "sms" }));
+  /** What the worker's send would text for a saved reply, or why it holds the reply back. */
+  const send = async (messageId: string) => await as(tx, "worker", async (db) => {
+    expect(await claimSmsDelivery({ db }, { businessId, messageId })).toBe(true);
+    return await loadSmsDeliveryTarget(db, { businessId, messageId });
+  });
   return {
+    businessId,
     number,
     contactOf,
+    write,
+    send,
     /** A customer's text to the business number, as the Twilio webhook hands it over. Returns its conversation. */
     async text(from: string, body: string): Promise<string> {
       await as(tx, "worker", (db) => receiveInboundSms({ db }, { businessId, providerMessageId: `SM${randomUUID()}`, from, to: number, body, payload: {} }));
@@ -82,13 +92,26 @@ async function seedBusiness(tx: DatabaseTransaction) {
       const contact = await contactOf(contactPhone);
       expect(await as(tx, "app", (db) => setContactSmsManualBlock({ db }, { userId, businessId, contactId: contact.id, blocked: true }))).toBe(true);
     },
-    /** An operator's reply from Messages, then what the worker's send would text: null when it holds the reply back. */
+    /** Turns texting off on the business's number. */
+    async stopTexting(): Promise<void> {
+      await tx.update(phoneNumbers).set({ smsEnabled: false }).where(eq(phoneNumbers.businessId, businessId));
+    },
+    /** An operator's reply from Messages, then what the worker's send would text. */
     async reply(conversationId: string) {
-      const messageId = await as(tx, "app", (db) => appendMessage({ db }, { userId, businessId, conversationId, body: "We're open 9 to 5.", direction: "outbound", channel: "sms" }));
-      return await as(tx, "worker", async (db) => {
-        expect(await claimSmsDelivery({ db }, { businessId, messageId })).toBe(true);
-        return await loadSmsDeliveryTarget(db, { businessId, messageId });
-      });
+      return await send(await write(conversationId));
+    },
+    /** The worker failing a reply it holds back, as its send does. */
+    async fail(messageId: string, failure: Parameters<typeof markSmsFailed>[1]["failure"]): Promise<void> {
+      await as(tx, "worker", (db) => markSmsFailed({ db }, { businessId, messageId, failure }));
+    },
+    async replies(conversationId: string) {
+      return await tx.select({ status: messages.status, providerStatus: messages.providerStatus }).from(messages).where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId), eq(messages.direction, "outbound")));
+    },
+    async realtime(messageId: string) {
+      return (await tx.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "realtime.publish"), eq(outboxMessages.aggregateId, messageId)))).map((row) => row.payload.type);
+    },
+    async failedTextAlerts() {
+      return await tx.select({ eventKey: operatorNotificationDeliveries.eventKey, channel: operatorNotificationDeliveries.channel }).from(operatorNotificationDeliveries).where(and(eq(operatorNotificationDeliveries.businessId, businessId), eq(operatorNotificationDeliveries.eventKind, "smsFailed")));
     },
   };
 }
@@ -98,7 +121,7 @@ describe.skipIf(!testUrl)("replies to customer texts", () => {
     await rollbackTest(async (shop) => {
       const customer = phone();
       const conversationId = await shop.text(customer, "Are you open Saturday?");
-      expect(await shop.reply(conversationId)).toEqual({ to: customer, from: shop.number, body: "We're open 9 to 5." });
+      expect(await shop.reply(conversationId)).toEqual({ ok: true, to: customer, from: shop.number, body: "We're open 9 to 5." });
       expect((await shop.contactOf(customer)).smsConsentStatus).toBeNull();
     });
   });
@@ -108,31 +131,60 @@ describe.skipIf(!testUrl)("replies to customer texts", () => {
       const customer = phone();
       const conversationId = await shop.text(customer, "Can I move my booking?");
       await shop.answerTexts(customer, "declined");
-      expect(await shop.reply(conversationId)).toMatchObject({ to: customer });
+      expect(await shop.reply(conversationId)).toMatchObject({ ok: true, to: customer });
     });
   });
 
-  it("holds back replies to customers who opted out or were blocked", async () => {
+  it("refuses replies to customers who opted out or were blocked, saying why, and saves none", async () => {
     await rollbackTest(async (shop) => {
       const stopped = phone();
       const stoppedConversation = await shop.text(stopped, "Are you open Saturday?");
       await shop.text(stopped, "STOP");
-      expect(await shop.reply(stoppedConversation)).toBeNull();
+      await expect(shop.write(stoppedConversation)).rejects.toMatchObject({ status: 409, code: "sms_opted_out", message: expect.stringContaining("texted STOP") });
+      expect(await shop.replies(stoppedConversation)).toEqual([]);
 
       const blocked = phone();
       const blockedConversation = await shop.text(blocked, "Are you open Saturday?");
       await shop.block(blocked);
-      expect(await shop.reply(blockedConversation)).toBeNull();
+      await expect(shop.write(blockedConversation)).rejects.toMatchObject({ status: 409, code: "sms_blocked" });
+      expect(await shop.replies(blockedConversation)).toEqual([]);
     });
   });
 
-  it("still needs a yes to text a customer who never texted", async () => {
+  it("still needs a yes to text a customer who never texted, and says so", async () => {
     await rollbackTest(async (shop) => {
       const caller = phone();
       const conversationId = await shop.voiceMessage(caller, "Please call me back about Friday.");
-      expect(await shop.reply(conversationId)).toBeNull();
+      await expect(shop.write(conversationId)).rejects.toMatchObject({ status: 409, code: "sms_no_consent", message: expect.stringContaining("hasn't agreed to texts or texted you in this conversation") });
       await shop.answerTexts(caller, "agreed");
-      expect(await shop.reply(conversationId)).toMatchObject({ to: caller });
+      expect(await shop.reply(conversationId)).toMatchObject({ ok: true, to: caller });
+    });
+  });
+
+  it("refuses a reply when the business has no number that can text", async () => {
+    await rollbackTest(async (shop) => {
+      const conversationId = await shop.text(phone(), "Are you open Saturday?");
+      await shop.stopTexting();
+      await expect(shop.write(conversationId)).rejects.toMatchObject({ status: 409, code: "sms_no_sender" });
+    });
+  });
+
+  it("fails a reply the customer can no longer get by the time it goes out, with the reason and an alert", async () => {
+    await rollbackTest(async (shop) => {
+      const customer = phone();
+      const conversationId = await shop.text(customer, "Are you open Saturday?");
+      const messageId = await shop.write(conversationId);
+      await shop.text(customer, "STOP");
+
+      expect(await shop.send(messageId)).toEqual({ ok: false, reason: "opted_out" });
+      await shop.fail(messageId, { held: "opted_out" });
+
+      expect(await shop.replies(conversationId)).toEqual([{ status: "failed", providerStatus: "held:opted_out" }]);
+      expect(await shop.realtime(messageId)).toContain("message.deliveryUpdated");
+      expect(await shop.failedTextAlerts()).toEqual([{ eventKey: `smsFailed:${messageId}`, channel: "email" }]);
+      // A failed text stays failed: another run of the send changes nothing.
+      await shop.fail(messageId, { rejected: 21610 });
+      expect(await shop.replies(conversationId)).toEqual([{ status: "failed", providerStatus: "held:opted_out" }]);
     });
   });
 });

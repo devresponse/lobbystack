@@ -143,12 +143,13 @@ export async function removeContactPasscode(
 /**
  * Checks a PIN a caller typed. A match resets the count of wrong PINs; the
  * CONTACT_PASSCODE_LOCK_ATTEMPTS-th wrong one in a row locks the PIN, and a
- * locked PIN is refused without being compared.
+ * locked PIN is refused without being compared. A wrong PIN that doesn't lock
+ * it says how many tries are left before the lock.
  */
 export async function checkContactPasscodeInTransaction(
   tx: DatabaseTransaction,
   input: { businessId: string; contactId: string; passcode: string },
-): Promise<{ status: "accepted" | "rejected" | "missing" } | { status: "locked"; justLocked: boolean }> {
+): Promise<{ status: "accepted" | "missing" } | { status: "rejected"; attemptsLeft: number } | { status: "locked"; justLocked: boolean }> {
   const where = and(eq(contactPasscodes.contactId, input.contactId), eq(contactPasscodes.businessId, input.businessId));
   const row = (await tx.select({ passcodeHash: contactPasscodes.passcodeHash, failedAttempts: contactPasscodes.failedAttempts, lockedAt: contactPasscodes.lockedAt }).from(contactPasscodes).where(where).limit(1).for("update"))[0];
   if (!row) return { status: "missing" };
@@ -161,7 +162,7 @@ export async function checkContactPasscodeInTransaction(
   const failedAttempts = row.failedAttempts + 1;
   const locked = failedAttempts >= CONTACT_PASSCODE_LOCK_ATTEMPTS;
   await tx.update(contactPasscodes).set({ failedAttempts, ...(locked ? { lockedAt: now } : {}), updatedAt: now }).where(where);
-  return locked ? { status: "locked", justLocked: true } : { status: "rejected" };
+  return locked ? { status: "locked", justLocked: true } : { status: "rejected", attemptsLeft: CONTACT_PASSCODE_LOCK_ATTEMPTS - failedAttempts };
 }
 
 /** Whether the contact has a PIN that isn't locked, read inside the caller's transaction. */

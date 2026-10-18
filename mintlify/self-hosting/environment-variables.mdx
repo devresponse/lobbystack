@@ -27,7 +27,7 @@ The name, logo, colour and outside links come from a brand folder under `brands/
 | Variable | Purpose |
 | --- | --- |
 | `APP_BASE_URL` | Set it on the admin and the worker, and pass it to the admin build as a Docker build argument, so the prerendered sign-in pages show the brand without first asking the server. |
-| `BRAND_PRESET` | The brand folder to use where no brand claims the domain, such as `alloplace` on `localhost` or a platform address. On a claimed domain it has no effect. Pass it to the admin build too. |
+| `BRAND_PRESET` | The brand folder to use where no brand claims the domain, such as `alloplace` on `localhost` or a platform address. On a claimed domain it has no effect. Set it on the admin and the worker, since the worker names texts and emails after the brand, and pass it to the admin build too. |
 | `BRAND_REQUIRED` | `true` makes the admin and worker refuse to start when no brand file matches. |
 
 Where no brand claims the domain and `BRAND_PRESET` is unset, the deployment shows LobbyStack, and its first owner picks a name and logo during onboarding.

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 
 import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
@@ -12,10 +12,19 @@ import type { DomainContext } from "./context";
 import { queueOperatorAlertInTransaction, type OperatorNotificationEventKey } from "./notifications";
 import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
+import { loadSmsReachInTransaction, smsHoldError } from "./sms";
 
 export { buildConversationSessionSummary, type CallSummaryLocale, type ConversationTranscriptTurn, type GeneratedCallSummary } from "./conversationSummary";
 
 const FACTUAL_OUTCOME_KINDS = new Set(["booked", "booking_in_progress", "message_taking"]);
+
+/**
+ * Closes a conversation. Nobody has it after that: a team member's take-over
+ * and a visitor's wait for a person end with it, so it leaves Action required.
+ */
+function closedConversation(now: Date) {
+  return { status: "closed", automationState: "ai_active", automationPausedAt: null, automationPausedByUserId: null, teamRequestedAt: null, updatedAt: now };
+}
 
 export type CallSummaryInput = {
   conversationId: string;
@@ -94,7 +103,7 @@ export async function finalizeConversationSession(
       await tx.update(contacts).set({ name: callerName, updatedAt: new Date() }).where(and(eq(contacts.id, call.contactId), eq(contacts.businessId, input.businessId), sql`${contacts.name} is null`));
     }
     const summaryText = summary.kind === "summary" ? summary.summary : summary.kind === "message_taking" ? summary.summary : undefined;
-    await tx.update(conversations).set({ status: "closed", ...(summaryText ? { summary: summaryText } : {}), revision: sql`${conversations.revision} + 1`, updatedAt: new Date() }).where(and(eq(conversations.id, call.conversationId), eq(conversations.businessId, input.businessId)));
+    await tx.update(conversations).set({ ...closedConversation(new Date()), ...(summaryText ? { summary: summaryText } : {}), revision: sql`${conversations.revision} + 1` }).where(and(eq(conversations.id, call.conversationId), eq(conversations.businessId, input.businessId)));
     await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "conversation", aggregateId: call.conversationId, dedupeKey: `conversation:${call.conversationId}:finalized:${session.id}`, payload: { type: "conversation.updated", entityId: call.conversationId } });
     await emitWebhookEventInTransaction(tx, { businessId: input.businessId, type: "call.completed", resourceId: input.callId });
     return { sessionId: session.id, finalized: true };
@@ -167,16 +176,59 @@ export async function insertMessageInTransaction(tx: DatabaseTransaction, input:
   return message.id;
 }
 
+/**
+ * The newer chat of the visitor a closed website chat belongs to: the chat
+ * they have open now. A chat closes when the visitor writes after a day
+ * without messages, and their widget shows the new chat from then on, so a
+ * reply belongs there.
+ */
+export async function findNewerWidgetChatInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string }): Promise<string | null> {
+  const [chat] = await tx.select({ widgetVisitorId: conversations.widgetVisitorId }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1);
+  if (!chat?.widgetVisitorId) return null;
+  const [newer] = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, chat.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"), ne(conversations.id, input.conversationId))).orderBy(desc(conversations.updatedAt)).limit(1);
+  return newer?.id ?? null;
+}
+
+/**
+ * Refuses a team member's reply or take-over in a website chat that closed:
+ * the visitor's widget no longer shows it, so they would never see the reply.
+ */
+async function refuseClosedChat(tx: DatabaseTransaction, input: { businessId: string; conversationId: string }): Promise<never> {
+  const newerChatId = await findNewerWidgetChatInTransaction(tx, input);
+  throw Object.assign(new Error(newerChatId
+    ? "This website chat is closed, so the visitor won't see a reply here. They started a new chat: reply there."
+    : "This website chat is closed, so the visitor won't see a reply here."), { status: 409, code: "chat_closed" });
+}
+
+/**
+ * Checks that a team member's reply can reach the conversation's customer:
+ * a website chat must be open, and a text must be one the worker would send
+ * (see loadSmsReachInTransaction), so a reply the customer would never get is
+ * refused with the reason instead of waiting forever. Locks the conversation,
+ * so a website chat can't close while the reply is saved.
+ */
+async function requireReachableConversation(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; channel: MessageInput["channel"] }): Promise<void> {
+  const [conversation] = await tx.select({ channel: conversations.channel, status: conversations.status }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
+  if (!conversation) throw Object.assign(new Error("Conversation not found."), { status: 404, code: "not_found" });
+  if (conversation.channel === "web_chat" && conversation.status !== "open") await refuseClosedChat(tx, input);
+  if (input.channel === "sms") {
+    const reach = await loadSmsReachInTransaction(tx, input);
+    if (!reach.ok) throw smsHoldError(reach.reason);
+  }
+}
+
 export async function appendMessage(
   context: DomainContext,
   input: MessageInput & { operatorAlert?: { eventKind: OperatorNotificationEventKey; subject: string; body: string } },
 ): Promise<string> {
+  const fromTeam = input.userId !== undefined && input.direction === "outbound";
   // A team member who writes in a website chat takes it over, so the AI stops answering alongside them.
-  const takesOver = input.userId !== undefined && input.direction === "outbound" && input.channel === "web_chat";
+  const takesOver = fromTeam && input.channel === "web_chat";
   const { messageId, takeOver } = await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
     if (input.userId) {
       await requireBusinessMembership(tx, { userId: input.userId, businessId: input.businessId, minimumRole: "scheduler" });
     }
+    if (fromTeam) await requireReachableConversation(tx, input);
     const id = await insertMessageInTransaction(tx, input);
     if (!id) {
       if (input.providerMessageId) {
@@ -244,8 +296,9 @@ export async function setAutomationState(
 ): Promise<void> {
   const change = await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, { ...input, minimumRole: "scheduler" });
-    const [current] = await tx.select({ channel: conversations.channel, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
+    const [current] = await tx.select({ channel: conversations.channel, status: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
     if (!current) return null;
+    if (input.state === "human_handoff" && current.channel === "web_chat" && current.status !== "open") await refuseClosedChat(tx, input);
     const now = new Date();
     // Either way, a visitor waiting for a person no longer waits: someone joined, or the AI has the chat back.
     await tx.update(conversations).set({ automationState: input.state, automationPausedAt: input.state === "human_handoff" ? now : null, automationPausedByUserId: input.state === "human_handoff" ? input.userId : null, teamRequestedAt: null, updatedAt: now }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
@@ -337,18 +390,28 @@ export async function registerWidgetVisitor(
 }
 
 /**
- * A website chat with no message for this long is over: the visitor's next
- * visit shows an empty chat, and their next message closes the old one and
- * starts a new one, which the receptionist answers.
+ * A website chat with no message, or team member taking it over, for this
+ * long is over: the visitor's next visit shows an empty chat, and their next
+ * message closes the old one and starts a new one, which the receptionist
+ * answers. Until then it stays open, so a page left open keeps showing it and
+ * still gets a team member's late reply.
  */
 export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
 
-/** The visitor's open website chat, and whether it went a day without messages. A chat without messages yet stays, however old. */
-async function openWidgetChat(tx: DatabaseTransaction, input: { businessId: string; widgetVisitorId: string; now: Date }) {
-  const [chat] = await tx.select({ id: conversations.id, automationState: conversations.automationState }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+/**
+ * The visitor's open website chat, and whether it went a day without messages
+ * or a take-over. A chat without messages yet stays, however old. With lock, a
+ * team member's reply or take-over being saved finishes first and counts, and
+ * one that comes after sees whether the chat closed.
+ */
+async function openWidgetChat(tx: DatabaseTransaction, input: { businessId: string; widgetVisitorId: string; now: Date; lock?: boolean }) {
+  const query = tx.select({ id: conversations.id, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+  const [chat] = input.lock ? await query.for("update") : await query;
   if (!chat) return undefined;
   const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, chat.id))).orderBy(desc(messages.createdAt)).limit(1);
-  return { ...chat, wentIdle: lastMessage !== undefined && input.now.getTime() - lastMessage.createdAt.getTime() >= WIDGET_CHAT_IDLE_CLOSE_MS };
+  // A team member who joins a quiet chat is in it, as if they had written.
+  const lastActiveAt = Math.max(lastMessage?.createdAt.getTime() ?? 0, chat.automationState === "human_handoff" ? chat.automationPausedAt?.getTime() ?? 0 : 0);
+  return { id: chat.id, automationState: chat.automationState, wentIdle: lastMessage !== undefined && input.now.getTime() - lastActiveAt >= WIDGET_CHAT_IDLE_CLOSE_MS };
 }
 
 export async function getOrCreateWidgetConversation(
@@ -368,10 +431,11 @@ export async function getOrCreateWidgetConversation(
       visitor = await lockVisitor();
     }
     if (!visitor) throw new Error("Widget visitor not found.");
-    let current = await openWidgetChat(tx, { ...input, now });
+    let current = await openWidgetChat(tx, { ...input, now, lock: true });
     if (current?.wentIdle) {
       await tx.update(conversationSessions).set({ status: "closed", closedAt: now, updatedAt: now }).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, current.id), eq(conversationSessions.status, "open")));
-      await tx.update(conversations).set({ status: "closed", updatedAt: now }).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
+      await tx.update(conversations).set(closedConversation(now)).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
+      await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "conversation", aggregateId: current.id, dedupeKey: `conversation:${current.id}:closed`, payload: { type: "conversation.updated", entityId: current.id } });
       current = undefined;
     }
     const conversationId = current?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
@@ -384,18 +448,20 @@ export async function getOrCreateWidgetConversation(
 }
 
 /**
- * The chat the visitor's widget shows: their open website chat, unless it went
- * a day without messages, since their next message starts a new one then.
- * Unlike getOrCreateWidgetConversation, never creates or closes a chat, so a
- * visitor who only looks leaves nothing behind.
+ * The chat the visitor's widget shows: their open website chat, and whether it
+ * went a day without messages, since their next message starts a new one then.
+ * An idle chat is still the visitor's until then, so a team member's late reply
+ * in it still reaches a page left open. Unlike getOrCreateWidgetConversation,
+ * never creates or closes a chat, so a visitor who only looks leaves nothing
+ * behind.
  */
-export async function findCurrentWidgetConversationId(
+export async function findCurrentWidgetChat(
   context: DomainContext,
   input: { businessId: string; widgetVisitorId: string; now?: Date },
-): Promise<string | null> {
+): Promise<{ conversationId: string; idle: boolean } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const chat = await openWidgetChat(tx, { ...input, now: input.now ?? new Date() });
-    return chat && !chat.wentIdle ? chat.id : null;
+    return chat ? { conversationId: chat.id, idle: chat.wentIdle } : null;
   });
 }
 

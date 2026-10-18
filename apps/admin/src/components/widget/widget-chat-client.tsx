@@ -50,9 +50,12 @@ type ChatHandling = { handoff: boolean; waitingForTeam: boolean; teamMemberName:
 const RECEPTIONIST_HANDLING: ChatHandling = { handoff: false, waitingForTeam: false, teamMemberName: null };
 
 type HistoryPayload = {
+  conversationId?: string;
   automationState?: string;
   waitingForTeam?: boolean;
   teamMemberName?: string | null;
+  /** The chat went a day without messages, so the visitor's next message starts a new one. */
+  idle?: boolean;
   messages?: Array<{ id: string; role: "user" | "assistant"; content: string; fromTeam?: boolean; teamMemberName?: string | null }>;
 };
 
@@ -162,10 +165,21 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const [handling, setHandling] = useState<ChatHandling>(RECEPTIONIST_HANDLING);
   const handoff = handling.handoff;
   const [voiceCaptions, setVoiceCaptions] = useState<VoiceCaptions>({ live: false, turns: [] });
+  // Whether the chat is on screen. The loader loads it when its panel first
+  // opens, or in the page's own element, and says when the panel opens or closes.
+  const [panelOpen, setPanelOpen] = useState(true);
   // Whether the server has the visitor's chat, which their first message
   // starts. The history says whether they have one; once the server answers a
   // message they most likely do, and the live updates stop if they don't.
   const [chatSaved, setChatSaved] = useState(false);
+  // Whether that chat went a day without messages. It stays open, so the live
+  // updates still bring a team member's late reply, but the visitor's next
+  // message starts a new chat.
+  const chatIdleRef = useRef(false);
+  // The chat on screen, which the history keeps even once it goes idle, and a
+  // count that reopens the live updates when the server starts a new chat.
+  const shownChatRef = useRef<string | null>(null);
+  const [streamGeneration, setStreamGeneration] = useState(0);
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
@@ -178,14 +192,14 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     }),
     prepareSendMessagesRequest: ({ messages }) => {
       const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+      // The receptionist replies in the language the widget shows.
+      const locale = normalizeInterfaceLocale(i18n.language);
       return {
         body: {
           visitorId: visitorIdRef.current || visitorId,
           messageId: lastUserMessage?.id ?? (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `m-${Date.now()}`),
           content: lastUserMessage ? messageText(lastUserMessage) : "",
-          // The reply language the AI uses only covers English and French. For
-          // other interface languages the server keeps its business default.
-          ...(i18n.language === "fr" || i18n.language === "en" ? { locale: i18n.language } : {}),
+          ...(locale ? { locale } : {}),
         },
       };
     },
@@ -225,6 +239,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       if (data && data.type === "visitor" && typeof data.visitorId === "string") {
         setParentVisitorId(data.visitorId);
       }
+      if (data && (data.type === "open" || data.type === "close")) setPanelOpen(data.type === "open");
       if (data && data.type === "session" && typeof data.token === "string" && typeof data.parentOrigin === "string" && event.origin === data.parentOrigin) {
         setSessionToken(data.token);
         setParentOrigin(data.parentOrigin);
@@ -274,6 +289,8 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
 
   const loadHistory = useCallback(async (signal?: AbortSignal) => {
     const url = new URL("/api/widget/history", window.location.origin);
+    // A chat that went a day without messages comes back only for the page that shows it.
+    if (shownChatRef.current) url.searchParams.set("chat", shownChatRef.current);
     try {
       const response = await fetch(url, { headers: { authorization: `Bearer ${sessionToken}`, "x-widget-parent-origin": parentOrigin ?? "" }, credentials: "include", signal: signal ?? null });
       if (!response.ok) return;
@@ -282,12 +299,20 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
       if (Array.isArray(data.messages)) {
         setChatSaved(data.messages.length > 0);
-        setMessages(data.messages.map((message) => ({
+        chatIdleRef.current = data.idle === true;
+        const shown = shownChatRef.current;
+        const current = data.messages.length > 0 ? data.conversationId ?? null : null;
+        shownChatRef.current = current;
+        // The live updates follow one chat, so a new one the server started
+        // in its place, as when the old one went idle, needs its own.
+        if (shown && current && shown !== current) setStreamGeneration((generation) => generation + 1);
+        const saved = data.messages.map((message): WidgetMessage => ({
           id: message.id,
           role: message.role === "assistant" ? "assistant" : "user",
           parts: [{ type: "text", text: message.content }],
           ...(message.role === "assistant" && message.fromTeam ? { metadata: { fromTeam: true, teamMemberName: message.teamMemberName ?? null } } : {}),
-        })));
+        }));
+        setMessages(saved);
       }
     } catch {
       /* transcript resume is best effort */
@@ -357,8 +382,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
 
-  // Once the visitor has a chat, an open stream tells the widget when a team
-  // member writes or takes over. It pauses while the page is in the background.
+  // Once the visitor has a chat on screen, even one that went idle on a page
+  // left open, an open stream tells the widget when a team member writes or
+  // takes over. It pauses while the page is in the background.
   const configLoaded = configState !== null;
   useEffect(() => {
     if (!sessionToken || !parentOrigin || !configLoaded || !chatSaved || !pageVisible) return;
@@ -388,7 +414,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken]);
+  }, [chatSaved, configLoaded, pageVisible, parentOrigin, refreshHistory, sessionToken, streamGeneration]);
 
   // New messages and each streamed piece of a reply scroll the thread to the
   // bottom, unless the visitor scrolled up to reread something. This runs
@@ -400,13 +426,15 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     if (thread && followThreadRef.current) thread.scrollTop = thread.scrollHeight;
   }, [chatLoaded, messages, status, voiceCaptions, submitError]);
 
-  // A live voice call or its captions are on screen. Typed messages come back
-  // from history after a reload; these don't, so the loader asks the visitor
-  // before the page reloads or closes.
+  // Leaving or reloading the page hangs up a live voice call, and its captions,
+  // unlike typed messages, don't come back from history. So the loader asks the
+  // visitor first while a call is live, or while the panel shows the captions
+  // of one. Captions in a closed panel aren't worth a prompt on every link.
   const voiceTranscriptShown = voiceCaptions.live || voiceCaptions.turns.length > 0;
+  const warnBeforeLeaving = voiceCaptions.live || (voiceCaptions.turns.length > 0 && panelOpen);
   useEffect(() => {
-    window.parent?.postMessage({ type: "leave-warning", enabled: voiceTranscriptShown }, "*");
-  }, [voiceTranscriptShown]);
+    window.parent?.postMessage({ type: "leave-warning", enabled: warnBeforeLeaving }, "*");
+  }, [warnBeforeLeaving]);
 
   // The loader's color holds until the settings arrive, so the chat never flashes the default color.
   const color = configState ? configState.config?.color ?? initialColor ?? DEFAULT_COLOR : initialColor ?? LOADING_COLOR;
@@ -421,6 +449,15 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     setSubmitError(null);
     setDraft("");
     followThreadRef.current = true;
+    if (chatIdleRef.current) {
+      // This message closes the idle chat and starts a new one, which the
+      // thread shows from here, as a reload would. The live updates follow
+      // the new chat once the server answers, as for a first message.
+      chatIdleRef.current = false;
+      shownChatRef.current = null;
+      setChatSaved(false);
+      setMessages([]);
+    }
     try {
       clearError();
       await sendMessage({ text: content });

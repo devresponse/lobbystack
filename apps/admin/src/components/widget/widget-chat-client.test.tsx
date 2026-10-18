@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
+// The language the widget shows, which a test can set.
+const widgetLanguage = vi.hoisted(() => ({ current: "en" }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { get language() { return widgetLanguage.current; }, changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
@@ -19,6 +21,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  widgetLanguage.current = "en";
 });
 
 /** A response the test sends when it chooses. */
@@ -262,6 +265,132 @@ describe("widget chat live updates", () => {
   });
 });
 
+describe("a website chat after a day without messages", () => {
+  const question = { id: "m1", role: "user", content: "Do you open on Sundays?" };
+  const answer = { id: "m2", role: "assistant", content: "We open at ten on Sundays." };
+  const lateReply = { id: "m3", role: "assistant", content: "Sorry for the wait, this is Yuri.", fromTeam: true, teamMemberName: "Yuri" };
+
+  /** Opens the widget with the history the test sets, and live update streams that send events when the test says. */
+  function openChat(firstHistory: object) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const chat = { history: firstHistory };
+    // As the server does, a chat that went idle comes back only to the page that shows it.
+    const history = vi.fn((url: string) => {
+      const { conversationId, idle } = chat.history as { conversationId?: string; idle?: boolean };
+      return idle && new URL(url).searchParams.get("chat") !== conversationId ? { messages: [] } : chat.history;
+    });
+    const encoder = new TextEncoder();
+    const streams: Array<{ signal: AbortSignal | null | undefined; send: (event: string) => void; end: () => void }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("/api/widget/history")) return Response.json(history(path));
+      if (path.includes("/api/widget/chat")) return streamedReply("We're open until six today.");
+      if (path.includes("/api/widget/stream")) {
+        let controller!: ReadableStreamDefaultController<Uint8Array>;
+        const body = new ReadableStream<Uint8Array>({ start(opened) { controller = opened; } });
+        streams.push({ signal: init?.signal, send: (event) => controller.enqueue(encoder.encode(`event: ${event}\ndata: {}\n\n`)), end: () => controller.close() });
+        return new Response(body, { headers: { "content-type": "text/event-stream" } });
+      }
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    /** A live update: the widget reloads the history, which then holds what the test says. */
+    const update = async (event: string, next: object, stream = streams.at(-1)!) => {
+      chat.history = next;
+      const reloads = history.mock.calls.length;
+      await act(async () => { stream.send(event); });
+      await vi.waitFor(() => expect(history.mock.calls.length).toBeGreaterThan(reloads));
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    };
+    return { client, chat, history, streams, update };
+  }
+
+  it("keeps the chat on a page left open, and still shows a team member's late reply", async () => {
+    const { client, history, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
+    expect(await screen.findByText(answer.content)).toBeTruthy();
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+
+    // A day passes without messages, and the stream's next "ready" reloads the history of the chat on screen.
+    await update("ready", { conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
+    expect(new URL(history.mock.calls.at(-1)![0]).searchParams.get("chat")).toBe("c1");
+    expect(screen.getByText(question.content)).toBeTruthy();
+    expect(screen.getByText(answer.content)).toBeTruthy();
+    expect(streams[0]!.signal?.aborted).toBe(false);
+
+    // The stream runs its course and the widget opens the next one, as it does every ten minutes.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => { streams[0]!.end(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(streams).toHaveLength(2));
+
+    await update("message", { conversationId: "c1", automationState: "human_handoff", teamMemberName: "Yuri", idle: false, messages: [question, answer, lateReply] });
+    expect(screen.getByText(lateReply.content)).toBeTruthy();
+    expect(screen.getByText("chat.teamMemberInChat Yuri")).toBeTruthy();
+    expect(screen.getByText(answer.content)).toBeTruthy();
+    client.clear();
+  });
+
+  it("opens empty on a new visit, and keeps no live updates open for the idle chat", async () => {
+    const { client, history, streams } = openChat({ conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
+    expect(await screen.findByText("chat.welcome")).toBeTruthy();
+    expect(screen.queryByText(answer.content)).toBeNull();
+    expect(new URL(history.mock.calls[0]![0]).searchParams.has("chat")).toBe(false);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(streams).toHaveLength(0);
+    client.clear();
+  });
+
+  it("starts a new chat with the visitor's next message, and follows that one", async () => {
+    const { client, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
+    expect(await screen.findByText(answer.content)).toBeTruthy();
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+    await update("ready", { conversationId: "c1", automationState: "ai_active", idle: true, messages: [question, answer] });
+
+    const composer = screen.getByRole("textbox", { name: "chat.composerPlaceholder" });
+    fireEvent.change(composer, { target: { value: "Are you open today?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+
+    expect(await screen.findByText("We're open until six today.")).toBeTruthy();
+    // The thread shows the new chat, as the server has it, and stops following the old one.
+    expect(screen.getByText("Are you open today?")).toBeTruthy();
+    expect(screen.queryByText(question.content)).toBeNull();
+    expect(screen.queryByText(answer.content)).toBeNull();
+    expect(streams[0]!.signal?.aborted).toBe(true);
+    // Once the server answered, the stream opens again for the new chat.
+    await vi.waitFor(() => expect(streams).toHaveLength(2));
+
+    await update("ready", { conversationId: "c2", automationState: "ai_active", idle: false, messages: [{ id: "n1", role: "user", content: "Are you open today?" }, { id: "n2", role: "assistant", content: "We're open until six today." }] });
+    expect(screen.getByText("We're open until six today.")).toBeTruthy();
+    expect(screen.queryByText(answer.content)).toBeNull();
+    client.clear();
+  });
+
+  it("follows a new chat the server started when the page hadn't heard the old one went idle", async () => {
+    const { client, streams, update } = openChat({ conversationId: "c1", automationState: "ai_active", idle: false, messages: [question, answer] });
+    expect(await screen.findByText(answer.content)).toBeTruthy();
+    await vi.waitFor(() => expect(streams).toHaveLength(1));
+
+    const composer = screen.getByRole("textbox", { name: "chat.composerPlaceholder" });
+    fireEvent.change(composer, { target: { value: "Are you open today?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+    expect(await screen.findByText("We're open until six today.")).toBeTruthy();
+
+    // The server closed the old chat, which its stream hears, and the history now has the new one.
+    await update("conversation", { conversationId: "c2", automationState: "ai_active", idle: false, messages: [{ id: "n1", role: "user", content: "Are you open today?" }, { id: "n2", role: "assistant", content: "We're open until six today." }] });
+    expect(screen.queryByText(answer.content)).toBeNull();
+    // The live updates move to the new chat.
+    await vi.waitFor(() => expect(streams).toHaveLength(2));
+    expect(streams[0]!.signal?.aborted).toBe(true);
+    client.clear();
+  });
+});
+
 describe("widget voice captions", () => {
   it("shows both sides of a live voice call in the chat thread and asks the loader to warn before leaving", async () => {
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
@@ -291,6 +420,50 @@ describe("widget voice captions", () => {
     expect(screen.getByText("chat.voiceLive")).toBeTruthy();
     expect(screen.getByRole("button", { name: "chat.voiceEnd" })).toBeTruthy();
     await vi.waitFor(() => expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*"));
+    postMessage.mockRestore();
+    client.clear();
+  });
+
+  it("asks before leaving during a call, and after it only while the panel shows its captions", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    const postMessage = vi.spyOn(window, "postMessage");
+    Element.prototype.scrollTo = () => {};
+    const transcript = [{ speaker: "assistant", text: "Hi, how can I help?" }, { speaker: "caller", text: "Are you open Sunday?" }];
+    const call = (status: "connected" | "idle") => vi.mocked(useWebVoiceCall).mockReturnValue({ status, errorKey: null, remoteAudioRef: { current: null }, transcript, startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+    call("connected");
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const widget = () => <QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>;
+    const view = render(widget());
+    const fromLoader = (data: object) => act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data }));
+    });
+    /** What the chat last told the loader: whether to ask before the page closes. */
+    const warns = () => postMessage.mock.calls.map(([message]) => message as { type?: string; enabled?: boolean }).filter((message) => message.type === "leave-warning").at(-1)?.enabled;
+    const callIs = (status: "connected" | "idle") => act(() => {
+      call(status);
+      view.rerender(widget());
+    });
+    fromLoader({ type: "session", token: "token", parentOrigin: "https://business.test", visitorId });
+
+    expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
+    await vi.waitFor(() => expect(warns()).toBe(true));
+    // The chat opens with its panel, so a finished call's captions are on screen.
+    callIs("idle");
+    expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
+    expect(warns()).toBe(true);
+    // With the panel closed, links on the site leave without asking, until it opens again.
+    fromLoader({ type: "close" });
+    expect(warns()).toBe(false);
+    fromLoader({ type: "open" });
+    expect(warns()).toBe(true);
+
+    // Leaving during a call hangs up, so the panel being closed doesn't matter then.
+    callIs("connected");
+    fromLoader({ type: "close" });
+    expect(warns()).toBe(true);
+    callIs("idle");
+    expect(warns()).toBe(false);
     postMessage.mockRestore();
     client.clear();
   });
@@ -526,6 +699,39 @@ describe("widget first load", () => {
     // The live updates bring anything new, so the renewal alone doesn't reload the history.
     expect(historyRequests).toHaveBeenCalledTimes(1);
     expect(screen.getByText(teamReply.content)).toBeTruthy();
+    client.clear();
+  });
+});
+
+describe("widget reply language", () => {
+  it.each([["es", "es"], ["sr", "sr"], ["fr-CA", "fr"], ["en", "en"]])("asks for replies in the language the widget shows, %s", async (language, locale) => {
+    widgetLanguage.current = language;
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const chatRequests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("/api/widget/history")) return Response.json({ messages: [] });
+      if (path.includes("/api/widget/chat")) {
+        chatRequests.push(JSON.parse(String(init?.body)));
+        return streamedReply("Claro.");
+      }
+      if (path.includes("/api/widget/stream")) return new Response(null, { status: 401 });
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: "¿Abren los domingos?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+
+    expect(await screen.findByText("Claro.")).toBeTruthy();
+    expect(chatRequests).toEqual([expect.objectContaining({ visitorId, content: "¿Abren los domingos?", locale })]);
     client.clear();
   });
 });

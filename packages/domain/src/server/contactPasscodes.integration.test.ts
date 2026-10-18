@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { afterAll, describe, expect, it } from "vitest";
-import { apiKeys, appointmentChangeVerifications, appointments, auditLogs, businessHours, businessMemberships, businesses, contactPasscodes, contacts, createDatabaseClient, receptionistProfiles, services, staff, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiKeys, appointmentChangeVerifications, appointments, auditLogs, businessHours, businessMemberships, businesses, calls, contactPasscodes, contacts, createDatabaseClient, receptionistProfiles, services, staff, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { isGuessableContactPasscode, type ApiContactPasscodesGenerate, type ApiContactPasscodesUpdate, type AppointmentChangeVerificationMode } from "@lobbystack/shared";
 
 import { createAppointmentChangeVerification, issueAppointmentChangeOtp, verifyAppointmentChangePasscode } from "./appointmentChanges";
@@ -43,8 +43,9 @@ const tomorrow = DateTime.utc().plus({ days: 1 }).set({ hour: 15, minute: 0, sec
 
 /**
  * A business open all day that lets callers cancel and reschedule from the
- * booking number with the given check, and Milan's cut tomorrow at 3 PM. The dashboard runs
- * as the app role and the call as the worker, both under RLS.
+ * booking number with the given check, Milan's cut tomorrow at 3 PM, and
+ * Milan's call. The dashboard runs as the app role and the call as the
+ * worker, both under RLS.
  */
 async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChangeVerificationMode = "passcode_required") {
   await tx.execute(sql`reset role`);
@@ -66,10 +67,16 @@ async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChange
   const asOwner = async () => { await tx.execute(sql`reset role`); };
   const contactId = milan!.id;
   const appointmentId = appointment!.id;
+  const startCall = async () => {
+    await asOwner();
+    return (await tx.insert(calls).values({ businessId, contactId, providerCallId: randomUUID(), transport: "pstn", startedAt: new Date() }).returning({ id: calls.id }))[0]!.id;
+  };
+  const callId = await startCall();
   return {
     businessId,
     contactId,
     appointmentId,
+    callId,
     userIds,
     setPin: async (passcode: string, userId = userIds.admin, forContact = contactId) => {
       await as("lobbystack_app");
@@ -100,10 +107,12 @@ async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChange
       // Rows from one transaction share a timestamp, so sort them by name.
       return (await tx.select({ eventType: auditLogs.eventType }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), sql`${auditLogs.eventType} like ${`${prefix}%`}`))).map((row) => row.eventType).sort();
     },
-    // What a phone call from the booking number runs, as the worker.
-    verify: async (action: "cancel" | "reschedule" = "cancel") => {
+    // Another call from the booking number, which may not be Milan's.
+    startCall,
+    // What a phone call from the booking number runs, as the worker. Milan's call by default; null for none.
+    verify: async (action: "cancel" | "reschedule" = "cancel", onCall: string | null = callId) => {
       await as("lobbystack_worker");
-      return await createAppointmentChangeVerification({ db }, { businessId, callerPhone: phone, action, serviceName: "Cut" });
+      return await createAppointmentChangeVerification({ db }, { businessId, callerPhone: phone, action, serviceName: "Cut", ...(onCall ? { callId: onCall } : {}) });
     },
     type: async (verificationId: string, passcode: string) => {
       await as("lobbystack_worker");
@@ -119,7 +128,7 @@ async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChange
     },
     verification: async (verificationId: string) => {
       await asOwner();
-      return (await tx.select({ status: appointmentChangeVerifications.status, attemptCount: appointmentChangeVerifications.attemptCount }).from(appointmentChangeVerifications).where(eq(appointmentChangeVerifications.id, verificationId)))[0];
+      return (await tx.select({ status: appointmentChangeVerifications.status, attemptCount: appointmentChangeVerifications.attemptCount, callId: appointmentChangeVerifications.callId }).from(appointmentChangeVerifications).where(eq(appointmentChangeVerifications.id, verificationId)))[0];
     },
     setMode: async (mode: AppointmentChangeVerificationMode) => {
       await asOwner();
@@ -244,8 +253,9 @@ describe.skipIf(!client)("appointment changes that need the keypad PIN", () => {
       expect(await type(first.verificationId, "111222")).toMatchObject({ ok: false, status: "failed", attemptsLeft: 0 });
       expect(await type(first.verificationId, pin)).toMatchObject({ ok: false, status: "failed" });
 
+      // This change has two tries left, but the lock comes after one more wrong PIN.
       const second = (await verify())!;
-      expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_pending", attemptsLeft: 2 });
+      expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_pending", attemptsLeft: 1 });
       expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_locked" });
       expect((await row())!.failedAttempts).toBe(5);
       expect((await detail()).passcode).toMatchObject({ locked: true });
@@ -289,6 +299,28 @@ describe.skipIf(!client)("appointment changes that need the keypad PIN", () => {
       expect(moving.expiresAt).toBe((await verify("reschedule"))!.expiresAt);
       expect(await verification(pending.verificationId)).toMatchObject({ status: "superseded" });
       expect(await reschedule(moving.verificationId)).not.toBeNull();
+    });
+  });
+
+  it("counts an accepted PIN only on the call that took it", async () => {
+    await rollbackTest(async (tx) => {
+      const { callId, setPin, verify, type, verification, startCall, appointmentStatus } = await seed(tx);
+      await setPin(pin);
+      const other = await startCall();
+      // Another call from the same number, which may be spoofed, needs the PIN
+      // again for either change while the one Milan typed is still good, and
+      // so does a check that names no call.
+      for (const [action, onCall] of [["cancel", other], ["reschedule", other], ["cancel", null]] as const) {
+        const typed = (await verify())!;
+        expect(await verification(typed.verificationId)).toMatchObject({ status: "passcode_pending", callId });
+        expect(await type(typed.verificationId, pin)).toMatchObject({ ok: true, status: "passcode_verified" });
+
+        const asked = (await verify(action, onCall))!;
+        expect(asked).toMatchObject({ status: "passcode_pending" });
+        expect(asked.verificationId).not.toBe(typed.verificationId);
+        expect(await verification(asked.verificationId)).toMatchObject({ callId: onCall });
+      }
+      expect(await appointmentStatus()).toBe("confirmed");
     });
   });
 

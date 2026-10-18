@@ -113,6 +113,24 @@ describe("public profile settings", () => {
     expect(saves(fetch)).toHaveLength(0);
   });
 
+  it("marks a field whose text hides or reorders what's around it, and keeps emoji", async () => {
+    const fetch = setup(view());
+    const city = await screen.findByLabelText("publicPage.details.city");
+    fireEvent.change(city, { target: { value: "Toronto\u202E" } });
+    fireEvent.click(screen.getByRole("button", { name: "publicPage.save" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("publicPage.errors.plainText");
+    expect(city.getAttribute("aria-invalid")).toBe("true");
+    expect(saves(fetch)).toHaveLength(0);
+
+    fireEvent.change(city, { target: { value: "Toronto" } });
+    expect(city.getAttribute("aria-invalid")).toBeNull();
+    // A soft hyphen pasted along is dropped; the joiners inside emoji stay.
+    fireEvent.change(screen.getByLabelText("publicPage.details.about"), { target: { value: "Family den\u00ADtistry \u{1F469}\u200D\u2695\uFE0F \u{1F3F3}\uFE0F\u200D\u{1F308}" } });
+    fireEvent.click(screen.getByRole("button", { name: "publicPage.save" }));
+    await waitFor(() => expect(saves(fetch)).toHaveLength(1));
+    expect(saves(fetch)[0]!.body).toMatchObject({ description: "Family dentistry \u{1F469}\u200D\u2695\uFE0F \u{1F3F3}\uFE0F\u200D\u{1F308}", address: expect.objectContaining({ city: "Toronto" }) });
+  });
+
   it("says when the chosen widget can't be used any more", async () => {
     setup(view(), () => Response.json({ error: "Choose one of this business's active website widgets.", code: "widget_key_unavailable" }, { status: 400 }));
     fireEvent.change(await screen.findByLabelText("publicPage.details.category"), { target: { value: "Dental clinic" } });

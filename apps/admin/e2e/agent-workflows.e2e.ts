@@ -7,6 +7,17 @@ import translations from "../public/locales/fr/agent.json" with { type: "json" }
 
 const state = process.env.PARITY_PORT_OPERATOR_STORAGE_STATE_FR;
 const userId = process.env.PARITY_OPERATOR_USER_ID;
+
+/**
+ * Matches copy whose {{appName}} the page fills with the deployment's app name.
+ * That name depends on the brand and on what onboarding saved, so any name
+ * passes, but a placeholder left unfilled doesn't.
+ */
+function withAppName(text: string): RegExp {
+  const pattern = text.split("{{appName}}").map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^{}]+");
+  return new RegExp(`^${pattern}$`);
+}
+
 test("service, rule and knowledge editors persist changes and enforce read-only membership", async ({ browser, baseURL }) => {
   test.skip(!state || !userId, "Requires an authenticated disposable operator fixture.");
   const database = createDatabaseClient("lobbystack_worker");
@@ -98,7 +109,7 @@ test("service, rule and knowledge editors persist changes and enforce read-only 
     // confirm step, and closing it grants nothing.
     await smsSwitch.click();
     await expect(dialog.getByRole("heading", { name: settings.notifications.phoneVerification.confirm.title, exact: true })).toBeVisible();
-    await expect(dialog.getByText(settings.notifications.phoneVerification.confirm.consent, { exact: true })).toBeVisible();
+    await expect(dialog.getByText(withAppName(settings.notifications.phoneVerification.confirm.consent))).toBeVisible();
     await dialog.getByRole("button", { name: settings.notifications.phoneVerification.cancel, exact: true }).click();
     await expect(dialog).toBeHidden();
     await expect(smsSwitch).not.toBeChecked();

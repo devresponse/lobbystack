@@ -1,7 +1,7 @@
 import { and, desc, eq, isNotNull } from "drizzle-orm";
 
 import { conversations, enqueueOutbox, messages, users, withBusinessTransaction } from "@lobbystack/db";
-import type { RuntimeLocale } from "@lobbystack/shared";
+import type { InterfaceLocale } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
@@ -33,10 +33,12 @@ export function teamChatWentQuiet(chat: { teamRequestedAt: Date | null; automati
   return now.getTime() - lastActiveAt >= TEAM_CHAT_QUIET_MS;
 }
 
-/** What the receptionist says when nobody from the team joined in time. */
-const NOBODY_JOINED: Record<RuntimeLocale, string> = {
+/** What the receptionist says when nobody from the team joined in time, in the widget's language. Serbian is in Latin script. */
+const NOBODY_JOINED: Record<InterfaceLocale, string> = {
   en: "Sorry, nobody from the team is free to join right now. If you'd like, leave your name and the best number to reach you, and someone will get back to you.",
   fr: "Désolé, personne de l'équipe n'est disponible pour le moment. Si vous le souhaitez, laissez votre nom et le meilleur numéro pour vous joindre, et quelqu'un vous recontactera.",
+  es: "Lo sentimos, ahora mismo nadie del equipo está disponible para unirse. Si lo desea, deje su nombre y el mejor número para contactarle, y alguien se pondrá en contacto con usted.",
+  sr: "Žao nam je, trenutno niko iz tima ne može da se pridruži. Ako želite, ostavite svoje ime i broj na kojem ste najlakše dostupni, i neko će Vam se javiti.",
 };
 
 export type TeamRequestOutcome =
@@ -51,7 +53,7 @@ export type TeamRequestOutcome =
  */
 export async function requestTeamForWidgetChat(
   context: DomainContext,
-  input: { businessId: string; conversationId: string; locale: RuntimeLocale; reason?: string; now?: Date },
+  input: { businessId: string; conversationId: string; locale: InterfaceLocale; reason?: string; now?: Date },
 ): Promise<TeamRequestOutcome> {
   const requestedAt = input.now ?? new Date();
   const reason = input.reason?.replace(/\s+/g, " ").trim().slice(0, 200);
@@ -101,7 +103,7 @@ export async function requestTeamForWidgetChat(
  */
 export async function expireTeamRequest(
   context: DomainContext,
-  input: { businessId: string; conversationId: string; requestedAt: Date; locale: RuntimeLocale },
+  input: { businessId: string; conversationId: string; requestedAt: Date; locale: InterfaceLocale },
 ): Promise<{ expired: boolean }> {
   const expired = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const [current] = await tx.select({ automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");

@@ -7,7 +7,7 @@ import { createReceptionistAgent } from "@lobbystack/agent-core/agent";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
 import { announceLateWidgetReply, appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, reserveWidgetChatUsageInTransaction, returnQuietTeamChat } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
-import { widgetChatRequestSchema, type BusinessContextSnapshot, type RuntimeLocale } from "@lobbystack/shared";
+import { normalizeInterfaceLocale, widgetChatRequestSchema, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
 
 import { getWorkerDatabase, readJson } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
@@ -20,6 +20,14 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 const SAFE_CHAT_ERROR = "The chat could not be processed.";
+
+/** The language the receptionist replies in, for each language the widget shows. */
+const REPLY_LANGUAGES: Record<InterfaceLocale, string> = {
+  en: "English",
+  fr: "French",
+  es: "Spanish",
+  sr: "Serbian in Latin script (not Cyrillic)",
+};
 
 function logGenerationFailure(cause: unknown): void {
   console.error("Widget chat generation failed", {
@@ -105,7 +113,9 @@ export async function POST(request: Request) {
           const snapshot = await getCachedBusinessSnapshot(context, { businessId: session.businessId });
           const activeSnapshot = snapshot ?? fallbackSnapshot(session);
           const history = await loadWidgetChatHistory(context, { businessId: session.businessId, conversationId });
-          const locale: RuntimeLocale = body.locale === "fr" || (!body.locale && (session.config.localeOverride === "fr" || session.defaultLocale === "fr")) ? "fr" : "en";
+          // The widget's language, which the visitor reads the chat in. A widget
+          // from before it sent one shows its settings' language, or the business's.
+          const locale: InterfaceLocale = body.locale ?? normalizeInterfaceLocale(session.config.localeOverride) ?? session.defaultLocale;
           const agent = createReceptionistAgent({
             model: model!,
             context: {
@@ -116,7 +126,7 @@ export async function POST(request: Request) {
               // With live chat on, a visitor who asks for a person can get someone from the team here.
               ...(session.config.liveChat?.enabled ? { liveChat: { locale, onTeamRequested: () => { teamRequested = true; } } } : {}),
             },
-            extraInstructions: `Reply in ${locale === "fr" ? "French" : "English"} unless the visitor clearly asks to switch languages.`,
+            extraInstructions: `Reply in ${REPLY_LANGUAGES[locale]} unless the visitor clearly asks to switch languages.`,
           });
           writer.write({ type: "text-start", id: assistantMessageId });
           const text: string[] = [];

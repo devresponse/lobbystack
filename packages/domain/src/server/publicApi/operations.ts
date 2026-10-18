@@ -213,19 +213,32 @@ export function callerAudit(caller: ApiCaller): ApiAudit {
 export async function resolveActingUserId(context: DomainContext, caller: ApiCaller): Promise<string> {
   if (caller.grantId !== undefined) return caller.userId;
   if (caller.platformKeyId !== undefined) return caller.actingUserId;
-  const { apiKeyId } = caller;
-  return await inBusiness(context, caller, async (tx) => {
-    const [key] = await tx.select({ createdByUserId: apiKeys.createdByUserId }).from(apiKeys).where(and(eq(apiKeys.id, apiKeyId), eq(apiKeys.businessId, caller.businessId))).limit(1);
-    const userId = key?.createdByUserId;
-    if (!userId) throw keyOwnerInactive();
-    try {
-      await requireBusinessAdmin(tx, { userId, businessId: caller.businessId });
-    } catch (error) {
-      if (error instanceof AuthorizationError) throw keyOwnerInactive();
-      throw error;
-    }
-    return userId;
-  });
+  return await inBusiness(context, caller, (tx) => actingUserIdInTransaction(tx, caller));
+}
+
+/** resolveActingUserId inside the transaction that acts, for a check that has to hold until it commits. */
+async function actingUserIdInTransaction(tx: DatabaseTransaction, caller: ApiCaller): Promise<string> {
+  if (caller.grantId !== undefined) return caller.userId;
+  if (caller.platformKeyId !== undefined) return caller.actingUserId;
+  const [key] = await tx.select({ createdByUserId: apiKeys.createdByUserId }).from(apiKeys).where(and(eq(apiKeys.id, caller.apiKeyId), eq(apiKeys.businessId, caller.businessId))).limit(1);
+  const userId = key?.createdByUserId;
+  if (!userId) throw keyOwnerInactive();
+  try {
+    await requireBusinessAdmin(tx, { userId, businessId: caller.businessId });
+  } catch (error) {
+    if (error instanceof AuthorizationError) throw keyOwnerInactive();
+    throw error;
+  }
+  return userId;
+}
+
+/**
+ * The person a team change acts for, checked under the team lock, so the key's
+ * creator can't be demoted or removed between the check and the change.
+ */
+async function teamActorInTransaction(tx: DatabaseTransaction, caller: ApiCaller): Promise<string> {
+  await lockBusinessTeam(tx, caller.businessId);
+  return await actingUserIdInTransaction(tx, caller);
 }
 
 function keyOwnerInactive(): PublicApiError {
@@ -749,19 +762,27 @@ export async function createTeamInvitationForApi(context: DomainContext, caller:
   });
 }
 
+/**
+ * Team changes, like invitations, need a per-business key whose creator is
+ * still an owner or admin, so a demoted or removed admin's key can't restore
+ * their role or change anyone else's.
+ */
 export async function revokeTeamInvitationForApi(context: DomainContext, caller: ApiCaller, invitationId: string): Promise<void> {
   await inBusiness(context, caller, async (tx) => {
+    await teamActorInTransaction(tx, caller);
     if (!await revokeInvitationInTransaction(tx, { businessId: caller.businessId, invitationId })) throw notFound("Invitation");
     await audit(tx, caller, { eventType: "api.team.invitation_revoked", entityType: "business_invitation", entityId: invitationId });
   });
 }
 
+/** Changes a member's role, as revokeTeamInvitationForApi checks. A member demoted below admin loses their API keys. */
 export async function updateTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string, input: ApiTeamMemberUpdate): Promise<ApiTeamMember> {
   return await inBusiness(context, caller, async (tx) => {
+    const actorUserId = await teamActorInTransaction(tx, caller);
     const current = await loadTeamMember(tx, caller.businessId, membershipId);
     if (!current) throw notFound("Team member");
     if (current.role === input.role) return current;
-    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role });
+    const outcome = await updateMemberRoleInTransaction(tx, { businessId: caller.businessId, membershipId, role: input.role, actorUserId });
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
     await audit(tx, caller, { eventType: "api.team.member_updated", entityType: "business_membership", entityId: membershipId, payload: { role: input.role, previousRole: current.role } });
@@ -769,9 +790,11 @@ export async function updateTeamMemberForApi(context: DomainContext, caller: Api
   });
 }
 
+/** Takes a member off the team with their API keys, as revokeTeamInvitationForApi checks. */
 export async function removeTeamMemberForApi(context: DomainContext, caller: ApiCaller, membershipId: string): Promise<void> {
   await inBusiness(context, caller, async (tx) => {
-    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
+    const actorUserId = await teamActorInTransaction(tx, caller);
+    const outcome = await removeMemberInTransaction(tx, { businessId: caller.businessId, membershipId, actorUserId }, async () => (await selectTeamMembers(tx, caller.businessId, membershipId).limit(1))[0]?.email);
     if (outcome === "not_found") throw notFound("Team member");
     if (outcome === "final_owner") throw lastOwner();
     await audit(tx, caller, { eventType: "api.team.member_removed", entityType: "business_membership", entityId: membershipId });

@@ -371,7 +371,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         if (isDisabledAuthEmailEndpoint(ctx.path) || isDisabledOAuthEndpoint(ctx.path)) {
           throw new APIError("NOT_FOUND", { message: "Endpoint not enabled." });
         }
-        if (needsMcpResource(ctx.path)) await ensureMcpResource(database.db);
+        if (needsMcpResource(ctx.path)) await ensureMcpResource(database.db, getEmailDatabase().db);
         const registration = registrationWithApplicationType(ctx.path, ctx.body);
         if (registration) return { context: { body: registration } };
         const resetRequestPaths = ["/request-password-reset", "/email-otp/request-password-reset"];

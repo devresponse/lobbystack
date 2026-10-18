@@ -59,8 +59,8 @@ Each endpoint except `GET /me` requires one scope. A key without it gets `403` w
 
 | Scope | Allows |
 | --- | --- |
-| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist`, `GET /rules`, `GET /onboarding`, `GET /widget-keys`, `GET /calendars`, `GET /calendars/{connection_id}/calendars`, `GET /notification-preferences` |
-| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` and `DELETE` on `/services/{service_id}`, `POST /rules`, `PATCH` and `DELETE` on `/rules/{rule_id}`, `POST /rules/reorder`, `PATCH /onboarding`, `POST /onboarding/complete`, `POST /widget-keys`, `PATCH /widget-keys/{widget_key_id}`, `POST /calendars/google/connect`, `PATCH` and `DELETE` on `/calendars/{connection_id}`, `PATCH /notification-preferences` |
+| `business:read` | `GET /business`, `GET /services`, `GET /staff`, `GET /receptionist`, `GET /rules`, `GET /onboarding`, `GET /widget-keys`, `GET /calendars`, `GET /calendars/{connection_id}/calendars`, `GET /notification-preferences`, `GET /public-profile` |
+| `business:write` | `PATCH /business`, `PATCH /receptionist`, `POST /services`, `PATCH` and `DELETE` on `/services/{service_id}`, `POST /rules`, `PATCH` and `DELETE` on `/rules/{rule_id}`, `POST /rules/reorder`, `PATCH /onboarding`, `POST /onboarding/complete`, `POST /widget-keys`, `PATCH /widget-keys/{widget_key_id}`, `POST /calendars/google/connect`, `PATCH` and `DELETE` on `/calendars/{connection_id}`, `PATCH /notification-preferences`, `PATCH /public-profile` |
 | `calls:read` | `GET /calls`, `GET /calls/{call_id}` |
 | `contacts:read` | `GET /contacts`, `GET /contacts/{contact_id}` |
 | `contacts:write` | `POST /contacts`, `PATCH /contacts/{contact_id}`, `POST /contacts/passcodes`, `POST /contacts/passcodes/generate` |
@@ -99,11 +99,15 @@ Without the header, the request returns `400` with the code `business_required`.
 
 `POST /team/claim-link` hands a business to its owner. Once they accept, a partner's key no longer reaches it, and an operator's key still does. Either way, `GET /businesses` stops listing it.
 
-Only a verified LobbyStack account can accept a claim link. For an owner who has none, `POST /users` makes an account with their email and emails them a link to set a password, which also verifies the email. Then send the claim link.
+Accepting also turns off the webhook endpoints the sender made and any that a platform key made, and disconnects the calendars the sender connected, so the business's data stops going to them. The owner sees what was turned off and can turn an endpoint back on in the dashboard.
+
+Only a verified LobbyStack account can accept a claim link. For an owner who has none, `POST /users` makes an account with their email and emails them a link to set a password, which also verifies the email. Then send the claim link. A platform key can create 20 accounts an hour.
 
 ## Revoke a key
 
 On **Settings** > **API keys**, click **Revoke** next to the key. Requests with it fail right away, and you can't undo it. Create a new key if you still need access.
+
+LobbyStack also revokes the keys someone made for a business when they leave its team, when their role changes to one below Admin, and when they hand the business over with a claim link. If a per-business key's creator is no longer an owner or admin, the key can't change the team or set keypad PINs: it gets `403` with the code `key_owner_inactive`.
 
 ## Rate limits
 

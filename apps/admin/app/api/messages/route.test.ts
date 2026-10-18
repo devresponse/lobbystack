@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   appendMessage: vi.fn(),
   setAutomationState: vi.fn(),
   findNewerWidgetChatInTransaction: vi.fn(),
+  loadSmsReachInTransaction: vi.fn(),
   /** What the thread query returns, newest first as the database does. */
   rows: [] as Array<Record<string, unknown>>,
 }));
@@ -26,7 +27,7 @@ vi.mock("@/lib/api-helpers", async (original) => ({
   withOperatorTransaction: async (_request: Request, callback: (input: { session: unknown; businessId: string; tx: unknown }) => Promise<unknown>) => await callback({ session: { user: { id: "user_1" } }, businessId, tx: threadTransaction() }),
 }));
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app" }) }));
-vi.mock("@lobbystack/domain", () => ({ appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction }));
+vi.mock("@lobbystack/domain", () => ({ appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction }));
 
 import { GET, PATCH, POST } from "./route";
 
@@ -37,12 +38,13 @@ function request(method: "POST" | "PATCH", body: Record<string, unknown>): Reque
 }
 
 function row(overrides: Record<string, unknown>) {
-  return { id: "m1", conversationId, contactName: null, contactPhone: null, visitorName: "Ada", visitorEmail: null, channel: "web_chat", conversationStatus: "open", automationState: "ai_active", teamRequestedAt: null, body: "Hi", direction: "inbound", status: "received", createdAt: new Date("2026-10-14T21:00:00.000Z"), ...overrides };
+  return { id: "m1", conversationId, contactName: null, contactPhone: null, visitorName: "Ada", visitorEmail: null, channel: "web_chat", conversationStatus: "open", automationState: "ai_active", teamRequestedAt: null, messageChannel: "web_chat", body: "Hi", direction: "inbound", status: "received", providerStatus: null, createdAt: new Date("2026-10-14T21:00:00.000Z"), ...overrides };
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.rows = [];
+  mocks.loadSmsReachInTransaction.mockResolvedValue({ ok: true, to: "+14165550134", from: "+14375550100" });
 });
 
 describe("POST /api/messages", () => {
@@ -54,6 +56,16 @@ describe("POST /api/messages", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: closedChat.message, code: "chat_closed" });
     expect(mocks.appendMessage).toHaveBeenCalledWith({ db: "app" }, { businessId, conversationId, body: "Yes, from 10 to 4.", direction: "outbound", channel: "web_chat", userId: "user_1" });
+  });
+
+  it("refuses a text that can't reach the contact, saying why", async () => {
+    const noConsent = Object.assign(new Error("This contact hasn't texted you or agreed to texts, so you can't text them."), { status: 409, code: "sms_no_consent" });
+    mocks.appendMessage.mockRejectedValue(noConsent);
+
+    const response = await POST(request("POST", { conversationId, body: "We can see you Friday at 3.", channel: "sms" }));
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({ error: noConsent.message, code: "sms_no_consent" });
   });
 });
 
@@ -76,15 +88,39 @@ describe("GET /api/messages?conversationId=", () => {
 
     const response = await GET(new Request(`http://localhost/api/messages?conversationId=${conversationId}`));
 
-    expect(await response.json()).toEqual({ messages: [expect.objectContaining({ conversationStatus: "closed" })], newerConversationId });
+    expect(await response.json()).toEqual({ messages: [expect.objectContaining({ conversationStatus: "closed" })], newerConversationId, smsReplyHold: null });
     expect(mocks.findNewerWidgetChatInTransaction).toHaveBeenCalledWith(expect.anything(), { businessId, conversationId });
+    expect(mocks.loadSmsReachInTransaction).not.toHaveBeenCalled();
+  });
+
+  it("shows why a text never went out, and why a reply can't be texted now", async () => {
+    const voice = { channel: "voice", conversationStatus: "closed", visitorName: null, contactPhone: "+14165550134" };
+    mocks.rows = [
+      row({ ...voice, id: "m3", messageChannel: "sms", direction: "outbound", status: "failed", providerStatus: "failed", body: "Are you free at 4?" }),
+      row({ ...voice, id: "m2", messageChannel: "sms", direction: "outbound", status: "failed", providerStatus: "held:opted_out", body: "We can see you Friday at 3." }),
+      row({ ...voice, id: "m1", messageChannel: "dashboard", body: "Please call me back about Friday." }),
+    ];
+    mocks.loadSmsReachInTransaction.mockResolvedValue({ ok: false, reason: "opted_out" });
+
+    const response = await GET(new Request(`http://localhost/api/messages?conversationId=${conversationId}`));
+    const body = await response.json() as { messages: Array<Record<string, unknown>>; smsReplyHold: string | null };
+
+    expect(body.messages.map(({ id, status, failureReason }) => ({ id, status, failureReason }))).toEqual([
+      { id: "m1", status: "received", failureReason: null },
+      { id: "m2", status: "failed", failureReason: "opted_out" },
+      // The carrier failed this one: its status is all there is to say.
+      { id: "m3", status: "failed", failureReason: null },
+    ]);
+    expect(body.messages[1]).not.toHaveProperty("providerStatus");
+    expect(body.smsReplyHold).toBe("opted_out");
+    expect(mocks.loadSmsReachInTransaction).toHaveBeenCalledWith(expect.anything(), { businessId, conversationId });
   });
 
   it("looks for no newer chat while a chat is open, or for a conversation that isn't a website chat", async () => {
     for (const thread of [row({}), row({ channel: "voice", conversationStatus: "closed" })]) {
       mocks.rows = [thread];
       const response = await GET(new Request(`http://localhost/api/messages?conversationId=${conversationId}`));
-      expect(await response.json()).toMatchObject({ newerConversationId: null });
+      expect(await response.json()).toMatchObject({ newerConversationId: null, smsReplyHold: null });
     }
     expect(mocks.findNewerWidgetChatInTransaction).not.toHaveBeenCalled();
   });

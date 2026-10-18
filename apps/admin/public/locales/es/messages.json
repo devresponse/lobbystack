@@ -51,7 +51,20 @@
     "uploadFailed": "No se pudo subir ese archivo adjunto.",
     "maxAttachments": "Puede enviar hasta {{count}} archivos adjuntos a la vez.",
     "partialAttachmentsAdded": "Solo se añadieron los primeros {{count}} archivos adjuntos.",
-    "deliveryFailed": "Error al enviar"
+    "deliveryFailed": "Error al enviar",
+    "statusSending": "Enviando",
+    "statusSent": "Enviado",
+    "statusDelivered": "Entregado",
+    "statusUndelivered": "No entregado",
+    "smsHoldPlaceholder": "No puede enviar SMS a este contacto.",
+    "smsHold": {
+      "noPhone": "Este contacto no tiene un número de teléfono al que enviar SMS.",
+      "blocked": "Este contacto está bloqueado, así que no recibe SMS.",
+      "optedOut": "Este contacto respondió STOP, así que no recibe SMS.",
+      "noConsent": "Este contacto no le ha escrito por SMS ni ha aceptado recibirlos, así que no puede enviarle uno.",
+      "noSender": "Su negocio no tiene ningún número que pueda enviar SMS.",
+      "rejected": "Este número no puede recibir SMS."
+    }
   },
   "outcome": {
     "label": "Resumen",

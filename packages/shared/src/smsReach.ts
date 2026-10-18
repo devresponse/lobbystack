@@ -17,3 +17,30 @@ export function permanentSmsErrorCode(error: unknown): number | undefined {
   const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
   return typeof code === "number" && PERMANENT_SMS_ERROR_CODES.has(code) ? code : undefined;
 }
+
+/**
+ * Why a text can't go to a contact: they have no phone number, the business
+ * blocked them, they texted STOP, they never agreed to texts and never texted
+ * the conversation, or the business has no number that can send texts.
+ */
+export type SmsHoldReason = "no_phone" | "blocked" | "opted_out" | "no_consent" | "no_sender";
+
+/** Why a text failed before it went out: it was held, or Twilio refused the number ("rejected"). */
+export type SmsFailureReason = SmsHoldReason | "rejected";
+
+const SMS_HOLD_REASONS: ReadonlySet<string> = new Set<SmsHoldReason>(["no_phone", "blocked", "opted_out", "no_consent", "no_sender"]);
+
+/**
+ * The provider status a text keeps when it fails before it goes out:
+ * "held:opted_out" for one held back, "rejected:21610" for one Twilio refused.
+ */
+export function failedSmsProviderStatus(failure: { held: SmsHoldReason } | { rejected: number }): string {
+  return "held" in failure ? `held:${failure.held}` : `rejected:${failure.rejected}`;
+}
+
+/** Why a text failed before it went out, read from its provider status. Null for any other text. */
+export function smsFailureReason(providerStatus: string | null | undefined): SmsFailureReason | null {
+  if (providerStatus?.startsWith("rejected:")) return "rejected";
+  const held = providerStatus?.startsWith("held:") ? providerStatus.slice("held:".length) : "";
+  return SMS_HOLD_REASONS.has(held) ? held as SmsHoldReason : null;
+}

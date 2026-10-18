@@ -12,6 +12,7 @@ import type { DomainContext } from "./context";
 import { queueOperatorAlertInTransaction, type OperatorNotificationEventKey } from "./notifications";
 import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
+import { loadSmsReachInTransaction, smsHoldError } from "./sms";
 
 export { buildConversationSessionSummary, type CallSummaryLocale, type ConversationTranscriptTurn, type GeneratedCallSummary } from "./conversationSummary";
 
@@ -200,14 +201,20 @@ async function refuseClosedChat(tx: DatabaseTransaction, input: { businessId: st
 }
 
 /**
- * Checks that a team member's reply can reach the conversation's customer.
- * Locks the conversation, so a website chat can't close while the reply is
- * saved.
+ * Checks that a team member's reply can reach the conversation's customer:
+ * a website chat must be open, and a text must be one the worker would send
+ * (see loadSmsReachInTransaction), so a reply the customer would never get is
+ * refused with the reason instead of waiting forever. Locks the conversation,
+ * so a website chat can't close while the reply is saved.
  */
-async function requireReachableConversation(tx: DatabaseTransaction, input: { businessId: string; conversationId: string }): Promise<void> {
+async function requireReachableConversation(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; channel: MessageInput["channel"] }): Promise<void> {
   const [conversation] = await tx.select({ channel: conversations.channel, status: conversations.status }).from(conversations).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).limit(1).for("update");
   if (!conversation) throw Object.assign(new Error("Conversation not found."), { status: 404, code: "not_found" });
   if (conversation.channel === "web_chat" && conversation.status !== "open") await refuseClosedChat(tx, input);
+  if (input.channel === "sms") {
+    const reach = await loadSmsReachInTransaction(tx, input);
+    if (!reach.ok) throw smsHoldError(reach.reason);
+  }
 }
 
 export async function appendMessage(

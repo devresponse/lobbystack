@@ -51,7 +51,20 @@
     "uploadFailed": "Impossible de téléverser cette pièce jointe.",
     "maxAttachments": "Vous pouvez envoyer jusqu'à {{count}} pièces jointes à la fois.",
     "partialAttachmentsAdded": "Seules les {{count}} premières pièces jointes ont été ajoutées.",
-    "deliveryFailed": "Échec de l'envoi"
+    "deliveryFailed": "Échec de l'envoi",
+    "statusSending": "Envoi en cours",
+    "statusSent": "Envoyé",
+    "statusDelivered": "Livré",
+    "statusUndelivered": "Non livré",
+    "smsHoldPlaceholder": "Vous ne pouvez pas envoyer de texto à ce contact.",
+    "smsHold": {
+      "noPhone": "Ce contact n'a aucun numéro de téléphone où envoyer un texto.",
+      "blocked": "Ce contact est bloqué : il ne reçoit pas de textos.",
+      "optedOut": "Ce contact a répondu STOP : il ne reçoit pas de textos.",
+      "noConsent": "Ce contact ne vous a pas écrit par texto et n'a pas accepté les textos : vous ne pouvez pas lui en envoyer.",
+      "noSender": "Votre entreprise n'a aucun numéro qui peut envoyer des textos.",
+      "rejected": "Ce numéro ne peut pas recevoir de textos."
+    }
   },
   "outcome": {
     "label": "Résumé",

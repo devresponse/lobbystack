@@ -5,10 +5,11 @@ import { useActiveBusiness } from "@/hooks/use-active-business";
 import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ArrowLeft, Bot, SearchIcon, Send, User } from "lucide-react";
+import { ArrowLeft, Bot, CircleAlert, SearchIcon, Send, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { SmsFailureReason, SmsHoldReason } from "@lobbystack/shared";
 
 import { PageHeader } from "@/components/page-header";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -22,7 +23,8 @@ import { useTelemetry } from "@/components/product-analytics";
 
 const PAGE_SIZE = 50;
 
-type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; conversationStatus?: string | null; automationState: string | null; teamRequestedAt?: string | null; body: string; direction: string; status: string; createdAt: string };
+// channel is the conversation's; messageChannel, in a thread, is how the message itself went, such as "sms" for a text.
+type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; conversationStatus?: string | null; automationState: string | null; teamRequestedAt?: string | null; messageChannel?: string | null; body: string; direction: string; status: string; failureReason?: SmsFailureReason | null; createdAt: string };
 
 /** A website visitor asked for a person and nobody from the team has joined yet. */
 function waitingForTeam(message: Message): boolean {
@@ -36,6 +38,20 @@ function closedChat(message: Message): boolean {
 
 function errorCode(error: unknown): string | undefined {
   return typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string" ? (error as { code: string }).code : undefined;
+}
+
+/** How the delivery of a text the team sent went, by its status, as keys in the messages namespace. */
+const textStatusKeys: Record<string, string> = { queued: "page.statusSending", sending: "page.statusSending", sent: "page.statusSent", delivered: "page.statusDelivered", undelivered: "page.statusUndelivered", failed: "page.deliveryFailed" };
+
+/** Why a text can't reach a contact, or why one failed before it went out, as keys in the messages namespace. */
+const smsHoldKeys: Record<SmsFailureReason, string> = { no_phone: "page.smsHold.noPhone", blocked: "page.smsHold.blocked", opted_out: "page.smsHold.optedOut", no_consent: "page.smsHold.noConsent", no_sender: "page.smsHold.noSender", rejected: "page.smsHold.rejected" };
+
+/** Why the server refused a reply, as a key: the chat closed, or the text can't reach the contact ("sms_opted_out"). */
+function refusalKey(error: unknown): string | undefined {
+  const code = errorCode(error);
+  if (code === "chat_closed") return "page.closedReplyRefused";
+  const reason = code?.startsWith("sms_") ? code.slice("sms_".length) : "";
+  return Object.hasOwn(smsHoldKeys, reason) ? smsHoldKeys[reason as SmsFailureReason] : undefined;
 }
 
 function initials(name: string | null, fallback: string): string {
@@ -57,6 +73,14 @@ function conversationSubtitle(message: Message, t: (key: string) => string): str
 /** A conversation as the list shows it, from its latest message. */
 function conversationOf(latest: Message, locale: string, t: (key: string) => string) {
   return { id: latest.conversationId, latest, displayName: conversationName(latest, locale, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" };
+}
+
+/** One message in the thread. A text the team sent shows how its delivery went, and why it failed when it never went out. */
+function MessageBubble({ message, locale, t }: { message: Message; locale: string; t: (key: string) => string }) {
+  const outbound = message.direction === "outbound";
+  const statusKey = outbound && message.messageChannel === "sms" ? textStatusKeys[message.status] : undefined;
+  const failed = message.status === "failed" || message.status === "undelivered";
+  return <div className={cn("flex", outbound ? "justify-end" : "justify-start")}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", outbound ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] opacity-70"><span>{formatDateTime(message.createdAt, locale, { hour: "numeric", minute: "2-digit" })}</span>{statusKey ? <span className="inline-flex items-center gap-1">{failed ? <CircleAlert className="size-3" /> : null}{t(statusKey)}</span> : null}</p>{message.failureReason ? <p className="mt-1 text-[11px]">{t(smsHoldKeys[message.failureReason])}</p> : null}</div></div>;
 }
 
 export function LiveMessagesSurface() {
@@ -81,12 +105,12 @@ export function LiveMessagesSurface() {
   });
   const thread = useQuery({
     queryKey: ["messages", business?.businessId, "thread", selectedId],
-    queryFn: () => requestJson<{ messages: Message[]; newerConversationId?: string | null }>(`/api/messages?conversationId=${encodeURIComponent(selectedId!)}`),
+    queryFn: () => requestJson<{ messages: Message[]; newerConversationId?: string | null; smsReplyHold?: SmsHoldReason | null }>(`/api/messages?conversationId=${encodeURIComponent(selectedId!)}`),
     enabled: Boolean(business && selectedId),
   });
-  // A refusal means the conversation changed since it loaded, such as a website chat that closed: show it as it is now.
+  // A refusal means the conversation changed since it loaded, such as a website chat that closed or a contact who texted STOP: show it as it is now.
   const refreshAfterRefusal = (error: unknown) => {
-    if (errorCode(error) === "chat_closed") void queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] });
+    if (refusalKey(error)) void queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] });
   };
   const send = useMutation({
     mutationFn: async () => {
@@ -99,7 +123,7 @@ export function LiveMessagesSurface() {
       await queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] });
     },
     onError: (error) => {
-      toast.error(t(errorCode(error) === "chat_closed" ? "page.closedReplyRefused" : "page.sendFailed"));
+      toast.error(t(refusalKey(error) ?? "page.sendFailed"));
       refreshAfterRefusal(error);
     },
   });
@@ -134,6 +158,9 @@ export function LiveMessagesSurface() {
   const selectedWaiting = selected ? waitingForTeam(selected.latest) : false;
   const selectedClosed = selected ? closedChat(selected.latest) : false;
   const newerConversationId = selectedClosed ? thread.data?.newerConversationId ?? null : null;
+  // Replies outside website chats go by text, voice messages included: why a text can't reach this contact, if it can't.
+  const selectedSmsHold = selected && selected.channel !== "web_chat" ? thread.data?.smsReplyHold ?? null : null;
+  const replyBlocked = selectedClosed || selectedSmsHold !== null;
 
   function openConversation(conversationId: string, channel: string) {
     if (business) telemetry.track("web.messages.thread_opened", { businessId: business.businessId, conversationId, channel });
@@ -142,7 +169,7 @@ export function LiveMessagesSurface() {
 
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (draft.trim() && !selectedClosed) send.mutate();
+    if (draft.trim() && !replyBlocked) send.mutate();
   }
 
   return (
@@ -161,7 +188,7 @@ export function LiveMessagesSurface() {
         </div>
       </div>
       <div className={cn("hidden min-w-0 w-full flex-1 flex-col border bg-background sm:flex sm:rounded-md", selected && "flex")}>
-        {selected ? <><div className="flex items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div>{selectedClosed ? <div className="ml-auto flex items-center"><span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{t("page.closedBadge")}</span></div> : selected.channel === "web_chat" ? <div className="ml-auto flex items-center gap-2"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></div> : null}</div>{selectedClosed ? <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"><p>{t(newerConversationId ? "page.closedNewerDescription" : "page.closedDescription")}</p>{newerConversationId ? <Button onClick={() => openConversation(newerConversationId, "web_chat")} size="sm" variant="outline">{t("page.openNewerChat")}</Button> : null}</div> : selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <div className={cn("flex", message.direction === "outbound" ? "justify-end" : "justify-start")} key={message.id}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", message.direction === "outbound" ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 text-[11px] opacity-70">{formatDateTime(message.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</p></div></div>)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" disabled={selectedClosed} onChange={(event) => setDraft(event.target.value)} placeholder={selectedClosed ? t("page.closedComposerPlaceholder") : selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim() || selectedClosed} loading={send.isPending} size="icon-lg" type="submit"><Send /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
+        {selected ? <><div className="flex items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div>{selectedClosed ? <div className="ml-auto flex items-center"><span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{t("page.closedBadge")}</span></div> : selected.channel === "web_chat" ? <div className="ml-auto flex items-center gap-2"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></div> : null}</div>{selectedClosed ? <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"><p>{t(newerConversationId ? "page.closedNewerDescription" : "page.closedDescription")}</p>{newerConversationId ? <Button onClick={() => openConversation(newerConversationId, "web_chat")} size="sm" variant="outline">{t("page.openNewerChat")}</Button> : null}</div> : selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : selectedSmsHold ? <p className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{t(smsHoldKeys[selectedSmsHold])}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <MessageBubble key={message.id} locale={i18n.language} message={message} t={t} />)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" disabled={replyBlocked} onChange={(event) => setDraft(event.target.value)} placeholder={selectedClosed ? t("page.closedComposerPlaceholder") : selectedSmsHold ? t("page.smsHoldPlaceholder") : selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim() || replyBlocked} loading={send.isPending} size="icon-lg" type="submit"><Send /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
       </div>
     </section>
   );

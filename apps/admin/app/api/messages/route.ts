@@ -2,8 +2,8 @@ import { and, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { contacts, conversations, messages, widgetVisitors } from "@lobbystack/db";
-import { appendMessage, findNewerWidgetChatInTransaction, setAutomationState } from "@lobbystack/domain";
-import { isUuid } from "@lobbystack/shared";
+import { appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, setAutomationState } from "@lobbystack/domain";
+import { isUuid, smsFailureReason } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -13,7 +13,8 @@ const conversationFields = { conversationId: conversations.id, contactName: cont
 
 /**
  * Without conversationId: one row per conversation (its latest message), newest first, paged. With it: that thread,
- * and for a website chat that closed, the visitor's newer chat, where a reply reaches them.
+ * each text with why it failed when it never went out, and where a reply goes: for a website chat that closed, the
+ * visitor's newer chat; for any other conversation, which takes replies by text, why a text can't reach the contact.
  */
 export async function GET(request: Request) {
   try {
@@ -23,9 +24,15 @@ export async function GET(request: Request) {
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       if (conversationId) {
         // shortcut: returns the newest 500 messages of a thread; add "load older" paging if threads grow past that.
-        const thread = await tx.select({ id: messages.id, ...conversationFields, body: messages.body, direction: messages.direction, status: messages.status, createdAt: messages.createdAt }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id)).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId))).orderBy(desc(messages.createdAt)).limit(500);
-        const closedChat = thread[0]?.channel === "web_chat" && thread[0].conversationStatus !== "open";
-        return { messages: thread.reverse(), newerConversationId: closedChat ? await findNewerWidgetChatInTransaction(tx, { businessId, conversationId }) : null };
+        const thread = await tx.select({ id: messages.id, ...conversationFields, messageChannel: messages.channel, body: messages.body, direction: messages.direction, status: messages.status, providerStatus: messages.providerStatus, createdAt: messages.createdAt }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id)).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId))).orderBy(desc(messages.createdAt)).limit(500);
+        const conversation = thread[0];
+        const closedChat = conversation?.channel === "web_chat" && conversation.conversationStatus !== "open";
+        const smsReach = conversation && conversation.channel !== "web_chat" ? await loadSmsReachInTransaction(tx, { businessId, conversationId }) : null;
+        return {
+          messages: thread.reverse().map(({ providerStatus, ...message }) => ({ ...message, failureReason: message.status === "failed" ? smsFailureReason(providerStatus) : null })),
+          newerConversationId: closedChat ? await findNewerWidgetChatInTransaction(tx, { businessId, conversationId }) : null,
+          smsReplyHold: smsReach && !smsReach.ok ? smsReach.reason : null,
+        };
       }
       const limit = Math.min(Math.max(Math.trunc(Number(url.searchParams.get("limit")) || 50), 1), 100);
       const offset = Math.max(Math.trunc(Number(url.searchParams.get("offset")) || 0), 0);

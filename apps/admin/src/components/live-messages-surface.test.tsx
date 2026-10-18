@@ -164,3 +164,66 @@ describe("a website chat that closed", () => {
     expect((screen.getByPlaceholderText("page.closedComposerPlaceholder") as HTMLInputElement).value).toBe("Yes, from 10 to 4.");
   });
 });
+
+describe("texts the team sends", () => {
+  const voice = { conversationId: "caller", contactName: "Ada Caller", contactPhone: "+14165550134", visitorName: null, visitorEmail: null, channel: "voice", conversationStatus: "closed", automationState: "ai_active", createdAt: "2026-09-01T12:00:00Z" };
+  const text = (id: string, body: string, status: string, failureReason: string | null = null) => ({ ...voice, id, messageChannel: "sms", body, direction: "outbound", status, failureReason });
+  const note = { ...voice, id: "m-note", messageChannel: "dashboard", body: "Please call me back about Friday.", direction: "inbound", status: "received", failureReason: null };
+
+  /** Shows the inbox with a caller's voice-message thread, as the server returns it on each load, and its answer to a reply. */
+  function showCallerThread(thread: (loads: number) => Record<string, unknown>, post?: () => Response) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    let threadLoads = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "POST") return post!();
+      if (new URL(url, "http://admin.test").searchParams.get("conversationId")) return Response.json(thread(threadLoads++));
+      return Response.json({ messages: [note], hasNext: false });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveMessagesSurface /></QueryClientProvider>);
+    return fetchMock;
+  }
+
+  it("shows how each one is going, and why a failed one never went out", async () => {
+    showCallerThread(() => ({ messages: [note, text("m1", "We can see you Friday at 3.", "delivered"), text("m2", "Does 4 work instead?", "failed", "opted_out"), text("m3", "Or Saturday?", "failed"), text("m4", "See you then.", "queued")], newerConversationId: null, smsReplyHold: null }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+
+    expect((await screen.findByText("We can see you Friday at 3.")).parentElement!.textContent).toContain("page.statusDelivered");
+    const held = screen.getByText("Does 4 work instead?").parentElement!.textContent;
+    expect(held).toContain("page.deliveryFailed");
+    expect(held).toContain("page.smsHold.optedOut");
+    // A text the carrier failed has its status, and no reason to give.
+    expect(screen.getByText("Or Saturday?").parentElement!.textContent).not.toContain("page.smsHold");
+    expect(screen.getByText("See you then.").parentElement!.textContent).toContain("page.statusSending");
+    // A voice message the receptionist took isn't a text. (The list shows it too, above the thread.)
+    expect(screen.getAllByText("Please call me back about Friday.").at(-1)!.parentElement!.textContent).not.toContain("page.status");
+  });
+
+  it("says why a caller who left a voice message can't be texted, and takes no reply", async () => {
+    showCallerThread(() => ({ messages: [note], newerConversationId: null, smsReplyHold: "no_consent" }));
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+
+    expect(await screen.findByText("page.smsHold.noConsent")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.smsHoldPlaceholder") as HTMLInputElement).disabled).toBe(true);
+  });
+
+  it("says why a reply wasn't sent when the contact can no longer get texts", async () => {
+    const fetchMock = showCallerThread((loads) => ({ messages: [note], newerConversationId: null, smsReplyHold: loads === 0 ? null : "opted_out" }), () => Response.json({ error: "This contact texted STOP, so they don't get texts.", code: "sms_opted_out" }, { status: 409 }));
+    const { toast } = await import("sonner");
+    const toastError = vi.spyOn(toast, "error");
+
+    await userEvent.click(await screen.findByRole("button", { name: /Ada Caller/ }));
+    await userEvent.type(screen.getByPlaceholderText("page.composerPlaceholderSms"), "We can see you Friday at 3.");
+    await userEvent.click(screen.getByRole("button", { name: "page.send" }));
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("page.smsHold.optedOut"));
+    expect(fetchMock).toHaveBeenCalledWith("/api/messages?businessId=business", expect.objectContaining({ method: "POST", body: JSON.stringify({ conversationId: "caller", body: "We can see you Friday at 3.", channel: "sms" }) }));
+    // The thread reloads with the reason, and keeps the draft.
+    expect(await screen.findByText("page.smsHold.optedOut")).toBeTruthy();
+    expect((screen.getByPlaceholderText("page.smsHoldPlaceholder") as HTMLInputElement).value).toBe("We can see you Friday at 3.");
+  });
+});

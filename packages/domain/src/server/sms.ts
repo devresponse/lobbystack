@@ -1,7 +1,7 @@
-import { and, eq, inArray, isNotNull, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
 import { contacts, conversationSessions, conversations, enqueueOutbox, messages, phoneNumbers, providerEvents, smsConsentEvents, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { brandLinks, contactEmailFor, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, failedSmsProviderStatus, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition, type SmsHoldReason } from "@lobbystack/shared";
 
 import { deploymentAppName } from "./branding";
 import { findOrCreateContactByPhone } from "./contacts";
@@ -208,29 +208,62 @@ export async function smsDeliveryLeaseEndsAt(context: DomainContext, input: { bu
   });
 }
 
-/** Whether the contact texted the conversation an outbound text belongs to, so the text answers them. */
-function contactTextedConversationSql(businessId: string) {
-  return sql<boolean>`exists (select 1 from ${messages} as "contact_texts" where "contact_texts"."business_id" = ${businessId} and "contact_texts"."conversation_id" = ${messages.conversationId} and "contact_texts"."direction" = 'inbound' and "contact_texts"."channel" = 'sms')`;
-}
+/** Whether a text can go to a conversation's contact now: where to and from, or why not. */
+export type SmsReach = { ok: true; to: string; from: string } | { ok: false; reason: SmsHoldReason };
 
 /**
- * Where and what to text for a queued outbound text, or null when it can't go
- * out. A text the business starts needs the contact's yes. HELP and START
- * answers don't, and neither does a reply in a conversation the contact
- * texted: declining was about appointment texts, so only an opt-out stops
- * it. A blocked contact gets nothing.
+ * Whether a text can go to a conversation's contact now, by the rules every
+ * text to a contact follows, whether a team member is writing it or the
+ * worker is about to send it. A text the business starts needs the contact's
+ * yes. HELP and START answers don't, and neither does a reply in a
+ * conversation the contact texted: declining was about appointment texts, so
+ * only an opt-out stops it. A blocked contact gets nothing.
  */
-export async function loadSmsDeliveryTarget(db: Database, input: { businessId: string; messageId: string }): Promise<{ to: string; from: string; body: string } | null> {
+export async function loadSmsReachInTransaction(tx: DatabaseTransaction, input: { businessId: string; conversationId: string; complianceReply?: boolean }): Promise<SmsReach> {
+  const [contact] = await tx.select({ phone: contacts.phone, blockedAt: contacts.operatorBlockedAt, consent: contacts.smsConsentStatus })
+    .from(conversations)
+    .innerJoin(contacts, and(eq(contacts.id, conversations.contactId), eq(contacts.businessId, input.businessId)))
+    .where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)))
+    .limit(1);
+  if (!contact?.phone) return { ok: false, reason: "no_phone" };
+  if (contact.blockedAt) return { ok: false, reason: "blocked" };
+  if (!input.complianceReply && contact.consent !== "subscribed") {
+    const replyAllowed = contact.consent === null || contact.consent === "declined";
+    const [contactText] = replyAllowed ? await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, input.conversationId), eq(messages.direction, "inbound"), eq(messages.channel, "sms"))).limit(1) : [];
+    if (!contactText) return { ok: false, reason: contact.consent === "opted_out" ? "opted_out" : "no_consent" };
+  }
+  const [sender] = await tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.smsEnabled, true))).limit(1);
+  if (!sender) return { ok: false, reason: "no_sender" };
+  return { ok: true, to: contact.phone, from: sender.e164 };
+}
+
+const smsHoldMessages: Record<SmsHoldReason, string> = {
+  no_phone: "This contact has no phone number to text.",
+  blocked: "This contact is blocked, so they don't get texts.",
+  opted_out: "This contact texted STOP, so they don't get texts.",
+  no_consent: "This contact hasn't texted you or agreed to texts, so you can't text them.",
+  no_sender: "This business has no number that can send texts.",
+};
+
+/** The refusal of a team member's text that can't reach the contact, with the reason in its code: "sms_opted_out". */
+export function smsHoldError(reason: SmsHoldReason): Error & { status: number; code: string } {
+  return Object.assign(new Error(smsHoldMessages[reason]), { status: 409, code: `sms_${reason}` });
+}
+
+/** What the worker does with a claimed text: send it, fail it with the reason it's held, or nothing (null) when it's gone. */
+export type SmsDeliveryTarget = { ok: true; to: string; from: string; body: string } | { ok: false; reason: SmsHoldReason };
+
+/**
+ * Where and what to text for a queued outbound text, or why it can't go out
+ * (see loadSmsReachInTransaction). Null when the text is gone or no longer
+ * waits to be sent.
+ */
+export async function loadSmsDeliveryTarget(db: Database, input: { businessId: string; messageId: string }): Promise<SmsDeliveryTarget | null> {
   return await withBusinessTransaction(db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const row = (await tx.select({ to: contacts.phone, from: phoneNumbers.e164, body: messages.body })
-      .from(messages)
-      .innerJoin(conversations, and(eq(conversations.id, messages.conversationId), eq(conversations.businessId, input.businessId)))
-      .innerJoin(contacts, and(eq(contacts.id, conversations.contactId), eq(contacts.businessId, input.businessId)))
-      .innerJoin(phoneNumbers, and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.smsEnabled, true)))
-      .where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.direction, "outbound"), eq(messages.channel, "sms"), isNull(contacts.operatorBlockedAt), isNotNull(contacts.phone), or(eq(contacts.smsConsentStatus, "subscribed"), eq(messages.providerStatus, "compliance_reply"), and(or(isNull(contacts.smsConsentStatus), eq(contacts.smsConsentStatus, "declined")), contactTextedConversationSql(input.businessId))), inArray(messages.status, ["queued", "sending"])))
-      .limit(1))[0];
-    if (!row || row.to === null) return null;
-    return { to: row.to, from: row.from, body: row.body };
+    const [message] = await tx.select({ conversationId: messages.conversationId, body: messages.body, providerStatus: messages.providerStatus }).from(messages).where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.direction, "outbound"), eq(messages.channel, "sms"), inArray(messages.status, ["queued", "sending"]))).limit(1);
+    if (!message) return null;
+    const reach = await loadSmsReachInTransaction(tx, { businessId: input.businessId, conversationId: message.conversationId, complianceReply: message.providerStatus === "compliance_reply" });
+    return reach.ok ? { ...reach, body: message.body } : reach;
   });
 }
 
@@ -270,6 +303,28 @@ export async function releaseSmsDelivery(context: DomainContext, input: { busine
     await tx.update(messages)
       .set({ status: "queued", revision: sql`${messages.revision} + 1`, updatedAt: new Date() })
       .where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.status, "sending")));
+  });
+}
+
+async function queueSmsFailedAlertInTransaction(tx: DatabaseTransaction, input: { businessId: string; messageId: string }): Promise<void> {
+  await queueOperatorAlertInTransaction(tx, { businessId: input.businessId, eventKind: "smsFailed", eventKey: `smsFailed:${input.messageId}`, subject: "SMS delivery failed", body: "A message could not be delivered. Open the inbox to review it." });
+}
+
+/**
+ * Fails a claimed text that won't go out, keeping why in its provider status
+ * (see failedSmsProviderStatus): the contact can't get texts now, such as
+ * after texting STOP, or Twilio refused the number. The thread shows the
+ * reason, and the team gets the failed-text alert.
+ */
+export async function markSmsFailed(context: DomainContext, input: { businessId: string; messageId: string; failure: { held: SmsHoldReason } | { rejected: number } }): Promise<void> {
+  await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const [failed] = await tx.update(messages)
+      .set({ status: "failed", providerStatus: failedSmsProviderStatus(input.failure), revision: sql`${messages.revision} + 1`, updatedAt: new Date() })
+      .where(and(eq(messages.id, input.messageId), eq(messages.businessId, input.businessId), eq(messages.status, "sending")))
+      .returning({ id: messages.id });
+    if (!failed) return;
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "message", aggregateId: failed.id, dedupeKey: `message:${failed.id}:delivery:failed`, payload: { type: "message.deliveryUpdated", entityId: failed.id } });
+    await queueSmsFailedAlertInTransaction(tx, { businessId: input.businessId, messageId: failed.id });
   });
 }
 
@@ -316,7 +371,7 @@ export async function updateSmsDeliveryStatus(
         payload: { providerMessageId: input.providerMessageId, providerStatus: input.providerStatus },
       });
     }
-    if (nextStatus === "failed" || nextStatus === "undelivered") await queueOperatorAlertInTransaction(tx, { businessId: input.businessId, eventKind: "smsFailed", eventKey: `smsFailed:${current.id}`, subject: "SMS delivery failed", body: "A message could not be delivered. Open the inbox to review it." });
+    if (nextStatus === "failed" || nextStatus === "undelivered") await queueSmsFailedAlertInTransaction(tx, { businessId: input.businessId, messageId: current.id });
     return true;
   });
 }

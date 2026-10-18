@@ -8,7 +8,7 @@ import { realtimeEventSchema, type JobEnvelope } from "@lobbystack/contracts";
 import { getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, type BillingUsageKind } from "@lobbystack/shared";
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
@@ -502,11 +502,22 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           await releaseSmsDelivery(dependencies.domain, { businessId, messageId });
           return { status: "skipped", entityId: messageId };
         }
+        if (!target.ok) {
+          // The contact can't get texts now, such as after texting STOP since the reply was written: it fails with the reason instead of waiting forever.
+          await markSmsFailed(dependencies.domain, { businessId, messageId, failure: { held: target.reason } });
+          return { status: "skipped", entityId: messageId };
+        }
         try {
           const result = await dependencies.twilio.sendSms({ to: target.to, from: target.from, body: target.body, ...twilioStatusCallbackOption({ messageId }) });
           await markSmsSent(dependencies.domain, { businessId, messageId, providerMessageId: result.providerMessageId });
           return { status: "completed", entityId: messageId };
         } catch (error) {
+          const permanentCode = permanentSmsErrorCode(error);
+          if (permanentCode) {
+            // Twilio rejects this number on every attempt, so the text fails now instead of after every retry.
+            await markSmsFailed(dependencies.domain, { businessId, messageId, failure: { rejected: permanentCode } });
+            return { status: "skipped", entityId: messageId };
+          }
           await releaseSmsDelivery(dependencies.domain, { businessId, messageId });
           throw error;
         }

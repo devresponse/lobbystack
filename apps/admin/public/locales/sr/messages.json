@@ -51,7 +51,20 @@
     "uploadFailed": "Nije moguće otpremiti prilog.",
     "maxAttachments": "Najveći broj priloga koji možete poslati odjednom: {{count}}.",
     "partialAttachmentsAdded": "Dodato je samo prvih nekoliko priloga (najviše {{count}}).",
-    "deliveryFailed": "Slanje nije uspelo"
+    "deliveryFailed": "Slanje nije uspelo",
+    "statusSending": "Šalje se",
+    "statusSent": "Poslato",
+    "statusDelivered": "Isporučeno",
+    "statusUndelivered": "Nije isporučeno",
+    "smsHoldPlaceholder": "Ovom kontaktu ne možete poslati SMS.",
+    "smsHold": {
+      "noPhone": "Ovaj kontakt nema broj telefona na koji se može poslati SMS.",
+      "blocked": "Ovaj kontakt je blokiran, pa ne prima SMS poruke.",
+      "optedOut": "Ovaj kontakt je poslao STOP, pa ne prima SMS poruke.",
+      "noConsent": "Ovaj kontakt Vam nije pisao putem SMS-a niti je pristao na SMS poruke, pa mu ne možete poslati poruku.",
+      "noSender": "Vaše preduzeće nema broj sa kog može da šalje SMS poruke.",
+      "rejected": "Ovaj broj ne može da prima SMS poruke."
+    }
   },
   "outcome": {
     "label": "Rezime",

@@ -120,8 +120,11 @@ test("an owner publishes the business's public profile, where visitors read its 
     const chat = visitorPage.frameLocator("#profile-chat iframe");
     await expect(chat.getByRole("textbox", { name: widgetCopy.chat.composerPlaceholder, exact: true })).toBeEnabled();
     await expect(chat.getByText(widgetCopy.errors.originDenied)).toHaveCount(0);
-    // With a number, visitors can also call from the browser, in the page as in a bubble.
-    await expect(chat.getByRole("button", { name: widgetCopy.chat.voiceStart, exact: true })).toBeVisible();
+    // With a number, visitors can also call from the browser, in the page as in a bubble, but
+    // only from a server that runs live calls: anywhere else the call could only fail.
+    const callButton = chat.getByRole("button", { name: widgetCopy.chat.voiceStart, exact: true });
+    if (process.env.LIVE_PROTOTYPE_ENABLED === "true" && process.env.OPENAI_API_KEY) await expect(callButton).toBeVisible();
+    else await expect(callButton).toHaveCount(0);
     expect(await visitorPage.locator(`script[src="/embed.js?key=${widgetKey}"]`).count()).toBe(1);
     // The chat sits in the page, not in a bubble.
     await expect(visitorPage.getByRole("button", { name: "Open chat", exact: true })).toHaveCount(0);

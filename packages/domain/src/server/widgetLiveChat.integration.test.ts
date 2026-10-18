@@ -69,6 +69,13 @@ async function seedChat(tx: DatabaseTransaction) {
     expire: (requestedAt: Date, locale: InterfaceLocale = "fr") => as(tx, "worker", (db) => expireTeamRequest({ db }, { businessId, conversationId, requestedAt, locale })),
     /** A team member presses Join (Take over) or Resume AI in Messages. */
     teamSets: (state: "ai_active" | "human_handoff") => as(tx, "app", (db) => setAutomationState({ db }, { userId, businessId, conversationId, state })),
+    /** Another team member, who can press the same buttons. */
+    async addTeamMember() {
+      const otherId = randomUUID();
+      await tx.insert(users).values({ id: otherId, name: "Ana Petrović", email: `${otherId}@example.invalid`, normalizedEmail: `${otherId}@example.invalid` });
+      await tx.insert(businessMemberships).values({ businessId, userId: otherId, role: "business_owner" });
+      return { userId: otherId, sets: (state: "ai_active" | "human_handoff") => as(tx, "app", (db) => setAutomationState({ db }, { userId: otherId, businessId, conversationId, state })) };
+    },
     view: (now?: Date) => as(tx, "worker", (db) => loadWidgetChatView({ db }, { businessId, conversationId, ...(now ? { now } : {}) })),
     /** The visitor writes again, as the widget's chat route checks first. */
     returnQuiet: (now: Date) => as(tx, "worker", (db) => returnQuietTeamChat({ db }, { businessId, conversationId, now })),
@@ -252,6 +259,28 @@ describe.skipIf(!testUrl)("live chat with the team against PostgreSQL under prod
       expect(await chat.expire(secondRequest)).toEqual({ expired: false });
       expect((await chat.messageRows()).filter((row) => row.aiGenerated)).toEqual([]);
       expect(await chat.events()).toEqual(["conversation.team_joined", "conversation.team_requested", "conversation.team_requested"]);
+    });
+  });
+
+  it("keeps the chat with the first team member to join when a second one presses Join too", async () => {
+    await rollbackTest(async (chat) => {
+      await chat.asksForPerson();
+      const other = await chat.addTeamMember();
+      await chat.teamSets("human_handoff");
+      const joined = await chat.automation();
+      expect(joined).toMatchObject({ state: "human_handoff", pausedBy: chat.userId, teamRequestedAt: null });
+      const announced = (await chat.realtime()).length;
+
+      // A second team member, on a screen that still showed the visitor waiting, presses Join.
+      await other.sets("human_handoff");
+      expect(await chat.automation()).toEqual(joined);
+      expect(await chat.view()).toMatchObject({ waitingForTeam: false, teamMemberName: "Yuri" });
+      expect(await chat.realtime()).toHaveLength(announced);
+      expect(await chat.events()).toEqual(["conversation.team_joined", "conversation.team_requested"]);
+
+      // Either of them can still hand the chat back to the receptionist.
+      await other.sets("ai_active");
+      expect(await chat.automation()).toMatchObject({ state: "ai_active", pausedBy: null, teamRequestedAt: null });
     });
   });
 });

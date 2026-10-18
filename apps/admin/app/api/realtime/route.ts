@@ -6,6 +6,8 @@ import { parseRealtimeMessage } from "@/lib/realtime";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const PING_TIMEOUT_MS = 5_000;
+
 export async function GET(request: Request): Promise<Response> {
   try {
     const businessId = new URL(request.url).searchParams.get("businessId");
@@ -27,6 +29,8 @@ export async function GET(request: Request): Promise<Response> {
         const subscriber = new Redis(redisUrl, {
           protocol: 2,
           maxRetriesPerRequest: 1,
+          // A connection that died without closing never answers: its ping fails instead of waiting forever.
+          commandTimeout: PING_TIMEOUT_MS,
           lazyConnect: true,
           connectionName: `lobbystack:sse:${businessId}`,
         });
@@ -64,12 +68,18 @@ export async function GET(request: Request): Promise<Response> {
           // stream on a Redis drop: the browser reconnects and refetches on "ready".
           subscriber.once("close", () => void cleanup());
           controller.enqueue(encoder.encode(`event: ready\ndata: ${JSON.stringify({ businessId })}\n\n`));
+          // The browser hears a ping only while Redis answers one too, and opens
+          // a new stream when the pings stop. A ping Redis leaves unanswered ends
+          // this stream at once, so the browser reconnects with a new subscriber.
           heartbeat = setInterval(() => {
-            try {
-              controller.enqueue(encoder.encode(": keepalive\n\n"));
-            } catch {
-              void cleanup(false);
-            }
+            subscriber.ping().then(() => {
+              if (closed) return;
+              try {
+                controller.enqueue(encoder.encode("event: ping\ndata: {}\n\n"));
+              } catch {
+                void cleanup(false);
+              }
+            }, () => void cleanup());
           }, 15_000);
           heartbeat.unref?.();
         } catch (error) {

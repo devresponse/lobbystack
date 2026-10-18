@@ -111,6 +111,55 @@ it("retries the session request on a later open after a failure", async () => {
   expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "retry-session" }), "https://admin.example.test");
 });
 
+it("renews the session before it expires, trying again through a short outage such as a deploy", async () => {
+  const fetchMock = vi.fn();
+  vi.stubGlobal("fetch", fetchMock);
+  const frame = mountWidget();
+  const session = (token: string) => Response.json({ token, expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
+  fetchMock
+    .mockImplementationOnce(async () => session("first-session"))
+    .mockImplementationOnce(async () => new Response("Application failed to respond", { status: 502 }))
+    .mockImplementationOnce(async () => { throw new TypeError("Failed to fetch"); })
+    .mockImplementationOnce(async () => session("renewed-session"));
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "ready" } }));
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "first-session" }), "https://admin.example.test");
+
+  // Five minutes before the hour is up it renews, while a deploy answers 502 and then the network drops.
+  await vi.advanceTimersByTimeAsync(55 * 60_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(2_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(4_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(4);
+  // The chat kept its session meanwhile and never showed an error.
+  expect(post).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session-error" }), expect.anything());
+  expect(post).toHaveBeenCalledWith(expect.objectContaining({ type: "session", token: "renewed-session" }), "https://admin.example.test");
+});
+
+it("tells the chat when a renewal is refused for good, without trying again", async () => {
+  const fetchMock = vi.fn()
+    .mockImplementationOnce(async () => Response.json({ token: "first-session", expiresAt: new Date(Date.now() + 3_600_000).toISOString() }))
+    .mockImplementationOnce(async () => Response.json({ code: "widget_key_invalid" }, { status: 403 }));
+  vi.stubGlobal("fetch", fetchMock);
+  const frame = mountWidget();
+  window.LobbyStack!.open();
+  const post = vi.spyOn(frame.contentWindow!, "postMessage");
+  await flush();
+  window.dispatchEvent(new MessageEvent("message", { origin: "https://admin.example.test", source: frame.contentWindow, data: { type: "ready" } }));
+  await vi.advanceTimersByTimeAsync(55 * 60_000);
+  await flush();
+  expect(post).toHaveBeenCalledWith({ type: "session-error", code: "widget_key_invalid" }, "https://admin.example.test");
+  await vi.advanceTimersByTimeAsync(10 * 60_000);
+  await flush();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it("asks before the page unloads only while the chat has a voice call or its captions", async () => {
   const { frame } = await start(Response.json({ token: "fixture-session", expiresAt: "2099-01-01T00:00:00Z" }));
   const unload = () => {

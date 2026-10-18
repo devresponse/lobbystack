@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ subscribers: [] as Array<EventEmitter & { subscribe: ReturnType<typeof vi.fn>; unsubscribe: ReturnType<typeof vi.fn> }> }));
+const mocks = vi.hoisted(() => ({ subscribers: [] as Array<EventEmitter & { subscribe: ReturnType<typeof vi.fn>; unsubscribe: ReturnType<typeof vi.fn>; ping: ReturnType<typeof vi.fn> }> }));
 vi.mock("ioredis", async () => {
   const { EventEmitter } = await import("node:events");
   const { vi } = await import("vitest");
@@ -11,6 +11,7 @@ vi.mock("ioredis", async () => {
       connect = async () => undefined;
       subscribe = vi.fn(async () => 1);
       unsubscribe = vi.fn(async () => 0);
+      ping = vi.fn(async () => "PONG");
       disconnect() { this.emit("close"); }
     },
   };
@@ -99,6 +100,30 @@ describe("shared realtime subscriber for website chats", () => {
     publish(mocks.subscribers[1]!, first);
     expect(later.event).toHaveBeenCalledTimes(1);
     expect(a.event).not.toHaveBeenCalled();
+  });
+
+  it("resets every chat when Redis stops answering its ping, and the next chat connects afresh", async () => {
+    vi.useFakeTimers();
+    try {
+      const { listenToBusinessRealtime } = await loadHub();
+      const chat = listener();
+      await listenToBusinessRealtime(first, chat);
+      const subscriber = mocks.subscribers[0]!;
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(subscriber.ping).toHaveBeenCalledTimes(1);
+      expect(chat.reset).not.toHaveBeenCalled();
+
+      subscriber.ping.mockRejectedValueOnce(new Error("Command timed out"));
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(chat.reset).toHaveBeenCalledTimes(1);
+      // The closed hub stops pinging, and the next chat gets a new connection.
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(subscriber.ping).toHaveBeenCalledTimes(2);
+      await listenToBusinessRealtime(first, listener());
+      expect(mocks.subscribers).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refuses to listen without Redis", async () => {

@@ -69,7 +69,8 @@ export function LiveOverviewSurface() {
 
   useEffect(() => {
     if (!businessId) return;
-    return subscribeRealtimeQuery(queryClient, businessId, ["dashboard"], ["call.started", "call.updated", "call.completed", "message.upserted", "appointment.updated"]);
+    // conversation.updated brings call summaries and chats handed to the team or back.
+    return subscribeRealtimeQuery(queryClient, businessId, ["dashboard"], ["call.started", "call.updated", "call.completed", "message.upserted", "appointment.updated", "conversation.updated"]);
   }, [businessId, queryClient]);
 
   const metrics = summary.data ? [

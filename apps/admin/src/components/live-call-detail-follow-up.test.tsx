@@ -10,6 +10,8 @@ const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof crea
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => telemetryRef.current!.telemetry }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }), usePathname: () => "/calls/call-1" }));
+const realtime = vi.hoisted(() => ({ subscribe: vi.fn(() => () => {}) }));
+vi.mock("@/lib/realtime-query", () => ({ subscribeRealtimeQuery: realtime.subscribe }));
 
 const clients: QueryClient[] = [];
 beforeEach(() => {
@@ -71,5 +73,13 @@ describe("several follow-ups on one call", () => {
     expect(buttons).toHaveLength(3);
     await userEvent.click(buttons[2]!);
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/calls/call-1?businessId=business", expect.objectContaining({ method: "PATCH", body: JSON.stringify({ action: "complete_follow_up", inboxItemId: "request-1" }) })));
+  });
+});
+
+describe("live updates", () => {
+  it("refreshes the call as it ends and gets its summary, caller name and recording", async () => {
+    setup();
+    await screen.findByRole("tab", { name: "detail.tabs.details" });
+    expect(realtime.subscribe).toHaveBeenCalledWith(expect.anything(), "business", ["call", "business", "call-1"], ["call.updated", "call.completed", "recording.available", "conversation.updated"]);
   });
 });

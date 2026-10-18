@@ -54,7 +54,7 @@ OpenAI's GPT-Live model answers browser calls and phone calls. Phone calls reach
 
 | Variable | Purpose |
 | --- | --- |
-| `LIVE_PROTOTYPE_ENABLED` | Set to `true` on admin and worker. Compose sets it by default. Browser calls fail without it. |
+| `LIVE_PROTOTYPE_ENABLED` | Set to `true` on admin and worker. Compose sets it by default. Without it, browser calls fail and the website widget shows no call button. |
 | `OPENAI_WEBHOOK_SECRET` | Verifies OpenAI's incoming-call webhook at `/api/webhooks/openai/live`. Phone calls only. |
 | `TWILIO_SIP_TRUNK_SID` | The Twilio Elastic SIP trunk that sends calls to your OpenAI project. New numbers join it, and the worker won't provision a number without it. |
 | `WEB_CALL_MAX_DURATION_MS` | Optional cap on browser call length. |

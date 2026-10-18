@@ -1,6 +1,6 @@
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  const { assertProductionSecrets, brandLinkEnvironment, brandStartupReport, currentBrand, invalidBrandLinkVariables, resolveBrand } = await import("@lobbystack/shared");
+  const { assertProductionSecrets, brandStartupReport, currentBrand, resolveBrand } = await import("@lobbystack/shared");
   assertProductionSecrets(process.env, [
     "BETTER_AUTH_SECRET",
     "INTERNAL_SERVICE_SECRET",
@@ -21,10 +21,6 @@ export async function register(): Promise<void> {
   const running = resolveBrand({ appBaseUrl: process.env.APP_BASE_URL, preset: process.env.BRAND_PRESET });
   if (running.id !== brand.id || running.appName !== brand.appName) {
     console.error(`[brand] brand.build_mismatch: this build shows ${brand.appName} (${brand.id}), but APP_BASE_URL and BRAND_PRESET now pick ${running.appName} (${running.id}). Rebuild the admin to show it.`);
-  }
-  const invalidLinks = invalidBrandLinkVariables(brandLinkEnvironment());
-  if (invalidLinks.length) {
-    console.warn(`[branding] Ignoring ${invalidLinks.join(", ")}: a site or page must be an http or https URL and the contact address a plain email address, so the app uses the brand's link instead.`);
   }
   const { initializeTelemetry } = await import("@lobbystack/telemetry/node");
   await initializeTelemetry({ serviceName: "lobbystack-admin" });

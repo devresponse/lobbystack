@@ -32,7 +32,7 @@ El nombre, el logo, el color y los enlaces externos vienen de una carpeta de mar
 
 Donde ninguna marca reclama el dominio y `BRAND_PRESET` está vacía, la implementación muestra LobbyStack, y su primer propietario elige un nombre y un logo durante la incorporación.
 
-`BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` y `NEXT_PUBLIC_CONTACT_EMAIL` todavía tienen prioridad sobre el archivo de marca durante una versión más y luego desaparecerán. Mientras alguna esté definida, el admin y el worker registran `brand.deprecated_variables` al iniciarse.
+`BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` y `NEXT_PUBLIC_CONTACT_EMAIL` ya no tienen ningún efecto. Ponga sus valores en una carpeta de marca.
 
 Las páginas de [perfil público](/es/settings/public-profile) leen una variable más al cargarse, así que basta con reiniciar el servicio de administración después de cambiarla.
 

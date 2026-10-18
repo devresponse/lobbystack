@@ -5,7 +5,6 @@ import {
   currentBrand,
   brandLogoContentType,
   normalizeAppName,
-  readBrandingEnvironment,
   type BrandLogoContentType,
   type ResolvedBrand,
   type SavedBranding,
@@ -36,14 +35,11 @@ let cachedSavedAppName: { promise: Promise<string | null>; expiresAt: number } |
 
 /**
  * The name emails and texts call the deployment by, in the order the dashboard
- * uses: BRAND_APP_NAME, then a matched brand file, then what onboarding saved,
- * then the default brand. Admin and worker both call it, and both resolve the
- * same brand from APP_BASE_URL. When the database can't be read, the default
- * brand stands in.
+ * uses: a matched brand file, then what onboarding saved, then the default
+ * brand. Admin and worker both call it, and both resolve the same brand from
+ * APP_BASE_URL. When the database can't be read, the default brand stands in.
  */
-export async function deploymentAppName(db: Database, environment: Record<string, string | undefined> = process.env, brand: ResolvedBrand = currentBrand()): Promise<string> {
-  const fromEnvironment = readBrandingEnvironment(environment).appName;
-  if (fromEnvironment) return fromEnvironment;
+export async function deploymentAppName(db: Database, brand: ResolvedBrand = currentBrand()): Promise<string> {
   if (brandFileMatched(brand)) return brand.appName;
   const now = Date.now();
   if (!cachedSavedAppName || cachedSavedAppName.expiresAt <= now) {

@@ -10,7 +10,7 @@ vi.mock("./api-helpers", () => ({ getAppDatabase: () => ({ db: {} }) }));
 vi.mock("./error-reporting", () => ({ reportServerError: async () => undefined }));
 
 import { buildTimeBrandingSnapshot, forgetCachedBranding, loadBranding } from "./branding";
-import { initialBrandingFields } from "./onboarding-branding";
+import { asksInitialBranding } from "./onboarding-branding";
 
 afterEach(() => {
   fixture.appBaseUrl = "http://localhost";
@@ -29,13 +29,13 @@ describe("branding on a deployment a brand file matches", () => {
 
   it("prerenders the brand as final, so the browser needn't ask", () => {
     fixture.appBaseUrl = "https://demo.alloplace.com";
-    expect(buildTimeBrandingSnapshot({})).toMatchObject({ appName: "AlloPlace", final: true });
+    expect(buildTimeBrandingSnapshot()).toMatchObject({ appName: "AlloPlace", final: true });
   });
 
   it("skips the onboarding brand step", async () => {
     fixture.appBaseUrl = "https://demo.alloplace.com";
     fixture.canSave.mockResolvedValue(true);
-    expect(await initialBrandingFields("owner")).toBeNull();
+    expect(await asksInitialBranding("owner")).toBe(false);
     expect(fixture.canSave).not.toHaveBeenCalled();
   });
 });
@@ -47,11 +47,11 @@ describe("branding on a deployment no brand file matches", () => {
   });
 
   it("prerenders LobbyStack for now and lets the browser ask the server", () => {
-    expect(buildTimeBrandingSnapshot({})).toEqual({ appName: "LobbyStack", logoUrl: null, final: false });
+    expect(buildTimeBrandingSnapshot()).toEqual({ appName: "LobbyStack", logoUrl: null, final: false });
   });
 
   it("keeps the onboarding brand step open", async () => {
     fixture.canSave.mockResolvedValue(true);
-    expect(await initialBrandingFields("owner")).toEqual({ appName: true, logo: true });
+    expect(await asksInitialBranding("owner")).toBe(true);
   });
 });

@@ -8,7 +8,14 @@ const submitFeedbackMock = vi.fn();
 const toastErrorMock = vi.fn();
 const toastSuccessMock = vi.fn();
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+// The deployment's brand: LobbyStack's, unless a test picks another.
+const brand = vi.hoisted(() => ({ appBaseUrl: "http://localhost" }));
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks(shared.resolveBrand({ appBaseUrl: brand.appBaseUrl }).links) };
+});
+
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); brand.appBaseUrl = "http://localhost"; });
 
 vi.mock("sonner", () => ({
   toast: {
@@ -74,9 +81,8 @@ describe("DashboardFeedbackWidget", () => {
     expect(helpCenterLink.getAttribute("target")).toBe("_blank");
   });
 
-  it("links to the deployment's own address and docs", () => {
-    vi.stubEnv("NEXT_PUBLIC_DOCS_SITE_URL", "https://alloplace.com/");
-    vi.stubEnv("NEXT_PUBLIC_CONTACT_EMAIL", "support@alloplace.com");
+  it("links to the brand's own address and docs", () => {
+    brand.appBaseUrl = "https://demo.alloplace.com";
 
     renderDashboardFeedbackWidget();
 

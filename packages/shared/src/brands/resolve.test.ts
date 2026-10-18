@@ -129,14 +129,6 @@ describe("brandStartupReport", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost", preset: "alloplace" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();
   });
 
-  it("warns while a variable that will go away is still set", () => {
-    const brand = resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data);
-    expect(brandStartupReport(brand, { BRAND_APP_NAME: "AlloPlace", NEXT_PUBLIC_TERMS_URL: "https://alloplace.com/legal/terms", BRAND_LOGO_URL: " " }).warnings).toEqual([
-      "[brand] brand.deprecated_variables: BRAND_APP_NAME, NEXT_PUBLIC_TERMS_URL still override the brand file, but will be removed in a later release. Put the values in a folder under brands/ instead.",
-    ]);
-    expect(brandStartupReport(brand, {}).warnings).toEqual([]);
-  });
-
   it("names the brand and how it was chosen", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }, data), {}).info).toBe("[brand] alloplace (apex alloplace.com), shown as AlloPlace (dev)");
   });

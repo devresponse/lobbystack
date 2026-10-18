@@ -31,7 +31,7 @@ function createEmailProvider(): SmtpEmailProvider | undefined {
     console.warn("SMTP_HOST is missing. Authentication email jobs will fail until email delivery is configured.");
     return undefined;
   }
-  const logo = brandEmailLogo(process.env);
+  const logo = brandEmailLogo();
   return new SmtpEmailProvider({
     host,
     // A deploy template can leave optional inputs blank, so "" counts as unset.

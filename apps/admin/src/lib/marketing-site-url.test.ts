@@ -1,9 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { ResolvedBrand } from "@lobbystack/shared";
+
+// The links of the deployment's brand: none of its own, unless a test gives some.
+const brand = vi.hoisted(() => ({ links: {} as Partial<ResolvedBrand["links"]> }));
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, ...brand.links }) };
+});
+
 import { affiliateTermsHref, localizeMarketingHref, privacyHref, termsHref } from "./marketing-site-url";
 
 afterEach(() => {
-  vi.unstubAllEnvs();
+  brand.links = {};
 });
 
 it("points legal links at the translated marketing pages", () => {
@@ -24,7 +33,7 @@ it("leaves external and untranslated targets alone when the locale is English", 
 
 describe("a deployment's own site", () => {
   it("keeps each path on the deployment's domain, in every language", () => {
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com/");
+    brand.links = { siteUrl: "https://alloplace.com" };
     expect(localizeMarketingHref("en", "/")).toBe("https://alloplace.com/");
     expect(localizeMarketingHref("fr", "/")).toBe("https://alloplace.com/");
     expect(termsHref("sr")).toBe("https://alloplace.com/terms");
@@ -33,26 +42,17 @@ describe("a deployment's own site", () => {
   });
 
   it("keeps the path of a site served under one", () => {
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://example.com/receptionist/");
+    brand.links = { siteUrl: "https://example.com/receptionist" };
     expect(localizeMarketingHref("fr", "/")).toBe("https://example.com/receptionist/");
     expect(termsHref("en")).toBe("https://example.com/receptionist/terms");
   });
 
   it("opens the deployment's own terms and privacy pages", () => {
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "https://alloplace.com");
-    vi.stubEnv("NEXT_PUBLIC_TERMS_URL", "https://alloplace.com/legal/terms");
-    vi.stubEnv("NEXT_PUBLIC_PRIVACY_URL", "https://alloplace.com/legal/privacy");
+    brand.links = { siteUrl: "https://alloplace.com", termsUrl: "https://alloplace.com/legal/terms", privacyUrl: "https://alloplace.com/legal/privacy" };
     for (const locale of ["en", "fr", "es", "sr"] as const) {
       expect(termsHref(locale)).toBe("https://alloplace.com/legal/terms");
       expect(privacyHref(locale)).toBe("https://alloplace.com/legal/privacy");
       expect(affiliateTermsHref(locale)).toBe("https://alloplace.com/legal/terms");
     }
-  });
-
-  it("links to LobbyStack's site when the variable is empty or unusable", () => {
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "");
-    expect(termsHref("en")).toBe("https://lobbystack.com/terms/");
-    vi.stubEnv("NEXT_PUBLIC_LANDING_SITE_URL", "alloplace.com");
-    expect(termsHref("fr")).toBe("https://lobbystack.com/fr/terms/");
   });
 });

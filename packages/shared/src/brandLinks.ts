@@ -3,28 +3,13 @@ import { currentBrand, type ResolvedBrand } from "./brands/resolve";
 // Where the app sends people outside itself: the deployment's website, its
 // terms and privacy policy, its docs, and the address people write to.
 //
-// Each one comes from the deployment's brand file (brands/resolve.ts). A
-// NEXT_PUBLIC_ variable still wins over the file until they are removed;
-// Next.js writes those into the admin's build, so a change takes a rebuild.
-// Whatever neither sets, or sets to something unusable, links to LobbyStack's own.
-
-/** The variables that point the app's outside links at a deployment's own pages and inbox. */
-export const BRAND_LINK_ENVIRONMENT = {
-  siteUrl: "NEXT_PUBLIC_LANDING_SITE_URL",
-  termsUrl: "NEXT_PUBLIC_TERMS_URL",
-  privacyUrl: "NEXT_PUBLIC_PRIVACY_URL",
-  docsUrl: "NEXT_PUBLIC_DOCS_SITE_URL",
-  contactEmail: "NEXT_PUBLIC_CONTACT_EMAIL",
-} as const;
-
-export type BrandLinkVariable = (typeof BRAND_LINK_ENVIRONMENT)[keyof typeof BRAND_LINK_ENVIRONMENT];
-
-export type BrandLinkEnvironment = Partial<Record<BrandLinkVariable, string | undefined>>;
+// Each one comes from the deployment's brand file (brands/resolve.ts), and
+// whatever the brand leaves out goes to LobbyStack's own.
 
 export const LOBBYSTACK_SITE_URL = "https://lobbystack.com";
 export const LOBBYSTACK_DOCS_URL = "https://docs.lobbystack.com";
 
-/** LobbyStack's address for each place the app gives one. NEXT_PUBLIC_CONTACT_EMAIL replaces all three. */
+/** LobbyStack's address for each place the app gives one. A brand's contactEmail replaces all three. */
 export const LOBBYSTACK_CONTACT_EMAILS = {
   /** The dashboard's feedback form. */
   support: "support@lobbystack.com",
@@ -80,50 +65,22 @@ export function normalizeEmailAddress(value: unknown): string | null {
   return address.length <= 254 && EMAIL_ADDRESS.test(address) ? address : null;
 }
 
-const normalizers: Record<BrandLinkVariable, (value: unknown) => string | null> = {
-  NEXT_PUBLIC_LANDING_SITE_URL: normalizeSiteUrl,
-  NEXT_PUBLIC_TERMS_URL: normalizePageUrl,
-  NEXT_PUBLIC_PRIVACY_URL: normalizePageUrl,
-  NEXT_PUBLIC_DOCS_SITE_URL: normalizeSiteUrl,
-  NEXT_PUBLIC_CONTACT_EMAIL: normalizeEmailAddress,
-};
-
 const NO_BRAND_LINKS: ResolvedBrand["links"] = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
 
-/** Each link from the environment, else the brand's, else LobbyStack's. */
-export function resolveBrandLinks(environment: BrandLinkEnvironment, brand: ResolvedBrand["links"] = NO_BRAND_LINKS): BrandLinks {
+/** Each link from the brand, else LobbyStack's. */
+export function resolveBrandLinks(brand: ResolvedBrand["links"] = NO_BRAND_LINKS): BrandLinks {
   return {
-    siteUrl: normalizeSiteUrl(environment.NEXT_PUBLIC_LANDING_SITE_URL) ?? brand.siteUrl ?? LOBBYSTACK_SITE_URL,
-    termsUrl: normalizePageUrl(environment.NEXT_PUBLIC_TERMS_URL) ?? brand.termsUrl,
-    privacyUrl: normalizePageUrl(environment.NEXT_PUBLIC_PRIVACY_URL) ?? brand.privacyUrl,
-    docsUrl: normalizeSiteUrl(environment.NEXT_PUBLIC_DOCS_SITE_URL) ?? brand.docsUrl ?? LOBBYSTACK_DOCS_URL,
-    contactEmail: normalizeEmailAddress(environment.NEXT_PUBLIC_CONTACT_EMAIL) ?? brand.contactEmail,
-  };
-}
-
-/** The variables that are set but hold nothing usable, so LobbyStack's link stands in for them. */
-export function invalidBrandLinkVariables(environment: BrandLinkEnvironment): BrandLinkVariable[] {
-  return (Object.keys(normalizers) as BrandLinkVariable[]).filter((name) => Boolean(environment[name]?.trim()) && normalizers[name](environment[name]) === null);
-}
-
-/**
- * The link variables as this process sees them. Next.js writes a NEXT_PUBLIC_
- * value into the build only where the code names it, so each one is named
- * here rather than read from an environment passed in.
- */
-export function brandLinkEnvironment(): BrandLinkEnvironment {
-  return {
-    NEXT_PUBLIC_LANDING_SITE_URL: process.env.NEXT_PUBLIC_LANDING_SITE_URL,
-    NEXT_PUBLIC_TERMS_URL: process.env.NEXT_PUBLIC_TERMS_URL,
-    NEXT_PUBLIC_PRIVACY_URL: process.env.NEXT_PUBLIC_PRIVACY_URL,
-    NEXT_PUBLIC_DOCS_SITE_URL: process.env.NEXT_PUBLIC_DOCS_SITE_URL,
-    NEXT_PUBLIC_CONTACT_EMAIL: process.env.NEXT_PUBLIC_CONTACT_EMAIL,
+    siteUrl: brand.siteUrl ?? LOBBYSTACK_SITE_URL,
+    termsUrl: brand.termsUrl,
+    privacyUrl: brand.privacyUrl,
+    docsUrl: brand.docsUrl ?? LOBBYSTACK_DOCS_URL,
+    contactEmail: brand.contactEmail,
   };
 }
 
 /** Where this deployment's outside links go. */
 export function brandLinks(): BrandLinks {
-  return resolveBrandLinks(brandLinkEnvironment(), currentBrand().links);
+  return resolveBrandLinks(currentBrand().links);
 }
 
 /** The address to give for one purpose: the deployment's own, else LobbyStack's for that purpose. */

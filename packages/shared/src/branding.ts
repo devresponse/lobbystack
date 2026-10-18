@@ -6,20 +6,13 @@ import type { BrandImage } from "./brands/types";
 // A brand file under brands/ sets them when the deployment's domain or
 // BRAND_PRESET picks one (brands/resolve.ts). Otherwise the deployment's first
 // owner picks them in onboarding and the database keeps them, and LobbyStack
-// fills in whatever nobody chose. BRAND_APP_NAME and BRAND_LOGO_URL still win
-// over both, field by field, until they are removed.
+// fills in whatever nobody chose.
 
 export const DEFAULT_APP_NAME = "LobbyStack";
 
-/** The environment variables that set a deployment's branding. */
-export const BRANDING_ENVIRONMENT = {
-  appName: "BRAND_APP_NAME",
-  logoUrl: "BRAND_LOGO_URL",
-} as const;
+export type BrandingField = "appName" | "logoUrl";
 
-export type BrandingField = keyof typeof BRANDING_ENVIRONMENT;
-
-export type BrandingSource = "environment" | "file" | "database" | "default";
+export type BrandingSource = "file" | "database" | "default";
 
 export const MAX_APP_NAME_LENGTH = 40;
 
@@ -45,13 +38,6 @@ export type SavedBranding = {
   appName: string | null;
   /** A digest of the saved logo, so its URL changes whenever the logo does. */
   logoVersion: string | null;
-};
-
-export type BrandingEnvironment = {
-  appName: string | null;
-  logoUrl: string | null;
-  /** Variables that are set but hold nothing usable, so they count as unset. */
-  invalid: Array<(typeof BRANDING_ENVIRONMENT)[BrandingField]>;
 };
 
 // Control, format and line separator characters, bidirectional overrides among
@@ -85,29 +71,16 @@ export function normalizeLogoUrl(value: unknown): string | null {
   }
 }
 
-/** The branding a deployment's environment variables set. */
-export function readBrandingEnvironment(environment: Record<string, string | undefined>): BrandingEnvironment {
-  const rawName = environment[BRANDING_ENVIRONMENT.appName];
-  const rawLogo = environment[BRANDING_ENVIRONMENT.logoUrl];
-  const appName = normalizeAppName(rawName);
-  const logoUrl = normalizeLogoUrl(rawLogo);
-  const invalid: BrandingEnvironment["invalid"] = [];
-  if (rawName?.trim() && !appName) invalid.push(BRANDING_ENVIRONMENT.appName);
-  if (rawLogo?.trim() && !logoUrl) invalid.push(BRANDING_ENVIRONMENT.logoUrl);
-  return { appName, logoUrl, invalid };
-}
-
 /**
- * Who the deployment's emails come from: EMAIL_FROM, with the deployment's
- * name in front when it holds only an address. The name is BRAND_APP_NAME
- * while it lasts, else a matched brand file's. Onboarding's saved name is in
- * the database, so a deployment with neither keeps EMAIL_FROM as it is.
+ * Who the deployment's emails come from: EMAIL_FROM, with a matched brand
+ * file's name in front when it holds only an address. Onboarding's saved name
+ * is in the database, so a deployment without a brand file keeps EMAIL_FROM as
+ * it is.
  */
 export function emailSender(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): string {
-  const name = readBrandingEnvironment(environment).appName ?? (brandFileMatched(brand) ? brand.appName : null);
   const from = environment.EMAIL_FROM?.trim();
-  if (!from) return namedSender(name ?? brand.appName, "no-reply@localhost");
-  return name && !from.includes("<") ? namedSender(name, from) : from;
+  if (!from) return namedSender(brand.appName, "no-reply@localhost");
+  return brandFileMatched(brand) && !from.includes("<") ? namedSender(brand.appName, from) : from;
 }
 
 // Quoted, so a name such as "AlloPlace (dev)" isn't read as an address comment.
@@ -117,21 +90,14 @@ function namedSender(name: string, address: string): string {
 
 /**
  * The logo emails show above the deployment's name: the brand file's email
- * logo under the deployment's address. None while BRAND_LOGO_URL sets a
- * different logo, or without an address to load it from.
+ * logo under the deployment's address. None without one, or without an
+ * address to load it from.
  */
-export function brandEmailLogo(environment: Record<string, string | undefined>, brand: ResolvedBrand = currentBrand()): BrandImage | null {
-  return readBrandingEnvironment(environment).logoUrl ? null : brandImage(brand, brand.emailLogo);
+export function brandEmailLogo(brand: ResolvedBrand = currentBrand()): BrandImage | null {
+  return brandImage(brand, brand.emailLogo);
 }
 
-/**
- * The variable that colours the deployment's public pages: the field behind a
- * business's chat on its profile page, today's row in its hours and the logo
- * tile. Text on it is black or white, whichever reads better.
- */
-export const BRAND_ACCENT_VARIABLE = "BRAND_ACCENT_COLOR";
-
-/** The accent without BRAND_ACCENT_COLOR: the website widget's default colour. */
+/** The accent of a brand without one: the website widget's default colour. */
 export const DEFAULT_BRAND_ACCENT_COLOR = "#0f766e";
 
 const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -143,9 +109,14 @@ export function normalizeAccentColor(value: unknown): string | null {
   return `#${digits.length === 3 ? [...digits].map((digit) => digit + digit).join("") : digits}`;
 }
 
-/** The deployment's accent colour from its environment, else its brand's, else the default. */
-export function brandAccentColor(environment: Record<string, string | undefined>, brand: Pick<ResolvedBrand, "accentColor"> = currentBrand()): string {
-  return normalizeAccentColor(environment[BRAND_ACCENT_VARIABLE]) ?? brand.accentColor ?? DEFAULT_BRAND_ACCENT_COLOR;
+/**
+ * The colour of the deployment's public pages: the field behind a business's
+ * chat on its profile page, today's row in its hours and the logo tile. It is
+ * the brand's accent, else the default. Text on it is black or white,
+ * whichever reads better.
+ */
+export function brandAccentColor(brand: Pick<ResolvedBrand, "accentColor"> = currentBrand()): string {
+  return brand.accentColor ?? DEFAULT_BRAND_ACCENT_COLOR;
 }
 
 /** Black or white, whichever contrasts more with a #rrggbb colour (a yellow gets black). */
@@ -168,21 +139,21 @@ export function savedBrandLogoUrl(logoVersion: string): string {
 type BrandForBranding = Pick<ResolvedBrand, "source" | "appName" | "logoUrl">;
 
 /**
- * Each field from the environment, else a matched brand file, else the saved
- * choice, else the default brand. Without a brand, the default is LobbyStack.
+ * Each field from a matched brand file, else the saved choice, else the
+ * default brand. Without a brand, the default is LobbyStack.
  */
-export function resolveBranding(input: { environment: Pick<BrandingEnvironment, "appName" | "logoUrl">; saved: SavedBranding | null; brand?: BrandForBranding }): Branding {
+export function resolveBranding(input: { saved: SavedBranding | null; brand?: BrandForBranding }): Branding {
   const file = input.brand && brandFileMatched(input.brand) ? input.brand : null;
   const savedName = file ? null : normalizeAppName(input.saved?.appName);
   const savedLogo = !file && input.saved?.logoVersion ? savedBrandLogoUrl(input.saved.logoVersion) : null;
   const fallbackName = input.brand?.appName ?? DEFAULT_APP_NAME;
   const fallbackLogo = input.brand?.logoUrl ?? null;
   return {
-    appName: input.environment.appName ?? file?.appName ?? savedName ?? fallbackName,
-    logoUrl: input.environment.logoUrl ?? (file ? file.logoUrl : savedLogo ?? fallbackLogo),
+    appName: file?.appName ?? savedName ?? fallbackName,
+    logoUrl: file ? file.logoUrl : savedLogo ?? fallbackLogo,
     sources: {
-      appName: input.environment.appName ? "environment" : file ? "file" : savedName ? "database" : "default",
-      logoUrl: input.environment.logoUrl ? "environment" : file ? "file" : savedLogo ? "database" : "default",
+      appName: file ? "file" : savedName ? "database" : "default",
+      logoUrl: file ? "file" : savedLogo ? "database" : "default",
     },
   };
 }

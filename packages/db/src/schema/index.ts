@@ -1386,8 +1386,8 @@ export const platformPartnerBusinesses = pgTable(
 );
 
 // The app name and logo the deployment shows in place of LobbyStack, chosen
-// once in onboarding. One row at most; BRAND_APP_NAME and BRAND_LOGO_URL win
-// over it. Only app.save_initial_branding writes it.
+// once in onboarding. One row at most; a brand file that matches the
+// deployment wins over it. Only app.save_initial_branding writes it.
 export const deploymentBranding = pgTable("deployment_branding", {
   id: smallint("id").default(1).primaryKey(),
   appName: text("app_name"),

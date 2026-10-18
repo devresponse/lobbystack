@@ -4,11 +4,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MCP_OAUTH_SCOPES, mcpBearerChallenge, mcpResourceUrl, oauthIssuer, protectedResourceMetadata, protectedResourceMetadataUrl, tokenAudienceMatches } from "./oauth-config";
 import { mcpTools } from "./tools";
 
+// The deployment's brand: LobbyStack's, unless a test picks another.
+const brand = vi.hoisted(() => ({ appBaseUrl: "http://localhost" }));
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks(shared.resolveBrand({ appBaseUrl: brand.appBaseUrl }).links) };
+});
+
 const env = { APP_BASE_URL: "https://app.example.com/" };
 
 describe("MCP OAuth configuration", () => {
   afterEach(() => {
-    vi.unstubAllEnvs();
+    brand.appBaseUrl = "http://localhost";
   });
 
   it("derives the resource, issuer and metadata URLs from APP_BASE_URL", () => {
@@ -31,9 +38,9 @@ describe("MCP OAuth configuration", () => {
     expect(MCP_OAUTH_SCOPES).toContain("offline_access");
   });
 
-  it("points at the deployment's own docs", () => {
-    vi.stubEnv("NEXT_PUBLIC_DOCS_SITE_URL", "https://help.example.com/");
-    expect(protectedResourceMetadata(env)).toMatchObject({ resource_documentation: "https://help.example.com/ai/mcp" });
+  it("points at the brand's own docs", () => {
+    brand.appBaseUrl = "https://demo.alloplace.com";
+    expect(protectedResourceMetadata(env)).toMatchObject({ resource_documentation: "https://alloplace.com/ai/mcp" });
   });
 
   it("offers OAuth clients exactly the scopes the MCP tools use", () => {

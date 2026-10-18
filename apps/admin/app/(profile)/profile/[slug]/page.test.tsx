@@ -63,7 +63,8 @@ async function render(slug = "acme-dental"): Promise<string> {
 beforeEach(() => {
   vi.useFakeTimers({ now: NOW, toFake: ["Date"] });
   vi.stubEnv("APP_BASE_URL", "https://app.example.com");
-  vi.stubEnv("BRAND_ACCENT_COLOR", "#FFD100");
+  // The build's address picks the AlloPlace brand, whose accent is yellow.
+  vi.stubEnv("NEXT_PUBLIC_BRAND_BASE_URL", "https://demo.alloplace.com");
   vi.stubEnv("GOOGLE_MAPS_EMBED_API_KEY", "");
   mocks.requestHeaders = new Headers({ "x-lobbystack-locale": "en", "x-lobbystack-locale-source": "header" });
   mocks.getSession.mockResolvedValue(null);

@@ -5,6 +5,13 @@ import { businesses, calls, createDatabaseClient, outboxMessages, sessions, user
 import { createBusiness } from "./tenancy";
 import { ONBOARDING_FOLLOWUP_DELAY_MS, queueOnboardingFollowupEmail, submitOnboardingAttribution } from "./onboarding";
 
+// A test that names the deployment gives it the AlloPlace brand file.
+const brand = vi.hoisted(() => ({ appBaseUrl: null as string | null }));
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, currentBrand: () => brand.appBaseUrl ? shared.resolveBrand({ appBaseUrl: brand.appBaseUrl }) : shared.currentBrand() };
+});
+
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
 if (testUrl) {
@@ -52,7 +59,7 @@ async function followupEmails(tx: DatabaseTransaction, businessId: string) {
   return await tx.select().from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "email.send")));
 }
 
-afterEach(() => { vi.unstubAllEnvs(); });
+afterEach(() => { brand.appBaseUrl = null; });
 
 describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreSQL roles", () => {
   it("schedules the follow-up a day after onboarding completes, once", async () => {
@@ -72,7 +79,7 @@ describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreS
   });
 
   it("queues one email to an owner who has not come back", async () => {
-    vi.stubEnv("BRAND_APP_NAME", "RealInfoBot");
+    brand.appBaseUrl = "https://demo.alloplace.com";
     await rollbackTest(async tx => {
       const { userId, businessId, email } = await completedWorkspace(tx);
       const completedAt = new Date(Date.now() - ONBOARDING_FOLLOWUP_DELAY_MS);
@@ -87,7 +94,7 @@ describe.skipIf(!testUrl)("onboarding follow-up email against dedicated PostgreS
         template: "onboarding_followup",
         to: email,
         from: sender.from,
-        subject: "Votre avis sur RealInfoBot ?",
+        subject: "Votre avis sur AlloPlace ?",
         variables: { locale: "fr", firstName: "Sam", senderName: "Raphael" },
       });
     });

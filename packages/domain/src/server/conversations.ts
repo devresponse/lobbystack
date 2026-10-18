@@ -339,7 +339,8 @@ export async function registerWidgetVisitor(
 /**
  * A website chat with no message for this long is over: the visitor's next
  * visit shows an empty chat, and their next message closes the old one and
- * starts a new one, which the receptionist answers.
+ * starts a new one, which the receptionist answers. Until then it stays open,
+ * so a page left open keeps showing it and still gets a team member's late reply.
  */
 export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
 
@@ -384,18 +385,20 @@ export async function getOrCreateWidgetConversation(
 }
 
 /**
- * The chat the visitor's widget shows: their open website chat, unless it went
- * a day without messages, since their next message starts a new one then.
- * Unlike getOrCreateWidgetConversation, never creates or closes a chat, so a
- * visitor who only looks leaves nothing behind.
+ * The chat the visitor's widget shows: their open website chat, and whether it
+ * went a day without messages, since their next message starts a new one then.
+ * An idle chat is still the visitor's until then, so a team member's late reply
+ * in it still reaches a page left open. Unlike getOrCreateWidgetConversation,
+ * never creates or closes a chat, so a visitor who only looks leaves nothing
+ * behind.
  */
-export async function findCurrentWidgetConversationId(
+export async function findCurrentWidgetChat(
   context: DomainContext,
   input: { businessId: string; widgetVisitorId: string; now?: Date },
-): Promise<string | null> {
+): Promise<{ conversationId: string; idle: boolean } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const chat = await openWidgetChat(tx, { ...input, now: input.now ?? new Date() });
-    return chat && !chat.wentIdle ? chat.id : null;
+    return chat ? { conversationId: chat.id, idle: chat.wentIdle } : null;
   });
 }
 

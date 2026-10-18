@@ -4,7 +4,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { businessMemberships, businesses, conversations, conversationSessions, createDatabaseClient, messages, operatorNotificationDeliveries, outboxMessages, productEvents, users, widgetVisitors, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
-import { appendMessage, findCurrentWidgetConversationId, findWidgetConversationId, getOrCreateWidgetConversation, setAutomationState, WIDGET_CHAT_IDLE_CLOSE_MS } from "./conversations";
+import { appendMessage, findCurrentWidgetChat, findWidgetConversationId, getOrCreateWidgetConversation, setAutomationState, WIDGET_CHAT_IDLE_CLOSE_MS } from "./conversations";
 import { expireTeamRequest, loadWidgetChatView, requestTeamForWidgetChat, returnQuietTeamChat, TEAM_CHAT_QUIET_MS, TEAM_REQUEST_WAIT_MS } from "./widgetLiveChat";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -74,7 +74,7 @@ async function seedChat(tx: DatabaseTransaction) {
     /** The visitor sends a message, as the widget's chat route looks up or starts their chat. */
     openChat: (now: Date) => as(tx, "worker", (db) => getOrCreateWidgetConversation({ db }, { businessId, widgetVisitorId: visitorId, now })),
     /** The widget opens, as its history route looks up the chat to show. */
-    shownChat: (widgetVisitorId: string, now?: Date) => as(tx, "worker", (db) => findCurrentWidgetConversationId({ db }, { businessId, widgetVisitorId, ...(now ? { now } : {}) })),
+    shownChat: (widgetVisitorId: string, now?: Date) => as(tx, "worker", (db) => findCurrentWidgetChat({ db }, { businessId, widgetVisitorId, ...(now ? { now } : {}) })),
     /** Moves a message in time, as if it was written then. */
     async writtenAt(messageId: string, at: Date) {
       await tx.update(messages).set({ createdAt: at }).where(eq(messages.id, messageId));
@@ -317,24 +317,31 @@ describe.skipIf(!testUrl)("the chat a visitor's widget shows, against PostgreSQL
     });
   });
 
-  it("is empty once a day passed without messages, and the old chat stays open until the visitor writes", async () => {
+  it("is marked idle once a day passed without messages, and the old chat stays open until the visitor writes", async () => {
     await rollbackTest(async (chat) => {
       // A chat without messages yet is the one shown, however old.
-      expect(await chat.shownChat(chat.visitorId, new Date(Date.now() + 3 * WIDGET_CHAT_IDLE_CLOSE_MS))).toBe(chat.conversationId);
+      expect(await chat.shownChat(chat.visitorId, new Date(Date.now() + 3 * WIDGET_CHAT_IDLE_CLOSE_MS))).toEqual({ conversationId: chat.conversationId, idle: false });
       await chat.visitorWrites("Do you open on Sundays?");
       const lastMessage = Date.now();
-      expect(await chat.shownChat(chat.visitorId, new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toBe(chat.conversationId);
+      expect(await chat.shownChat(chat.visitorId, new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, idle: false });
 
       const nextDay = new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000);
-      expect(await chat.shownChat(chat.visitorId, nextDay)).toBeNull();
+      expect(await chat.shownChat(chat.visitorId, nextDay)).toEqual({ conversationId: chat.conversationId, idle: true });
       // Looking closes nothing, so the live updates still follow the old chat for a team member's late reply.
       expect(await chat.chats()).toEqual([{ id: chat.conversationId, status: "open", state: "ai_active" }]);
       expect(await chat.findChat(chat.visitorId)).toBe(chat.conversationId);
 
-      // The visitor's next message closes it and starts the chat shown from then on.
-      const next = await chat.openChat(nextDay);
+      // A team member's late reply makes it the visitor's chat again.
+      const lateReply = await chat.teamReplies("Sorry for the wait: yes, from ten.");
+      await chat.writtenAt(lateReply, nextDay);
+      expect(await chat.shownChat(chat.visitorId, nextDay)).toEqual({ conversationId: chat.conversationId, idle: false });
+
+      // Without one, the visitor's next message closes it and starts the chat shown from then on.
+      const dayAfter = new Date(nextDay.getTime() + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000);
+      expect(await chat.shownChat(chat.visitorId, dayAfter)).toEqual({ conversationId: chat.conversationId, idle: true });
+      const next = await chat.openChat(dayAfter);
       expect(next.conversationId).not.toBe(chat.conversationId);
-      expect(await chat.shownChat(chat.visitorId, nextDay)).toBe(next.conversationId);
+      expect(await chat.shownChat(chat.visitorId, dayAfter)).toEqual({ conversationId: next.conversationId, idle: false });
     });
   });
 });

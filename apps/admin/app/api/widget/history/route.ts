@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { findCurrentWidgetConversationId, loadWidgetChatView } from "@lobbystack/domain";
+import { findCurrentWidgetChat, loadWidgetChatView } from "@lobbystack/domain";
 import { isUuid } from "@lobbystack/shared";
 
 import { asApiResponse } from "@/lib/api-helpers";
@@ -24,11 +24,15 @@ export async function GET(request: Request) {
     const context = createWorkerDomainContext();
     if (!isUuid(visitorId)) return NextResponse.json({ messages: [] });
     // Reading never starts a chat: the visitor's first message does, so one who only looks leaves none behind.
-    const conversationId = await findCurrentWidgetConversationId(context, { businessId: session.businessId, widgetVisitorId: visitorId });
-    if (!conversationId) return NextResponse.json({ messages: [] });
+    const chat = await findCurrentWidgetChat(context, { businessId: session.businessId, widgetVisitorId: visitorId });
+    if (!chat) return NextResponse.json({ messages: [] });
+    const { conversationId } = chat;
     const view = await loadWidgetChatView(context, { businessId: session.businessId, conversationId });
     return NextResponse.json({
       conversationId,
+      // A day passed without messages: a new visit shows an empty chat, a page
+      // left open keeps this one, and the visitor's next message starts a new one.
+      idle: chat.idle,
       automationState: view.automationState,
       waitingForTeam: view.waitingForTeam,
       teamMemberName: view.teamMemberName,

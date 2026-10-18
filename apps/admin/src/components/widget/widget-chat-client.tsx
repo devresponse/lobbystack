@@ -53,6 +53,8 @@ type HistoryPayload = {
   automationState?: string;
   waitingForTeam?: boolean;
   teamMemberName?: string | null;
+  /** The chat went a day without messages, so the visitor's next message starts a new one. */
+  idle?: boolean;
   messages?: Array<{ id: string; role: "user" | "assistant"; content: string; fromTeam?: boolean; teamMemberName?: string | null }>;
 };
 
@@ -166,6 +168,10 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   // starts. The history says whether they have one; once the server answers a
   // message they most likely do, and the live updates stop if they don't.
   const [chatSaved, setChatSaved] = useState(false);
+  // Whether that chat went a day without messages. It stays open, so the live
+  // updates still bring a team member's late reply, but the visitor's next
+  // message starts a new chat.
+  const chatIdleRef = useRef(false);
 
   const visitorId = useMemo(() => (parentVisitorId ?? visitorIdRef.current) || "", [parentVisitorId]);
 
@@ -282,12 +288,17 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
       setHandling(data.automationState === "human_handoff" ? { handoff: true, waitingForTeam: data.waitingForTeam === true, teamMemberName: data.teamMemberName ?? null } : RECEPTIONIST_HANDLING);
       if (Array.isArray(data.messages)) {
         setChatSaved(data.messages.length > 0);
-        setMessages(data.messages.map((message) => ({
+        const idle = data.idle === true;
+        chatIdleRef.current = idle;
+        const saved = data.messages.map((message): WidgetMessage => ({
           id: message.id,
           role: message.role === "assistant" ? "assistant" : "user",
           parts: [{ type: "text", text: message.content }],
           ...(message.role === "assistant" && message.fromTeam ? { metadata: { fromTeam: true, teamMemberName: message.teamMemberName ?? null } } : {}),
-        })));
+        }));
+        // A chat idle for a day shows empty on a new visit, as the visitor's
+        // next message starts a new one, but stays on a page left open.
+        setMessages((shown) => idle && shown.length === 0 ? [] : saved);
       }
     } catch {
       /* transcript resume is best effort */
@@ -357,8 +368,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
 
-  // Once the visitor has a chat, an open stream tells the widget when a team
-  // member writes or takes over. It pauses while the page is in the background.
+  // Once the visitor has a chat, even one idle for a day, an open stream tells
+  // the widget when a team member writes or takes over. It pauses while the
+  // page is in the background.
   const configLoaded = configState !== null;
   useEffect(() => {
     if (!sessionToken || !parentOrigin || !configLoaded || !chatSaved || !pageVisible) return;
@@ -421,6 +433,14 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     setSubmitError(null);
     setDraft("");
     followThreadRef.current = true;
+    if (chatIdleRef.current) {
+      // This message closes the idle chat and starts a new one, which the
+      // thread shows from here, as a reload would. The live updates follow
+      // the new chat once the server answers, as for a first message.
+      chatIdleRef.current = false;
+      setChatSaved(false);
+      setMessages([]);
+    }
     try {
       clearError();
       await sendMessage({ text: content });

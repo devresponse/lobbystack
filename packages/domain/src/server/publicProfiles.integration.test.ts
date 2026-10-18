@@ -170,10 +170,11 @@ describe.skipIf(!client)("public profile pages", () => {
       expect(await fixture.resolve()).toBeNull();
       expect(await fixture.page()).toBeNull();
 
+      // Rows from one transaction share a timestamp, so sort them by name.
       const events = await tx.select({ eventType: auditLogs.eventType, actorUserId: auditLogs.actorUserId, entityId: auditLogs.entityId })
         .from(auditLogs)
         .where(and(eq(auditLogs.businessId, fixture.businessId), sql`${auditLogs.eventType} like 'public_profile.%'`))
-        .orderBy(auditLogs.createdAt);
+        .orderBy(auditLogs.eventType);
       expect(events).toEqual([
         { eventType: "public_profile.published", actorUserId: fixture.adminId, entityId: fixture.businessId },
         { eventType: "public_profile.unpublished", actorUserId: fixture.ownerId, entityId: fixture.businessId },

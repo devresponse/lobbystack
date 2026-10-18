@@ -75,12 +75,35 @@ function conversationOf(latest: Message, locale: string, t: (key: string) => str
   return { id: latest.conversationId, latest, displayName: conversationName(latest, locale, t), channel: latest.channel === "web_chat" ? "web_chat" : "sms" };
 }
 
+const DAY_MS = 86_400_000;
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/** When a conversation last moved, as an inbox shows it: the time today, Yesterday, or the date. */
+function listTime(value: string, locale: string, t: (key: string) => string, now = new Date()): string {
+  const date = new Date(value);
+  // Rounded, since a day with a clock change is an hour shorter or longer.
+  const daysAgo = Math.round((startOfDay(now) - startOfDay(date)) / DAY_MS);
+  if (daysAgo <= 0) return formatDateTime(date, locale, { hour: "numeric", minute: "2-digit" });
+  if (daysAgo === 1) return t("page.yesterday");
+  return formatDateTime(date, locale, date.getFullYear() === now.getFullYear() ? { month: "short", day: "numeric" } : { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** A message's time, with its date when it was written before today. */
+function messageTime(value: string, locale: string, now = new Date()): string {
+  const date = new Date(value);
+  if (startOfDay(date) >= startOfDay(now)) return formatDateTime(date, locale, { hour: "numeric", minute: "2-digit" });
+  return formatDateTime(date, locale, { ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }), month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
 /** One message in the thread. A text the team sent shows how its delivery went, and why it failed when it never went out. */
 function MessageBubble({ message, locale, t }: { message: Message; locale: string; t: (key: string) => string }) {
   const outbound = message.direction === "outbound";
   const statusKey = outbound && message.messageChannel === "sms" ? textStatusKeys[message.status] : undefined;
   const failed = message.status === "failed" || message.status === "undelivered";
-  return <div className={cn("flex", outbound ? "justify-end" : "justify-start")}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", outbound ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] opacity-70"><span>{formatDateTime(message.createdAt, locale, { hour: "numeric", minute: "2-digit" })}</span>{statusKey ? <span className="inline-flex items-center gap-1">{failed ? <CircleAlert className="size-3" /> : null}{t(statusKey)}</span> : null}</p>{message.failureReason ? <p className="mt-1 text-[11px]">{t(smsHoldKeys[message.failureReason])}</p> : null}</div></div>;
+  return <div className={cn("flex", outbound ? "justify-end" : "justify-start")}><div className={cn("max-w-[80%] rounded-2xl px-4 py-3 text-sm", outbound ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}><p className="ph-mask whitespace-pre-wrap">{message.body}</p><p className="mt-1 flex flex-wrap items-center gap-x-2 text-[11px] opacity-70"><span>{messageTime(message.createdAt, locale)}</span>{statusKey ? <span className="inline-flex items-center gap-1">{failed ? <CircleAlert className="size-3" /> : null}{t(statusKey)}</span> : null}</p>{message.failureReason ? <p className="mt-1 text-[11px]">{t(smsHoldKeys[message.failureReason])}</p> : null}</div></div>;
 }
 
 export function LiveMessagesSurface() {
@@ -183,7 +206,7 @@ export function LiveMessagesSurface() {
           <div className="relative"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label={t("page.searchPlaceholder")} className="pl-10" onChange={(event) => setSearch(event.target.value)} placeholder={t("page.searchPlaceholder")} value={search} /></div>
         </div>
         <div className="-mx-3 no-scrollbar h-full overflow-y-auto p-3">
-          {conversations.map((conversation) => <div key={conversation.id}><button className={cn("group flex w-full rounded-md px-2 py-2 text-start text-sm hover:bg-accent hover:text-accent-foreground", selectedId === conversation.id && "bg-muted")} onClick={() => openConversation(conversation.id, conversation.channel)} type="button"><div className="flex w-full gap-2"><Avatar><AvatarFallback className="ph-mask">{initials(conversation.latest.visitorName ?? conversation.latest.contactName, conversation.displayName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2"><span className="ph-mask truncate font-semibold">{conversation.displayName}</span><span className="text-[11px] text-muted-foreground">{formatDateTime(conversation.latest.createdAt, i18n.language, { hour: "numeric", minute: "2-digit" })}</span></div><span className="ph-mask line-clamp-2 text-muted-foreground">{conversation.latest.body || t("page.emptyPreview")}</span>{closedChat(conversation.latest) ? <span className="mt-1 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{t("page.closedBadge")}</span> : waitingForTeam(conversation.latest) ? <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><User className="size-3" />{t("page.waitingBadge")}</span> : null}</div>{conversation.channel === "web_chat" ? <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary" title="Web chat"><Bot className="size-3" /></span> : null}</div></button><Separator className="my-1" /></div>)}
+          {conversations.map((conversation) => <div key={conversation.id}><button className={cn("group flex w-full rounded-md px-2 py-2 text-start text-sm hover:bg-accent hover:text-accent-foreground", selectedId === conversation.id && "bg-muted")} onClick={() => openConversation(conversation.id, conversation.channel)} type="button"><div className="flex w-full gap-2"><Avatar><AvatarFallback className="ph-mask">{initials(conversation.latest.visitorName ?? conversation.latest.contactName, conversation.displayName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2"><span className="ph-mask truncate font-semibold">{conversation.displayName}</span><span className="text-[11px] text-muted-foreground">{listTime(conversation.latest.createdAt, i18n.language, t)}</span></div><span className="ph-mask line-clamp-2 text-muted-foreground">{conversation.latest.body || t("page.emptyPreview")}</span>{closedChat(conversation.latest) ? <span className="mt-1 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{t("page.closedBadge")}</span> : waitingForTeam(conversation.latest) ? <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><User className="size-3" />{t("page.waitingBadge")}</span> : null}</div>{conversation.channel === "web_chat" ? <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary" title="Web chat"><Bot className="size-3" /></span> : null}</div></button><Separator className="my-1" /></div>)}
           {latestMessages.hasNextPage ? <Button className="w-full" loading={latestMessages.isFetchingNextPage} onClick={() => void latestMessages.fetchNextPage()} size="sm" variant="ghost">{t("page.loadMore")}</Button> : null}
         </div>
       </div>

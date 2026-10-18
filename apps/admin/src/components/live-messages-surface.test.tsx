@@ -76,6 +76,35 @@ describe("messages inbox paging", () => {
   });
 });
 
+describe("message times", () => {
+  it("dates the conversations and messages that aren't from today", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 8, 2, 15, 0));
+    try {
+      const row = (conversationId: string, contactName: string, createdAt: Date) => ({ id: `m-${conversationId}`, conversationId, contactName, contactPhone: null, visitorName: null, visitorEmail: null, channel: "web_chat", automationState: "ai_active", body: `Hello from ${contactName}`, direction: "inbound", status: "delivered", createdAt: createdAt.toISOString() });
+      const rows = [row("today", "Today Visitor", new Date(2026, 8, 2, 9, 30)), row("yesterday", "Yesterday Visitor", new Date(2026, 8, 1, 23, 50)), row("august", "August Visitor", new Date(2026, 7, 20, 10, 0)), row("last-year", "Last Year Visitor", new Date(2025, 11, 30, 10, 0))];
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+      clients.push(client);
+      client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+      vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+        const conversationId = new URL(url, "http://admin.test").searchParams.get("conversationId");
+        return Response.json({ messages: conversationId ? rows.filter((entry) => entry.conversationId === conversationId) : rows });
+      }));
+      render(<QueryClientProvider client={client}><LiveMessagesSurface /></QueryClientProvider>);
+
+      expect((await screen.findByRole("button", { name: /Today Visitor/ })).textContent).toMatch(/9:30\sAM/);
+      expect(screen.getByRole("button", { name: /Yesterday Visitor/ }).textContent).toContain("page.yesterday");
+      expect(screen.getByRole("button", { name: /August Visitor/ }).textContent).toContain("Aug 20");
+      expect(screen.getByRole("button", { name: /Last Year Visitor/ }).textContent).toContain("Dec 30, 2025");
+
+      await userEvent.click(screen.getByRole("button", { name: /August Visitor/ }));
+      expect(await screen.findByText(/Aug 20, 10:00\sAM/)).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe("a website visitor waiting for a person", () => {
   it("is marked in the list, and Join chat takes the chat for the team", async () => {
     const waiting = { id: "m1", conversationId: "conversation-1", contactName: null, contactPhone: null, visitorName: "Ada Visitor", visitorEmail: null, channel: "web_chat", automationState: "human_handoff", teamRequestedAt: "2026-09-01T12:00:00Z", body: "Can I talk to someone?", direction: "inbound", status: "delivered", createdAt: "2026-09-01T12:00:00Z" };

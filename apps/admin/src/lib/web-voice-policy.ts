@@ -34,13 +34,16 @@ export function buildWebVoiceRateLimits(input: {
   }
 
   const dashboard = input.dashboardTestCall === true;
+  // One IP address can be a whole office or a mobile carrier's shared address,
+  // so it gets more website calls than one visitor. The counts keep their
+  // names when the numbers change, so a new number applies to today's counts.
   if (input.ipHash) {
-    limits.push(limit(dashboard ? "dashboard-ip-hour" : "ip-hour", `${input.businessId}:${input.ipHash}`, dashboard ? 30 : 5, hour, "rate_limit_ip_hour"));
-    limits.push(limit(dashboard ? "dashboard-ip-day" : "ip-day", `${input.businessId}:${input.ipHash}`, dashboard ? 100 : 10, day, "rate_limit_ip_day"));
+    limits.push(limit(dashboard ? "dashboard-ip-hour" : "ip-hour", `${input.businessId}:${input.ipHash}`, dashboard ? 30 : 20, hour, "rate_limit_ip_hour"));
+    limits.push(limit(dashboard ? "dashboard-ip-day" : "ip-day", `${input.businessId}:${input.ipHash}`, 100, day, "rate_limit_ip_day"));
   }
   if (input.visitorId) {
-    limits.push(limit(dashboard ? "dashboard-visitor-hour" : "visitor-hour", `${input.businessId}:${input.visitorId}`, dashboard ? 30 : 5, hour, "rate_limit_visitor_hour"));
-    limits.push(limit(dashboard ? "dashboard-visitor-day" : "visitor-day", `${input.businessId}:${input.visitorId}`, dashboard ? 100 : 10, day, "rate_limit_visitor_day"));
+    limits.push(limit(dashboard ? "dashboard-visitor-hour" : "visitor-hour", `${input.businessId}:${input.visitorId}`, dashboard ? 30 : 10, hour, "rate_limit_visitor_hour"));
+    limits.push(limit(dashboard ? "dashboard-visitor-day" : "visitor-day", `${input.businessId}:${input.visitorId}`, dashboard ? 100 : 30, day, "rate_limit_visitor_day"));
   }
   limits.push(limit(dashboard ? "dashboard-origin-10m" : "origin-10m", `${input.businessId}:${input.origin}`, 30 * (dashboard ? 4 : 1), 10 * minute, "rate_limit_origin"));
   limits.push(limit(dashboard ? "dashboard-business-hour" : "business-hour", input.businessId, dashboard ? 120 : 60, hour, "rate_limit_business_hour"));

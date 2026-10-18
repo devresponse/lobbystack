@@ -125,6 +125,8 @@ Dashboard test calls, the website widget, prospect demos, and the landing site d
 
 The caller hears nothing until step 4. The admin logs `live.browser_start` with the milliseconds each stage took: `accessMs`, `checksMs` (rate limits, minutes and the snapshot), `greetingMs` (the recording check), `openaiMs`, `recordMs` and `attachMs`. The response's `Server-Timing` header shows the browser the same stages. With `LIVE_RECORDED_GREETING=true`, `greetingRecording` says whether the call opened with a recording.
 
+A refused start logs `live.browser_refused` with the `status` and `code` the browser got. For a rate limit, `reason` names the count that ran out, such as `rate_limit_ip_day`, and `widgetId` names the kind of call. The website widget lets each visitor start 10 calls an hour and 30 a day, each IP address 20 an hour and 100 a day (counted only when `TRUSTED_CLIENT_IP_HEADER` is set), and each business 60 an hour and 300 a day. The counts restart at the top of each UTC hour and at midnight UTC. When OpenAI refuses to create the session, for example with 429 because its account is out of credit, the browser gets 502 and error tracking gets OpenAI's code, such as `insufficient_quota`.
+
 The browser can only close the session. It can't change instructions or answer delegations. Before it sends its WebRTC offer, the browser waits for ICE candidate gathering to finish, for up to 10 seconds. When the caller hangs up, it sends `session.close` and mutes the microphone. It keeps the connection open until `session.closed` arrives, for up to 15 seconds. Prospect demos don't count against minutes, and their agent can only answer questions and take messages.
 
 ## What the worker does during a call

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { APIError } from "openai";
 
 import { buildBrowserSessionConfig } from "@lobbystack/agent-core/live/session";
 import { finishLiveCall, getWebVoiceBillingAllowance, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
@@ -52,8 +53,26 @@ function createServerTiming() {
   };
 }
 
-function denied(status: number, code: string, headers: Record<string, string>) {
+// The browser only gets the code, so the log line is where an operator sees
+// why a call didn't start. A rate limit's `reason` names the count that ran out.
+function denied(status: number, code: string, headers: Record<string, string>, fields: { widgetId?: string; reason?: string } = {}) {
+  logEvent("warn", "live.browser_refused", { status, code, ...fields });
   return NextResponse.json({ code, error: "The call couldn't start." }, { status, headers });
+}
+
+/**
+ * OpenAI refusing the session, such as with 429 when its account is out of
+ * credit, is our failure to start the call, not the caller's. It reaches the
+ * logs and error tracking with OpenAI's code, and the browser gets 502: passing
+ * OpenAI's own status on would read as one of our limits.
+ */
+class LiveSessionRefusedError extends Error {
+  readonly status = 502;
+
+  constructor(cause: APIError) {
+    super(`OpenAI refused to create the live session${cause.code ? ` (${cause.code})` : ""}: ${cause.message}`, { cause });
+    this.name = "LiveSessionRefusedError";
+  }
 }
 
 export async function OPTIONS(request: Request) {
@@ -94,7 +113,7 @@ async function startBrowserCall(request: Request) {
       ...(access.visitorId ? { visitorId: access.visitorId } : {}),
       ...(access.prospectDemoId ? { prospectDemoId: access.prospectDemoId } : { dashboardTestCall: access.dashboardTestCall }),
     });
-    if (!limit.allowed) return denied(limit.status, limit.code, cors);
+    if (!limit.allowed) return denied(limit.status, limit.code, cors, { widgetId: access.widgetId, reason: limit.reason });
     // The rate limit shields the database, so only allowed callers reach it.
     // The caller hears nothing until this request returns, so these two
     // independent reads run together.
@@ -113,7 +132,11 @@ async function startBrowserCall(request: Request) {
     timing.mark("greeting");
 
     const client = getLiveClient();
-    const live = await client.live.create({ session: buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }), transport: { type: "webrtc", sdp: body.sdp } });
+    const live = await client.live
+      .create({ session: buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }), transport: { type: "webrtc", sdp: body.sdp } })
+      .catch((error: unknown) => {
+        throw error instanceof APIError && typeof error.status === "number" ? new LiveSessionRefusedError(error) : error;
+      });
     timing.mark("openai");
     const sessionId = live.session.id;
     addToCallContext({ sessionId });

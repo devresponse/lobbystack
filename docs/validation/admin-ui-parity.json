@@ -26,7 +26,11 @@
     "/settings/api-keys",
     "/integrations/webhooks",
     "/settings/connected-apps",
-    "/oauth/consent"
+    "/oauth/consent",
+    "/onboarding/brand",
+    "/settings/profile",
+    "/profile/[slug]",
+    "/settings/qrcode"
   ],
   "localizedPortRoutes": [
     "/[locale]/accept-invite",
@@ -1354,6 +1358,34 @@
       "state": "default",
       "comparison": "excluded",
       "reason": "New OAuth consent screen for MCP clients"
+    },
+    {
+      "path": "/onboarding/brand",
+      "fixtureState": "onboarding",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New onboarding step that names the deployment's app and logo"
+    },
+    {
+      "path": "/settings/profile",
+      "fixtureState": "operator",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New public profile settings"
+    },
+    {
+      "path": "/profile/[slug]",
+      "fixtureState": "public",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New public business profile page"
+    },
+    {
+      "path": "/settings/qrcode",
+      "fixtureState": "operator",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New printable QR code signs for the public profile"
     }
   ]
 }

@@ -29,13 +29,27 @@ export async function currentPageRoutes(root: string): Promise<string[]> {
     .sort();
 }
 
+/**
+ * The legacy dashboard's route table at the frozen reference commit, or null
+ * when this clone doesn't have that commit. The fork never carried the
+ * original's history, and the original is gone, so it can't be fetched.
+ */
+export function referenceAppSource(root: string, commit: string): string | null {
+  try {
+    execFileSync("git", ["cat-file", "-e", `${commit}^{commit}`], { cwd: root, stdio: "ignore" });
+  } catch {
+    return null;
+  }
+  return execFileSync("git", ["show", `${commit}:apps/web/src/App.tsx`], { cwd: root, encoding: "utf8" });
+}
+
 export async function validateAdminUiParity(root = process.cwd()) {
   const manifest = JSON.parse(await readFile(resolve(root, "docs/validation/admin-ui-parity.json"), "utf8")) as { referenceCommit: string; visualHarness: string; visualCertifier: string; visualMatrix: { locales: string[]; themes: string[]; viewports: string[]; maxDiffPixelRatio: number; colorThreshold: number }; visualExemptions: string[]; localizedPortRoutes: string[]; visualRoutes: VisualRoute[]; capabilities: Entry[] };
   const errors: string[] = [];
   if (manifest.referenceCommit !== "98df89901f1dca22b8c96ccf9509a8cd549f2eb9") errors.push("Visual parity reference commit changed unexpectedly.");
   const exactMembers = (actual: string[], expected: string[]) => actual.length === expected.length && expected.every(value => actual.includes(value));
   if (!exactMembers(manifest.visualMatrix.locales, ["en", "fr"]) || !exactMembers(manifest.visualMatrix.themes, ["light", "dark"]) || !exactMembers(manifest.visualMatrix.viewports, ["1440x1000", "390x844"]) || !Number.isFinite(manifest.visualMatrix.maxDiffPixelRatio) || manifest.visualMatrix.maxDiffPixelRatio < 0 || manifest.visualMatrix.maxDiffPixelRatio > 0.001 || manifest.visualMatrix.colorThreshold !== 0) errors.push("Visual parity matrix is incomplete or too permissive.");
-  if (!exactMembers(manifest.visualExemptions, ["/messages", "/settings/widget", "/embed/[key]", "/settings/plan/ai-sms-compliance", "/settings/api-keys", "/integrations/webhooks", "/settings/connected-apps", "/oauth/consent"])) errors.push("Visual parity exemptions do not match the approved scope.");
+  if (!exactMembers(manifest.visualExemptions, ["/messages", "/settings/widget", "/embed/[key]", "/settings/plan/ai-sms-compliance", "/settings/api-keys", "/integrations/webhooks", "/settings/connected-apps", "/oauth/consent", "/onboarding/brand", "/settings/profile", "/profile/[slug]", "/settings/qrcode"])) errors.push("Visual parity exemptions do not match the approved scope.");
   try { await readFile(resolve(root, manifest.visualHarness), "utf8"); } catch { errors.push(`Missing visual parity harness ${manifest.visualHarness}`); }
   try { await readFile(resolve(root, manifest.visualCertifier), "utf8"); } catch { errors.push(`Missing visual parity certifier ${manifest.visualCertifier}`); }
 
@@ -58,10 +72,10 @@ export async function validateAdminUiParity(root = process.cwd()) {
     if (!localizedRoute.startsWith("/[locale]/")) errors.push(`Localized port route must start with /[locale]/: ${localizedRoute}`);
     if (!manifestShapes.has(routeShape(withoutLocaleSegment(localizedRoute)))) errors.push(`Localized port route is missing from the route-and-state manifest: ${localizedRoute}`);
   }
-  const frozenSource = execFileSync("git", ["show", `${manifest.referenceCommit}:apps/web/src/App.tsx`], { cwd: root, encoding: "utf8" });
-  const frozenRoutes = referenceUiRoutes(frozenSource);
+  const frozenSource = referenceAppSource(root, manifest.referenceCommit);
+  const frozenRoutes = frozenSource === null ? null : referenceUiRoutes(frozenSource);
   const referenceShapes = new Set(manifest.visualRoutes.map(route => routeShape(route.referencePath ?? route.path)));
-  for (const referenceRoute of frozenRoutes) {
+  for (const referenceRoute of frozenRoutes ?? []) {
     if (!referenceShapes.has(routeShape(referenceRoute))) errors.push(`Frozen main route is missing from the route-and-state manifest: ${referenceRoute}`);
   }
   const pageRoutes = await currentPageRoutes(root);
@@ -94,9 +108,9 @@ export async function validateAdminUiParity(root = process.cwd()) {
   }
 
   if (errors.length) throw new Error(errors.join("\n"));
-  return { frozenRoutes: frozenRoutes.length, states: manifest.visualRoutes.length };
+  return { frozenRoutes: frozenRoutes?.length ?? null, states: manifest.visualRoutes.length };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  validateAdminUiParity().then(result => console.log(`Admin UI parity manifest passed: ${result.frozenRoutes} frozen routes and ${result.states} declared states. Rendered parity requires screenshot certification.`)).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });
+  validateAdminUiParity().then(result => console.log(`Admin UI parity manifest passed: ${result.frozenRoutes === null ? "legacy routes not compared (reference commit not in this clone)" : `${result.frozenRoutes} frozen routes`} and ${result.states} declared states. Rendered parity requires screenshot certification.`)).catch(error => { console.error(error instanceof Error ? error.message : String(error)); process.exitCode = 1; });
 }

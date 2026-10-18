@@ -42,7 +42,8 @@ for (const capability of excluded) {
 }
 
 if (!manifest.capabilities.some((capability) => capability.status === "retired")) failures.push("manifest must document retired capabilities");
-try { await validateAdminUiParity(root); } catch (error) { failures.push(error instanceof Error ? error.message : String(error)); }
+let legacyRoutesCompared = true;
+try { legacyRoutesCompared = (await validateAdminUiParity(root)).frozenRoutes !== null; } catch (error) { failures.push(error instanceof Error ? error.message : String(error)); }
 if (failures.length > 0) {
   console.error(`Replacement parity check failed with ${failures.length} issue${failures.length === 1 ? "" : "s"}:`);
   for (const failure of failures) console.error(`- ${failure}`);
@@ -51,3 +52,4 @@ if (failures.length > 0) {
 
 const counts = Object.fromEntries(["required", "excluded", "retired"].map((status) => [status, manifest.capabilities.filter((capability) => capability.status === status).length]));
 console.log(`Replacement capability and route inventory passed: ${counts.required} required, ${counts.excluded} excluded, ${counts.retired} retired. Rendered parity requires screenshot certification.`);
+if (!legacyRoutesCompared) console.log("Skipped the legacy dashboard route comparison: its reference commit isn't in this clone.");

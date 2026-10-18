@@ -277,9 +277,12 @@ function passcodeCommand(outcome: KeypadPasscodeOutcome): string {
 
 // What GPT-Live hears, and the next request sees, when the keypad stops taking
 // a PIN the caller didn't finish. GPT-Live was told to wait quietly, so without
-// it the call would sit silent. Another try needs the backend to start the
-// keypad again.
-const PASSCODE_STOPPED = "The keypad stopped taking the PIN after a minute without a key press. In the language of the conversation, tell the caller briefly and ask whether they want to try again. If they do, delegate to the backend to start the keypad again before you ask for the PIN.";
+// it the call would sit silent. The conversation may have moved on meanwhile.
+// Another try needs the backend to start the keypad again.
+const PASSCODE_STOPPED = "The keypad stopped taking the PIN after a minute without a key press. If you're still waiting for the caller to type it, tell them briefly in the language of the conversation and ask whether they want to try again; if they do, delegate to the backend to start the keypad again before you ask for the PIN. If the conversation has moved on, don't bring it up.";
+// What GPT-Live hears when the caller presses the pound key before typing as
+// many digits as the shortest PIN has. It isn't checked, so it uses no try.
+const PASSCODE_TOO_SHORT = `The caller pressed the pound key after fewer than ${CONTACT_PASSCODE_MIN_LENGTH} digits, and every PIN is at least that long, so it wasn't checked and used none of their tries. In the language of the conversation, ask them briefly to type their whole PIN again, then press the pound key.`;
 const PASSCODE_STOPPED_RESULT = { ok: false, reason: "The keypad stopped taking the PIN after a minute without a key press. If the caller wants to try again, verify the appointment again, then start the check again with requestKeypadPasscode." };
 
 // Tools that change something. The next request on the call sees their results,
@@ -911,6 +914,8 @@ export class LiveCallController {
     if (this.ending || this.finished) return false;
     clearTimeout(this.passcode?.timer);
     this.passcode = { check, digits: "", checking: false };
+    // An earlier check's outcome no longer applies to the next request.
+    this.latestPasscode = undefined;
     this.schedulePasscodeEnd(this.passcode);
     return true;
   }
@@ -920,9 +925,16 @@ export class LiveCallController {
     // Keys pressed while the PIN is being checked don't count.
     if (passcode.checking) return;
     if (key === "*") passcode.digits = "";
-    // A pound key before the PIN is as long as the shortest one is ignored:
-    // checking it would only use up one of the caller's tries.
-    if (key === "#" && passcode.digits.length >= CONTACT_PASSCODE_MIN_LENGTH) return void this.checkPasscode(passcode);
+    if (key === "#") {
+      if (passcode.digits.length >= CONTACT_PASSCODE_MIN_LENGTH) return void this.checkPasscode(passcode);
+      // Checking a PIN shorter than the shortest one would only use up one of
+      // the caller's tries, so its digits are dropped and the caller is asked
+      // to type the whole PIN again.
+      if (passcode.digits) {
+        passcode.digits = "";
+        this.tellPasscodeOutcome(PASSCODE_TOO_SHORT);
+      }
+    }
     if (/^[0-9]$/.test(key)) {
       passcode.digits += key;
       if (passcode.digits.length >= CONTACT_PASSCODE_MAX_LENGTH) return void this.checkPasscode(passcode);
@@ -942,12 +954,14 @@ export class LiveCallController {
     }, complete ? PASSCODE_KEY_GAP_MS : PASSCODE_IDLE_MS);
   }
 
-  // GPT-Live is waiting quietly for the PIN, so it hears that the keypad
-  // stopped taking it and offers another try, unless the call is ending.
+  // GPT-Live may be waiting quietly for the PIN, so it hears that the keypad
+  // stopped taking it, unless the call is ending, being transferred, or
+  // waiting to hang up once the caller is done.
   private stopPasscode(): void {
     this.passcode = undefined;
     if (this.ending || this.finished) return;
     this.latestPasscode = fitToAppend(JSON.stringify(PASSCODE_STOPPED_RESULT));
+    if (this.transfer || this.pendingHangup) return;
     this.tellPasscodeOutcome(PASSCODE_STOPPED);
   }
 

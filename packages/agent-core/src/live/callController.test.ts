@@ -1360,7 +1360,8 @@ describe("LiveCallController keypad PIN", () => {
   };
   const accepted = { status: "accepted" as const, result: { ok: true, status: "passcode_verified", verificationId: "verification_1", appointmentId: "appointment_1", action: "cancel" } };
   const passcodeAppends = (socket: FakeSocket) => sentOfType(socket, "session.instructions.append").filter((event) => event.event_id.startsWith("passcode_"));
-  const stopped = "The keypad stopped taking the PIN after a minute without a key press. In the language of the conversation, tell the caller briefly and ask whether they want to try again. If they do, delegate to the backend to start the keypad again before you ask for the PIN.";
+  const stopped = "The keypad stopped taking the PIN after a minute without a key press. If you're still waiting for the caller to type it, tell them briefly in the language of the conversation and ask whether they want to try again; if they do, delegate to the backend to start the keypad again before you ask for the PIN. If the conversation has moved on, don't bring it up.";
+  const tooShort = "The caller pressed the pound key after fewer than 4 digits, and every PIN is at least that long, so it wasn't checked and used none of their tries. In the language of the conversation, ask them briefly to type their whole PIN again, then press the pound key.";
 
   it("checks the PIN at the pound key, keeps it out of the transcript, and tells GPT-Live and the next request the outcome", async () => {
     fakeTimers();
@@ -1407,20 +1408,20 @@ describe("LiveCallController keypad PIN", () => {
     expect(passcodeAppends(socket).map((event) => event.event_id)).toEqual(["passcode_1", "passcode_2"]);
   });
 
-  it("ignores the pound key until the PIN is as long as the shortest one, so a short PIN uses no try", async () => {
+  it("drops a PIN shorter than the shortest one at the pound key and asks for it again, so it uses no try", async () => {
     fakeTimers();
     const { controller, socket } = setup();
     const check = vi.fn(async () => accepted);
     controller.collectPasscode(check);
-    press(socket, "4#");
-    press(socket, "80#");
+    press(socket, "12#");
     await vi.advanceTimersByTimeAsync(30_000);
     expect(check).not.toHaveBeenCalled();
-    expect(passcodeAppends(socket)).toEqual([]);
-    press(socket, "6#");
+    expect(passcodeAppends(socket)).toEqual([expect.objectContaining({ delegation_id: null, event_id: "passcode_1", content: tooShort })]);
+    // The digits before the pound key don't count toward the next PIN.
+    press(socket, "480613#");
     await vi.advanceTimersByTimeAsync(0);
     expect(check).toHaveBeenCalledTimes(1);
-    expect(check).toHaveBeenCalledWith("4806");
+    expect(check).toHaveBeenCalledWith("480613");
   });
 
   it("ignores keys while the PIN is being checked, and waits for more than a short PIN", async () => {
@@ -1476,6 +1477,35 @@ describe("LiveCallController keypad PIN", () => {
     void controller.wrapUp("duration_limit");
     await vi.advanceTimersByTimeAsync(1_000);
     expect(passcodeAppends(socket)).toHaveLength(2);
+  });
+
+  it("tells GPT-Live nothing when the keypad stops during a transfer or while the call waits to hang up", async () => {
+    fakeTimers();
+    const transferring = setup();
+    transferring.controller.collectPasscode(async () => accepted);
+    transferring.controller.transferAfterAnnouncement("tel:+14165550199");
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(passcodeAppends(transferring.socket)).toEqual([]);
+
+    const hangingUp = setup();
+    hangingUp.controller.collectPasscode(async () => accepted);
+    hangingUp.controller.endWhenCallerDone();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(passcodeAppends(hangingUp.socket)).toEqual([]);
+  });
+
+  it("leaves an earlier check's outcome out of the next request once a new check starts", async () => {
+    fakeTimers();
+    const generate = vi.fn<Generate>(async () => reply("Sure."));
+    const { controller, socket } = setup({ generate });
+    controller.collectPasscode(async () => accepted);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(passcodeAppends(socket).map((event) => event.content)).toEqual([stopped]);
+    controller.collectPasscode(async () => accepted);
+    socket.emit("session.input_transcript.delta", { delta: "How many digits is it?", start_ms: 500, end_ms: 1_000 });
+    socket.emit("session.delegation.created", { delegation: { id: "item_1" }, offset_ms: 1_100 });
+    await vi.advanceTimersByTimeAsync(300);
+    expect(generate.mock.calls[0]![0].prompt).not.toContain("Keypad PIN check in this call");
   });
 
   it("tells GPT-Live to offer the team when the PIN wasn't accepted or couldn't be checked", async () => {

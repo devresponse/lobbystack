@@ -48,8 +48,9 @@ describe("call.saveRecording", () => {
   it("gives up after the last attempt, or at once on any other error", async () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     await expect(handleJob(recordingJob(LIVE_RECORDING_ATTEMPTS), dependencies(vi.fn(async () => { throw notReady(404); })))).resolves.toEqual({ status: "skipped", entityId: "call_1" });
-    expect(error).toHaveBeenCalledWith("[live] live_1 recording never became available");
+    expect(error).toHaveBeenCalledWith(JSON.stringify({ level: "error", message: "live.recording_never_available", callId: "call_1", sessionId: "live_1", attempt: LIVE_RECORDING_ATTEMPTS }));
     await expect(handleJob(recordingJob(1), dependencies(vi.fn(async () => { throw notReady(401); })))).resolves.toEqual({ status: "skipped", entityId: "call_1" });
+    expect(error).toHaveBeenLastCalledWith(JSON.stringify({ level: "error", message: "live.recording_unavailable", callId: "call_1", sessionId: "live_1", status: 401, error: "401" }));
     expect(retryLiveCallRecording).not.toHaveBeenCalled();
     expect(persistCallRecording).not.toHaveBeenCalled();
   });
@@ -70,7 +71,7 @@ describe("live.recoverOrphans", () => {
 
   it("hands every open call older than a minute, in every business, to the live call handler", async () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
-    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const failingBusinessId = randomUUID();
     vi.mocked(listBusinessesWithOpenLiveCalls).mockResolvedValue([businessId, failingBusinessId, otherBusinessId]);
     vi.mocked(listOpenLiveCalls).mockImplementation(async (_context, input) => {
@@ -89,6 +90,10 @@ describe("live.recoverOrphans", () => {
     expect(Date.now() - startedBefore.getTime()).toBeGreaterThanOrEqual(60_000);
     expect(Date.now() - startedBefore.getTime()).toBeLessThan(65_000);
     expect(vi.mocked(listOpenLiveCalls).mock.calls.every(([, input]) => input.startedBefore === startedBefore)).toBe(true);
+    // Each failure is reported with the business or call it belongs to.
+    const reports = error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(reports).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/exception: connection reset$/), operation: "live.list_open_calls", businessId: failingBusinessId, error: "connection reset" }));
+    expect(reports).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/exception: snapshot missing$/), operation: "live.recover", businessId, callId: "call_live_b", sessionId: "live_b", error: "snapshot missing" }));
   });
 
   it("does nothing when GPT-Live is off or Redis is down", async () => {

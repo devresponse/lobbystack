@@ -30,6 +30,11 @@ describe("jobFailureLogLine", () => {
     });
   });
 
+  it("names the call a failed job worked on", () => {
+    const job = { ...failedJob({ attemptsMade: 2 }), data: { ...failedJob({ attemptsMade: 2 }).data, type: "call.saveRecording" as const, queue: "default" as const, payload: { callId: "call_1", sessionId: "rtc_1", durationMs: 60_000 } } };
+    expect(JSON.parse(jobFailureLogLine("default", job, new Error("Storage unavailable")))).toMatchObject({ type: "call.saveRecording", businessId, callId: "call_1", sessionId: "rtc_1", attempt: 2 });
+  });
+
   it("says when BullMQ has stopped retrying", () => {
     expect(JSON.parse(jobFailureLogLine("critical", failedJob({ attemptsMade: 5, finishedOn: Date.now() }), new Error("boom")))).toMatchObject({ attempt: 5, willRetry: false });
   });

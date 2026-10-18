@@ -28,6 +28,7 @@ export * from "./outbox";
 export * from "./phoneVerification";
 export { verificationCodeSmsBody } from "./verificationCode";
 export * from "./phoneNumbers";
+export * from "./providerPricing";
 export * from "./widgetKeys";
 export * from "./widgetLiveChat";
 export * from "./privacy";

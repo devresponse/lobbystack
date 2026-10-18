@@ -27,7 +27,7 @@ beforeAll(async () => {
       if not exists (select from pg_roles where rolname = 'lobbystack_app') then create role lobbystack_app; end if;
     end $$;
     create schema ${schema};
-    create table ${schema}.users (id uuid primary key, email text, email_verified boolean);
+    create table ${schema}.users (id uuid primary key, email text, email_verified boolean, preferred_locale text);
     create table ${schema}.verifications (id uuid primary key, identifier text not null, value text not null, expires_at timestamptz not null, created_at timestamptz not null, updated_at timestamptz not null);
     grant usage on schema ${schema} to lobbystack_auth, lobbystack_app;
     grant select on ${schema}.users to lobbystack_auth;
@@ -52,7 +52,7 @@ afterAll(async () => {
 describe.skipIf(!url)("auth issuance with PostgreSQL", () => {
   it("persists with the locked adapter inside signup and rejects overlapping issuance", async () => {
     const email = `${randomUUID()}@example.invalid`;
-    await admin!.pool.query(`insert into ${schema}.users values ($1, $2, false)`, [randomUUID(), email]);
+    await admin!.pool.query(`insert into ${schema}.users values ($1, $2, false, 'fr')`, [randomUUID(), email]);
     let release!: () => void;
     state.enqueue.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve; }));
     const { issueEmailVerificationCode } = await import("./auth");
@@ -67,6 +67,8 @@ describe.skipIf(!url)("auth issuance with PostgreSQL", () => {
     await expect(first).resolves.toBe(true);
     const rows = (await admin!.pool.query(`select * from ${schema}.verifications`)).rows;
     const otp = state.enqueue.mock.calls[0]![1].payload.variables.code;
+    // The code goes out in the account's language.
+    expect(state.enqueue.mock.calls[0]![1].payload.variables.locale).toBe("fr");
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ identifier: `email-verification-otp-${email}`, value: `${createHash("sha256").update(otp).digest("base64url")}:0` });
     expect(state.allowed).toHaveBeenCalledOnce();

@@ -47,6 +47,36 @@ const EXISTING_ACCOUNT_SUBJECTS: Record<SupportedLocale, (appName: string) => st
   sr: (appName) => `Već imate ${appName} nalog`,
 };
 
+type AuthEmailPurpose = "verification" | "password_reset" | "email_change";
+
+// French puts no "de" before the app's name and Serbian never declines it (see docs/branding.md).
+const AUTH_EMAIL_SUBJECTS: Record<AuthEmailPurpose | "verification_code", Record<SupportedLocale, (appName: string) => string>> = {
+  verification_code: {
+    en: (appName) => `Your ${appName} verification code`,
+    fr: (appName) => `Votre code de vérification ${appName}`,
+    es: (appName) => `Su código de verificación de ${appName}`,
+    sr: (appName) => `Vaš ${appName} kod za potvrdu`,
+  },
+  verification: {
+    en: (appName) => `Confirm your new ${appName} email address`,
+    fr: (appName) => `Confirmez votre nouvelle adresse courriel pour ${appName}`,
+    es: (appName) => `Confirme su nueva dirección de correo de ${appName}`,
+    sr: (appName) => `Potvrdite novu imejl adresu za ${appName} nalog`,
+  },
+  password_reset: {
+    en: (appName) => `Reset your ${appName} password`,
+    fr: (appName) => `Réinitialisez votre mot de passe ${appName}`,
+    es: (appName) => `Restablezca su contraseña de ${appName}`,
+    sr: (appName) => `Resetujte lozinku za ${appName} nalog`,
+  },
+  email_change: {
+    en: (appName) => `Confirm your ${appName} email change`,
+    fr: (appName) => `Confirmez le changement d'adresse courriel de votre compte ${appName}`,
+    es: (appName) => `Confirme el cambio de correo de su cuenta de ${appName}`,
+    sr: (appName) => `Potvrdite promenu imejl adrese za ${appName} nalog`,
+  },
+};
+
 /** The deployment's name, as auth emails call it (see docs/branding.md). */
 async function authEmailAppName(): Promise<string> {
   return await deploymentAppName(getEmailDatabase().db);
@@ -111,40 +141,47 @@ async function enqueueAuthEmailOutbox(input: { userId: string; dedupeKey: string
   });
 }
 
+/** The account's dashboard language, which its emails are written in. */
+async function accountLocale(userId: string): Promise<SupportedLocale> {
+  const stored = (await getAuthDatabase().db.select({ preferredLocale: users.preferredLocale }).from(users).where(eq(users.id, userId)).limit(1))[0];
+  return resolveLocale(stored?.preferredLocale);
+}
+
+/** `newEmail` is where an email change moves the account, which the email to the current address names. */
 async function enqueueAuthEmail(input: {
-  purpose: "verification" | "password_reset" | "email_change";
+  purpose: AuthEmailPurpose;
   userId: string;
   email: string;
   url: string;
+  locale: SupportedLocale;
+  newEmail?: string;
 }): Promise<void> {
   const urlHash = createHash("sha256").update(input.url).digest("hex");
-  const appName = await authEmailAppName();
-  const subject = input.purpose === "verification"
-    ? `Verify your ${appName} email`
-    : input.purpose === "password_reset"
-      ? `Reset your ${appName} password`
-      : `Confirm your ${appName} email change`;
   await enqueueAuthEmailOutbox({
     userId: input.userId,
     dedupeKey: `auth-email:${input.purpose}:${input.userId}:${urlHash}`,
     payload: {
-      template: input.purpose === "verification" ? "verify_email" : input.purpose === "password_reset" ? "password_reset" : "verify_email",
+      template: input.purpose === "password_reset" ? "password_reset" : "verify_email",
       to: input.email,
-      subject,
-      variables: { url: input.url },
+      subject: AUTH_EMAIL_SUBJECTS[input.purpose][input.locale](await authEmailAppName()),
+      variables: {
+        url: input.url,
+        locale: input.locale,
+        ...(input.purpose === "email_change" ? { purpose: "email_change", ...(input.newEmail ? { newEmail: input.newEmail } : {}) } : {}),
+      },
     },
   });
 }
 
-async function enqueueEmailVerificationCode(input: { userId: string; email: string; otp: string; issuanceId: string }): Promise<boolean> {
+async function enqueueEmailVerificationCode(input: { userId: string; email: string; otp: string; issuanceId: string; locale: SupportedLocale }): Promise<boolean> {
   await enqueueAuthEmailOutbox({
     userId: input.userId,
     dedupeKey: `auth-email:verification-code:${input.userId}:${input.issuanceId}`,
     payload: {
       template: "verify_email",
       to: input.email,
-      subject: `Your ${await authEmailAppName()} verification code`,
-      variables: { code: input.otp },
+      subject: AUTH_EMAIL_SUBJECTS.verification_code[input.locale](await authEmailAppName()),
+      variables: { code: input.otp, locale: input.locale },
     },
   });
   return true;
@@ -161,7 +198,7 @@ export async function issueEmailVerificationCode(email: string, remoteIp?: strin
     const lock = await tx.execute<{ acquired: boolean }>(sql`select pg_try_advisory_xact_lock(hashtextextended(${`email-verification:${normalizedEmail}`}, 0)) as acquired`);
     if (!lock.rows[0]?.acquired) throw new EmailVerificationRateLimitError();
     await assertEmailVerificationSendAllowed({ email: normalizedEmail, ...(remoteIp ? { remoteIp } : {}) });
-    const user = (await tx.select({ id: users.id, emailVerified: users.emailVerified }).from(users).where(eq(users.email, normalizedEmail)).limit(1))[0];
+    const user = (await tx.select({ id: users.id, emailVerified: users.emailVerified, preferredLocale: users.preferredLocale }).from(users).where(eq(users.email, normalizedEmail)).limit(1))[0];
     if (!user || user.emailVerified) return false;
     const issuanceId = randomUUID();
     const issuer = createAuth(tx);
@@ -169,7 +206,7 @@ export async function issueEmailVerificationCode(email: string, remoteIp?: strin
     // Signup runs inside Better Auth's adapter AsyncLocalStorage. A nested
     // instance alone does not replace that adapter for internal writes.
     const otp = await runWithAdapter(adapter, () => issuer.api.createVerificationOTP({ body: { email: normalizedEmail, type: "email-verification" } }));
-    return await enqueueEmailVerificationCode({ userId: user.id, email: normalizedEmail, otp, issuanceId });
+    return await enqueueEmailVerificationCode({ userId: user.id, email: normalizedEmail, otp, issuanceId, locale: resolveLocale(user.preferredLocale) });
   });
 }
 
@@ -242,12 +279,13 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
       allowedAttempts: 3,
       sendVerificationOTP: async ({ email, otp, type }) => {
         if (type !== "forget-password") throw new Error("Only password recovery codes use the public OTP sender.");
-        const user = (await database.db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1))[0];
+        const user = (await database.db.select({ id: users.id, preferredLocale: users.preferredLocale }).from(users).where(eq(users.email, email)).limit(1))[0];
         if (!user) return;
+        const locale = resolveLocale(user.preferredLocale);
         await enqueueAuthEmailOutbox({
           userId: user.id,
           dedupeKey: `auth-reset-code:${user.id}:${randomUUID()}`,
-          payload: { template: "password_reset", to: email, subject: `Reset your ${await authEmailAppName()} password`, variables: { code: otp } },
+          payload: { template: "password_reset", to: email, subject: AUTH_EMAIL_SUBJECTS.password_reset[locale](await authEmailAppName()), variables: { code: otp, locale } },
         });
       },
     })],
@@ -289,7 +327,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         if (account?.password) await database.db.update(users).set({ passwordHash: account.password, passwordAlgorithm: "lobbystack-scrypt-v1", updatedAt: new Date() }).where(eq(users.id, user.id));
       },
       sendResetPassword: async ({ user, url }: { user: { id: string; email: string }; url: string }) => {
-        await enqueueAuthEmail({ purpose: "password_reset", userId: user.id, email: user.email, url });
+        await enqueueAuthEmail({ purpose: "password_reset", userId: user.id, email: user.email, url, locale: await accountLocale(user.id) });
       },
     },
     emailVerification: {
@@ -318,7 +356,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         const confirmationUrl = new URL(`/${recipientLocale}/confirm-email-change`, process.env.APP_BASE_URL ?? "http://localhost:3000");
         confirmationUrl.searchParams.set("token", verificationUrl.searchParams.get("token") ?? "");
         confirmationUrl.searchParams.set("email", user.email);
-        await enqueueAuthEmail({ purpose: "verification", userId: user.id, email: user.email, url: confirmationUrl.toString() });
+        await enqueueAuthEmail({ purpose: "verification", userId: user.id, email: user.email, url: confirmationUrl.toString(), locale: recipientLocale });
       },
     },
     user: {
@@ -331,8 +369,8 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
       },
       changeEmail: {
         enabled: true,
-        sendChangeEmailConfirmation: async ({ user, url }: { user: { id: string; email: string }; newEmail: string; url: string }) => {
-          await enqueueAuthEmail({ purpose: "email_change", userId: user.id, email: user.email, url });
+        sendChangeEmailConfirmation: async ({ user, newEmail, url }: { user: { id: string; email: string }; newEmail: string; url: string }) => {
+          await enqueueAuthEmail({ purpose: "email_change", userId: user.id, email: user.email, url, newEmail, locale: await accountLocale(user.id) });
         },
       },
     },

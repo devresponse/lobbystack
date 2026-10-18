@@ -95,7 +95,7 @@ Every email and text the app sends calls it by the same name as the dashboard: v
 
 `deploymentAppName()` in `packages/domain/src/server/branding.ts` resolves the name in the same order as the dashboard: a matched brand file, then the saved onboarding choice, then the default brand. It caches the saved choice for 30 seconds and uses the default brand when the database can't be read. The admin builds email subjects and SMS replies with it, and the worker renders email bodies and sends the codes with it, so **set `APP_BASE_URL` on the worker as well as the admin**: the worker picks its brand from it the same way.
 
-The verification email's HTML header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text.
+Every email except the founder check-in and dashboard feedback has an HTML version whose header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text.
 
 When `EMAIL_FROM` holds only an address and a brand file matches, the worker puts the brand's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
 

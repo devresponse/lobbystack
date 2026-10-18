@@ -10,6 +10,7 @@ import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, ma
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
+import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file.
 const brand = vi.hoisted(() => ({ appBaseUrl: null as string | null }));
@@ -60,6 +61,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     releaseOperatorNotificationDelivery: vi.fn(),
     markNotificationSent: vi.fn(),
     recordCallProviderPricing: vi.fn(),
+    recheckProviderPrice: vi.fn(),
     loadLiveCallForPricing: vi.fn(),
     recordProductEvent: vi.fn(),
     recordSmsProviderPricing: vi.fn(),
@@ -150,6 +152,10 @@ describe("worker handlers", () => {
     const invitation = { invitationId: randomUUID(), email: "agent@example.test", token: "token", template: "invitation", url: "https://app.example.test/invite/token" };
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: invitation, trace: {}, idempotencyKey: "invitation:x:send", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
     expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "invitation", to: "agent@example.test", subject: "You're invited to join AlloPlace", appName: "AlloPlace" }));
+    // An invitation that names its business says so, in the inviter's language.
+    const named = { ...invitation, variables: { url: invitation.url, businessName: "Maple Dental", role: "viewer", transfersOwnership: "false", locale: "fr" } };
+    await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: named, trace: {}, idempotencyKey: "invitation:y:send", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
+    expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ template: "invitation", subject: "Invitation à rejoindre Maple Dental sur AlloPlace", variables: named.variables }));
     await handleJob({ jobId: randomUUID(), businessId: randomUUID(), type: "email.send", queue: "default", payload: { template: "operator_alert", to: "owner@example.test", message: "Hi" }, trace: {}, idempotencyKey: "alert:x", scheduled: false }, { domain: { db: undefined as never }, email: { sendTemplate } });
     expect(sendTemplate).toHaveBeenLastCalledWith(expect.objectContaining({ subject: "AlloPlace notification", appName: "AlloPlace" }));
   });
@@ -731,6 +737,76 @@ describe("worker handlers", () => {
     expect(recordCallProviderPricing).toHaveBeenCalledWith({ db: undefined as never }, expect.objectContaining({ providerCallId: "CA777", callId: "call_1", providerCostUsd: 0.02 }));
   });
 
+  it("checks a text's price again later while Twilio hasn't filled it in", async () => {
+    const getMessagePricing = vi.fn().mockResolvedValue({ providerNumSegments: 1 });
+    for (const [priceRecheck, recheck] of [[undefined, 1], [4, 5]] as const) {
+      const job = pricingJob("sms.syncPrice", { providerMessageId: "SM123", providerStatus: "sent", ...(priceRecheck ? { priceRecheck } : {}) });
+
+      const result = await handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getMessagePricing } });
+
+      expect(result).toEqual({ status: "skipped", entityId: `SM123:recheck:${recheck}` });
+      expect(recheckProviderPrice).toHaveBeenLastCalledWith({ db: undefined as never }, { topic: "sms.syncPrice", businessId: job.businessId, entityId: "SM123", payload: job.payload, recheck });
+    }
+    expect(recordSmsProviderPricing).not.toHaveBeenCalled();
+  });
+
+  it("reports a text Twilio never priced as a warning, not an error, once the rechecks run out", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const job = pricingJob("sms.syncPrice", { providerMessageId: "SM123", providerStatus: "failed", priceRecheck: PROVIDER_PRICE_RECHECKS });
+    const getMessagePricing = vi.fn().mockResolvedValue({ providerNumSegments: 1 });
+
+    const result = await handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getMessagePricing } }, { queueJobId: "job_1" });
+
+    expect(result).toEqual({ status: "skipped", entityId: "SM123" });
+    expect(recheckProviderPrice).not.toHaveBeenCalled();
+    expect(recordSmsProviderPricing).not.toHaveBeenCalled();
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ level: "warn", message: expect.stringMatching(/\] warning: Twilio SMS pricing is incomplete for SM123\.$/), operation: "job.sms.syncPrice", jobType: "sms.syncPrice", jobId: "job_1", rechecks: PROVIDER_PRICE_RECHECKS, alertable: false }));
+    expect(error).not.toHaveBeenCalled();
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
+  it("still fails the job when Twilio can't be reached", async () => {
+    const job = pricingJob("sms.syncPrice", { providerMessageId: "SM123", providerStatus: "delivered" });
+    const getMessagePricing = vi.fn().mockRejectedValue(new Error("connect ECONNRESET"));
+
+    await expect(handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getMessagePricing } })).rejects.toThrow("connect ECONNRESET");
+    expect(recheckProviderPrice).not.toHaveBeenCalled();
+  });
+
+  it("checks a call's price again later, then reports it as a warning", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const getCallPricing = vi.fn().mockResolvedValue({ providerPriceUnit: "usd" });
+    const job = pricingJob("call.syncPrice", { providerCallId: "CA123", providerCallStatus: "completed" });
+
+    await expect(handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getCallPricing } })).resolves.toEqual({ status: "skipped", entityId: "CA123:recheck:1" });
+    expect(recheckProviderPrice).toHaveBeenCalledWith({ db: undefined as never }, { topic: "call.syncPrice", businessId: job.businessId, entityId: "CA123", payload: job.payload, recheck: 1 });
+
+    const last = pricingJob("call.syncPrice", { providerCallId: "CA123", providerCallStatus: "completed", priceRecheck: PROVIDER_PRICE_RECHECKS });
+    await expect(handleJob(last, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getCallPricing } })).resolves.toEqual({ status: "skipped", entityId: "CA123" });
+    expect(recheckProviderPrice).toHaveBeenCalledTimes(1);
+    expect(recordCallProviderPricing).not.toHaveBeenCalled();
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toContainEqual(expect.objectContaining({ level: "warn", message: expect.stringMatching(/\] warning: Twilio call pricing is incomplete for CA123\.$/), operation: "job.call.syncPrice", rechecks: PROVIDER_PRICE_RECHECKS }));
+    warn.mockRestore();
+  });
+
+  it("checks a GPT-Live call's price again later while Twilio hasn't listed or priced the call", async () => {
+    vi.stubEnv("TWILIO_SIP_TRUNK_SID", "TK123");
+    vi.mocked(loadLiveCallForPricing).mockResolvedValue({ startedAt: new Date("2026-09-26T12:00:00Z"), callerPhone: "+14165550134" });
+    const job = pricingJob("call.syncPrice", { callId: "call_1", providerCallStatus: "completed" });
+    const getCallPricing = vi.fn().mockResolvedValue({});
+
+    await expect(handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getCallPricing, findTrunkCall: vi.fn().mockResolvedValue(undefined) } })).resolves.toEqual({ status: "skipped", entityId: "call_1:recheck:1" });
+    expect(getCallPricing).not.toHaveBeenCalled();
+    await expect(handleJob(job, { domain: { db: undefined as never }, twilio: { sendSms: vi.fn(), getCallPricing, findTrunkCall: vi.fn().mockResolvedValue("CA777") } })).resolves.toEqual({ status: "skipped", entityId: "call_1:recheck:1" });
+
+    expect(recheckProviderPrice).toHaveBeenCalledTimes(2);
+    expect(recheckProviderPrice).toHaveBeenCalledWith({ db: undefined as never }, { topic: "call.syncPrice", businessId: job.businessId, entityId: "call_1", payload: job.payload, recheck: 1 });
+    expect(recordCallProviderPricing).not.toHaveBeenCalled();
+  });
+
   it("delivers a resolved SMS notification and records the provider id", async () => {
     const businessId = randomUUID();
     const notificationId = randomUUID();
@@ -812,20 +888,28 @@ describe("worker handlers", () => {
     const deliveryId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: "Maple Dental" });
+    vi.stubEnv("APP_BASE_URL", "https://app.example.test");
     const sendTemplate = vi.fn().mockResolvedValue({ messageId: "email-123" });
 
     const result = await handleJob({ ...notificationJob({ operatorDeliveryId: deliveryId }), businessId }, { domain, email: { sendTemplate } });
 
     expect(result).toEqual({ status: "completed", entityId: deliveryId });
-    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ to: "operator@example.test", idempotencyKey: `operator-notification:${deliveryId}` }));
+    // The email names the business and the alert, and links into the dashboard.
+    expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({
+      template: "operator_alert",
+      to: "operator@example.test",
+      subject: "New message",
+      variables: { message: "A caller left a message.", eventKind: "voiceMessage", appUrl: "https://app.example.test", businessName: "Maple Dental" },
+      idempotencyKey: `operator-notification:${deliveryId}`,
+    }));
     expect(markOperatorNotificationSent).toHaveBeenCalledWith(domain, { businessId, deliveryId, providerMessageId: "email-123" });
   });
 
   it("uses separate main-account credentials only for the configured operator alert sender", async () => {
     const businessId = randomUUID(); const deliveryId = randomUUID(); const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "sms", status: "processing", destination: "+14165550100", sender: "+14165550101", subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "sms", status: "processing", destination: "+14165550100", sender: "+14165550101", subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: null });
     const mainSend = vi.fn().mockResolvedValue({ providerMessageId: "SMmain" });
     const stagingSend = vi.fn().mockResolvedValue({ providerMessageId: "SMstaging" });
     const job = { ...notificationJob({ operatorDeliveryId: deliveryId }), businessId };
@@ -1086,7 +1170,7 @@ describe("worker handlers", () => {
     const deliveryId = randomUUID();
     const domain = { db: undefined as never };
     vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
-    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date() });
+    vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "voiceMessage", eventKey: "voice:1", channel: "email", status: "processing", destination: "operator@example.test", sender: null, subject: "New message", body: "A caller left a message.", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: "Maple Dental" });
     const error = new Error("smtp down");
     const sendTemplate = vi.fn().mockRejectedValue(error);
 

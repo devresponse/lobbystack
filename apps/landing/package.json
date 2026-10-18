@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "predev": "pnpm --filter @lobbystack/shared build",
     "dev": "astro dev",
     "prebuild": "pnpm --filter @lobbystack/shared build",
     "build": "astro build",

@@ -23,6 +23,7 @@ import { MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy } from "@lobbystack
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
+import { createGreetingRecordings, type GreetingRecordingStore } from "./greetingRecordings";
 import { recordLiveCallLatency, recordLiveDelegation, recordLiveDelegationGeneration } from "./liveCallTelemetry";
 
 export const LIVE_ATTACH_PATH = "/internal/live/attach";
@@ -55,6 +56,13 @@ type AttachRequest = {
    * no greeting.
    */
   resume?: boolean;
+  /**
+   * The greeting a browser call opened with, when LIVE_RECORDED_GREETING is
+   * on. `play`: the session's starting history has it as already said, and
+   * the worker plays its recording as the call connects. Otherwise the call
+   * opened as before, and the worker records it for the next one.
+   */
+  recordedGreeting?: { text: string; play: boolean };
   /** Set when this worker took the call over after its owner died. Never parsed from HTTP. */
   recovery?: OpenLiveCall;
 };
@@ -190,6 +198,7 @@ export function parseAttachRequest(raw: string): AttachRequest | undefined {
     ...(typeof body.maxDurationMs === "number" && body.maxDurationMs > 0 ? { maxDurationMs: body.maxDurationMs } : {}),
     ...(body.intakeOnly === true ? { intakeOnly: true } : {}),
     ...(body.resume === true ? { resume: true } : {}),
+    ...(typeof body.recordedGreeting?.text === "string" && body.recordedGreeting.text.trim() ? { recordedGreeting: { text: body.recordedGreeting.text.trim(), play: body.recordedGreeting.play === true } } : {}),
   };
 }
 
@@ -223,7 +232,7 @@ function inCallContext<T extends object>(inCall: InCall, options: T): T {
  * and creates or accepts the OpenAI session, then calls this endpoint so the
  * worker holds the sideband for the rest of the call.
  */
-export function createLiveCallHandler(input: { domain: DomainContext; attachLock?: AttachLock }) {
+export function createLiveCallHandler(input: { domain: DomainContext; attachLock?: AttachLock; greetingRecordings?: GreetingRecordingStore }) {
   // `inCall` runs code from outside a call, such as a shutdown's wrap-up, in
   // the call's context, so the timers and callbacks it starts keep its IDs.
   const active = new Map<string, { request: AttachRequest; controller: LiveCallController; wrapUp: (reason: LiveCallWrapUp) => Promise<void>; inCall: InCall }>();
@@ -249,6 +258,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     }
   };
   const client = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0 }) : undefined;
+  const recordings = client && input.greetingRecordings ? createGreetingRecordings({ store: input.greetingRecordings, client }) : undefined;
   // The caller waits in silence while the agent works, so delegation runs on
   // its own reasoning effort (low unless AI_DELEGATION_* says otherwise).
   const model = createAgentModel(liveDelegationEnvironment());
@@ -450,6 +460,11 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     const savedTurns: Promise<number> = recovery ? Promise.resolve(recovery.lastSequence)
       : request.resume ? lastLiveCallSequence(input.domain, call).catch((error: unknown) => { logFailure("live.saved_transcript_unread")(error); return 0; })
       : Promise.resolve(0);
+    // A call the admin opened with the greeting's recording plays it, and one
+    // it opened without records it for the next call. A call already under
+    // way gets no greeting at all.
+    const recorded = recovery || request.resume ? undefined : request.recordedGreeting;
+    const recordingLoad: Promise<string | undefined> = recorded?.play && recordings ? recordings.load(recorded.text) : Promise.resolve(undefined);
     let end: LiveCallEnd | undefined;
     let controller: LiveCallController | undefined;
     let sessionAlive = false;
@@ -491,7 +506,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     // In order, so a quick answer never lands before the referral it follows.
     let transferWrites = Promise.resolve();
 
-    const setup: Promise<LiveCallSetup> = Promise.all([snapshotLoad, savedTurns]).then(([snapshot, saved]) => {
+    const business: Promise<LiveCallSetup> = Promise.all([snapshotLoad, savedTurns]).then(([snapshot, saved]) => {
       if (!snapshot) throw new Error("The business has no published snapshot.");
       const agent = createReceptionistAgent({
         model,
@@ -514,9 +529,16 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         return done;
       };
       // A recovered call, or one with a saved transcript, is already under
-      // way, so the greeting fallback must not fire.
-      return { agent, callerDone: (conversation: string, abortSignal: AbortSignal) => inCall(callerDone, conversation, abortSignal), ...(phone && normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy).verificationMode === "passcode_required" ? { maskKeypad: true } : {}), ...(recovery || saved > 0 ? {} : { greeting: snapshot.greeting }) };
+      // way, so the greeting fallback must not fire. The greeting's words come
+      // from the admin when it opened the call with them, so a snapshot this
+      // worker cached earlier can't contradict them.
+      return { agent, callerDone: (conversation: string, abortSignal: AbortSignal) => inCall(callerDone, conversation, abortSignal), ...(phone && normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy).verificationMode === "passcode_required" ? { maskKeypad: true } : {}), ...(recovery || saved > 0 ? {} : { greeting: recorded?.text ?? snapshot.greeting }) };
     });
+    // The attach answers once the business has loaded, so the recording can
+    // finish loading while the caller's browser connects.
+    const setup: Promise<LiveCallSetup> = recorded?.play
+      ? Promise.all([business, recordingLoad]).then(([ready, audio]) => ({ ...ready, greetingRecording: audio ? { audio } : {} }))
+      : business;
 
     const finish = async (summary: LiveCallSummary) => {
       if (recovery && !sessionAlive) {
@@ -602,7 +624,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     controller.start();
     // Without the business the call can't go on; the controller ends the
     // session, and the admin records the failed attach.
-    await setup;
+    await business;
+    if (recorded && !recorded.play) void recordings?.record(recorded.text);
   }
 
   /** Ends a browser session: over its sideband when this worker holds it, otherwise over a new one. */

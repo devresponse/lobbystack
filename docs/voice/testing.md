@@ -32,6 +32,7 @@ These options change what runs:
 - **`--concurrency <n>`**: how many sessions run at once. The default is 4. With 22 sessions at once, many runs lost their transcripts.
 - **`--snapshot <file>`**: uses a real business's snapshot instead of the demo business.
 - **`--browser`**: plays a browser call, like one from the website widget, instead of a phone call. GPT-Live gets the browser call's instructions, the agent runs on the `web_voice` channel, and the caller's audio skips the phone-line filter. Use it after a change to what browser calls hear, such as how they handle a caller who asks for a person.
+- **`--recorded-greeting`**: with `--browser`, opens each call with a recording of the greeting, as `LIVE_RECORDED_GREETING=true` does (see [Open browser calls with a recording](runtime.md#open-browser-calls-with-a-recording)). The script renders the recording once. A run fails when the receptionist speaks again after the recording, before the caller does.
 
 Each run uses under a minute of GPT-Live audio, plus a delegation model call for each hand-over. The default 18 runs take about 5 minutes.
 
@@ -48,7 +49,7 @@ PASS trailing-goodbye  greeted at 1.6 s | ended 4.1 s after the caller | hand-ov
 Each field answers one question:
 
 - **`PASS` or `FAIL`**: whether the call ended or went on, as the scenario expects
-- **`greeted at … s`**: when the receptionist first spoke, before the caller did, and how many greeting commands the worker sent. The caller waits 15 seconds for it.
+- **`greeted at … s`**: when the receptionist first spoke, before the caller did, and how many greeting commands the worker sent. The caller waits 15 seconds for it. With `--recorded-greeting`, `by the recording` means OpenAI played the recording at that time, and `then said: "…"` shows what the receptionist said after it, before the caller spoke.
 - **`ended … after the caller`**: how long after the caller's last line the controller closed the session, or `still open` after 15 seconds
 - **`hand-overs`**: each request GPT-Live handed to the backend after the opening question, by the tools the agent used. `reply` means the agent answered without a tool.
 - **`checks`**: each answer from the caller check, which runs when the caller speaks after the agent ended the call

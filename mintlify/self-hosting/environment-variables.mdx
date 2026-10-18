@@ -58,6 +58,7 @@ OpenAI's GPT-Live model answers browser calls and phone calls. Phone calls reach
 | `OPENAI_WEBHOOK_SECRET` | Verifies OpenAI's incoming-call webhook at `/api/webhooks/openai/live`. Phone calls only. |
 | `TWILIO_SIP_TRUNK_SID` | The Twilio Elastic SIP trunk that sends calls to your OpenAI project. New numbers join it, and the worker won't provision a number without it. |
 | `WEB_CALL_MAX_DURATION_MS` | Optional cap on browser call length. |
+| `LIVE_RECORDED_GREETING` | Set to `true` on admin to open browser calls with a recording of the business greeting, so the caller hears it as soon as the call connects. The first call after the greeting changes opens as before, and the worker records the greeting for the next one. Admin and worker need the same `REDIS_URL`. |
 | `WEB_CALL_PUBLIC_BUSINESS_SLUG` | Business that answers the public demo call on your marketing site. |
 | `WEB_CALL_ALLOWED_ORIGINS` | Comma-separated sites allowed to start that public demo call. Website widget calls use each widget key's allowed origins instead. |
 

@@ -145,7 +145,7 @@ async function main(): Promise<void> {
   };
   const state = { ready: false, redis: false, database: false, storage: false, activeJobs: 0, draining: false };
   const embeddings = createEmbeddingProvider();
-  const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) }, attachLock: realtime });
+  const liveCalls = createLiveCallHandler({ domain: { db: database.db, snapshotCache: getWorkerSnapshotCache(), ...(embeddings ? { embeddings } : {}) }, attachLock: realtime, greetingRecordings: realtime });
   const health = startHealthServer(workerPort, state, liveCalls.handle);
   const email = createEmailProvider();
   const onboardingFollowupSender = createOnboardingFollowupSender();

@@ -296,6 +296,90 @@ describe("LiveCallController greeting", () => {
   });
 });
 
+describe("LiveCallController greeting recording", () => {
+  const greeting = "Thanks for calling Northside Plumbing.";
+  // 100 ms of audio stands in for the recording.
+  const recorded = (recording: LiveCallSetup["greetingRecording"] = { audio: pcm(3_000) }): Promise<LiveCallSetup> => Promise.resolve({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: recording });
+  const sentIds = (socket: FakeSocket) => greetings(socket).map((event) => event.event_id);
+  const steps = (events: GreetingEvent[]) => events.map((event) => [event.step, event.trigger].filter(Boolean).join(" "));
+
+  // OpenAI's guide recommends a recording for predictable greeting playback.
+  it("plays the recording as soon as the session starts and sends no greeting command", async () => {
+    fakeTimers();
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket, turns, closed } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).toEqual([{ type: "session.output_audio.fixture.play", audio: pcm(3_000), event_id: "greeting_recording" }]);
+    await vi.advanceTimersByTimeAsync(500);
+    socket.emit("session.output_audio.fixture.playing", { client_event_id: "greeting_recording" });
+    socket.emit("session.output_audio.fixture.played", { client_event_id: "greeting_recording" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
+    expect(steps(greetingEvents)).toEqual(["sent recording", "acknowledged recording", "spoken recording"]);
+    // GPT-Live writes no transcript for a recording, so its words come from the greeting.
+    socket.emit("session.input_transcript.delta", { delta: "Are you open today?", start_ms: 31_000, end_ms: 32_000 });
+    expect(turns).toEqual([{ sequence: 1, speaker: "assistant", text: greeting }]);
+    socket.emit("session.closed", { reason: "remote_hangup", usage: { seconds: 33 } });
+    expect(closed[0]?.latency).toMatchObject({ firstSpeechMs: 500, greetedFirst: true });
+  });
+
+  it("sends the greeting command at once when OpenAI rejects the recording", async () => {
+    fakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("error", Object.assign(new Error("Unknown event type"), { error: { type: "invalid_request_error", client_event_id: "greeting_recording" } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentIds(socket)).toEqual(["greeting_recording", "greeting_1"]);
+    expect(greetings(socket)[1]?.content).toContain(`say exactly "${greeting}"`);
+    expect(steps(greetingEvents)).toEqual(["sent recording", "failed recording", "sent fallback"]);
+  });
+
+  it("sends the greeting command when OpenAI doesn't start the recording within 3 seconds", async () => {
+    fakeTimers();
+    const { socket } = setup({ phone: false, setup: recorded() });
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sentIds(socket)).toEqual(["greeting_recording", "greeting_1"]);
+    // A recording that starts after that is still the greeting, so the command isn't sent again.
+    socket.emit("session.output_audio.fixture.playing", { client_event_id: "greeting_recording" });
+    socket.emit("session.instructions.appended", { client_event_id: "greeting_1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(sentIds(socket)).toEqual(["greeting_recording", "greeting_1"]);
+  });
+
+  // The admin saw a recording the worker couldn't load in time. The starting
+  // history has the greeting as already said, so GPT-Live won't say it unasked.
+  it("sends the greeting command at once when there's no recording to play", async () => {
+    fakeTimers();
+    const { socket } = setup({ phone: false, setup: recorded({}) });
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentIds(socket)).toEqual(["greeting_1"]);
+  });
+
+  it("doesn't play the recording over a caller who spoke while the business loaded", async () => {
+    fakeTimers();
+    let resolveSetup!: (value: LiveCallSetup) => void;
+    const { socket } = setup({ phone: false, setup: new Promise((resolve) => { resolveSetup = resolve; }) });
+    socket.socket.emit("open");
+    startSession(socket);
+    socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 1_000, end_ms: 1_500 });
+    resolveSetup({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: { audio: pcm(3_000) } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(greetings(socket)).toHaveLength(0);
+  });
+});
+
 describe("LiveCallController delegation", () => {
   it("answers a delegation with the agent's result", async () => {
     const { socket, generate } = setup();

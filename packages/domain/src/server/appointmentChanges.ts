@@ -202,7 +202,8 @@ export async function verifyAppointmentChangeOtp(
 /**
  * Checks a PIN the caller typed on the keypad for a passcode_pending change.
  * Each change allows PASSCODE_MAX_ATTEMPTS tries, and wrong PINs also count
- * toward the contact's lock. Once the PIN matches, a cancellation's result says
+ * toward the contact's lock, so the tries a wrong PIN says are left are the
+ * fewer of the two. Once the PIN matches, a cancellation's result says
  * whether the caller gets texts, as verifyAppointmentChangeOtp does.
  */
 export async function verifyAppointmentChangePasscode(
@@ -239,9 +240,10 @@ export async function verifyAppointmentChangePasscode(
       const status = attemptCount >= PASSCODE_MAX_ATTEMPTS ? "failed" : "passcode_pending";
       await tx.update(appointmentChangeVerifications).set({ status, attemptCount, updatedAt: now }).where(eq(appointmentChangeVerifications.id, current.id));
       await audit("appointment_change.passcode_rejected", { attemptCount });
+      // Wrong PINs from earlier calls can bring the lock before this change's last try.
       return status === "failed"
         ? { ok: false, status, ...change, attemptsLeft: 0, reason: "The PIN didn't match, and there are no tries left on this call." }
-        : { ok: false, status, ...change, attemptsLeft: PASSCODE_MAX_ATTEMPTS - attemptCount, reason: "The PIN didn't match." };
+        : { ok: false, status, ...change, attemptsLeft: Math.min(PASSCODE_MAX_ATTEMPTS - attemptCount, checked.attemptsLeft), reason: "The PIN didn't match." };
     }
     await tx.update(appointmentChangeVerifications).set({ status: "passcode_verified", attemptCount, updatedAt: now }).where(eq(appointmentChangeVerifications.id, current.id));
     await audit("appointment_change.passcode_verified");

@@ -891,12 +891,12 @@ export class LiveCallController {
   /**
    * Takes the next PIN the caller types on the keypad for `check`. The digits
    * stay out of the transcript and the next request, and GPT-Live, which never
-   * hears key presses, is told the outcome. A PIN ends at the pound key, at
-   * the longest PIN length, or PASSCODE_KEY_GAP_MS after the last key once it's
-   * long enough; star starts it over. A PIN that didn't match can be typed
-   * again. After PASSCODE_IDLE_MS without a key, the keypad stops taking it,
-   * and GPT-Live and the next request are told. Returns false once the call is
-   * ending.
+   * hears key presses, is told the outcome. Once a PIN is as long as the
+   * shortest one, it ends at the pound key or PASSCODE_KEY_GAP_MS after the
+   * last key; it also ends at the longest PIN length, and star starts it over.
+   * A PIN that didn't match can be typed again. After PASSCODE_IDLE_MS without
+   * a key, the keypad stops taking it, and GPT-Live and the next request are
+   * told. Returns false once the call is ending.
    */
   collectPasscode(check: KeypadPasscodeCheck): boolean {
     if (this.ending || this.finished) return false;
@@ -911,7 +911,9 @@ export class LiveCallController {
     // Keys pressed while the PIN is being checked don't count.
     if (passcode.checking) return;
     if (key === "*") passcode.digits = "";
-    if (key === "#" && passcode.digits) return void this.checkPasscode(passcode);
+    // A pound key before the PIN is as long as the shortest one is ignored:
+    // checking it would only use up one of the caller's tries.
+    if (key === "#" && passcode.digits.length >= CONTACT_PASSCODE_MIN_LENGTH) return void this.checkPasscode(passcode);
     if (/^[0-9]$/.test(key)) {
       passcode.digits += key;
       if (passcode.digits.length >= CONTACT_PASSCODE_MAX_LENGTH) return void this.checkPasscode(passcode);

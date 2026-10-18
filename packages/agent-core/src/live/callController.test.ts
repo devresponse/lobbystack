@@ -1323,6 +1323,22 @@ describe("LiveCallController keypad PIN", () => {
     expect(passcodeAppends(socket).map((event) => event.event_id)).toEqual(["passcode_1", "passcode_2"]);
   });
 
+  it("ignores the pound key until the PIN is as long as the shortest one, so a short PIN uses no try", async () => {
+    fakeTimers();
+    const { controller, socket } = setup();
+    const check = vi.fn(async () => accepted);
+    controller.collectPasscode(check);
+    press(socket, "4#");
+    press(socket, "80#");
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(check).not.toHaveBeenCalled();
+    expect(passcodeAppends(socket)).toEqual([]);
+    press(socket, "6#");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(check).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledWith("4806");
+  });
+
   it("ignores keys while the PIN is being checked, and waits for more than a short PIN", async () => {
     fakeTimers();
     const { controller, socket } = setup();

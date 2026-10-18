@@ -253,8 +253,9 @@ describe.skipIf(!client)("appointment changes that need the keypad PIN", () => {
       expect(await type(first.verificationId, "111222")).toMatchObject({ ok: false, status: "failed", attemptsLeft: 0 });
       expect(await type(first.verificationId, pin)).toMatchObject({ ok: false, status: "failed" });
 
+      // This change has two tries left, but the lock comes after one more wrong PIN.
       const second = (await verify())!;
-      expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_pending", attemptsLeft: 2 });
+      expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_pending", attemptsLeft: 1 });
       expect(await type(second.verificationId, "111222")).toMatchObject({ ok: false, status: "passcode_locked" });
       expect((await row())!.failedAttempts).toBe(5);
       expect((await detail()).passcode).toMatchObject({ locked: true });

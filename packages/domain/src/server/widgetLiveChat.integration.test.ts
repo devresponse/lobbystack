@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { businessMemberships, businesses, conversations, conversationSessions, createDatabaseClient, messages, operatorNotificationDeliveries, outboxMessages, productEvents, users, widgetVisitors, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import type { InterfaceLocale } from "@lobbystack/shared";
 
 import { appendMessage, findCurrentWidgetChat, findWidgetConversationId, getOrCreateWidgetConversation, setAutomationState, WIDGET_CHAT_IDLE_CLOSE_MS } from "./conversations";
 import { expireTeamRequest, loadWidgetChatView, requestTeamForWidgetChat, returnQuietTeamChat, TEAM_CHAT_QUIET_MS, TEAM_REQUEST_WAIT_MS } from "./widgetLiveChat";
@@ -62,10 +63,10 @@ async function seedChat(tx: DatabaseTransaction) {
     visitorWrites: (body: string) => write("worker", { body, direction: "inbound" }),
     aiReplies: (body: string) => write("worker", { body, direction: "outbound", aiGenerated: true }),
     teamReplies: (body: string) => write("app", { body, direction: "outbound", userId }),
-    /** The visitor asks the receptionist for a person, as its requestTeamMember tool does. */
-    asksForPerson: (now?: Date) => as(tx, "worker", (db) => requestTeamForWidgetChat({ db }, { businessId, conversationId, locale: "fr", reason: "Questions about\nan invoice", ...(now ? { now } : {}) })),
-    /** The worker's job, once the wait is over. */
-    expire: (requestedAt: Date) => as(tx, "worker", (db) => expireTeamRequest({ db }, { businessId, conversationId, requestedAt, locale: "fr" })),
+    /** The visitor asks the receptionist for a person, as its requestTeamMember tool does, in a widget showing `locale`. */
+    asksForPerson: (now?: Date, locale: InterfaceLocale = "fr") => as(tx, "worker", (db) => requestTeamForWidgetChat({ db }, { businessId, conversationId, locale, reason: "Questions about\nan invoice", ...(now ? { now } : {}) })),
+    /** The worker's job, once the wait is over, with the language its request saved. */
+    expire: (requestedAt: Date, locale: InterfaceLocale = "fr") => as(tx, "worker", (db) => expireTeamRequest({ db }, { businessId, conversationId, requestedAt, locale })),
     /** A team member presses Join (Take over) or Resume AI in Messages. */
     teamSets: (state: "ai_active" | "human_handoff") => as(tx, "app", (db) => setAutomationState({ db }, { userId, businessId, conversationId, state })),
     view: (now?: Date) => as(tx, "worker", (db) => loadWidgetChatView({ db }, { businessId, conversationId, ...(now ? { now } : {}) })),
@@ -212,6 +213,23 @@ describe.skipIf(!testUrl)("live chat with the team against PostgreSQL under prod
       // The job runs once; a retry finds nothing left to do.
       expect(await chat.expire(requestedAt)).toEqual({ expired: false });
       expect(await chat.events()).toEqual(["conversation.team_request_expired", "conversation.team_requested"]);
+    });
+  });
+
+  it.each<[InterfaceLocale, string]>([
+    ["es", "nadie del equipo está disponible"],
+    ["sr", "niko iz tima ne može da se pridruži"],
+  ])("offers to take a message in the language the widget shows, %s", async (locale, nobodyJoined) => {
+    await rollbackTest(async (chat) => {
+      const requestedAt = new Date(Date.now() - TEAM_REQUEST_WAIT_MS);
+      await chat.asksForPerson(requestedAt, locale);
+      expect(await chat.expiryJobs()).toEqual([expect.objectContaining({ payload: expect.objectContaining({ locale }) })]);
+
+      expect(await chat.expire(requestedAt, locale)).toEqual({ expired: true });
+      const offers = (await chat.messageRows()).filter((row) => row.aiGenerated);
+      expect(offers).toEqual([expect.objectContaining({ body: expect.stringContaining(nobodyJoined) })]);
+      // Serbian is written in Latin script.
+      expect(offers[0]!.body).not.toMatch(/\p{Script=Cyrillic}/u);
     });
   });
 

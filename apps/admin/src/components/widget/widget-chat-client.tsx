@@ -184,14 +184,14 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     }),
     prepareSendMessagesRequest: ({ messages }) => {
       const lastUserMessage = [...messages].reverse().find((message) => message.role === "user");
+      // The receptionist replies in the language the widget shows.
+      const locale = normalizeInterfaceLocale(i18n.language);
       return {
         body: {
           visitorId: visitorIdRef.current || visitorId,
           messageId: lastUserMessage?.id ?? (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : `m-${Date.now()}`),
           content: lastUserMessage ? messageText(lastUserMessage) : "",
-          // The reply language the AI uses only covers English and French. For
-          // other interface languages the server keeps its business default.
-          ...(i18n.language === "fr" || i18n.language === "en" ? { locale: i18n.language } : {}),
+          ...(locale ? { locale } : {}),
         },
       };
     },

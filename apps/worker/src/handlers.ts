@@ -837,7 +837,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const requestedAt = new Date(String(job.payload.requestedAt ?? ""));
       if (!conversationId || !Number.isFinite(requestedAt.getTime())) return { status: "skipped" };
       const businessId = businessIdOrThrow(job);
-      const result = await expireTeamRequest(dependencies.domain, { businessId, conversationId, requestedAt, locale: job.payload.locale === "fr" ? "fr" : "en" });
+      const result = await expireTeamRequest(dependencies.domain, { businessId, conversationId, requestedAt, locale: normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en" });
       return { status: result.expired ? "completed" : "skipped", entityId: conversationId };
     }
     case "privacy.scrubMessage": {

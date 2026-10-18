@@ -340,7 +340,8 @@ export const widgetChatRequestSchema = z.object({
   visitorId: z.guid(),
   messageId: z.guid(),
   content: z.string().min(1).max(4_000),
-  locale: z.enum(runtimeLocales).optional(),
+  /** The widget's language, which the receptionist replies in. */
+  locale: z.enum(interfaceLocales).optional(),
 });
 
 export type WidgetChatRequest = z.infer<typeof widgetChatRequestSchema>;

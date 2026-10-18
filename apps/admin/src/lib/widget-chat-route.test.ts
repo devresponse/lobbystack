@@ -319,6 +319,37 @@ describe("POST /api/widget/chat", () => {
     expect(mocks.appendMessage).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ body: "I've let the team know.", direction: "outbound", aiGenerated: true }));
   });
 
+  it.each([
+    ["en", "Reply in English unless"],
+    ["fr", "Reply in French unless"],
+    ["es", "Reply in Spanish unless"],
+    ["sr", "Reply in Serbian in Latin script (not Cyrillic) unless"],
+  ])("replies in the widget's language, %s, and says so if nobody from the team joins", async (locale, instruction) => {
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: { liveChat: { enabled: true } } } });
+    mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+
+    await readSse(await POST(widgetRequest({ locale })));
+
+    const agent = mocks.createReceptionistAgent.mock.calls[0]![0] as { extraInstructions: string; context: { liveChat?: { locale: string } } };
+    expect(agent.extraInstructions).toContain(instruction);
+    expect(agent.context.liveChat?.locale).toBe(locale);
+  });
+
+  it("uses the widget's settings, then the business's language, for a widget that sends none", async () => {
+    mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
+    mocks.loadWidgetChatHistory.mockResolvedValue([]);
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: { localeOverride: "es" } } });
+    await readSse(await POST(widgetRequest()));
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: {} } });
+    await readSse(await POST(widgetRequest()));
+
+    expect(mocks.createReceptionistAgent.mock.calls.map(([input]) => (input as { extraInstructions: string }).extraInstructions)).toEqual([
+      expect.stringContaining("Reply in Spanish unless"),
+      expect.stringContaining("Reply in French unless"),
+    ]);
+  });
+
   it("offers no live chat when the widget has it off", async () => {
     mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
     mocks.loadWidgetChatHistory.mockResolvedValue([]);

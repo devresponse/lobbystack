@@ -4,7 +4,9 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en", changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
+// The language the widget shows, which a test can set.
+const widgetLanguage = vi.hoisted(() => ({ current: "en" }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { get language() { return widgetLanguage.current; }, changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
@@ -19,6 +21,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  widgetLanguage.current = "en";
 });
 
 /** A response the test sends when it chooses. */
@@ -632,6 +635,39 @@ describe("widget first load", () => {
     // The live updates bring anything new, so the renewal alone doesn't reload the history.
     expect(historyRequests).toHaveBeenCalledTimes(1);
     expect(screen.getByText(teamReply.content)).toBeTruthy();
+    client.clear();
+  });
+});
+
+describe("widget reply language", () => {
+  it.each([["es", "es"], ["sr", "sr"], ["fr-CA", "fr"], ["en", "en"]])("asks for replies in the language the widget shows, %s", async (language, locale) => {
+    widgetLanguage.current = language;
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    const chatRequests: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string, init?: RequestInit) => {
+      const path = String(url);
+      if (path.includes("/api/widget/history")) return Response.json({ messages: [] });
+      if (path.includes("/api/widget/chat")) {
+        chatRequests.push(JSON.parse(String(init?.body)));
+        return streamedReply("Claro.");
+      }
+      if (path.includes("/api/widget/stream")) return new Response(null, { status: 401 });
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: "¿Abren los domingos?" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+
+    expect(await screen.findByText("Claro.")).toBeTruthy();
+    expect(chatRequests).toEqual([expect.objectContaining({ visitorId, content: "¿Abren los domingos?", locale })]);
     client.clear();
   });
 });

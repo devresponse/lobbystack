@@ -33,13 +33,22 @@ describe("conversation.expireTeamRequest", () => {
     expect(expireTeamRequest).toHaveBeenCalledWith(domain, { businessId, conversationId, requestedAt: new Date("2026-10-14T21:00:00.000Z"), locale: "fr" });
   });
 
+  it.each(["es", "sr"])("says it in a %s widget's language too", async (locale) => {
+    vi.mocked(expireTeamRequest).mockResolvedValue({ expired: true });
+
+    await handleJob(expiryJob(randomUUID(), { conversationId: randomUUID(), requestedAt: "2026-10-14T21:00:00.000Z", locale }), { domain });
+
+    expect(expireTeamRequest).toHaveBeenCalledWith(domain, expect.objectContaining({ locale }));
+  });
+
   it("skips a request someone answered, and falls back to English for a language it can't say", async () => {
     const conversationId = randomUUID();
     vi.mocked(expireTeamRequest).mockResolvedValue({ expired: false });
 
-    await expect(handleJob(expiryJob(randomUUID(), { conversationId, requestedAt: "2026-10-14T21:00:00.000Z", locale: "es" }), { domain })).resolves.toEqual({ status: "skipped", entityId: conversationId });
+    await expect(handleJob(expiryJob(randomUUID(), { conversationId, requestedAt: "2026-10-14T21:00:00.000Z", locale: "de" }), { domain })).resolves.toEqual({ status: "skipped", entityId: conversationId });
+    await handleJob(expiryJob(randomUUID(), { conversationId, requestedAt: "2026-10-14T21:00:00.000Z" }), { domain });
 
-    expect(expireTeamRequest).toHaveBeenCalledWith(domain, expect.objectContaining({ locale: "en" }));
+    expect(vi.mocked(expireTeamRequest).mock.calls.map(([, input]) => input.locale)).toEqual(["en", "en"]);
   });
 
   it("skips a job without a conversation or a readable request time", async () => {

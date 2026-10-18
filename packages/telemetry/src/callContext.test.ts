@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const posthog = vi.hoisted(() => ({ capture: vi.fn().mockResolvedValue(undefined) }));
 vi.mock("posthog-node", () => ({ PostHog: class { captureExceptionImmediate = posthog.capture; } }));
 
-import { addToCallContext, currentCallContext, forceFlushTelemetryLogs, initializeTelemetry, logEvent, reportError, shutdownTelemetry, withCallContext, withOpenSpan, withSpan } from "./node";
+import { addToCallContext, currentCallContext, forceFlushTelemetryLogs, initializeTelemetry, logEvent, reportError, reportWarning, shutdownTelemetry, withCallContext, withOpenSpan, withSpan } from "./node";
 
 // Digit runs like these used to look like phone numbers to the exporter.
 const CALL_ID = "12345678-1234-4234-8234-123456789012";
@@ -133,6 +133,31 @@ describe("call context", () => {
     expect(distinctId).toBe("system:lobbystack-worker");
     expect(safe.message).not.toContain("private-token");
     expect(properties).toMatchObject({ operation: "job.call.saveRecording", jobId: "job_1", callId: CALL_ID, sessionId: SESSION_ID, service: "lobbystack-worker", alertable: true });
+    expect(properties).not.toHaveProperty("$exception_level");
     expect(lines(error)).toEqual([expect.objectContaining({ level: "error", message: expect.stringMatching(/exception: Provider refused Bearer \[redacted\] for \[redacted-email\]$/), callId: CALL_ID, exceptionType: "Error", error: "Provider refused Bearer [redacted] for [redacted-email]" })]);
+  });
+
+  it("reports a warning to PostHog at warning level, without alerting or failing the span", async () => {
+    vi.stubEnv("POSTHOG_KEY", "fixture");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await initializeTelemetry({ endpoint: "", serviceName: "lobbystack-worker" });
+    const missing = new Error("Twilio call pricing is incomplete for CA123.");
+
+    await withSpan("job.call.syncPrice", {}, async (span) => {
+      const setStatus = vi.spyOn(span, "setStatus");
+      await withCallContext({ callId: CALL_ID, sessionId: SESSION_ID }, async () => {
+        await reportWarning(missing, { operation: "job.call.syncPrice", rechecks: 10 });
+      });
+      expect(setStatus).not.toHaveBeenCalled();
+    });
+
+    expect(posthog.capture).toHaveBeenCalledTimes(1);
+    const [safe, distinctId, properties] = posthog.capture.mock.calls[0]!;
+    expect(distinctId).toBe("system:lobbystack-worker");
+    expect(safe.message).toBe("Twilio call pricing is incomplete for CA123.");
+    expect(properties).toMatchObject({ operation: "job.call.syncPrice", rechecks: 10, callId: CALL_ID, sessionId: SESSION_ID, service: "lobbystack-worker", alertable: false, $exception_level: "warning" });
+    expect(lines(warn)).toEqual([expect.objectContaining({ level: "warn", message: "[worker] warning: Twilio call pricing is incomplete for CA123.", callId: CALL_ID, exceptionType: "Error" })]);
+    expect(error).not.toHaveBeenCalled();
   });
 });

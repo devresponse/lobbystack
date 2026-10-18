@@ -376,6 +376,8 @@ async function loadErrorReportClient(): Promise<ErrorReportClient | undefined> {
   return errorReportClient;
 }
 
+type ReportProperties = { operation: string } & Record<string, string | number | boolean | undefined>;
+
 /**
  * Reports an exception to PostHog error tracking with the current call's IDs,
  * logs it as one line whose message leads with the error (`[worker]
@@ -384,7 +386,22 @@ async function loadErrorReportClient(): Promise<ErrorReportClient | undefined> {
  * when telemetry hasn't started. Each error object is reported once, and
  * reporting never throws.
  */
-export async function reportError(error: unknown, properties: { operation: string } & Record<string, string | number | boolean | undefined>): Promise<void> {
+export async function reportError(error: unknown, properties: ReportProperties): Promise<void> {
+  await reportException("error", error, properties);
+}
+
+/**
+ * Reports a problem nobody needs to be alerted about, such as a price Twilio
+ * never filled in, the way reportError does but as a warning: PostHog gets it
+ * with `$exception_level` "warning" and `alertable` false, the log line is a
+ * `warn` (`[worker] warning: …`), and the active span isn't marked failed.
+ */
+export async function reportWarning(error: unknown, properties: ReportProperties): Promise<void> {
+  await reportException("warning", error, properties);
+}
+
+async function reportException(level: "error" | "warning", error: unknown, properties: ReportProperties): Promise<void> {
+  const warning = level === "warning";
   if (error && typeof error === "object") {
     if (reportedErrors.has(error)) return;
     reportedErrors.add(error);
@@ -403,16 +420,17 @@ export async function reportError(error: unknown, properties: { operation: strin
     service,
     environment: process.env.RAILWAY_ENVIRONMENT_NAME ?? process.env.NODE_ENV,
     release: serviceVersion(),
-    alertable: true,
+    alertable: !warning,
     ...(cause ? { cause } : {}),
   };
   // The log viewer shows the message, so it leads with the error; the rest
   // (route, errorId, cause, the call's IDs) can be filtered on.
-  logEvent("error", `[${service.replace(/^lobbystack-/, "")}] exception: ${safe.message}`, { ...report, exceptionType: safe.name, error: safe.message, stack: safe.stack });
-  recordException(safe);
+  logEvent(warning ? "warn" : "error", `[${service.replace(/^lobbystack-/, "")}] ${warning ? "warning" : "exception"}: ${safe.message}`, { ...report, exceptionType: safe.name, error: safe.message, stack: safe.stack });
+  if (!warning) recordException(safe);
   try {
     const client = await loadErrorReportClient();
-    await client?.captureExceptionImmediate(safe, `system:${service}`, report);
+    // PostHog files an exception as an error unless its level says otherwise.
+    await client?.captureExceptionImmediate(safe, `system:${service}`, warning ? { ...report, $exception_level: "warning" } : report);
   } catch {
     logEvent("warn", "exception.delivery_failed", { operation: properties.operation });
   }

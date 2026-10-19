@@ -97,6 +97,38 @@ describe("directToolAnswer", () => {
     }
   });
 
+  // On a 2026-10-19 demo call the matched chunk came after a long neighbor, the
+  // passage was cut from its start, and GPT-Live invented the names it lacked.
+  it("keeps the chunk that ranked when its neighbors don't fit", () => {
+    const before = "How to reach the council in writing through the strata manager. ".repeat(30);
+    const ranked = "Current council: President Richard Anderson, Vice-President Gabrielle Gendron, Treasurer Peter Derry.";
+    const after = "Privacy officer requests go in writing. ".repeat(30);
+    const textWithNeighbors = `${before}\n\n${ranked}\n\n${after}`;
+    const focusStart = before.length + 2;
+    const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [
+      { title: "Contacts", text: textWithNeighbors, focusStart, focusEnd: focusStart + ranked.length },
+      { title: "Parking", text: "Visitor parking is in stalls 1 to 3.", focusStart: 0, focusEnd: 36 },
+    ] } }))!;
+    expect(answer).toContain(`- Contacts: ${ranked}`);
+    expect(answer).not.toContain("How to reach the council");
+    expect(answer).toContain("- Parking: Visitor parking is in stalls 1 to 3.");
+  });
+
+  it("trims a long ranked chunk from its own start, not from its neighbor's", () => {
+    const before = "Earlier section about mailboxes. ".repeat(40);
+    const ranked = `Council members: Richard Anderson, President. ${"More council details follow here. ".repeat(60)}`;
+    const focusStart = before.length + 2;
+    const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [{ title: "Contacts", text: `${before}\n\n${ranked}`, focusStart, focusEnd: focusStart + ranked.length }] } }))!;
+    expect(answer).toContain("- Contacts: Council members: Richard Anderson, President.");
+    expect(answer).not.toContain("mailboxes");
+    expect(countKnowledgeTokens(answer)).toBeLessThanOrEqual(480);
+  });
+
+  it("ignores a focus range that doesn't fit the passage", () => {
+    const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [{ title: "Payment", text: "Cards accepted.", focusStart: 5, focusEnd: 500 }] } }));
+    expect(answer).toContain("- Payment: Cards accepted.");
+  });
+
   it("answers what the business offers from its knowledge base when it lists no services", () => {
     const answer = directToolAnswer(step({ toolName: "getBusinessServices", output: { services: [], knowledge: { outcome: "found", matches: [{ title: "About", text: "An open-source AI receptionist that answers calls and books appointments." }] } } }));
     expect(answer).toContain("- About: An open-source AI receptionist that answers calls and books appointments.");

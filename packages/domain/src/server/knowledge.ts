@@ -508,7 +508,10 @@ export async function searchKnowledgeEvidence(
   for (let index = 0; index < matches.length; index += 1) {
     const p = matches[index]!;
     const neighbors = current.filter(row => row.documentId === p.documentId && row.sourceRevision === p.sourceRevision && Math.abs(row.sequence - p.sequence) <= 1).sort((a, b) => a.sequence - b.sequence);
-    const expanded = { ...p, supportingChunkIds: neighbors.map(row => row.chunkId), content: neighbors.map(row => row.content).join("\n\n") };
+    // A reader with less room than the whole passage, like a live call, starts at the chunk that ranked.
+    const focusStart = neighbors.filter(row => row.sequence < p.sequence).reduce((offset, row) => offset + row.content.length + 2, 0);
+    const ranked = neighbors.find(row => row.chunkId === p.chunkId);
+    const expanded = { ...p, supportingChunkIds: neighbors.map(row => row.chunkId), content: neighbors.map(row => row.content).join("\n\n"), ...(ranked ? { focusStart, focusEnd: focusStart + ranked.content.length } : {}) };
     const proposed = matches.map((match, candidateIndex) => candidateIndex === index ? expanded : match);
     if (proposed.reduce((sum, match) => sum + countKnowledgeTokens(JSON.stringify(match) + "\n"), 0) <= KNOWLEDGE_SEARCH_TOKEN_BUDGET) matches[index] = expanded;
   }

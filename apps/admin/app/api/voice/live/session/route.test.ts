@@ -196,18 +196,23 @@ describe("POST /api/voice/live/session", () => {
     expect(mocks.recordedGreeting).toHaveBeenCalledWith(snapshot);
     expect(mocks.sessionConfig).toHaveBeenCalledWith(snapshot, { greetingRecorded: true });
     expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: true } }));
+    // GPT-Live writes no transcript for the recording, so the browser's captions get its words here.
+    await expect(response.json()).resolves.toMatchObject({ sessionId: "live_1", greeting: "Hi" });
   });
 
   it("opens the call as before when LIVE_RECORDED_GREETING is off or the recording isn't made yet", async () => {
     mocks.access.mockResolvedValue(widget);
-    await start("lobbystack-widget");
+    const off = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
     expect(mocks.attach.mock.lastCall![0]).not.toHaveProperty("recordedGreeting");
+    expect(await off.json()).not.toHaveProperty("greeting");
     // The worker records it for the next call.
     mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: false });
-    await start("lobbystack-widget");
+    const unrecorded = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
     expect(mocks.attach).toHaveBeenLastCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: false } }));
+    // GPT-Live says the greeting itself, so its own transcript captions it.
+    expect(await unrecorded.json()).not.toHaveProperty("greeting");
   });
 
   // The Server-Timing header only reaches the caller's browser.

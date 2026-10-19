@@ -148,9 +148,10 @@ export type LiveCallSetup = {
   /**
    * Set when a recording of the greeting opens the call, and the session's
    * starting history has the greeting as already said. The controller plays
-   * `audio` (base64 16-bit PCM at 24 kHz) as soon as the session starts.
-   * Without `audio`, or when OpenAI doesn't play it, the greeting command
-   * goes out at once, since GPT-Live won't say the greeting on its own.
+   * `audio` (base64 16-bit PCM at 24 kHz) once the session has started and the
+   * caller's audio reaches it. Without `audio`, or when OpenAI doesn't play
+   * it, the greeting command goes out instead, since GPT-Live won't say the
+   * greeting on its own.
    */
   greetingRecording?: { audio?: string };
   /**
@@ -236,6 +237,13 @@ const GREETING_COMMANDS = 3;
 // command goes out instead.
 const RECORDING_START_MS = 3_000;
 const GREETING_RECORDING = "greeting_recording";
+// A browser connects its audio after the session starts: on staging calls,
+// the caller's audio reached OpenAI about a second after session.started. A
+// recording played sooner can play before the caller can hear it, and
+// GPT-Live, whose history has the greeting as said, then waits for the
+// caller. So the recording waits for the caller's audio, up to this long
+// after session.started.
+const CALLER_AUDIO_WAIT_MS = 3_000;
 // Reflected audio is 16-bit PCM at 24 kHz. A chunk this loud is voice;
 // silence on staging calls stayed far below it.
 const VOICE_RMS = 400;
@@ -431,6 +439,8 @@ export class LiveCallController {
   // The recording of the greeting OpenAI was asked to play: its words, for
   // the transcript, how long it plays, and whether OpenAI started it.
   private recording: { text: string; ms: number; playing?: boolean } | undefined;
+  // Plays the recording once the caller's audio reaches the session.
+  private onCallerAudio: (() => void) | undefined;
   private readonly pendingAppends = new Map<string, PendingAppend>();
   // Delegations run one at a time in arrival order. A newer request supersedes
   // an unfinished older one: its result goes to GPT-Live as background facts
@@ -531,9 +541,10 @@ export class LiveCallController {
       if (typeof event.delta === "string" && isVoice(event.delta)) this.heardSpeech(event.end_ms);
     });
     // OpenAI's server-controls guide: the sideband also receives the caller's
-    // audio as OpenAI received it, with no timeline position. The worker only
+    // audio as OpenAI received it, with no timeline position. The worker
     // measures it, to show whether audio reaches GPT-Live while the caller is
-    // silent.
+    // silent. Its first chunk shows the caller's audio has connected, so the
+    // greeting's recording can play.
     untyped.on<{ audio?: unknown }>("session.input_audio.append", (event) => {
       if (typeof event.audio !== "string") return;
       const chunk = measurePcm(event.audio);
@@ -541,6 +552,7 @@ export class LiveCallController {
       this.inputAudio.samples += chunk.samples;
       this.inputAudio.payloadBytes += event.audio.length;
       if (chunk.voice) this.inputAudio.loudSamples += chunk.samples;
+      this.onCallerAudio?.();
     });
     // A keypad press reaches only the sideband, with no timeline position. It
     // counts as caller input, so the next request's agent sees it, unless it's
@@ -585,7 +597,7 @@ export class LiveCallController {
       this.startedSeenAt = performance.now();
       clearTimeout(this.greetingTimer);
       this.greetingTimer = setTimeout(() => this.sendGreetingFallback(), GREETING_FALLBACK_MS);
-      void this.ready.then((setup) => { if (setup.greetingRecording) this.playGreetingRecording(setup.greeting, setup.greetingRecording.audio); }, () => undefined);
+      void this.ready.then((setup) => { if (setup.greetingRecording) this.playGreetingRecordingOnceConnected(setup.greeting, setup.greetingRecording.audio); }, () => undefined);
       this.options.onStarted?.();
     });
     // A phone call's session starts before the worker attaches, so an attach
@@ -757,6 +769,24 @@ export class LiveCallController {
       this.send({ type: "session.instructions.append", delegation_id: null, content: greetingCommand(greeting), event_id: `greeting_${this.greetingAttempts}` }, { kind: "greeting" });
       this.reportGreeting("sent", trigger);
     }, () => undefined);
+  }
+
+  // The caller hears the recording only once their audio has connected, so
+  // it waits for the caller's first audio, or CALLER_AUDIO_WAIT_MS after
+  // session.started without it. So does the greeting command that replaces a
+  // recording the worker couldn't load.
+  private playGreetingRecordingOnceConnected(greeting: string | undefined, audio: string | undefined): void {
+    const play = () => {
+      this.onCallerAudio = undefined;
+      this.playGreetingRecording(greeting, audio);
+    };
+    if (this.inputAudio.chunks > 0) {
+      play();
+      return;
+    }
+    this.onCallerAudio = play;
+    clearTimeout(this.greetingTimer);
+    this.greetingTimer = setTimeout(play, Math.max(0, CALLER_AUDIO_WAIT_MS - (performance.now() - (this.startedSeenAt ?? this.attachedAt))));
   }
 
   // Plays the recording of the greeting; the session's starting history has

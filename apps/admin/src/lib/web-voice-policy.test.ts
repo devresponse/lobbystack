@@ -17,7 +17,7 @@ describe("web voice policy", () => {
       ["ip-hour", 20, 3_600],
       ["ip-day", 100, 86_400],
       ["visitor-hour", 10, 3_600],
-      ["visitor-day", 30, 86_400],
+      ["visitor-day", 50, 86_400],
       ["origin-10m", 30, 600],
       ["business-hour", 60, 3_600],
       ["business-day", 300, 86_400],

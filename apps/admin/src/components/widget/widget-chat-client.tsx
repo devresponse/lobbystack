@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { renderSafeMarkdown } from "@/lib/widget-markdown";
-import { useWebVoiceCall, type WebVoiceTranscriptTurn } from "@lobbystack/web-voice";
+import { useWebVoiceCall, type WebVoiceErrorKey, type WebVoiceTranscriptTurn } from "@lobbystack/web-voice";
 
 type WidgetConfigPayload = {
   key: string;
@@ -655,6 +655,14 @@ export function threadEntries(messages: WidgetMessage[], streamingMessageId: str
   });
 }
 
+// The chat's line when a call fails or drops. A start the call limits refused
+// says so, since only waiting fixes it.
+function voiceErrorMessage(errorKey: WebVoiceErrorKey | null): string {
+  if (errorKey === "connectionDropped") return "chat.voiceEnded";
+  if (errorKey === "rateLimited") return "chat.voiceRateLimited";
+  return "chat.voiceUnavailable";
+}
+
 function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentOrigin, onStatusChange, onCaptions }: { className?: string; businessSlug: string; visitorId: string; sessionToken: string | null; parentOrigin: string | null; onStatusChange: (message: string | null) => void; onCaptions: (captions: VoiceCaptions) => void }) {
   const { t } = useTranslation("widget");
   // The iframe runs on the app's own origin, so the call starts here with the
@@ -668,7 +676,7 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
 
   useEffect(() => {
     if (status === "connected") onStatusChange(null);
-    if (status === "error") onStatusChange(errorKey === "connectionDropped" ? "chat.voiceEnded" : "chat.voiceUnavailable");
+    if (status === "error") onStatusChange(voiceErrorMessage(errorKey));
   }, [errorKey, onStatusChange, status]);
 
   useEffect(() => {

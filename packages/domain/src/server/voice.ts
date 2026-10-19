@@ -548,16 +548,14 @@ export async function getCallDetail(
       .limit(1))[0];
     if (!row) return null;
 
-    const [transcript, appointmentRows, followUpTasks] = await Promise.all([
-      tx.select({ id: transcripts.id, sequence: transcripts.sequence, speaker: transcripts.speaker, text: transcripts.text, confidence: transcripts.confidence, final: transcripts.final, createdAt: transcripts.createdAt }).from(transcripts).where(and(eq(transcripts.callId, input.callId), eq(transcripts.businessId, input.businessId))).orderBy(asc(transcripts.sequence)),
-      row.contactId
-        ? tx.select({ id: appointments.id, startsAt: appointments.startsAt, endsAt: appointments.endsAt, timezone: appointments.timezone, status: appointments.status, serviceName: services.name, staffName: staff.name }).from(appointments).innerJoin(services, eq(appointments.serviceId, services.id)).innerJoin(staff, eq(appointments.staffId, staff.id)).where(and(eq(appointments.businessId, input.businessId), eq(appointments.contactId, row.contactId))).orderBy(asc(appointments.startsAt))
-        : Promise.resolve([]),
-      tx.select({ id: inboxItems.id, title: visibleFollowUpTitle, body: visibleFollowUpBody, status: inboxItems.status, request: followUpRequest, createdAt: inboxItems.createdAt, updatedAt: inboxItems.updatedAt })
-        .from(inboxItems)
-        .where(and(eq(inboxItems.businessId, input.businessId), eq(inboxItems.relatedCallId, input.callId), eq(inboxItems.kind, "voice_message")))
-        .orderBy(desc(inboxItems.createdAt)),
-    ]);
+    const transcript = await tx.select({ id: transcripts.id, sequence: transcripts.sequence, speaker: transcripts.speaker, text: transcripts.text, confidence: transcripts.confidence, final: transcripts.final, createdAt: transcripts.createdAt }).from(transcripts).where(and(eq(transcripts.callId, input.callId), eq(transcripts.businessId, input.businessId))).orderBy(asc(transcripts.sequence));
+    const appointmentRows = row.contactId
+      ? await tx.select({ id: appointments.id, startsAt: appointments.startsAt, endsAt: appointments.endsAt, timezone: appointments.timezone, status: appointments.status, serviceName: services.name, staffName: staff.name }).from(appointments).innerJoin(services, eq(appointments.serviceId, services.id)).innerJoin(staff, eq(appointments.staffId, staff.id)).where(and(eq(appointments.businessId, input.businessId), eq(appointments.contactId, row.contactId))).orderBy(asc(appointments.startsAt))
+      : [];
+    const followUpTasks = await tx.select({ id: inboxItems.id, title: visibleFollowUpTitle, body: visibleFollowUpBody, status: inboxItems.status, request: followUpRequest, createdAt: inboxItems.createdAt, updatedAt: inboxItems.updatedAt })
+      .from(inboxItems)
+      .where(and(eq(inboxItems.businessId, input.businessId), eq(inboxItems.relatedCallId, input.callId), eq(inboxItems.kind, "voice_message")))
+      .orderBy(desc(inboxItems.createdAt));
     const state = recordingState({ ...row, retentionUntil: row.recordingRetentionUntil });
     const timeline = buildCallEvents({ ...row, startedAt: row.startedAt.toISOString(), endedAt: row.endedAt?.toISOString() ?? null }).map((event) => ({ type: event.key, at: event.timestamp ? new Date(event.timestamp) : null, status: event.failed ? "failed" : event.reached ? "reached" : "pending" }));
     return {

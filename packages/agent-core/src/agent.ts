@@ -1,5 +1,6 @@
 import { stepCountIs, ToolLoopAgent, type LanguageModel, type StopCondition, type ToolExecutionOptions, type ToolSet } from "ai";
 
+import type { AiTraceStep } from "@lobbystack/domain";
 import { reportError, withOpenSpan } from "@lobbystack/telemetry/node";
 
 import { buildAgentInstructions } from "./instructions";
@@ -43,6 +44,30 @@ export function withToolSpans(tools: ToolSet): ToolSet {
   })) as ToolSet;
 }
 
+/** The instructions createReceptionistAgent gives its model, so an AI debug trace can keep them. */
+export function receptionistInstructions(input: { context: AgentToolContext; extraInstructions?: string | undefined }): string {
+  return [buildAgentInstructions(input.context.snapshot, input.context.channel, { intakeOnly: input.context.intakeOnly ?? false, endsCalls: input.context.callControl !== undefined, keypad: input.context.callControl?.collectPasscode !== undefined, liveChat: offersLiveChat(input.context), ...(input.context.callerPhone ? { callerPhone: input.context.callerPhone } : {}) }), input.extraInstructions].filter(Boolean).join("\n\n");
+}
+
+type StepWithTools = { text?: string; toolCalls: ReadonlyArray<{ toolName: string; input?: unknown }>; toolResults: ReadonlyArray<{ toolName: string; output?: unknown }> };
+
+/** The agent's steps as an AI debug trace keeps them (ADR 0009): text, tool calls and tool results. */
+export function toAiTraceSteps(steps: ReadonlyArray<StepWithTools>): AiTraceStep[] {
+  return steps.map((step) => ({
+    ...(step.text?.trim() ? { text: step.text } : {}),
+    toolCalls: step.toolCalls.map((call) => ({ toolName: call.toolName, input: call.input })),
+    toolResults: step.toolResults.map((result) => ({ toolName: result.toolName, output: result.output })),
+  }));
+}
+
+/**
+ * An agent with given instructions and tools, for replaying an AI debug trace
+ * offline (scripts/ai/replay-trace.ts) with the tool results the trace recorded.
+ */
+export function createTraceReplayAgent(input: { model: LanguageModel; instructions: string; tools: ToolSet }): ReceptionistAgent {
+  return new ToolLoopAgent({ model: input.model, instructions: input.instructions, tools: input.tools, stopWhen: stepCountIs(4) });
+}
+
 export function createReceptionistAgent(input: {
   model: LanguageModel;
   context: AgentToolContext;
@@ -59,7 +84,7 @@ export function createReceptionistAgent(input: {
   if (input.directToolAnswers) stopWhen.push(({ steps }) => directToolAnswer(steps.at(-1)) !== undefined);
   return new ToolLoopAgent({
     model: input.model,
-    instructions: [buildAgentInstructions(input.context.snapshot, input.context.channel, { intakeOnly: input.context.intakeOnly ?? false, endsCalls: input.context.callControl !== undefined, keypad: input.context.callControl?.collectPasscode !== undefined, liveChat: offersLiveChat(input.context), ...(input.context.callerPhone ? { callerPhone: input.context.callerPhone } : {}) }), input.extraInstructions].filter(Boolean).join("\n\n"),
+    instructions: receptionistInstructions(input),
     tools: withToolSpans(createReceptionistTools(input.context)),
     stopWhen,
     ...(input.context.channel === "web_chat" ? { maxOutputTokens: WEB_CHAT_MAX_OUTPUT_TOKENS } : {}),

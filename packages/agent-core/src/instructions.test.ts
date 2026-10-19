@@ -91,6 +91,13 @@ describe("buildLiveInstructions", () => {
     expect(instructions).toContain(`Open the call with this greeting as soon as you're told to start: "${demoSnapshot.greeting}" Say it once, at the start of the call only.`);
   });
 
+  // A 2026-10-19 demo call invented council members and a manager's email.
+  it("forbids inventing names and contact details as well as prices", () => {
+    const instructions = buildLiveInstructions(demoSnapshot, callStart);
+    expect(instructions).toContain("Never make up availability, prices, policies, names, phone numbers, email addresses, dates, or any other fact about the business.");
+    expect(instructions).toContain("If neither has the detail asked for, say you don't have it and offer to take a message.");
+  });
+
   it("keeps later rules when an earlier one is too long for the budget", () => {
     const rules = [
       { id: "r1", order: 1, title: "Huge", content: "word ".repeat(5_000) },

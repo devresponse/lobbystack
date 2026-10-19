@@ -6,7 +6,9 @@ import { SidebandWS } from "openai/resources/live/sideband/ws";
 
 import { logEvent, reportError, setSpanAttributes, withSpan, type Span } from "@lobbystack/telemetry/node";
 
-import type { ReceptionistAgent } from "../agent";
+import type { AiTraceStep } from "@lobbystack/domain";
+
+import { toAiTraceSteps, type ReceptionistAgent } from "../agent";
 import type { KeypadPasscodeCheck, KeypadPasscodeOutcome } from "../tools";
 import { CALL_ENDING, DIRECT_ANSWER_TOOLS, directToolAnswer, fitToAppend, type DirectAnswerStep } from "./directAnswer";
 import { greetingCommand } from "./greeting";
@@ -39,6 +41,25 @@ export type DelegationTiming = {
   /** The agent ended the call, so the result went to GPT-Live as silent background. */
   endedCall: boolean;
   /** Tokens across the agent's model steps, when the generation finished. */
+  usage?: LanguageModelUsage;
+};
+
+/**
+ * What one delegated request was given and did, for its AI debug trace (ADR
+ * 0009). It holds the conversation, so it only goes to onDelegationTrace,
+ * never to logs or telemetry.
+ */
+export type DelegationTrace = {
+  delegationId: string;
+  prompt: string;
+  steps: AiTraceStep[];
+  /** What GPT-Live was handed: the answer, or a note that the result was background only. */
+  sent: string;
+  directAnswer: boolean;
+  failed: boolean;
+  superseded: boolean;
+  endedCall: boolean;
+  agentMs: number;
   usage?: LanguageModelUsage;
 };
 
@@ -127,9 +148,10 @@ export type LiveCallSetup = {
   /**
    * Set when a recording of the greeting opens the call, and the session's
    * starting history has the greeting as already said. The controller plays
-   * `audio` (base64 16-bit PCM at 24 kHz) as soon as the session starts.
-   * Without `audio`, or when OpenAI doesn't play it, the greeting command
-   * goes out at once, since GPT-Live won't say the greeting on its own.
+   * `audio` (base64 16-bit PCM at 24 kHz) once the session has started and the
+   * caller's audio reaches it. Without `audio`, or when OpenAI doesn't play
+   * it, the greeting command goes out instead, since GPT-Live won't say the
+   * greeting on its own.
    */
   greetingRecording?: { audio?: string };
   /**
@@ -172,6 +194,8 @@ export type LiveCallControllerOptions = {
   /** Each step of a transfer started with transferAfterAnnouncement(). */
   onTransfer?: (state: LiveCallTransferState) => void;
   onDelegation?: (timing: DelegationTiming) => void;
+  /** Each delegated request's prompt, steps and result, for its AI debug trace. */
+  onDelegationTrace?: (trace: DelegationTrace) => void;
   onClose?: (summary: LiveCallSummary) => void;
   /**
    * The session sent its first event other than an error, so it's alive. A
@@ -213,6 +237,13 @@ const GREETING_COMMANDS = 3;
 // command goes out instead.
 const RECORDING_START_MS = 3_000;
 const GREETING_RECORDING = "greeting_recording";
+// A browser connects its audio after the session starts: on staging calls,
+// the caller's audio reached OpenAI about a second after session.started. A
+// recording played sooner can play before the caller can hear it, and
+// GPT-Live, whose history has the greeting as said, then waits for the
+// caller. So the recording waits for the caller's audio, up to this long
+// after session.started.
+const CALLER_AUDIO_WAIT_MS = 3_000;
 // Reflected audio is 16-bit PCM at 24 kHz. A chunk this loud is voice;
 // silence on staging calls stayed far below it.
 const VOICE_RMS = 400;
@@ -408,6 +439,8 @@ export class LiveCallController {
   // The recording of the greeting OpenAI was asked to play: its words, for
   // the transcript, how long it plays, and whether OpenAI started it.
   private recording: { text: string; ms: number; playing?: boolean } | undefined;
+  // Plays the recording once the caller's audio reaches the session.
+  private onCallerAudio: (() => void) | undefined;
   private readonly pendingAppends = new Map<string, PendingAppend>();
   // Delegations run one at a time in arrival order. A newer request supersedes
   // an unfinished older one: its result goes to GPT-Live as background facts
@@ -508,9 +541,10 @@ export class LiveCallController {
       if (typeof event.delta === "string" && isVoice(event.delta)) this.heardSpeech(event.end_ms);
     });
     // OpenAI's server-controls guide: the sideband also receives the caller's
-    // audio as OpenAI received it, with no timeline position. The worker only
+    // audio as OpenAI received it, with no timeline position. The worker
     // measures it, to show whether audio reaches GPT-Live while the caller is
-    // silent.
+    // silent. Its first chunk shows the caller's audio has connected, so the
+    // greeting's recording can play.
     untyped.on<{ audio?: unknown }>("session.input_audio.append", (event) => {
       if (typeof event.audio !== "string") return;
       const chunk = measurePcm(event.audio);
@@ -518,6 +552,7 @@ export class LiveCallController {
       this.inputAudio.samples += chunk.samples;
       this.inputAudio.payloadBytes += event.audio.length;
       if (chunk.voice) this.inputAudio.loudSamples += chunk.samples;
+      this.onCallerAudio?.();
     });
     // A keypad press reaches only the sideband, with no timeline position. It
     // counts as caller input, so the next request's agent sees it, unless it's
@@ -562,7 +597,7 @@ export class LiveCallController {
       this.startedSeenAt = performance.now();
       clearTimeout(this.greetingTimer);
       this.greetingTimer = setTimeout(() => this.sendGreetingFallback(), GREETING_FALLBACK_MS);
-      void this.ready.then((setup) => { if (setup.greetingRecording) this.playGreetingRecording(setup.greeting, setup.greetingRecording.audio); }, () => undefined);
+      void this.ready.then((setup) => { if (setup.greetingRecording) this.playGreetingRecordingOnceConnected(setup.greeting, setup.greetingRecording.audio); }, () => undefined);
       this.options.onStarted?.();
     });
     // A phone call's session starts before the worker attaches, so an attach
@@ -734,6 +769,24 @@ export class LiveCallController {
       this.send({ type: "session.instructions.append", delegation_id: null, content: greetingCommand(greeting), event_id: `greeting_${this.greetingAttempts}` }, { kind: "greeting" });
       this.reportGreeting("sent", trigger);
     }, () => undefined);
+  }
+
+  // The caller hears the recording only once their audio has connected, so
+  // it waits for the caller's first audio, or CALLER_AUDIO_WAIT_MS after
+  // session.started without it. So does the greeting command that replaces a
+  // recording the worker couldn't load.
+  private playGreetingRecordingOnceConnected(greeting: string | undefined, audio: string | undefined): void {
+    const play = () => {
+      this.onCallerAudio = undefined;
+      this.playGreetingRecording(greeting, audio);
+    };
+    if (this.inputAudio.chunks > 0) {
+      play();
+      return;
+    }
+    this.onCallerAudio = play;
+    clearTimeout(this.greetingTimer);
+    this.greetingTimer = setTimeout(play, Math.max(0, CALLER_AUDIO_WAIT_MS - (performance.now() - (this.startedSeenAt ?? this.attachedAt))));
   }
 
   // Plays the recording of the greeting; the session's starting history has
@@ -1283,6 +1336,8 @@ export class LiveCallController {
       let failed = false;
       let ended = false;
       let usage: LanguageModelUsage | undefined;
+      // Empty when the request fails before the prompt is built.
+      let prompt = "";
       const stepMs: number[] = [];
       const steps: StepLike[] = [];
       let toolMs = 0;
@@ -1306,8 +1361,9 @@ export class LiveCallController {
         const { agent } = await this.ready;
         // endWhenCallerDone() reads this when the agent ends the call.
         this.answering = { offsetMs: event.offset_ms, revision };
+        prompt = this.delegationPrompt();
         const result = await Promise.race([timedOut, agent.generate({
-          prompt: this.delegationPrompt(),
+          prompt,
           abortSignal: delegationAbort.signal,
           onStepEnd: (step) => {
             const now = performance.now();
@@ -1348,17 +1404,21 @@ export class LiveCallController {
       // the outdated one. GPT-Live keeps it as background facts, and the newer
       // request's backend sees it.
       const superseded = revision < this.latestRevision;
+      let sent: string;
       if (superseded) {
         if (!failed && !ended) this.unheardResults.push(answer);
-        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: fitToAppend(`The caller made a newer request before this one finished, so this result is background only: ${answer}`), event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+        sent = fitToAppend(`The caller made a newer request before this one finished, so this result is background only: ${answer}`);
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
       } else if (ended && (this.hangupCancelled || this.pendingHangup?.callerSpoke) && !this.ending) {
         // The caller spoke again, so GPT-Live replies to them: a goodbye now could cut them off.
-        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: CALLER_SPOKE_AGAIN, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+        sent = CALLER_SPOKE_AGAIN;
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
       } else {
         this.unheardResults = [];
         this.lastAnswerSentAt = performance.now();
         // GPT-Live says its goodbye when it hears the call is ending, and the hangup waits for it.
-        this.send({ type: "session.commentary.append", delegation_id: delegationId, content: ended && failed ? CALL_ENDING : answer, event_id: `answer_${delegationId}` }, { kind: "answer", delegationId });
+        sent = ended && failed ? CALL_ENDING : answer;
+        this.send({ type: "session.commentary.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "answer", delegationId });
       }
 
       const timing: DelegationTiming = {
@@ -1395,6 +1455,7 @@ export class LiveCallController {
         "gen_ai.usage.output_tokens": usage?.outputTokens,
       });
       this.options.onDelegation?.(timing);
+      this.options.onDelegationTrace?.({ delegationId, prompt, steps: toAiTraceSteps(steps as unknown as Parameters<typeof toAiTraceSteps>[0]), sent, directAnswer, failed, superseded, endedCall: ended, agentMs: timing.agentMs, ...(usage ? { usage } : {}) });
     } finally {
       this.runningDelegations -= 1;
       this.resetSilenceTimer();

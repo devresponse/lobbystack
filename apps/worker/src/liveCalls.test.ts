@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(),
   recordProductEvent: vi.fn(async (..._args: unknown[]) => "event_1"),
   recordAiGenerationEvent: vi.fn(async (..._args: unknown[]) => "event_2"),
+  recordAiTrace: vi.fn(async (..._args: unknown[]) => "trace_1"),
   finishLiveCall: vi.fn(async (..._args: unknown[]) => false),
   createAgentModel: vi.fn((..._args: unknown[]) => ({})),
   callerIsDone: vi.fn(async (..._args: unknown[]) => true),
@@ -28,6 +29,7 @@ vi.mock("@lobbystack/agent-core", () => ({
   callerIsDone: mocks.callerIsDone,
   createAgentModel: mocks.createAgentModel,
   createReceptionistAgent: mocks.createReceptionistAgent,
+  receptionistInstructions: () => "Receptionist instructions",
   liveDelegationEnvironment: () => ({ AI_CHAT_REASONING_EFFORT: "low" }),
   liveLanguage: () => "English",
   closeLiveSession: mocks.closeLiveSession,
@@ -69,6 +71,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => ({
   LIVE_CALL_PROVIDER: "openai_live",
   recordProductEvent: mocks.recordProductEvent,
   recordAiGenerationEvent: mocks.recordAiGenerationEvent,
+  recordAiTrace: mocks.recordAiTrace,
 }));
 vi.mock("@lobbystack/jobs", () => ({ renewVoicePresenceGateway: vi.fn(async () => undefined), updateVoicePresence: vi.fn(async () => undefined) }));
 vi.mock("openai", () => ({ default: class { live = { sessions: { hangup: mocks.hangup } }; } }));
@@ -965,6 +968,23 @@ describe("live call latency telemetry", () => {
     const options = await startCall();
     options.onDelegation!(delegation as never);
     expect(logLines(info)).toContainEqual({ level: "info", message: "live.delegation", sessionId: "live_2", callId: "call_2", businessId: "biz_1", delegationId: "del_1", agentMs: 1_800, totalMs: 1_812, queueMs: 0, tools: ["getBusinessHours", "getBusinessHours"], modelSteps: 1, directAnswer: true, stepMs: [1_800], toolMs: 40, failed: false, superseded: false });
+    info.mockRestore();
+  });
+
+  it("saves each delegation's prompt, steps and result as an AI debug trace, not in the logs", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const options = await startCall();
+    await vi.waitFor(() => expect(mocks.createReceptionistAgent).toHaveBeenCalled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const steps = [{ toolCalls: [{ toolName: "searchKnowledge", input: { query: "council" } }], toolResults: [{ toolName: "searchKnowledge", output: { outcome: "found" } }] }];
+    options.onDelegationTrace!({ delegationId: "del_9", prompt: "Conversation so far: who is the president?", steps, sent: "Facts: President Richard Anderson.", directAnswer: true, failed: false, superseded: false, endedCall: false, agentMs: 900, usage: { inputTokens: 120, outputTokens: 0 } } as never);
+    expect(mocks.recordAiTrace).toHaveBeenLastCalledWith({ db: {} }, expect.objectContaining({
+      businessId: "biz_1", kind: "voice_delegation", channel: "web_voice", callId: "call_2", conversationId: "conv_2", delegationId: "del_9",
+      instructions: "Receptionist instructions", snapshot: { businessId: "biz_1", greeting: "Hi" },
+      input: "Conversation so far: who is the president?", steps, output: "Facts: President Richard Anderson.", directAnswer: true, failed: false,
+      usage: { inputTokens: 120, outputTokens: 0 }, durationMs: 900,
+    }));
+    expect(JSON.stringify(info.mock.calls)).not.toContain("Richard Anderson");
     info.mockRestore();
   });
 

@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { APIError } from "openai";
 
 import { buildBrowserSessionConfig } from "@lobbystack/agent-core/live/session";
-import { finishLiveCall, getWebVoiceBillingAllowance, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
+import { finishLiveCall, getWebVoiceBillingAllowance, recordAiTrace, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { asApiResponse, readJson } from "@/lib/api-helpers";
@@ -52,8 +53,26 @@ function createServerTiming() {
   };
 }
 
-function denied(status: number, code: string, headers: Record<string, string>) {
+// The browser only gets the code, so the log line is where an operator sees
+// why a call didn't start. A rate limit's `reason` names the count that ran out.
+function denied(status: number, code: string, headers: Record<string, string>, fields: { widgetId?: string; reason?: string } = {}) {
+  logEvent("warn", "live.browser_refused", { status, code, ...fields });
   return NextResponse.json({ code, error: "The call couldn't start." }, { status, headers });
+}
+
+/**
+ * OpenAI refusing the session, such as with 429 when its account is out of
+ * credit, is our failure to start the call, not the caller's. It reaches the
+ * logs and error tracking with OpenAI's code, and the browser gets 502: passing
+ * OpenAI's own status on would read as one of our limits.
+ */
+class LiveSessionRefusedError extends Error {
+  readonly status = 502;
+
+  constructor(cause: APIError) {
+    super(`OpenAI refused to create the live session${cause.code ? ` (${cause.code})` : ""}: ${cause.message}`, { cause });
+    this.name = "LiveSessionRefusedError";
+  }
 }
 
 export async function OPTIONS(request: Request) {
@@ -94,7 +113,7 @@ async function startBrowserCall(request: Request) {
       ...(access.visitorId ? { visitorId: access.visitorId } : {}),
       ...(access.prospectDemoId ? { prospectDemoId: access.prospectDemoId } : { dashboardTestCall: access.dashboardTestCall }),
     });
-    if (!limit.allowed) return denied(limit.status, limit.code, cors);
+    if (!limit.allowed) return denied(limit.status, limit.code, cors, { widgetId: access.widgetId, reason: limit.reason });
     // The rate limit shields the database, so only allowed callers reach it.
     // The caller hears nothing until this request returns, so these two
     // independent reads run together.
@@ -113,7 +132,12 @@ async function startBrowserCall(request: Request) {
     timing.mark("greeting");
 
     const client = getLiveClient();
-    const live = await client.live.create({ session: buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }), transport: { type: "webrtc", sdp: body.sdp } });
+    const sessionConfig = buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true });
+    const live = await client.live
+      .create({ session: sessionConfig, transport: { type: "webrtc", sdp: body.sdp } })
+      .catch((error: unknown) => {
+        throw error instanceof APIError && typeof error.status === "number" ? new LiveSessionRefusedError(error) : error;
+      });
     timing.mark("openai");
     const sessionId = live.session.id;
     addToCallContext({ sessionId });
@@ -133,6 +157,8 @@ async function startBrowserCall(request: Request) {
       callId = call.callId;
       addToCallContext({ callId });
       timing.mark("record");
+      // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
+      void recordAiTrace(domain, { businessId: access.businessId, kind: "voice_session", channel: "web_voice", callId, ...(call.conversationId ? { conversationId: call.conversationId } : {}), model: sessionConfig.model, snapshot, instructions: sessionConfig.instructions ?? undefined }).catch((error: unknown) => logEvent("warn", "live.ai_trace_unsaved", { errorType: error instanceof Error ? error.name : typeof error }));
       await Promise.all([
         access.prospectDemoId ? recordProspectDemoCallStarted(domain, { businessId: access.businessId, prospectDemoId: access.prospectDemoId, callId, channel: "web_voice", provider: "openai_live" }) : undefined,
         attachWorkerToLiveSession({
@@ -149,7 +175,9 @@ async function startBrowserCall(request: Request) {
       timing.mark("attach");
       // Where the wait before the call connects went, for the logs.
       logEvent("info", "live.browser_start", { widgetId: access.widgetId, ...timing.stages(), ...(recordedGreeting ? { greetingRecording: recordedGreeting.play } : {}) });
-      return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
+      // GPT-Live writes no transcript for the greeting's recording, so the
+      // browser's captions get its words here.
+      return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}), ...(recordedGreeting?.play ? { greeting: recordedGreeting.text } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
     } catch (error) {
       // The session exists at OpenAI; end it so nothing talks or bills without us.
       // The worker may be the reason the start failed, so OpenAI's own hangup

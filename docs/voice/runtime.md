@@ -85,12 +85,12 @@ OpenAI's [Live conversations guide](https://developers.openai.com/api/docs/guide
 With `LIVE_RECORDED_GREETING=true` on the admin, a browser call opens with a recording of the business greeting instead of waiting for GPT-Live to say it. The worker sends the recording with `session.output_audio.fixture.play`, and OpenAI plays it through the session's output. A call goes like this:
 
 1. The admin checks Redis for a recording of the greeting in GPT-Live's voice. The key comes from the greeting's words and the voice, so a changed greeting gets a new recording, and businesses with the same greeting share one.
-2. When there is one, the session's starting history has the greeting as already said, so GPT-Live waits for the caller. The worker loads the recording while the caller's browser connects and plays it as soon as the session starts.
+2. When there is one, the session's starting history has the greeting as already said, so GPT-Live waits for the caller. The worker loads the recording while the caller's browser connects. OpenAI starts the session before the browser has connected its audio: on staging calls, the caller's audio reached OpenAI about a second after `session.started`. A recording played sooner can play before the caller can hear it, and GPT-Live then waits for the caller. So the worker plays the recording once the caller's audio first reaches the sideband (`session.input_audio.append`), or 3 seconds after `session.started` without it. The start response gives the browser the greeting's words, which the widget shows as the call's first caption.
 3. When there isn't one, the call opens with the greeting command, as without the setting. Once the call is under way, the worker renders the greeting with OpenAI's speech model, `gpt-4o-mini-tts`, so the next call plays it. A recording stays in Redis for a week after the last call that played it, and takes about 64 KB of Redis memory per second of speech.
 
-OpenAI mutes the caller's audio while a recording plays and drops what the caller says over it. GPT-Live writes no transcript for a recording, so the worker adds the greeting's words to the call's transcript itself. The speech model uses GPT-Live's voice name (`marin`), but the two models may not sound exactly alike.
+OpenAI mutes the caller's audio while a recording plays and drops what the caller says over it. GPT-Live writes no transcript for a recording, so the worker adds the greeting's words to the call's transcript itself. If the receptionist speaks before the caller, as when GPT-Live says the greeting itself, the widget's captions show its words in place of the recording's. The speech model uses GPT-Live's voice name (`marin`), but the two models may not sound exactly alike.
 
-If OpenAI rejects the recording or doesn't start it within 3 seconds, or the worker can't load it from Redis within a second, the worker sends the greeting command at once. It logs these lines about recordings:
+If OpenAI rejects the recording or doesn't start it within 3 seconds, the worker sends the greeting command instead. When the worker can't load the recording from Redis within a second, it sends the command when it would have played the recording. In `live.greeting` with `trigger` `recording`, an `inputAudioMs` of 0 at step `sent` means the recording played before any of the caller's audio arrived. The worker also logs these lines about recordings:
 
 - `live.greeting_recorded`: a new recording, with its length (`recordingMs`) and how long the speech model took (`renderMs`)
 - `live.greeting_recording_failed`: the speech model failed, or the recording came back silent or longer than the 30 seconds OpenAI plays
@@ -125,13 +125,15 @@ Dashboard test calls, the website widget, prospect demos, and the landing site d
 
 The caller hears nothing until step 4. The admin logs `live.browser_start` with the milliseconds each stage took: `accessMs`, `checksMs` (rate limits, minutes and the snapshot), `greetingMs` (the recording check), `openaiMs`, `recordMs` and `attachMs`. The response's `Server-Timing` header shows the browser the same stages. With `LIVE_RECORDED_GREETING=true`, `greetingRecording` says whether the call opened with a recording.
 
+A refused start logs `live.browser_refused` with the `status` and `code` the browser got. For a rate limit, `reason` names the count that ran out, such as `rate_limit_ip_day`, and `widgetId` names the kind of call. The website widget lets each visitor start 10 calls an hour and 50 a day, each IP address 20 an hour and 100 a day (counted only when `TRUSTED_CLIENT_IP_HEADER` is set), and each business 60 an hour and 300 a day. The counts restart at the top of each UTC hour and at midnight UTC. When OpenAI refuses to create the session, for example with 429 because its account is out of credit, the browser gets 502 and error tracking gets OpenAI's code, such as `insufficient_quota`.
+
 The browser can only close the session. It can't change instructions or answer delegations. Before it sends its WebRTC offer, the browser waits for ICE candidate gathering to finish, for up to 10 seconds. When the caller hangs up, it sends `session.close` and mutes the microphone. It keeps the connection open until `session.closed` arrives, for up to 15 seconds. Prospect demos don't count against minutes, and their agent can only answer questions and take messages.
 
 ## What the worker does during a call
 
 Once attached, the worker owns the call until OpenAI closes the session. It:
 
-- speaks the business greeting, or plays its recording, as soon as the session starts
+- speaks the business greeting as soon as the session starts, or plays its recording once the caller's audio arrives
 - saves each caller and receptionist turn to the transcript
 - transfers phone calls with a SIP REFER to the destination number, once GPT-Live has told the caller
 - hangs up after the receptionist's goodbye has played, when the agent ends the call

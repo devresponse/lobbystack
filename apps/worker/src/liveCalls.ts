@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
+import { agentModelId, callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, receptionistInstructions, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
 import {
   blockLiveCaller,
   extendLiveCallReservation,
@@ -12,6 +12,7 @@ import {
   markLiveCallMediaStarted,
   orphanedLiveCallSeconds,
   prepareLiveCallTransfer,
+  recordAiTrace,
   recordLiveCallTransferResult,
   saveLiveCallTurn,
   type DomainContext,
@@ -19,7 +20,7 @@ import {
   type OpenLiveCall,
 } from "@lobbystack/domain";
 import { renewVoicePresenceGateway, updateVoicePresence } from "@lobbystack/jobs";
-import { MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy } from "@lobbystack/shared";
+import { MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
@@ -467,6 +468,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     const recordingLoad: Promise<string | undefined> = recorded?.play && recordings ? recordings.load(recorded.text) : Promise.resolve(undefined);
     let end: LiveCallEnd | undefined;
     let controller: LiveCallController | undefined;
+    // What each delegation's AI debug trace keeps besides its own steps (ADR 0009), set once the business loads.
+    let traceContext: { snapshot: BusinessContextSnapshot; instructions: string } | undefined;
     let sessionAlive = false;
     // A goodbye already under way keeps its own reason.
     const wrapUp = (reason: LiveCallWrapUp) => {
@@ -508,20 +511,18 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
 
     const business: Promise<LiveCallSetup> = Promise.all([snapshotLoad, savedTurns]).then(([snapshot, saved]) => {
       if (!snapshot) throw new Error("The business has no published snapshot.");
-      const agent = createReceptionistAgent({
-        model,
-        context: {
-          domain: input.domain,
-          snapshot,
-          channel: request.channel,
-          callId: request.callId,
-          ...(request.conversationId ? { conversationId: request.conversationId } : {}),
-          callControl,
-          ...(request.callerPhone ? { callerPhone: request.callerPhone } : {}),
-          ...(request.intakeOnly ? { intakeOnly: true } : {}),
-        },
-        directToolAnswers: true,
-      });
+      const agentContext = {
+        domain: input.domain,
+        snapshot,
+        channel: request.channel,
+        callId: request.callId,
+        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+        callControl,
+        ...(request.callerPhone ? { callerPhone: request.callerPhone } : {}),
+        ...(request.intakeOnly ? { intakeOnly: true } : {}),
+      };
+      const agent = createReceptionistAgent({ model, context: agentContext, directToolAnswers: true });
+      traceContext = { snapshot, instructions: receptionistInstructions({ context: agentContext }) };
       const callerDone = async (conversation: string, abortSignal: AbortSignal) => {
         const startedAt = performance.now();
         const done = await callerIsDone(model, conversation, abortSignal);
@@ -587,6 +588,24 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         recordLiveDelegation(input.domain, telemetryCall, timing);
         recordLiveDelegationGeneration(input.domain, telemetryCall, timing);
       },
+      // Kept only when the business keeps AI debug traces; never logged.
+      onDelegationTrace: (trace) => void recordAiTrace(input.domain, {
+        businessId: request.businessId,
+        kind: "voice_delegation",
+        channel: request.channel,
+        callId: request.callId,
+        ...(request.conversationId ? { conversationId: request.conversationId } : {}),
+        delegationId: trace.delegationId,
+        model: agentModelId(liveDelegationEnvironment()).model,
+        ...(traceContext ?? {}),
+        input: trace.prompt,
+        steps: trace.steps,
+        output: trace.sent,
+        directAnswer: trace.directAnswer,
+        failed: trace.failed,
+        ...(trace.usage ? { usage: { inputTokens: trace.usage.inputTokens, outputTokens: trace.usage.outputTokens } } : {}),
+        durationMs: trace.agentMs,
+      }).catch(logFailure("live.ai_trace_unsaved")),
       onClose: (summary) => {
         active.delete(request.sessionId);
         setSpanAttributes(span, { "lobbystack.close_reason": summary.closeReason, "lobbystack.end": end, "lobbystack.delegations": summary.delegations.length });

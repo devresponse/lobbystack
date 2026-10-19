@@ -109,6 +109,7 @@ export const SCHEMA_MIGRATIONS = [
   "0103_call_twilio_sid.sql",
   "0104_appointment_change_verification_call.sql",
   "0105_platform_key_records.sql",
+  "0106_ai_traces.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

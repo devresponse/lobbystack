@@ -137,6 +137,7 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
       return day && row.closeMinutes > row.openMinutes ? [{ day, open: minutesToClock(row.openMinutes), close: minutesToClock(row.closeMinutes) }] : [];
     }),
     hours_source: business.hoursSource === "generated" || business.hoursSource === "operator" ? business.hoursSource : "none",
+    ai_traces_enabled: business.aiTracesEnabled,
     created_at: iso(business.createdAt),
     updated_at: iso(business.updatedAt),
   };
@@ -171,11 +172,9 @@ export async function loadServiceResource(tx: DatabaseTransaction, businessId: s
 // active staff member, and a service with assignments as open only to them.
 
 export async function listStaffResources(tx: DatabaseTransaction, businessId: string): Promise<ApiStaff[]> {
-  const [members, activeServices, assignments] = await Promise.all([
-    tx.select().from(staff).where(eq(staff.businessId, businessId)).orderBy(asc(staff.name), asc(staff.id)),
-    tx.select({ id: services.id }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true))).orderBy(asc(services.name), asc(services.id)),
-    tx.select({ staffId: staffServiceAssignments.staffId, serviceId: staffServiceAssignments.serviceId }).from(staffServiceAssignments).where(eq(staffServiceAssignments.businessId, businessId)),
-  ]);
+  const members = await tx.select().from(staff).where(eq(staff.businessId, businessId)).orderBy(asc(staff.name), asc(staff.id));
+  const activeServices = await tx.select({ id: services.id }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true))).orderBy(asc(services.name), asc(services.id));
+  const assignments = await tx.select({ staffId: staffServiceAssignments.staffId, serviceId: staffServiceAssignments.serviceId }).from(staffServiceAssignments).where(eq(staffServiceAssignments.businessId, businessId));
   const assigned = new Map<string, Set<string>>();
   for (const row of assignments) {
     const list = assigned.get(row.serviceId) ?? new Set<string>();

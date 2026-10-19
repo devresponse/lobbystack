@@ -59,6 +59,9 @@ export type KnowledgePassage = {
   sourceRevision: number;
   sequence: number;
   supportingChunkIds?: string[];
+  /** Where the ranked chunk sits in content once its neighbors are added, as character offsets. */
+  focusStart?: number;
+  focusEnd?: number;
 };
 
 export function fuseKnowledgeRanks(lists: KnowledgePassage[][], limit = 6): KnowledgePassage[] {

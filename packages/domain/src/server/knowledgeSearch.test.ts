@@ -59,8 +59,18 @@ describe("knowledge evidence", () => {
     expect(result.outcome).toBe("found");
     expect(result.mode).toBe("hybrid");
     expect(result.matches[0]).toMatchObject({ sourceRevision: 3, supportingChunkIds: ["chunk", "adjacent"] });
+    // The ranked chunk's place in the expanded content, for readers with little room.
+    const match = result.matches[0]!;
+    expect(match.content.slice(match.focusStart, match.focusEnd)).toBe(current.find(row => row.chunkId === match.chunkId)!.content);
     expect(result.matches[0]?.content).toContain("MNGT 10407");
     expect(statements.filter(value => value.includes("LIMIT 12"))).toHaveLength(2);
+  });
+  it("marks where the ranked chunk sits between its neighbors", async () => {
+    const before = { ...primary, chunkId: "before", sequence: 0, content: "Earlier section about mailboxes." };
+    current = [adjacent, primary, before];
+    const [match] = (await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" })).matches;
+    expect(match!.content).toBe(`${before.content}\n\n${primary.content}\n\n${adjacent.content}`);
+    expect(match!.content.slice(match!.focusStart, match!.focusEnd)).toBe(primary.content);
   });
   it("keeps keyword search when embeddings fail", async () => {
     const result = await searchKnowledgeEvidence(context(vi.fn().mockRejectedValue(new Error("private provider error"))), { businessId: "tenant-a", query: "MNGT 10407" });

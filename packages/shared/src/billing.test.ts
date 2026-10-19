@@ -33,6 +33,7 @@ describe("content retention by plan", () => {
     expect(contentRetentionDaysForPlan("starter", "transcripts")).toBe(90);
     expect(contentRetentionDaysForPlan("starter", "recordings")).toBe(90);
     expect(contentRetentionDaysForPlan("starter", "follow_ups")).toBe(365);
+    expect(contentRetentionDaysForPlan("starter", "ai_traces")).toBe(30);
     expect(contentRetentionDaysForPlan("pro", "messages")).toBe(365);
     expect(contentRetentionDaysForPlan("enterprise", "transcripts")).toBe(90);
     expect(contentRetentionDaysForPlan("self_host", "messages")).toBe(365);

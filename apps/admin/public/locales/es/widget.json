@@ -25,6 +25,7 @@
     "voiceConnected": "Está hablando con la recepcionista.",
     "voiceEnded": "La llamada de voz terminó. Puede seguir escribiendo abajo.",
     "voiceUnavailable": "La voz en vivo no está disponible. Inténtelo más tarde.",
+    "voiceRateLimited": "Se han iniciado demasiadas llamadas. Inténtelo más tarde o siga escribiendo abajo.",
     "voiceConnecting": "Conectando…",
     "voiceRequestingMic": "Permita el acceso al micrófono para continuar.",
     "voiceEnd": "Colgar",

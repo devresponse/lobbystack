@@ -149,8 +149,12 @@ export function readSessionClosedReason(data: unknown): string | undefined {
   }
 }
 
-/** One speaker's stretch of a browser call, as the live captions show it. */
-export type WebVoiceTranscriptTurn = { speaker: "caller" | "assistant"; text: string };
+/**
+ * One speaker's stretch of a browser call, as the live captions show it.
+ * `recorded` marks the greeting's recording, whose words come from the start
+ * response, since GPT-Live writes no transcript for it.
+ */
+export type WebVoiceTranscriptTurn = { speaker: "caller" | "assistant"; text: string; recorded?: boolean };
 
 type TranscriptDelta = { speaker: WebVoiceTranscriptTurn["speaker"]; delta: string };
 
@@ -176,9 +180,13 @@ export function readTranscriptDelta(data: unknown): TranscriptDelta | undefined 
  * Adds a delta the way the worker builds the saved transcript: the current
  * speaker's turn grows, and a new speaker starts a turn. A blank delta from
  * the other speaker starts nothing, so it can't split a sentence in two.
+ * The receptionist speaking before the caller, as when the greeting's
+ * recording didn't play and GPT-Live said it itself, replaces the recording's
+ * words with its own.
  */
 export function appendTranscriptDelta(turns: readonly WebVoiceTranscriptTurn[], { speaker, delta }: TranscriptDelta): WebVoiceTranscriptTurn[] {
   const last = turns.at(-1);
+  if (last?.recorded && speaker === "assistant") return delta.trim() ? [...turns.slice(0, -1), { speaker, text: delta }] : [...turns];
   if (last?.speaker === speaker) return [...turns.slice(0, -1), { speaker, text: last.text + delta }];
   if (!delta.trim()) return [...turns];
   return [...turns, { speaker, text: delta }];
@@ -508,6 +516,9 @@ export function useWebVoiceCall({
       // A blip before the first "connected" still has to mark the call live, so only a
       // recovery after that stays quiet.
       let hasConnected = false;
+      // The words of the greeting's recording, which the worker plays once the
+      // call's audio connects.
+      let recordedGreeting: string | undefined;
       connection.onconnectionstatechange = () => {
         if (!isCurrentCall()) return;
         const state = connection.connectionState;
@@ -518,6 +529,8 @@ export function useWebVoiceCall({
           }
           if (hasConnected) return;
           hasConnected = true;
+          const greeting = recordedGreeting;
+          if (greeting) setTranscript((turns) => [{ speaker: "assistant", text: greeting, recorded: true }, ...turns]);
           setStatus("connected");
           emit("connected");
           return;
@@ -578,8 +591,9 @@ export function useWebVoiceCall({
         );
       }
 
-      const payload = (await response.json()) as StartedSession & { sdp: string };
+      const payload = (await response.json()) as StartedSession & { sdp: string; greeting?: unknown };
       const session = { sessionId: payload.sessionId, endToken: payload.endToken };
+      if (typeof payload.greeting === "string" && payload.greeting.trim()) recordedGreeting = payload.greeting.trim();
       if (attemptId !== startCallAttemptRef.current) {
         stopAttemptResources();
         // The caller gave up while connecting, but the server already started

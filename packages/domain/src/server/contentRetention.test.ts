@@ -9,7 +9,7 @@ vi.mock("@lobbystack/db", async (original) => ({
 }));
 vi.mock("./notifications", () => ({ queueOperatorAlertInTransaction: vi.fn() }));
 
-import { inboxItems, messages, transcripts } from "@lobbystack/db";
+import { aiTraceContexts, aiTraces, inboxItems, messages, transcripts } from "@lobbystack/db";
 import { appendMessage } from "./conversations";
 import { receiveInboundSms } from "./sms";
 import { upsertTranscript } from "./voice";
@@ -119,6 +119,13 @@ describe("approved content retention", () => {
     expect(deletes).toHaveLength(0);
     expect(selectCalls).toBe(0);
     expect(mocks.enqueue).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ topic: "privacy.deleteRecording" }));
+  });
+  it("deletes expired AI debug traces and the contexts only they used", async () => {
+    const result = await runPrivacyRetentionSweep(context, { businessId: "business", now });
+    expect(result.deletedAiTraces).toBe(1);
+    const traceDelete = deletes.find((entry) => entry.table === aiTraces)!;
+    expect(new PgDialect().sqlToQuery(traceDelete.where!).sql).toContain('"ai_traces"."expires_at" <');
+    expect(deletes.findIndex((entry) => entry.table === aiTraceContexts)).toBeGreaterThan(deletes.indexOf(traceDelete));
   });
   it("queues expired recordings when automatic content retention is enabled", async () => {
     directlySelected = [{ callId: "call", objectId: "recording" }];

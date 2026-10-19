@@ -1,3 +1,4 @@
+import { APIError } from "openai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -20,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@lobbystack/domain", () => ({
   finishLiveCall: mocks.finishLiveCall,
+  recordAiTrace: vi.fn(async () => null),
   getWebVoiceBillingAllowance: mocks.allowance,
   recordProspectDemoCallError: mocks.recordProspectDemoCallError,
   recordProspectDemoCallStarted: mocks.recordProspectDemoCallStarted,
@@ -93,6 +95,28 @@ describe("POST /api/voice/live/session", () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
+  it("logs which count refused a call, and keeps it from the browser", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.access.mockResolvedValue(widget);
+    mocks.rateLimit.mockResolvedValue({ allowed: false, status: 429, code: "web_voice_rate_limited", reason: "rate_limit_ip_day" });
+    const response = await start("lobbystack-widget");
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_refused", businessId: "biz_1", widgetId: "lobbystack-widget", status: 429, code: "web_voice_rate_limited", reason: "rate_limit_ip_day" }));
+    await expect(response.json()).resolves.toEqual({ code: "web_voice_rate_limited", error: "The call couldn't start." });
+    warn.mockRestore();
+  });
+
+  it("logs every other refusal with the code the browser got", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.access.mockResolvedValue(widget);
+    mocks.snapshot.mockResolvedValue({ ...snapshot, contactChannels: {} });
+    const response = await start("lobbystack-widget");
+    expect(response.status).toBe(403);
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_refused", businessId: "biz_1", status: 403, code: "voice_unavailable" }));
+    warn.mockRestore();
+  });
+
   it("closes the session and records OpenAI's setup charge when the worker can't take it", async () => {
     mocks.access.mockResolvedValue({ businessId: "biz_1", origin: "https://admin.lobbystack.test", widgetId: "lobbystack-prospect-demo", prospectDemoId: "demo_1", dashboardTestCall: false });
     mocks.attach.mockRejectedValue(new Error("Worker attach failed with status 500."));
@@ -114,6 +138,21 @@ describe("POST /api/voice/live/session", () => {
     expect(response.status).toBe(500);
     const lines = () => error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
     await vi.waitFor(() => expect(lines()).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/^\[admin\] exception: /), operation: "api_response", errorId: response.headers.get("x-error-id"), businessId: "biz_1", sessionId: "live_1", callId: "call_1" })));
+    error.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  // A 429 out of credit would otherwise read as our own call limit.
+  it("reports OpenAI refusing the session, and answers 502 instead of OpenAI's status", async () => {
+    for (const key of ["POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_API_KEY"]) vi.stubEnv(key, undefined);
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    mocks.access.mockResolvedValue(widget);
+    mocks.create.mockRejectedValue(APIError.generate(429, { error: { message: "You exceeded your current quota.", type: "insufficient_quota", code: "insufficient_quota" } }, undefined, new Headers()));
+    const response = await start("lobbystack-widget");
+    expect(response.status).toBe(502);
+    expect(mocks.startLiveWebCall).not.toHaveBeenCalled();
+    const lines = () => error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    await vi.waitFor(() => expect(lines()).toContainEqual(expect.objectContaining({ message: "[admin] exception: OpenAI refused to create the live session (insufficient_quota): 429 You exceeded your current quota.", errorId: response.headers.get("x-error-id"), businessId: "biz_1" })));
     error.mockRestore();
     vi.unstubAllEnvs();
   });
@@ -157,18 +196,23 @@ describe("POST /api/voice/live/session", () => {
     expect(mocks.recordedGreeting).toHaveBeenCalledWith(snapshot);
     expect(mocks.sessionConfig).toHaveBeenCalledWith(snapshot, { greetingRecorded: true });
     expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: true } }));
+    // GPT-Live writes no transcript for the recording, so the browser's captions get its words here.
+    await expect(response.json()).resolves.toMatchObject({ sessionId: "live_1", greeting: "Hi" });
   });
 
   it("opens the call as before when LIVE_RECORDED_GREETING is off or the recording isn't made yet", async () => {
     mocks.access.mockResolvedValue(widget);
-    await start("lobbystack-widget");
+    const off = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
     expect(mocks.attach.mock.lastCall![0]).not.toHaveProperty("recordedGreeting");
+    expect(await off.json()).not.toHaveProperty("greeting");
     // The worker records it for the next call.
     mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: false });
-    await start("lobbystack-widget");
+    const unrecorded = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
     expect(mocks.attach).toHaveBeenLastCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: false } }));
+    // GPT-Live says the greeting itself, so its own transcript captions it.
+    expect(await unrecorded.json()).not.toHaveProperty("greeting");
   });
 
   // The Server-Timing header only reaches the caller's browser.

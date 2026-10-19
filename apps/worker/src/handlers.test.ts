@@ -358,7 +358,7 @@ describe("worker handlers", () => {
   it("runs all tenant retention work from the hourly privacy job", async () => {
     const businessId = randomUUID();
     const domain = { db: undefined as never };
-    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, queuedRecordings: 1 });
+    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedAiTraces: 0, queuedRecordings: 1 });
     vi.mocked(deleteSentProductEventsBefore).mockResolvedValueOnce(1_000).mockResolvedValueOnce(7);
 
     const result = await handleJob({
@@ -373,7 +373,7 @@ describe("worker handlers", () => {
       recurring: true,
     }, { domain });
 
-    expect(result).toEqual({ status: "completed", entityId: JSON.stringify({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, queuedRecordings: 1 }) });
+    expect(result).toEqual({ status: "completed", entityId: JSON.stringify({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedAiTraces: 0, queuedRecordings: 1 }) });
     expect(runPrivacyRetentionSweep).toHaveBeenCalledWith(domain, { businessId });
     expect(deleteSentProductEventsBefore).toHaveBeenCalledWith(domain, {
       businessId,
@@ -412,7 +412,7 @@ describe("worker handlers", () => {
     const domain = { db: undefined as never };
     const enqueueProductEventRetentionContinuation = vi.fn().mockResolvedValue(undefined);
     const queuedAtMs = Date.parse("2026-09-21T12:00:00.000Z");
-    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 0, scrubbedMessages: 0, scrubbedOperatorDeliveries: 0, deletedTranscripts: 0, queuedRecordings: 0 });
+    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 0, scrubbedMessages: 0, scrubbedOperatorDeliveries: 0, deletedTranscripts: 0, deletedAiTraces: 0, queuedRecordings: 0 });
     vi.mocked(deleteSentProductEventsBefore).mockResolvedValue(1_000);
 
     await handleJob({

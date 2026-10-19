@@ -165,6 +165,60 @@ describe("live captions", () => {
     ]);
   });
 
+  // GPT-Live writes no transcript for the greeting's recording.
+  it("captions the greeting's recording once the call connects", async () => {
+    const channel = { readyState: "open", send: vi.fn(), onmessage: null as ((event: MessageEvent) => void) | null };
+    const peerConnectionInstance = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      connectionState: "new",
+      createDataChannel: vi.fn(() => channel),
+      createOffer: vi.fn(async () => ({ sdp: "offer-sdp" })),
+      iceGatheringState: "complete",
+      localDescription: { sdp: "offer-sdp" },
+      onconnectionstatechange: null as (() => void) | null,
+      ontrack: null,
+      setLocalDescription: vi.fn(async () => undefined),
+      setRemoteDescription: vi.fn(async () => undefined),
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ sessionId: "session-123", endToken: "end", sdp: "answer-sdp", greeting: "Thanks for calling Strata. " })));
+    vi.stubGlobal("RTCPeerConnection", vi.fn(function () { return peerConnectionInstance; }));
+    vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn(async () => createMockMediaStream(vi.fn())) } });
+
+    let controls: HookControls | null = null;
+    render(createElement(HookHarness, { endpoint: "https://app.example.com/api/voice/live/session", onReady: (next) => { controls = next; } }));
+    await waitFor(() => expect(controls).not.toBeNull());
+    await act(async () => {
+      await controls!.startCall();
+    });
+    expect(controls!.transcript).toEqual([]);
+
+    peerConnectionInstance.connectionState = "connected";
+    act(() => peerConnectionInstance.onconnectionstatechange!());
+    expect(controls!.status).toBe("connected");
+    expect(controls!.transcript).toEqual([{ speaker: "assistant", text: "Thanks for calling Strata.", recorded: true }]);
+
+    const deliver = (event: Record<string, unknown>) => act(() => channel.onmessage!(new MessageEvent("message", { data: JSON.stringify(event) })));
+    deliver({ type: "session.input_transcript.delta", delta: "Are you open Sunday?" });
+    deliver({ type: "session.output_transcript.delta", delta: "We're closed Sundays." });
+    expect(controls!.transcript.map(({ speaker, text }) => ({ speaker, text }))).toEqual([
+      { speaker: "assistant", text: "Thanks for calling Strata." },
+      { speaker: "caller", text: "Are you open Sunday?" },
+      { speaker: "assistant", text: "We're closed Sundays." },
+    ]);
+  });
+
+  it("replaces the recording's words when the receptionist speaks before the caller", () => {
+    const recorded = [{ speaker: "assistant" as const, text: "Thanks for calling Strata.", recorded: true }];
+    // A blank delta changes nothing.
+    expect(appendTranscriptDelta(recorded, { speaker: "assistant", delta: " " })).toEqual(recorded);
+    // The recording didn't play, so GPT-Live said the greeting itself.
+    const spoken = appendTranscriptDelta(recorded, { speaker: "assistant", delta: "Thanks for" });
+    expect(spoken).toEqual([{ speaker: "assistant", text: "Thanks for" }]);
+    expect(appendTranscriptDelta(spoken, { speaker: "assistant", delta: " calling Strata." })).toEqual([{ speaker: "assistant", text: "Thanks for calling Strata." }]);
+    expect(appendTranscriptDelta(recorded, { speaker: "caller", delta: "Hi" })).toEqual([...recorded, { speaker: "caller", text: "Hi" }]);
+  });
+
   it("reads only the caller's and the receptionist's transcript deltas", () => {
     expect(readTranscriptDelta(JSON.stringify({ type: "session.input_transcript.delta", delta: "hello" }))).toEqual({ speaker: "caller", delta: "hello" });
     expect(readTranscriptDelta(JSON.stringify({ type: "session.output_transcript.delta", delta: "hi" }))).toEqual({ speaker: "assistant", delta: "hi" });

@@ -37,6 +37,8 @@ import {
   type ApiCalendarConnectLink,
   type ApiCall,
   type ApiCallDetail,
+  type ApiAiTrace,
+  type ApiAiTraceDetail,
   type ApiCheckout,
   type ApiCheckoutCreate,
   type ApiClaimLink,
@@ -96,6 +98,7 @@ import {
 import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } from "../../authz";
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
+import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -306,9 +309,11 @@ export async function getBusinessForApi(context: DomainContext, caller: ApiCalle
 export async function updateBusinessForApi(context: DomainContext, caller: ApiCaller, input: ApiBusinessUpdate): Promise<ApiBusiness> {
   if (input.timezone !== undefined) assertTimeZone(input.timezone, "timezone");
   const fields = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.timezone !== undefined ? { timezone: input.timezone } : {}), ...(input.locale !== undefined ? { defaultLocale: input.locale } : {}), ...(input.website_url !== undefined ? { websiteUrl: input.website_url } : {}), ...(input.business_type !== undefined ? { businessType: input.business_type } : {}) };
-  if (!Object.keys(fields).length && input.hours === undefined) throw invalidRequest("Send at least one field to update.");
+  if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
+    // Read when each AI turn finishes, so no snapshot refresh is needed.
+    if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     if (input.hours !== undefined) {
       await tx.update(businesses).set({ updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
       try {
@@ -1478,6 +1483,18 @@ export async function getCallForApi(context: DomainContext, caller: ApiCaller, c
     const call = await loadCallDetailResource(tx, caller.businessId, callId);
     if (!call) throw notFound("Call");
     return call;
+  });
+}
+
+export async function listAiTracesForApi(context: DomainContext, caller: ApiCaller, request: Parameters<typeof listAiTraceResources>[2]): Promise<Page<ApiAiTrace>> {
+  return await inBusiness(context, caller, async (tx) => await listAiTraceResources(tx, caller.businessId, request));
+}
+
+export async function getAiTraceForApi(context: DomainContext, caller: ApiCaller, traceId: string): Promise<ApiAiTraceDetail> {
+  return await inBusiness(context, caller, async (tx) => {
+    const trace = await loadAiTraceResource(tx, caller.businessId, traceId);
+    if (!trace) throw notFound("AI trace");
+    return trace;
   });
 }
 

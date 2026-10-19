@@ -352,7 +352,10 @@ export function buildLiveInstructions(snapshot: BusinessContextSnapshot, now: Da
       "When a backend result says the call is ending, say one short goodbye, then stop talking. If the caller speaks again before the call ends, reply as usual. If they ask for more, help them, and when they're done, delegate again.",
       ...(phone ? ["When a backend result says the call is being transferred, tell the caller you're connecting them now, then stop talking."] : []),
     ].join("\n"),
-    "Never make up availability, prices, or policies.",
+    // On a 2026-10-19 demo call, a knowledge lookup came back without the names
+    // asked for, and GPT-Live said invented council members and an invented
+    // manager's email instead. Names and contact details need the same rule as prices.
+    "Never make up availability, prices, policies, names, phone numbers, email addresses, dates, or any other fact about the business. Say only what the business facts below or a backend result state. If neither has the detail asked for, say you don't have it and offer to take a message.",
     `Business facts:\n\n${liveBusinessFacts(snapshot, now.setZone(snapshot.timezone), channel).join("\n\n")}`,
   ].filter(Boolean).join("\n\n");
 }

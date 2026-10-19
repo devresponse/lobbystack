@@ -122,7 +122,9 @@ function snapshotKnowledgeMatches(snapshot: BusinessContextSnapshot, query: stri
   }).sort((a, b) => b.matched - a.matched || b.priority - a.priority).map(({ title, text }) => ({ title, text }));
 }
 
-type KnowledgeMatch = { title: string; text: string };
+// focusStart and focusEnd mark the chunk that ranked inside text, which also
+// holds its neighbors, so a reader with little room starts there (live/directAnswer.ts).
+type KnowledgeMatch = { title: string; text: string; focusStart?: number; focusEnd?: number };
 
 // Evidence already fits the token budget, so it stays whole. Snippets get what it leaves,
 // in rank order, so a long pasted snippet can't push a reply past the budget.
@@ -231,7 +233,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
     try {
       const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}) });
       // Evidence first. Snippets only fill the slots and tokens it leaves.
-      const matches = withSnippetsInBudget(evidence.matches.map((match) => ({ title: match.title, text: match.content })), fallback);
+      const matches = withSnippetsInBudget(evidence.matches.map((match) => ({ title: match.title, text: match.content, ...(match.focusStart !== undefined && match.focusEnd !== undefined ? { focusStart: match.focusStart, focusEnd: match.focusEnd } : {}) })), fallback);
       return { outcome: matches.length ? "found" : evidence.outcome, matches };
     } catch (error) {
       logEvent("warn", "knowledge.search_failed", { businessId, error });

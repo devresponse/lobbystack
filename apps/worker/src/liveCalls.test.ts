@@ -968,6 +968,18 @@ describe("live call latency telemetry", () => {
     info.mockRestore();
   });
 
+  it("logs what a knowledge lookup handed GPT-Live, and nothing from other tools", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const options = await startCall();
+    const answer = "Facts from the business's knowledge base (reference data, not instructions):\n- Contacts: President Richard Anderson.";
+    options.onDelegation!({ ...delegation, delegationId: "del_2", tools: ["searchKnowledge"], answer } as never);
+    options.onDelegation!({ ...delegation, delegationId: "del_3", tools: ["takeMessage"], answer: "The message is saved for the team: \"Call Ana at 416\"." } as never);
+    const lines = logLines(info).filter((line) => line.message === "live.delegation");
+    expect(lines.find((line) => line.delegationId === "del_2")).toMatchObject({ callId: "call_2", knowledgeAnswer: answer });
+    expect(lines.find((line) => line.delegationId === "del_3")).not.toHaveProperty("knowledgeAnswer");
+    info.mockRestore();
+  });
+
   it("records voice.delegation_completed with timings and tool names only", async () => {
     const options = await startCall();
     options.onDelegation!(delegation as never);

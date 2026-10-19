@@ -220,6 +220,15 @@ function reportFailure(operation: string, ids: CallContext = {}) {
 
 const callIds = (call: { sessionId: string; callId: string; businessId: string }): CallContext => ({ sessionId: call.sessionId, callId: call.callId, businessId: call.businessId });
 
+// What GPT-Live was handed for a knowledge lookup, so a wrong spoken answer can
+// be traced to what the lookup returned. Only when every tool was a knowledge
+// search: those answers hold the business's own documents, while other tools'
+// answers can repeat what the caller said, which stays out of the logs.
+function knowledgeAnswerLog(timing: { tools: string[]; answer: string; directAnswer: boolean }): { knowledgeAnswer?: string } {
+  if (!timing.directAnswer || !timing.tools.length || !timing.tools.every((tool) => tool === "searchKnowledge")) return {};
+  return { knowledgeAnswer: timing.answer };
+}
+
 type InCall = ReturnType<typeof AsyncLocalStorage.snapshot>;
 
 // Makes every function in `options` run in the call's context, whatever calls it.
@@ -583,7 +592,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         transferWrites = transferWrites.then(() => recordLiveCallTransferResult(input.domain, { ...call, state })).catch(logFailure("live.transfer_state_unrecorded"));
       },
       onDelegation: (timing) => {
-        logEvent("info", "live.delegation", { delegationId: timing.delegationId, agentMs: timing.agentMs, totalMs: timing.totalMs, queueMs: timing.queueMs, tools: timing.tools, modelSteps: timing.modelSteps, directAnswer: timing.directAnswer, stepMs: timing.stepMs, toolMs: timing.toolMs, failed: timing.failed, superseded: timing.superseded });
+        logEvent("info", "live.delegation", { delegationId: timing.delegationId, agentMs: timing.agentMs, totalMs: timing.totalMs, queueMs: timing.queueMs, tools: timing.tools, modelSteps: timing.modelSteps, directAnswer: timing.directAnswer, stepMs: timing.stepMs, toolMs: timing.toolMs, failed: timing.failed, superseded: timing.superseded, ...knowledgeAnswerLog(timing) });
         recordLiveDelegation(input.domain, telemetryCall, timing);
         recordLiveDelegationGeneration(input.domain, telemetryCall, timing);
       },

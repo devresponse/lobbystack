@@ -43,6 +43,8 @@ import {
   getReceptionistForApi,
   getTeamForApi,
   getCallForApi,
+  getAiTraceForApi,
+  listAiTracesForApi,
   getCheckoutForApi,
   getPhoneNumberClaimForApi,
   getContactForApi,
@@ -244,6 +246,11 @@ function dateParam(request: Request, name: string): Date | undefined {
   return parsed;
 }
 
+function optionalUuidParam(request: Request, name: string): string | undefined {
+  const value = queryParam(request, name);
+  return value === undefined ? undefined : uuidParam(value, name);
+}
+
 function textParam(request: Request, name: string, maxLength: number): string | undefined {
   const value = queryParam(request, name)?.trim();
   if (!value) return undefined;
@@ -427,6 +434,8 @@ export const v1 = {
   }),
   listStaff: (request: Request) => handleApiRequest(request, "listStaff", async ({ context, caller }) => ({ body: { data: await listStaffForApi(context, caller), next_cursor: null, has_more: false } })),
 
+  listAiTraces: (request: Request) => handleApiRequest(request, "listAiTraces", async ({ context, caller }) => ({ body: await listAiTracesForApi(context, caller, { ...pageQuery(request), callId: optionalUuidParam(request, "call_id"), conversationId: optionalUuidParam(request, "conversation_id") }) })),
+  getAiTrace: (request: Request, { params }: Params<"trace_id">) => handleApiRequest(request, "getAiTrace", async ({ context, caller }) => ({ body: data(await getAiTraceForApi(context, caller, uuidParam((await params).trace_id, "trace_id"))) })),
   listCalls: (request: Request) => handleApiRequest(request, "listCalls", async ({ context, caller }) => ({ body: await listCallsForApi(context, caller, { ...pageQuery(request), startedAfter: dateParam(request, "started_after"), startedBefore: dateParam(request, "started_before") }) })),
   getCall: (request: Request, { params }: Params<"call_id">) => handleApiRequest(request, "getCall", async ({ context, caller }) => ({ body: data(await getCallForApi(context, caller, uuidParam((await params).call_id, "call_id"))) })),
 

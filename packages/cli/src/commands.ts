@@ -345,6 +345,9 @@ export const groups: Record<string, Group> = Object.fromEntries([
   group("calls", "Calls the receptionist took.", {
     list: { operation: "listCalls", columns: columns("id", "started_at", "caller_phone", "outcome", "duration_seconds") },
     get: { operation: "getCall" },
+    // AI debug traces (ADR 0009): what the models were given and did on a call or website chat.
+    traces: { operation: "listAiTraces", columns: columns("id", "created_at", "kind", "channel", "direct_answer", "failed") },
+    trace: { operation: "getAiTrace" },
   }),
   group("messages", "Messages the receptionist took for the team.", {
     list: { operation: "listMessages", columns: columns("id", "created_at", "status", "urgency", "caller_name", "title") },

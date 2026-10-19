@@ -4,6 +4,7 @@ import type { BusinessContextSnapshot } from "@lobbystack/shared";
 
 const mocks = vi.hoisted(() => ({
   readJson: vi.fn(),
+  recordAiTrace: vi.fn(async (..._args: unknown[]) => null),
   resolveWidgetSessionAccess: vi.fn(),
   enforceWidgetRateLimits: vi.fn(),
   requestIpHash: vi.fn(),
@@ -25,6 +26,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@lobbystack/domain", () => ({
   announceLateWidgetReply: mocks.announceLateWidgetReply,
+  recordAiTrace: mocks.recordAiTrace,
   appendMessage: mocks.appendMessage,
   getOrCreateWidgetConversation: mocks.getOrCreateWidgetConversation,
   getCachedBusinessSnapshot: mocks.getCachedBusinessSnapshot,
@@ -47,6 +49,8 @@ vi.mock("@lobbystack/agent-core/model", () => ({
 
 vi.mock("@lobbystack/agent-core/agent", () => ({
   createReceptionistAgent: mocks.createReceptionistAgent,
+  receptionistInstructions: () => "Chat instructions",
+  toAiTraceSteps: (steps: unknown[]) => steps,
 }));
 
 function agentStreaming(textStream: AsyncIterable<string>, finishReason = "stop") {
@@ -298,6 +302,28 @@ describe("POST /api/widget/chat", () => {
       isStreaming: true,
       provider: "test",
       model: "test",
+    })));
+  });
+
+  it("hands each reply's instructions, history, steps and text to the AI debug trace", async () => {
+    vi.stubEnv("AI_CHAT_API_KEY", "test-api-key");
+    mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId, version: "v7" } as BusinessContextSnapshot);
+    mocks.loadWidgetChatHistory.mockResolvedValue([{ direction: "inbound", body: "Who is the president?" }]);
+    const steps = [{ text: "", toolCalls: [{ toolName: "searchKnowledge", input: { query: "council president" } }], toolResults: [{ toolName: "searchKnowledge", output: { outcome: "found" } }] }];
+    mocks.createReceptionistAgent.mockReturnValue({ stream: vi.fn().mockResolvedValue({ textStream: (async function* () { yield "Richard Anderson."; })(), totalUsage: Promise.resolve({ inputTokens: 5, outputTokens: 3, totalTokens: 8 }), finishReason: Promise.resolve("stop"), steps: Promise.resolve(steps) }) });
+
+    await readSse(await POST(widgetRequest()));
+    await vi.waitFor(() => expect(mocks.recordAiTrace).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
+      businessId,
+      kind: "chat_reply",
+      channel: "web_chat",
+      conversationId,
+      snapshot: { businessId, version: "v7" },
+      instructions: "Chat instructions",
+      input: "Visitor: Who is the president?",
+      steps,
+      output: "Richard Anderson.",
+      usage: { inputTokens: 5, outputTokens: 3 },
     })));
   });
 

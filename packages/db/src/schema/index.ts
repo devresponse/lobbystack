@@ -140,6 +140,8 @@ export const businesses = pgTable(
     phoneNumberReplacementReservedAt: timestamp("phone_number_replacement_reserved_at", { withTimezone: true }),
     phoneNumberReplacementUsedAt: timestamp("phone_number_replacement_used_at", { withTimezone: true }),
     telemetryEnabled: boolean("telemetry_enabled").default(true).notNull(),
+    // Keep a debug trace of each AI turn (what the model was given and did), see ADR 0009.
+    aiTracesEnabled: boolean("ai_traces_enabled").default(false).notNull(),
     // Who set the opening hours: none yet, AI from the knowledge sources, or a person.
     hoursSource: varchar("hours_source", { length: 16 }).$type<"none" | "generated" | "operator">().default("none").notNull(),
     hoursFingerprint: varchar("hours_fingerprint", { length: 64 }),
@@ -649,6 +651,62 @@ export const transcripts = pgTable(
     ...timestamps,
   },
   (table) => [uniqueIndex("transcripts_call_sequence_unique").on(table.callId, table.sequence)],
+);
+
+/**
+ * Text an AI turn was built from, stored once and shared by the traces that
+ * used it: the business snapshot, or the instructions a model was given. It
+ * expires with the last trace that points to it. See ADR 0009.
+ */
+export const aiTraceContexts = pgTable(
+  "ai_trace_contexts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 32 }).$type<"snapshot" | "instructions">().notNull(),
+    hash: varchar("hash", { length: 64 }).notNull(),
+    content: text("content").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("ai_trace_contexts_business_kind_hash_unique").on(table.businessId, table.kind, table.hash),
+    index("ai_trace_contexts_expires_idx").on(table.expiresAt),
+  ],
+);
+
+/** One AI turn: a website chat reply, a call's voice session, or one delegated request on a call. */
+export const aiTraces = pgTable(
+  "ai_traces",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    kind: varchar("kind", { length: 32 }).$type<"chat_reply" | "voice_session" | "voice_delegation">().notNull(),
+    channel: varchar("channel", { length: 32 }).notNull(),
+    callId: uuid("call_id").references(() => calls.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id").references(() => conversations.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id").references(() => messages.id, { onDelete: "set null" }),
+    delegationId: varchar("delegation_id", { length: 120 }),
+    model: varchar("model", { length: 120 }),
+    snapshotVersion: varchar("snapshot_version", { length: 120 }),
+    snapshotContextId: uuid("snapshot_context_id").references(() => aiTraceContexts.id, { onDelete: "set null" }),
+    instructionsContextId: uuid("instructions_context_id").references(() => aiTraceContexts.id, { onDelete: "set null" }),
+    input: text("input"),
+    steps: jsonb("steps").$type<unknown[]>().default([]).notNull(),
+    output: text("output"),
+    directAnswer: boolean("direct_answer").default(false).notNull(),
+    failed: boolean("failed").default(false).notNull(),
+    usage: jsonb("usage").$type<Record<string, number | undefined>>(),
+    durationMs: integer("duration_ms"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index("ai_traces_business_created_idx").on(table.businessId, table.createdAt),
+    index("ai_traces_call_idx").on(table.callId),
+    index("ai_traces_conversation_idx").on(table.conversationId),
+    index("ai_traces_expires_idx").on(table.expiresAt),
+  ],
 );
 
 export const appointments = pgTable(
@@ -1672,6 +1730,8 @@ export const allTenantTables = [
   messages,
   calls,
   transcripts,
+  aiTraceContexts,
+  aiTraces,
   appointments,
   appointmentChangeVerifications,
   knowledgeDocuments,
@@ -1739,6 +1799,8 @@ export const schema = {
   messages,
   calls,
   transcripts,
+  aiTraceContexts,
+  aiTraces,
   appointments,
   appointmentChangeVerifications,
   knowledgeDocuments,

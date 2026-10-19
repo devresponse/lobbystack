@@ -6705,6 +6705,277 @@
         }
       }
     },
+    "/ai-traces": {
+      "get": {
+        "operationId": "listAiTraces",
+        "summary": "List AI debug traces",
+        "description": "What the receptionist's models were given and did on each turn of a call or website chat, newest first, to find out why it said something. Traces are kept only while the business's ai_traces_enabled setting is on, and expire after the ai_traces retention period. Each trace leaves out its input, steps, instructions and snapshot: GET /ai-traces/{trace_id} has them.",
+        "tags": [
+          "Calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "calls:read",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "call_id",
+            "in": "query",
+            "description": "Only the traces of this call.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "query",
+            "description": "Only the traces of this website chat.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/AiTrace"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ai-traces/{trace_id}": {
+      "get": {
+        "operationId": "getAiTrace",
+        "summary": "Get an AI debug trace",
+        "description": "One turn with everything it was built from: the input, each model step with its tool calls and results, the instructions and the business snapshot.",
+        "tags": [
+          "Calls"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "calls:read",
+        "parameters": [
+          {
+            "name": "trace_id",
+            "in": "path",
+            "required": true,
+            "description": "The AI trace id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/AiTraceDetail"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the calls:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/contacts": {
       "get": {
         "operationId": "listContacts",
@@ -11856,6 +12127,10 @@
             ],
             "description": "Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."
           },
+          "ai_traces_enabled": {
+            "type": "boolean",
+            "description": "Whether each AI turn on calls and website chats keeps a debug trace, read with GET /ai-traces. Off by default."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -11879,6 +12154,7 @@
           "booking_mode",
           "hours",
           "hours_source",
+          "ai_traces_enabled",
           "created_at",
           "updated_at"
         ],
@@ -11959,6 +12235,10 @@
               ],
               "description": "One opening window on one day. A day with a break, such as lunch, has two windows. Days that are not listed are closed."
             }
+          },
+          "ai_traces_enabled": {
+            "description": "true keeps a debug trace of each AI turn from now on, for the ai_traces retention period. Traces hold what callers and visitors said. false stops new ones; existing ones expire as usual.",
+            "type": "boolean"
           }
         },
         "additionalProperties": false
@@ -12631,6 +12911,420 @@
           "ended_at",
           "created_at",
           "transcript"
+        ],
+        "additionalProperties": false
+      },
+      "AiTrace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat_reply",
+              "voice_session",
+              "voice_delegation"
+            ],
+            "description": "chat_reply: one website chat reply. voice_session: the instructions a call's voice model started with. voice_delegation: one request the voice model handed to the backend."
+          },
+          "channel": {
+            "type": "string",
+            "description": "web_chat, web_voice or voice."
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The reply message, for a website chat reply."
+          },
+          "delegation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot_version": {
+            "description": "The business snapshot the turn used.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tools the model called, in order."
+          },
+          "output": {
+            "description": "The reply sent, or what the voice model was handed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direct_answer": {
+            "type": "boolean",
+            "description": "The answer came straight from a tool result, with no model step to phrase it."
+          },
+          "failed": {
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the privacy sweep deletes it."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "channel",
+          "call_id",
+          "conversation_id",
+          "message_id",
+          "delegation_id",
+          "model",
+          "snapshot_version",
+          "tools",
+          "output",
+          "direct_answer",
+          "failed",
+          "duration_ms",
+          "input_tokens",
+          "output_tokens",
+          "created_at",
+          "expires_at"
+        ],
+        "additionalProperties": false
+      },
+      "AiTraceDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "chat_reply",
+              "voice_session",
+              "voice_delegation"
+            ],
+            "description": "chat_reply: one website chat reply. voice_session: the instructions a call's voice model started with. voice_delegation: one request the voice model handed to the backend."
+          },
+          "channel": {
+            "type": "string",
+            "description": "web_chat, web_voice or voice."
+          },
+          "call_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The reply message, for a website chat reply."
+          },
+          "delegation_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot_version": {
+            "description": "The business snapshot the turn used.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "tools": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tools the model called, in order."
+          },
+          "output": {
+            "description": "The reply sent, or what the voice model was handed.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "direct_answer": {
+            "type": "boolean",
+            "description": "The answer came straight from a tool result, with no model step to phrase it."
+          },
+          "failed": {
+            "type": "boolean"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "input_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "output_tokens": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the privacy sweep deletes it."
+          },
+          "input": {
+            "description": "What the model was given for this turn: the chat history or the delegation prompt.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tool_calls": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "type": "string"
+                      },
+                      "input": {}
+                    },
+                    "required": [
+                      "tool",
+                      "input"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "tool_results": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "tool": {
+                        "type": "string"
+                      },
+                      "output": {}
+                    },
+                    "required": [
+                      "tool",
+                      "output"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "text",
+                "tool_calls",
+                "tool_results"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each model step: its text, the tools it called with their input, and what they returned. Long values are cut."
+          },
+          "instructions": {
+            "description": "The instructions the model had.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "description": "The business snapshot the turn used, as JSON.",
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "channel",
+          "call_id",
+          "conversation_id",
+          "message_id",
+          "delegation_id",
+          "model",
+          "snapshot_version",
+          "tools",
+          "output",
+          "direct_answer",
+          "failed",
+          "duration_ms",
+          "input_tokens",
+          "output_tokens",
+          "created_at",
+          "expires_at",
+          "input",
+          "steps",
+          "instructions",
+          "snapshot"
         ],
         "additionalProperties": false
       },

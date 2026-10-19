@@ -187,6 +187,8 @@ export const contentRetentionCategories = [
   "transcripts",
   "recordings",
   "follow_ups",
+  // Debug traces of AI turns (ADR 0009), kept only for businesses that turn them on.
+  "ai_traces",
 ] as const;
 export type ContentRetentionCategory = (typeof contentRetentionCategories)[number];
 
@@ -198,11 +200,11 @@ export type ContentRetentionOverrides = Partial<
 export const FREE_CONTENT_RETENTION_MAX_DAYS = 30;
 
 export const contentRetentionDaysByPlan = {
-  self_host: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365 },
-  free_cloud: { messages: 30, transcripts: 30, recordings: 30, follow_ups: 30 },
-  starter: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365 },
-  pro: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365 },
-  enterprise: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365 },
+  self_host: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
+  free_cloud: { messages: 30, transcripts: 30, recordings: 30, follow_ups: 30, ai_traces: 30 },
+  starter: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
+  pro: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
+  enterprise: { messages: 365, transcripts: 90, recordings: 90, follow_ups: 365, ai_traces: 30 },
 } as const satisfies Record<
   BillingPlanSlug,
   Record<ContentRetentionCategory, number>

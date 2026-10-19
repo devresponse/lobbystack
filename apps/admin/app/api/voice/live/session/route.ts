@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { APIError } from "openai";
 
 import { buildBrowserSessionConfig } from "@lobbystack/agent-core/live/session";
-import { finishLiveCall, getWebVoiceBillingAllowance, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
+import { finishLiveCall, getWebVoiceBillingAllowance, recordAiTrace, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { asApiResponse, readJson } from "@/lib/api-helpers";
@@ -132,8 +132,9 @@ async function startBrowserCall(request: Request) {
     timing.mark("greeting");
 
     const client = getLiveClient();
+    const sessionConfig = buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true });
     const live = await client.live
-      .create({ session: buildBrowserSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true }), transport: { type: "webrtc", sdp: body.sdp } })
+      .create({ session: sessionConfig, transport: { type: "webrtc", sdp: body.sdp } })
       .catch((error: unknown) => {
         throw error instanceof APIError && typeof error.status === "number" ? new LiveSessionRefusedError(error) : error;
       });
@@ -156,6 +157,8 @@ async function startBrowserCall(request: Request) {
       callId = call.callId;
       addToCallContext({ callId });
       timing.mark("record");
+      // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
+      void recordAiTrace(domain, { businessId: access.businessId, kind: "voice_session", channel: "web_voice", callId, ...(call.conversationId ? { conversationId: call.conversationId } : {}), model: sessionConfig.model, snapshot, instructions: sessionConfig.instructions ?? undefined }).catch((error: unknown) => logEvent("warn", "live.ai_trace_unsaved", { errorType: error instanceof Error ? error.name : typeof error }));
       await Promise.all([
         access.prospectDemoId ? recordProspectDemoCallStarted(domain, { businessId: access.businessId, prospectDemoId: access.prospectDemoId, callId, channel: "web_voice", provider: "openai_live" }) : undefined,
         attachWorkerToLiveSession({

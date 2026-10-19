@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@lobbystack/domain", () => ({
   finishLiveCall: mocks.finishLiveCall,
+  recordAiTrace: vi.fn(async () => null),
   getWebVoiceBillingAllowance: mocks.allowance,
   recordProspectDemoCallError: mocks.recordProspectDemoCallError,
   recordProspectDemoCallStarted: mocks.recordProspectDemoCallStarted,

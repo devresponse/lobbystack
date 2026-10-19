@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 
-import { calls, enqueueOutbox, inboxItems, messages, operatorNotificationDeliveries, storageObjects, transcripts, withBusinessTransaction } from "@lobbystack/db";
+import { aiTraceContexts, aiTraces, calls, enqueueOutbox, inboxItems, messages, operatorNotificationDeliveries, storageObjects, transcripts, withBusinessTransaction } from "@lobbystack/db";
 
 import { EXPIRED_FOLLOW_UP_BODY, EXPIRED_FOLLOW_UP_TITLE } from "./followUpRetention";
 import type { DomainContext } from "./context";
@@ -9,7 +9,7 @@ import { isContentRetentionEnabled } from "./contentRetentionPolicy";
 export async function runPrivacyRetentionSweep(
   context: DomainContext,
   input: { businessId: string; now?: Date },
-): Promise<{ scrubbedFollowUps: number; scrubbedMessages: number; scrubbedOperatorDeliveries: number; deletedTranscripts: number; queuedRecordings: number }> {
+): Promise<{ scrubbedFollowUps: number; scrubbedMessages: number; scrubbedOperatorDeliveries: number; deletedTranscripts: number; deletedAiTraces: number; queuedRecordings: number }> {
   const now = input.now ?? new Date();
   const contentRetentionEnabled = isContentRetentionEnabled();
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
@@ -24,6 +24,13 @@ export async function runPrivacyRetentionSweep(
     const deletedTranscripts = !contentRetentionEnabled ? [] : await tx.delete(transcripts)
       .where(and(eq(transcripts.businessId, input.businessId), isNotNull(transcripts.expiresAt), lt(transcripts.expiresAt, now)))
       .returning({ callId: transcripts.callId });
+    // AI debug traces go first, then the snapshots and instructions only they pointed to.
+    const deletedAiTraces = !contentRetentionEnabled ? [] : await tx.delete(aiTraces)
+      .where(and(eq(aiTraces.businessId, input.businessId), lt(aiTraces.expiresAt, now)))
+      .returning({ id: aiTraces.id });
+    if (contentRetentionEnabled) {
+      await tx.delete(aiTraceContexts).where(and(eq(aiTraceContexts.businessId, input.businessId), lt(aiTraceContexts.expiresAt, now)));
+    }
     const scrubbedOperatorDeliveries = await tx.update(operatorNotificationDeliveries)
       .set({ subject: "[content expired]", body: "[content expired]", destination: "[expired]", sender: null, contentExpiresAt: new Date("9999-12-31T00:00:00.000Z"), updatedAt: now })
       .where(and(eq(operatorNotificationDeliveries.businessId, input.businessId), lt(operatorNotificationDeliveries.contentExpiresAt, now)))
@@ -68,6 +75,7 @@ export async function runPrivacyRetentionSweep(
       scrubbedMessages: scrubbedMessages.length,
       scrubbedOperatorDeliveries: scrubbedOperatorDeliveries.length,
       deletedTranscripts: deletedTranscripts.length,
+      deletedAiTraces: deletedAiTraces.length,
       queuedRecordings: expiredRecordings.length,
     };
   });

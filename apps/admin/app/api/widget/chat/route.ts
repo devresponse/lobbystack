@@ -3,9 +3,9 @@ import { randomUUID } from "node:crypto";
 import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { NextResponse } from "next/server";
 
-import { createReceptionistAgent } from "@lobbystack/agent-core/agent";
+import { createReceptionistAgent, receptionistInstructions, toAiTraceSteps } from "@lobbystack/agent-core/agent";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
-import { announceLateWidgetReply, appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, reserveWidgetChatUsageInTransaction, returnQuietTeamChat } from "@lobbystack/domain";
+import { announceLateWidgetReply, appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, recordAiTrace, reserveWidgetChatUsageInTransaction, returnQuietTeamChat, type AiTraceInput } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
 import { normalizeInterfaceLocale, widgetChatRequestSchema, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
 
@@ -31,6 +31,13 @@ const REPLY_LANGUAGES: Record<InterfaceLocale, string> = {
 
 function logGenerationFailure(cause: unknown): void {
   console.error("Widget chat generation failed", {
+    errorType: cause instanceof Error ? cause.name : typeof cause,
+  });
+}
+
+// A trace that can't be saved never fails the chat; like logGenerationFailure, only the error's type is logged.
+function logTraceFailure(cause: unknown): void {
+  console.error("Widget chat AI trace not saved", {
     errorType: cause instanceof Error ? cause.name : typeof cause,
   });
 }
@@ -99,6 +106,8 @@ export async function POST(request: Request) {
     const generationStartedAt = performance.now();
     // Set when the receptionist asks the team to join: the chat then waits for them.
     let teamRequested = false;
+    // What this reply's AI debug trace keeps (ADR 0009), filled in as the reply is built.
+    let trace: Omit<AiTraceInput, "kind" | "channel" | "businessId"> | undefined;
     const replyMetadata = () => teamRequested ? { automationState: "human_handoff", waitingForTeam: true } : { automationState: "ai_active" };
     const stream = createUIMessageStream({
       onError: () => SAFE_CHAT_ERROR,
@@ -116,25 +125,33 @@ export async function POST(request: Request) {
           // The widget's language, which the visitor reads the chat in. A widget
           // from before it sent one shows its settings' language, or the business's.
           const locale: InterfaceLocale = body.locale ?? normalizeInterfaceLocale(session.config.localeOverride) ?? session.defaultLocale;
-          const agent = createReceptionistAgent({
+          const agentInput = {
             model: model!,
             context: {
               domain: context,
               snapshot: activeSnapshot,
-              channel: "web_chat",
+              channel: "web_chat" as const,
               conversationId,
               // With live chat on, a visitor who asks for a person can get someone from the team here.
               ...(session.config.liveChat?.enabled ? { liveChat: { locale, onTeamRequested: () => { teamRequested = true; } } } : {}),
             },
             extraInstructions: `Reply in ${REPLY_LANGUAGES[locale]} unless the visitor clearly asks to switch languages.`,
-          });
+          };
+          const agent = createReceptionistAgent(agentInput);
+          const chatHistory = history.slice(-20);
+          trace = {
+            conversationId,
+            snapshot: activeSnapshot,
+            instructions: receptionistInstructions(agentInput),
+            input: chatHistory.map((row) => `${row.direction === "inbound" ? "Visitor" : "Receptionist"}: ${row.body}`).join("\n"),
+          };
           writer.write({ type: "text-start", id: assistantMessageId });
           const text: string[] = [];
           // The history already ends with the visitor's new message. The reply
           // isn't tied to the visitor's connection: one who moves to another
           // page mid-reply finds it saved in the chat there.
           const generation = await agent.stream({
-            messages: history.slice(-20).map((row) => ({ role: row.direction === "inbound" ? "user" as const : "assistant" as const, content: row.body })),
+            messages: chatHistory.map((row) => ({ role: row.direction === "inbound" ? "user" as const : "assistant" as const, content: row.body })),
           });
           for await (const part of generation.textStream) {
             text.push(part);
@@ -159,6 +176,8 @@ export async function POST(request: Request) {
           writer.write({ type: "text-end", id: assistantMessageId });
           writer.write({ type: "message-metadata", messageMetadata: replyMetadata() });
           writer.write({ type: "finish", finishReason });
+          const steps = await generation.steps;
+          void recordAiTrace(context, { ...trace, businessId: session.businessId, kind: "chat_reply", channel: "web_chat", messageId: persistedAssistantMessageId, model: usage.model, steps: toAiTraceSteps(steps), output: reply, usage: { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }, durationMs: usage.latencyMs }).catch(logTraceFailure);
         } catch (cause) {
           logGenerationFailure(cause);
           // The event deliberately contains only a stable category: provider
@@ -175,6 +194,7 @@ export async function POST(request: Request) {
             isError: true,
             error: "generation_failed",
           }).catch((recordingError: unknown) => logGenerationFailure(recordingError));
+          if (trace) void recordAiTrace(context, { ...trace, businessId: session.businessId, kind: "chat_reply", channel: "web_chat", failed: true, durationMs: performance.now() - generationStartedAt }).catch(logTraceFailure);
           writer.write({ type: "error", errorText: SAFE_CHAT_ERROR });
           writer.write({ type: "message-metadata", messageMetadata: replyMetadata() });
           writer.write({ type: "finish", finishReason: "error" });

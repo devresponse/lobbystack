@@ -18,6 +18,7 @@ const policySchema = z.strictObject({
     transcripts: days.optional(),
     recordings: days.optional(),
     follow_ups: days.optional(),
+    ai_traces: days.optional(),
   }),
   messageMedia: z.literal("scrub_with_body").optional(),
 });

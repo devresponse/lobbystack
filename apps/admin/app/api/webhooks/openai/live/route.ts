@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import type { LiveTransportIncomingWebhookEvent } from "openai/resources/webhooks";
 
 import { buildPhoneSessionConfig } from "@lobbystack/agent-core/live/session";
-import { finishLiveCall, getCachedBusinessSnapshot, startLivePhoneCall } from "@lobbystack/domain";
+import { finishLiveCall, getCachedBusinessSnapshot, recordAiTrace, startLivePhoneCall } from "@lobbystack/domain";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { getAppDatabase } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
@@ -179,8 +179,11 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
     return new NextResponse(null, { status: 200 });
   }
   try {
-    await client.live.sessions.accept(input.sessionId, { session: buildPhoneSessionConfig(snapshot) });
+    const sessionConfig = buildPhoneSessionConfig(snapshot);
+    await client.live.sessions.accept(input.sessionId, { session: sessionConfig });
     input.timing.mark("accept");
+    // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
+    void recordAiTrace(domain, { businessId: input.businessId, kind: "voice_session", channel: "voice", callId: call.callId, ...(call.conversationId ? { conversationId: call.conversationId } : {}), model: sessionConfig.model, snapshot, instructions: sessionConfig.instructions ?? undefined }).catch((error: unknown) => logEvent("warn", "live.ai_trace_unsaved", { errorType: error instanceof Error ? error.name : typeof error }));
   } catch (error) {
     await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed" });
     throw error;

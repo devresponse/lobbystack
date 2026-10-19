@@ -92,6 +92,7 @@ export const apiBusinessSchema = z.object({
   booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   hours: z.array(apiHoursWindowSchema),
   hours_source: z.enum(businessHoursSources).describe("Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."),
+  ai_traces_enabled: z.boolean().describe("Whether each AI turn on calls and website chats keeps a debug trace, read with GET /ai-traces. Off by default."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -103,6 +104,7 @@ export const apiBusinessUpdateSchema = z.strictObject({
   website_url: z.url().max(2_000).nullable().optional(),
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them."),
+  ai_traces_enabled: z.boolean().optional().describe("true keeps a debug trace of each AI turn from now on, for the ai_traces retention period. Traces hold what callers and visitors said. false stops new ones; existing ones expire as usual."),
 });
 
 const appointmentChangePolicyFields = {
@@ -609,6 +611,41 @@ export const apiCallDetailSchema = apiCallSchema.extend({
   transcript: z.array(apiTranscriptEntrySchema),
 });
 
+// AI debug traces (ADR 0009): what the receptionist's models were given and did.
+export const apiAiTraceSchema = z.object({
+  id,
+  kind: z.enum(["chat_reply", "voice_session", "voice_delegation"]).describe("chat_reply: one website chat reply. voice_session: the instructions a call's voice model started with. voice_delegation: one request the voice model handed to the backend."),
+  channel: z.string().describe("web_chat, web_voice or voice."),
+  call_id: id.nullable(),
+  conversation_id: id.nullable(),
+  message_id: id.nullable().describe("The reply message, for a website chat reply."),
+  delegation_id: z.string().nullable(),
+  model: z.string().nullable(),
+  snapshot_version: z.string().nullable().describe("The business snapshot the turn used."),
+  tools: z.array(z.string()).describe("Tools the model called, in order."),
+  output: z.string().nullable().describe("The reply sent, or what the voice model was handed."),
+  direct_answer: z.boolean().describe("The answer came straight from a tool result, with no model step to phrase it."),
+  failed: z.boolean(),
+  duration_ms: z.number().int().nullable(),
+  input_tokens: z.number().int().nullable(),
+  output_tokens: z.number().int().nullable(),
+  created_at: timestamp,
+  expires_at: timestamp.describe("When the privacy sweep deletes it."),
+});
+
+export const apiAiTraceStepSchema = z.object({
+  text: z.string().nullable(),
+  tool_calls: z.array(z.object({ tool: z.string(), input: z.unknown() })),
+  tool_results: z.array(z.object({ tool: z.string(), output: z.unknown() })),
+});
+
+export const apiAiTraceDetailSchema = apiAiTraceSchema.extend({
+  input: z.string().nullable().describe("What the model was given for this turn: the chat history or the delegation prompt."),
+  steps: z.array(apiAiTraceStepSchema).describe("Each model step: its text, the tools it called with their input, and what they returned. Long values are cut."),
+  instructions: z.string().nullable().describe("The instructions the model had."),
+  snapshot: z.string().nullable().describe("The business snapshot the turn used, as JSON."),
+});
+
 const smsConsentStatuses = ["subscribed", "declined", "opted_out"] as const;
 
 export const apiContactSchema = z.object({
@@ -922,6 +959,9 @@ export type ApiServiceUpdate = z.infer<typeof apiServiceUpdateSchema>;
 export type ApiStaff = z.infer<typeof apiStaffSchema>;
 export type ApiCall = z.infer<typeof apiCallSchema>;
 export type ApiCallDetail = z.infer<typeof apiCallDetailSchema>;
+export type ApiAiTrace = z.infer<typeof apiAiTraceSchema>;
+export type ApiAiTraceStep = z.infer<typeof apiAiTraceStepSchema>;
+export type ApiAiTraceDetail = z.infer<typeof apiAiTraceDetailSchema>;
 export type ApiContact = z.infer<typeof apiContactSchema>;
 export type ApiContactCreate = z.infer<typeof apiContactCreateSchema>;
 export type ApiContactUpdate = z.infer<typeof apiContactUpdateSchema>;

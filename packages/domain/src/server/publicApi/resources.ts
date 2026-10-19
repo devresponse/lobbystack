@@ -137,6 +137,7 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
       return day && row.closeMinutes > row.openMinutes ? [{ day, open: minutesToClock(row.openMinutes), close: minutesToClock(row.closeMinutes) }] : [];
     }),
     hours_source: business.hoursSource === "generated" || business.hoursSource === "operator" ? business.hoursSource : "none",
+    ai_traces_enabled: business.aiTracesEnabled,
     created_at: iso(business.createdAt),
     updated_at: iso(business.updatedAt),
   };

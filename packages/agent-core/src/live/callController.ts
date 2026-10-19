@@ -6,7 +6,9 @@ import { SidebandWS } from "openai/resources/live/sideband/ws";
 
 import { logEvent, reportError, setSpanAttributes, withSpan, type Span } from "@lobbystack/telemetry/node";
 
-import type { ReceptionistAgent } from "../agent";
+import type { AiTraceStep } from "@lobbystack/domain";
+
+import { toAiTraceSteps, type ReceptionistAgent } from "../agent";
 import type { KeypadPasscodeCheck, KeypadPasscodeOutcome } from "../tools";
 import { CALL_ENDING, DIRECT_ANSWER_TOOLS, directToolAnswer, fitToAppend, type DirectAnswerStep } from "./directAnswer";
 import { greetingCommand } from "./greeting";
@@ -39,6 +41,25 @@ export type DelegationTiming = {
   /** The agent ended the call, so the result went to GPT-Live as silent background. */
   endedCall: boolean;
   /** Tokens across the agent's model steps, when the generation finished. */
+  usage?: LanguageModelUsage;
+};
+
+/**
+ * What one delegated request was given and did, for its AI debug trace (ADR
+ * 0009). It holds the conversation, so it only goes to onDelegationTrace,
+ * never to logs or telemetry.
+ */
+export type DelegationTrace = {
+  delegationId: string;
+  prompt: string;
+  steps: AiTraceStep[];
+  /** What GPT-Live was handed: the answer, or a note that the result was background only. */
+  sent: string;
+  directAnswer: boolean;
+  failed: boolean;
+  superseded: boolean;
+  endedCall: boolean;
+  agentMs: number;
   usage?: LanguageModelUsage;
 };
 
@@ -172,6 +193,8 @@ export type LiveCallControllerOptions = {
   /** Each step of a transfer started with transferAfterAnnouncement(). */
   onTransfer?: (state: LiveCallTransferState) => void;
   onDelegation?: (timing: DelegationTiming) => void;
+  /** Each delegated request's prompt, steps and result, for its AI debug trace. */
+  onDelegationTrace?: (trace: DelegationTrace) => void;
   onClose?: (summary: LiveCallSummary) => void;
   /**
    * The session sent its first event other than an error, so it's alive. A
@@ -1283,6 +1306,8 @@ export class LiveCallController {
       let failed = false;
       let ended = false;
       let usage: LanguageModelUsage | undefined;
+      // Empty when the request fails before the prompt is built.
+      let prompt = "";
       const stepMs: number[] = [];
       const steps: StepLike[] = [];
       let toolMs = 0;
@@ -1306,8 +1331,9 @@ export class LiveCallController {
         const { agent } = await this.ready;
         // endWhenCallerDone() reads this when the agent ends the call.
         this.answering = { offsetMs: event.offset_ms, revision };
+        prompt = this.delegationPrompt();
         const result = await Promise.race([timedOut, agent.generate({
-          prompt: this.delegationPrompt(),
+          prompt,
           abortSignal: delegationAbort.signal,
           onStepEnd: (step) => {
             const now = performance.now();
@@ -1348,17 +1374,21 @@ export class LiveCallController {
       // the outdated one. GPT-Live keeps it as background facts, and the newer
       // request's backend sees it.
       const superseded = revision < this.latestRevision;
+      let sent: string;
       if (superseded) {
         if (!failed && !ended) this.unheardResults.push(answer);
-        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: fitToAppend(`The caller made a newer request before this one finished, so this result is background only: ${answer}`), event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+        sent = fitToAppend(`The caller made a newer request before this one finished, so this result is background only: ${answer}`);
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
       } else if (ended && (this.hangupCancelled || this.pendingHangup?.callerSpoke) && !this.ending) {
         // The caller spoke again, so GPT-Live replies to them: a goodbye now could cut them off.
-        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: CALLER_SPOKE_AGAIN, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
+        sent = CALLER_SPOKE_AGAIN;
+        this.send({ type: "session.thinking.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "update", delegationId });
       } else {
         this.unheardResults = [];
         this.lastAnswerSentAt = performance.now();
         // GPT-Live says its goodbye when it hears the call is ending, and the hangup waits for it.
-        this.send({ type: "session.commentary.append", delegation_id: delegationId, content: ended && failed ? CALL_ENDING : answer, event_id: `answer_${delegationId}` }, { kind: "answer", delegationId });
+        sent = ended && failed ? CALL_ENDING : answer;
+        this.send({ type: "session.commentary.append", delegation_id: delegationId, content: sent, event_id: `answer_${delegationId}` }, { kind: "answer", delegationId });
       }
 
       const timing: DelegationTiming = {
@@ -1395,6 +1425,7 @@ export class LiveCallController {
         "gen_ai.usage.output_tokens": usage?.outputTokens,
       });
       this.options.onDelegation?.(timing);
+      this.options.onDelegationTrace?.({ delegationId, prompt, steps: toAiTraceSteps(steps as unknown as Parameters<typeof toAiTraceSteps>[0]), sent, directAnswer, failed, superseded, endedCall: ended, agentMs: timing.agentMs, ...(usage ? { usage } : {}) });
     } finally {
       this.runningDelegations -= 1;
       this.resetSilenceTimer();

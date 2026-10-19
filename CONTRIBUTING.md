@@ -23,10 +23,14 @@ Use `pnpm` from the repository root. Start PostgreSQL and Redis before running t
 
 ```bash
 pnpm install
+pnpm env:generate
 docker compose up -d postgres redis
 pnpm db:migrate
+pnpm --filter @lobbystack/telemetry build
 pnpm dev
 ```
+
+`pnpm env:generate` writes `.env` with new random secrets. The admin loads `@lobbystack/telemetry` from its build output, so build it again after you change `packages/telemetry`. Open the dashboard at `http://localhost:13000`.
 
 Mock providers support routine development without live Twilio, AI, calendar, or email credentials.
 

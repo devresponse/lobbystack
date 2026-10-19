@@ -20,6 +20,15 @@ Utilisez `.env.example` comme source de référence. Stockez les valeurs de prod
 | `ENCRYPTION_KEY` | Chiffre les identifiants d'application stockés. |
 | `OTP_HASH_SECRET` | Hache les codes de vérification à usage unique et les codes PIN des appelants. Définissez la même valeur sur l'admin et le worker. La changer rend inutilisables tous les codes PIN enregistrés. |
 
+## Protection des inscriptions
+
+Cloudflare Turnstile vérifie qu'une personne, et non un robot, remplit le formulaire d'inscription. Définissez les deux clés sur l'admin.
+
+| Variable | Rôle |
+| --- | --- |
+| `TURNSTILE_SECRET_KEY` | La clé secrète de votre widget Turnstile. L'admin s'en sert pour vérifier chaque inscription par courriel. Sans elle, toute inscription par courriel échoue, sauf si `APP_BASE_URL` commence par `http://localhost:` ou `http://127.0.0.1:`. Le formulaire affiche alors "Impossible de créer votre compte. Veuillez réessayer.", et la réponse de l'admin indique `Turnstile is not configured.` |
+| `NEXT_PUBLIC_TURNSTILE_SITE_KEY` | La clé de site du widget. Le navigateur la lit pour afficher la vérification sur le formulaire d'inscription. Next.js l'écrit dans le code du navigateur à la compilation de l'admin, qui en a donc besoin comme argument de compilation Docker. Recompilez l'admin après l'avoir changée. Compose la passe à la compilation à partir de `.env`. Si la compilation n'a pas de clé de site alors que la clé secrète est définie, le formulaire n'affiche aucune vérification et chaque inscription échoue avec le même message. |
+
 ## Image de marque
 
 Le nom, le logo, la couleur et les liens externes viennent d'un dossier de marque sous `brands/` dans le dépôt, choisi par le domaine de `APP_BASE_URL` : `alloplace.com` et ses sous-domaines reçoivent ceux d'AlloPlace. Pour ajouter votre marque, ajoutez un dossier, réclamez votre domaine dans `brands/index.json`, puis lancez `pnpm brands:build`. Le fichier `docs/branding.md` du dépôt liste les champs.

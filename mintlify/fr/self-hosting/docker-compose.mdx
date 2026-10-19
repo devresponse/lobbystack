@@ -83,6 +83,8 @@ Pour inspecter les courriels en local, démarrez Mailpit :
 docker compose --env-file .env --profile development up -d mailpit
 ```
 
+Pour que le worker envoie ses courriels à Mailpit, définissez `SMTP_HOST=mailpit` et `SMTP_PORT=1025` dans `.env`. Lancez ensuite `docker compose --env-file .env up -d` pour recréer le worker. Mailpit affiche les messages à `http://localhost:8025`.
+
 ## Exporter les données OpenTelemetry
 
 L'export OpenTelemetry est désactivé quand `OTEL_EXPORTER_OTLP_ENDPOINT` est vide. Pour envoyer des traces, des métriques et des journaux OpenTelemetry à PostHog, ajoutez ces valeurs à `.env` :
@@ -105,8 +107,8 @@ L'analytique produit directe et le signalement des erreurs utilisent leur propre
 ## Vérifier le déploiement
 
 ```bash
-curl -fsS http://127.0.0.1:3000/api/health/ready
-curl -fsS http://127.0.0.1:3002/health/ready
+curl -fsS http://127.0.0.1:13000/api/health/ready
+curl -fsS http://127.0.0.1:13002/health/ready
 docker compose logs --since=10m admin worker
 ```
 
@@ -116,6 +118,7 @@ Les ports de service par défaut écoutent sur localhost. Faites passer le trafi
 
 - remplacez tous les identifiants de développement et limitez les permissions de `.env`
 - utilisez une valeur HTTPS de production pour `APP_BASE_URL`
+- définissez `TURNSTILE_SECRET_KEY` et `NEXT_PUBLIC_TURNSTILE_SITE_KEY` avec les clés d'un widget Cloudflare Turnstile. Sans elles, l'inscription par courriel échoue. Recompilez l'admin après avoir changé la clé de site. Les [variables de protection des inscriptions](/fr/self-hosting/environment-variables#protection-des-inscriptions) décrivent les deux
 - définissez `OPENAI_WEBHOOK_SECRET` et `TWILIO_SIP_TRUNK_SID` pour répondre aux appels téléphoniques. Le worker ne provisionne pas de numéro de téléphone sans `TWILIO_SIP_TRUNK_SID`. Les [variables des appels vocaux](/fr/self-hosting/environment-variables#appels-vocaux) décrivent le rôle de chacune
 - définissez `WEB_CALL_ALLOWED_ORIGINS` avec les sites exacts qui hébergent votre appel de démo public, si vous en avez un
 - configurez des sauvegardes de PostgreSQL et du stockage de fichiers hors de l'hôte

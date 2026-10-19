@@ -83,6 +83,8 @@ For local email inspection, start Mailpit:
 docker compose --env-file .env --profile development up -d mailpit
 ```
 
+To have the worker send its email to Mailpit, set `SMTP_HOST=mailpit` and `SMTP_PORT=1025` in `.env`. Then run `docker compose --env-file .env up -d` to recreate the worker. Mailpit shows the messages at `http://localhost:8025`.
+
 ## Export OpenTelemetry data
 
 OpenTelemetry export is disabled when `OTEL_EXPORTER_OTLP_ENDPOINT` is empty. To send traces, metrics, and OpenTelemetry logs to PostHog, add these values to `.env`:
@@ -105,8 +107,8 @@ Direct product analytics and error reporting use their own PostHog configuration
 ## Verify the deployment
 
 ```bash
-curl -fsS http://127.0.0.1:3000/api/health/ready
-curl -fsS http://127.0.0.1:3002/health/ready
+curl -fsS http://127.0.0.1:13000/api/health/ready
+curl -fsS http://127.0.0.1:13002/health/ready
 docker compose logs --since=10m admin worker
 ```
 
@@ -116,6 +118,7 @@ The default service ports bind to localhost. Put public traffic through Caddy or
 
 - replace all development credentials and limit `.env` permissions
 - use a production HTTPS value for `APP_BASE_URL`
+- set `TURNSTILE_SECRET_KEY` and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` to the keys of a Cloudflare Turnstile widget. Without them, email sign-up fails. Rebuild the admin after you change the site key. The [sign-up protection variables](/self-hosting/environment-variables#sign-up-protection) explain both
 - set `OPENAI_WEBHOOK_SECRET` and `TWILIO_SIP_TRUNK_SID` to answer phone calls. The worker won't provision a phone number without `TWILIO_SIP_TRUNK_SID`. The [voice calls variables](/self-hosting/environment-variables#voice-calls) list what each one does
 - set `WEB_CALL_ALLOWED_ORIGINS` to the exact sites that host your public demo call, if you run one
 - configure off-host PostgreSQL and file-storage backups

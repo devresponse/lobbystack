@@ -302,27 +302,65 @@ describe("LiveCallController greeting recording", () => {
   const recorded = (recording: LiveCallSetup["greetingRecording"] = { audio: pcm(3_000) }): Promise<LiveCallSetup> => Promise.resolve({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: recording });
   const sentIds = (socket: FakeSocket) => greetings(socket).map((event) => event.event_id);
   const steps = (events: GreetingEvent[]) => events.map((event) => [event.step, event.trigger].filter(Boolean).join(" "));
+  // The caller's browser has connected its audio: OpenAI reflects it to the sideband, silence included.
+  const callerAudio = (socket: FakeSocket) => socket.emit("session.input_audio.append", { audio: pcm(20) });
 
   // OpenAI's guide recommends a recording for predictable greeting playback.
-  it("plays the recording as soon as the session starts and sends no greeting command", async () => {
+  it("plays the recording once the caller's audio reaches the session and sends no greeting command", async () => {
     fakeTimers();
     const greetingEvents: GreetingEvent[] = [];
     const { socket, turns, closed } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
     socket.socket.emit("open");
     startSession(socket);
-    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1_000);
+    // On staging calls the caller's audio reached OpenAI about a second after
+    // session.started; a recording played before then reached no one.
+    expect(socket.sent).toEqual([]);
+    callerAudio(socket);
     expect(socket.sent).toEqual([{ type: "session.output_audio.fixture.play", audio: pcm(3_000), event_id: "greeting_recording" }]);
-    await vi.advanceTimersByTimeAsync(500);
+    await vi.advanceTimersByTimeAsync(200);
     socket.emit("session.output_audio.fixture.playing", { client_event_id: "greeting_recording" });
     socket.emit("session.output_audio.fixture.played", { client_event_id: "greeting_recording" });
+    callerAudio(socket);
     await vi.advanceTimersByTimeAsync(30_000);
     expect(sentIds(socket)).toEqual(["greeting_recording"]);
     expect(steps(greetingEvents)).toEqual(["sent recording", "acknowledged recording", "spoken recording"]);
+    expect(greetingEvents[0]).toMatchObject({ inputAudioMs: 100 });
     // GPT-Live writes no transcript for a recording, so its words come from the greeting.
     socket.emit("session.input_transcript.delta", { delta: "Are you open today?", start_ms: 31_000, end_ms: 32_000 });
     expect(turns).toEqual([{ sequence: 1, speaker: "assistant", text: greeting }]);
     socket.emit("session.closed", { reason: "remote_hangup", usage: { seconds: 33 } });
-    expect(closed[0]?.latency).toMatchObject({ firstSpeechMs: 500, greetedFirst: true });
+    expect(closed[0]?.latency).toMatchObject({ firstSpeechMs: 1_200, greetedFirst: true });
+  });
+
+  it("plays the recording at once when the caller's audio arrived before the business loaded", async () => {
+    fakeTimers();
+    let resolveSetup!: (value: LiveCallSetup) => void;
+    const { socket } = setup({ phone: false, setup: new Promise((resolve) => { resolveSetup = resolve; }) });
+    socket.socket.emit("open");
+    startSession(socket);
+    callerAudio(socket);
+    await vi.advanceTimersByTimeAsync(300);
+    resolveSetup({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: { audio: pcm(3_000) } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(socket.sent).toEqual([expect.objectContaining({ type: "session.output_audio.fixture.play", event_id: "greeting_recording" })]);
+  });
+
+  it("plays the recording 3 seconds after the session starts when no caller audio arrives", async () => {
+    fakeTimers();
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(socket.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
+    // The log line shows no caller audio had arrived.
+    expect(greetingEvents[0]).toMatchObject({ step: "sent", trigger: "recording", inputAudioMs: 0 });
+    // Audio arriving afterwards doesn't play it twice.
+    callerAudio(socket);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
   });
 
   it("sends the greeting command at once when OpenAI rejects the recording", async () => {
@@ -332,6 +370,7 @@ describe("LiveCallController greeting recording", () => {
     const { socket } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
     socket.socket.emit("open");
     startSession(socket);
+    callerAudio(socket);
     await vi.advanceTimersByTimeAsync(0);
     socket.emit("error", Object.assign(new Error("Unknown event type"), { error: { type: "invalid_request_error", client_event_id: "greeting_recording" } }));
     await vi.advanceTimersByTimeAsync(0);
@@ -345,6 +384,7 @@ describe("LiveCallController greeting recording", () => {
     const { socket } = setup({ phone: false, setup: recorded() });
     socket.socket.emit("open");
     startSession(socket);
+    callerAudio(socket);
     await vi.advanceTimersByTimeAsync(2_999);
     expect(sentIds(socket)).toEqual(["greeting_recording"]);
     await vi.advanceTimersByTimeAsync(1);
@@ -358,11 +398,14 @@ describe("LiveCallController greeting recording", () => {
 
   // The admin saw a recording the worker couldn't load in time. The starting
   // history has the greeting as already said, so GPT-Live won't say it unasked.
-  it("sends the greeting command at once when there's no recording to play", async () => {
+  it("sends the greeting command once the caller's audio arrives when there's no recording to play", async () => {
     fakeTimers();
     const { socket } = setup({ phone: false, setup: recorded({}) });
     socket.socket.emit("open");
     startSession(socket);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(sentIds(socket)).toEqual([]);
+    callerAudio(socket);
     await vi.advanceTimersByTimeAsync(0);
     expect(sentIds(socket)).toEqual(["greeting_1"]);
   });

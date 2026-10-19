@@ -43,7 +43,7 @@ export function buildWebVoiceRateLimits(input: {
   }
   if (input.visitorId) {
     limits.push(limit(dashboard ? "dashboard-visitor-hour" : "visitor-hour", `${input.businessId}:${input.visitorId}`, dashboard ? 30 : 10, hour, "rate_limit_visitor_hour"));
-    limits.push(limit(dashboard ? "dashboard-visitor-day" : "visitor-day", `${input.businessId}:${input.visitorId}`, dashboard ? 100 : 30, day, "rate_limit_visitor_day"));
+    limits.push(limit(dashboard ? "dashboard-visitor-day" : "visitor-day", `${input.businessId}:${input.visitorId}`, dashboard ? 100 : 50, day, "rate_limit_visitor_day"));
   }
   limits.push(limit(dashboard ? "dashboard-origin-10m" : "origin-10m", `${input.businessId}:${input.origin}`, 30 * (dashboard ? 4 : 1), 10 * minute, "rate_limit_origin"));
   limits.push(limit(dashboard ? "dashboard-business-hour" : "business-hour", input.businessId, dashboard ? 120 : 60, hour, "rate_limit_business_hour"));

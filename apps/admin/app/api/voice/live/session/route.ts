@@ -175,7 +175,9 @@ async function startBrowserCall(request: Request) {
       timing.mark("attach");
       // Where the wait before the call connects went, for the logs.
       logEvent("info", "live.browser_start", { widgetId: access.widgetId, ...timing.stages(), ...(recordedGreeting ? { greetingRecording: recordedGreeting.play } : {}) });
-      return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
+      // GPT-Live writes no transcript for the greeting's recording, so the
+      // browser's captions get its words here.
+      return NextResponse.json({ sessionId, endToken: liveSessionEndToken(sessionId), sdp: live.transport.sdp, ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}), ...(recordedGreeting?.play ? { greeting: recordedGreeting.text } : {}) }, { status: 201, headers: { ...cors, "server-timing": timing.header() } });
     } catch (error) {
       // The session exists at OpenAI; end it so nothing talks or bills without us.
       // The worker may be the reason the start failed, so OpenAI's own hangup

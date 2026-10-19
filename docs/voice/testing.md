@@ -32,7 +32,7 @@ These options change what runs:
 - **`--concurrency <n>`**: how many sessions run at once. The default is 4. With 22 sessions at once, many runs lost their transcripts.
 - **`--snapshot <file>`**: uses a real business's snapshot instead of the demo business.
 - **`--browser`**: plays a browser call, like one from the website widget, instead of a phone call. GPT-Live gets the browser call's instructions, the agent runs on the `web_voice` channel, and the caller's audio skips the phone-line filter. Use it after a change to what browser calls hear, such as how they handle a caller who asks for a person.
-- **`--recorded-greeting`**: with `--browser`, opens each call with a recording of the greeting, as `LIVE_RECORDED_GREETING=true` does (see [Open browser calls with a recording](runtime.md#open-browser-calls-with-a-recording)). The script renders the recording once. A run fails when the receptionist speaks again after the recording, before the caller does.
+- **`--recorded-greeting`**: with `--browser`, opens each call with a recording of the greeting, as `LIVE_RECORDED_GREETING=true` does (see [Open browser calls with a recording](runtime.md#open-browser-calls-with-a-recording)). The script renders the recording once. A run fails when the receptionist speaks again after the recording, before the caller does. OpenAI's reference sends the copy of the caller's audio only to sidebands, and the eval talks to GPT-Live over a WebSocket session instead, so its recording plays 3 seconds after the session starts rather than when the caller's audio arrives.
 
 Each run uses under a minute of GPT-Live audio, plus a delegation model call for each hand-over. The default 18 runs take about 5 minutes.
 

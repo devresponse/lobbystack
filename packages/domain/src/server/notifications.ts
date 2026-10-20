@@ -134,7 +134,7 @@ export function buildAppointmentNotification(input: {
 }): { subject: string; body: string } {
   const message = appointmentMessage(input);
   // Every customer text ends with the opt-out line, whether it comes from the
-  // shared sender or a self-hosted business's own number. Emails don't.
+  // shared sender or the business's own number. Emails don't.
   return input.channel === "sms" ? { ...message, body: `${message.body} ${SMS_OPT_OUT_FOOTER[input.locale]}` } : message;
 }
 

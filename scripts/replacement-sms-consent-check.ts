@@ -99,8 +99,16 @@ async function main(): Promise<void> {
 
     await migrator.db.insert(billingAccounts).values({ businessId, billingKey: `sender-${businessId}`, plan: "free_cloud" });
     delete process.env.TWILIO_ALERT_SMS_FROM;
+    // A hosted business with its own number texts from it, with or without a platform sender.
+    assert((await getNotificationPreferences({ db: app.db }, { businessId, userId, phoneVerified: true })).canUseSms, "Hosted alerts did not use the dedicated business number.");
+    await setNotificationPreferences({ db: app.db }, { userId, businessId, emailEnabled: false, smsEnabled: true, smsConsent: true, eventPreferences: preferences });
+    const [ownNumberDeliveryId] = await queueOperatorAlert({ db: worker.db }, { businessId, eventKind: "voiceMessage", eventKey: `own-number:${randomUUID()}`, subject: "Certification", body: "Own number" });
+    const ownNumberDelivery = (await migrator.db.select().from(operatorNotificationDeliveries).where(eq(operatorNotificationDeliveries.id, ownNumberDeliveryId!)))[0];
+    assert(ownNumberDelivery?.sender === "+14165550779", "Hosted alert dispatch did not use the dedicated business number.");
+    // Without one, it needs the platform sender.
+    await migrator.db.update(phoneNumbers).set({ status: "reclaimed", smsEnabled: false }).where(eq(phoneNumbers.businessId, businessId));
     const hostedPreferences = await getNotificationPreferences({ db: app.db }, { businessId, userId, phoneVerified: true });
-    assert(!hostedPreferences.canUseSms && hostedPreferences.smsUnavailableReason === "sender_missing", "Hosted alerts incorrectly used the dedicated business number without a platform sender.");
+    assert(!hostedPreferences.canUseSms && hostedPreferences.smsUnavailableReason === "sender_missing", "Hosted alerts had a sender without a business number or a platform sender.");
     process.env.TWILIO_ALERT_SMS_FROM = "+14165550780";
     assert((await getNotificationPreferences({ db: app.db }, { businessId, userId, phoneVerified: true })).canUseSms, "Configured hosted alert sender was not exposed.");
     await setNotificationPreferences({ db: app.db }, { userId, businessId, emailEnabled: false, smsEnabled: true, smsConsent: true, eventPreferences: preferences });

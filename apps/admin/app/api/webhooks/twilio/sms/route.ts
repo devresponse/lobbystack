@@ -30,7 +30,8 @@ export async function POST(request: Request) {
     const resolved = await getAppDatabase().db.execute<{ business_id: string }>(sql`select app.resolve_business_by_phone(${body.To}) as business_id`);
     const businessId = resolved.rows[0]?.business_id;
     if (!businessId) {
-      // The shared sender texts for every cloud business and belongs to none.
+      // The shared sender texts for every cloud business without a number of
+      // its own and belongs to none.
       // It answers STOP, START and HELP, and the reply goes out from it.
       if (!isSharedSmsSender(body.To)) return twiml();
       const { reply } = await receiveSharedSenderSms(createWorkerDomainContext(), { from: body.From, body: body.Body, ...(body.OptOutType ? { optOutType: body.OptOutType } : {}) });

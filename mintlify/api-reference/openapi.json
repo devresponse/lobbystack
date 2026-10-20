@@ -13947,7 +13947,7 @@
             "format": "uuid"
           },
           "sms_consent": {
-            "description": "True only if the customer agreed to receive confirmation and reminder texts. Used only outside cloud mode: in cloud mode, texts come from the deployment's shared number, and only the receptionist can collect that consent, on a call.",
+            "description": "True only if the customer agreed to receive confirmation and reminder texts. Used only when the business texts from its own number: a cloud-mode business without one texts from the deployment's shared number, and only the receptionist can collect that consent, on a call.",
             "type": "boolean"
           }
         },

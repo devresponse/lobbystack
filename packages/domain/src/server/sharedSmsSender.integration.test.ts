@@ -1,4 +1,5 @@
 import { randomInt, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { and, eq, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
@@ -57,15 +58,17 @@ async function asApp(tx: DatabaseTransaction) { await tx.execute(sql`reset sessi
 async function asOwner(tx: DatabaseTransaction) { await tx.execute(sql`reset role`); await tx.execute(sql`reset session authorization`); }
 
 /**
- * A business open all day with its own local number, an owner who agreed to
- * SMS alerts, and callers who verify changes with a texted code. Cloud runs on
- * a Starter plan, self-hosted on the self-hosted plan.
+ * A business open all day with its own local number, unless ownNumber is
+ * false, an owner who agreed to SMS alerts, and callers who verify changes
+ * with a texted code. Cloud runs on a Starter plan, self-hosted on the
+ * self-hosted plan.
  */
-async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean }) {
+async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean; ownNumber?: boolean }) {
   await asOwner(tx);
   const businessId = randomUUID();
   const userId = randomUUID();
-  const ownNumber = `+1416555${String(randomInt(0, 10_000)).padStart(4, "0")}`;
+  const localNumber = () => `+1416555${String(randomInt(0, 10_000)).padStart(4, "0")}`;
+  const ownNumber = options.ownNumber === false ? undefined : localNumber();
   const ownerPhone = phone();
   await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Javor", timezone: "UTC", businessType: "test", telemetryEnabled: false, deploymentMode: options.selfHosted ? "self_hosted_standard" : "cloud" });
   await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: options.selfHosted ? "self_hosted_standard" : "starter", subscriptionState: "active" });
@@ -78,7 +81,7 @@ async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean }) {
   const [member] = await tx.insert(staff).values({ businessId, name: "Sam", timezone: "UTC" }).returning();
   const [service] = await tx.insert(services).values({ businessId, name: "Cut", slug: "cut", durationMinutes: 30 }).returning();
   await tx.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 0, closeMinutes: 1439 })));
-  await tx.insert(phoneNumbers).values({ businessId, e164: ownNumber, providerPhoneId: `PN-${randomUUID()}` });
+  if (ownNumber) await tx.insert(phoneNumbers).values({ businessId, e164: ownNumber, providerPhoneId: `PN-${randomUUID()}` });
   const db = tx as unknown as Database;
   let slots = 0;
   const nextStart = () => DateTime.utc().plus({ days: 3 + slots++ }).set({ hour: 12, minute: 0, second: 0, millisecond: 0 }).toISO()!;
@@ -123,6 +126,14 @@ async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean }) {
     const [row] = await tx.select({ snapshot: businessContextSnapshots.snapshot }).from(businessContextSnapshots).where(eq(businessContextSnapshots.businessId, businessId));
     return (row?.snapshot as { contactChannels?: { smsNumber?: string } } | undefined)?.contactChannels?.smsNumber;
   };
+  /** Replaces the business's number, as a number replacement does: the old one stays active until its release. */
+  const replaceNumber = async () => {
+    await asOwner(tx);
+    const newNumber = localNumber();
+    await tx.update(phoneNumbers).set({ reclaimScheduledAt: sql`now() + interval '30 days'`, reclaimReason: "replacement" }).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.e164, ownNumber!)));
+    await tx.insert(phoneNumbers).values({ businessId, e164: newNumber, providerPhoneId: `PN-${randomUUID()}` });
+    return newNumber;
+  };
   // A booking through the public API, as a Zapier zap or the MCP sends it, saying the customer agreed to texts.
   const bookByApi = async (contactPhone: string) => {
     await asWorker(tx);
@@ -135,7 +146,7 @@ async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean }) {
     // Every event in the test's one transaction has the same timestamp, so compare them as a set.
     return { status: row?.status ?? null, source: row?.source ?? null, events: events.map((event) => `${event.action} ${event.source}`).sort() };
   };
-  return { businessId, ownNumber, book, bookByApi, addContact, deliver, operatorCancel, operatorAlertSender, changeCode, snapshotSmsNumber, consent };
+  return { businessId, ownNumber, book, bookByApi, addContact, deliver, operatorCancel, operatorAlertSender, changeCode, snapshotSmsNumber, replaceNumber, consent };
 }
 
 /** A text from this phone to the shared sender, applied as the webhook applies it. */
@@ -147,10 +158,27 @@ async function textShared(tx: DatabaseTransaction, from: string, body: string) {
 }
 
 describe.skipIf(!client)("the number a business texts from", () => {
-  it("is the shared sender on cloud, for every customer text, change codes, operator alerts and the agent's snapshot", async () => {
+  it("is a cloud business's own number, for every customer text, change codes, operator alerts and the agent's snapshot", async () => {
     vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
     await rollbackTest(async (tx) => {
       const business = await seed(tx, { selfHosted: false });
+      const customer = phone();
+      const appointmentId = await business.book(customer, "agreed");
+      for (const kind of ["booking_confirmation", "appointment_reminder"]) {
+        expect(await business.deliver(appointmentId, kind)).toMatchObject({ kind: "ready", delivery: { kind, to: customer, from: business.ownNumber } });
+      }
+      expect(await business.changeCode(await business.book(customer), customer)).toMatchObject({ issued: { ok: true }, from: business.ownNumber });
+      await business.operatorCancel(appointmentId);
+      expect(await business.deliver(appointmentId, CANCELLATION_CONFIRMATION)).toMatchObject({ kind: "ready", delivery: { kind: CANCELLATION_CONFIRMATION, from: business.ownNumber } });
+      expect(await business.operatorAlertSender()).toBe(business.ownNumber);
+      expect(await business.snapshotSmsNumber()).toBe(business.ownNumber);
+    });
+  });
+
+  it("is the shared sender on cloud without a number of its own, for the same texts", async () => {
+    vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
+    await rollbackTest(async (tx) => {
+      const business = await seed(tx, { selfHosted: false, ownNumber: false });
       const customer = phone();
       const appointmentId = await business.book(customer, "agreed");
       for (const kind of ["booking_confirmation", "appointment_reminder"]) {
@@ -181,26 +209,44 @@ describe.skipIf(!client)("the number a business texts from", () => {
     });
   });
 
+  it("is the new number once the business replaces its number, while the old one waits for its release", async () => {
+    vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
+    await rollbackTest(async (tx) => {
+      for (const selfHosted of [false, true]) {
+        const business = await seed(tx, { selfHosted });
+        const newNumber = await business.replaceNumber();
+        expect(await business.operatorAlertSender()).toBe(newNumber);
+        expect(await business.snapshotSmsNumber()).toBe(newNumber);
+      }
+    });
+  });
+
   it("can't reach a number outside North America from the toll-free shared sender", async () => {
     vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
     await rollbackTest(async (tx) => {
       const abroad = `+38169${String(randomInt(0, 10_000_000)).padStart(7, "0")}`;
-      const cloud = await seed(tx, { selfHosted: false });
+      const cloud = await seed(tx, { selfHosted: false, ownNumber: false });
       const cloudAppointment = await cloud.book(abroad, "agreed");
       expect(await cloud.deliver(cloudAppointment, "booking_confirmation")).toMatchObject({ kind: "skipped" });
       expect((await cloud.changeCode(await cloud.book(abroad), abroad)).issued).toMatchObject({ ok: false, status: "unavailable" });
-      // A self-hosted business's local number can.
-      const selfHosted = await seed(tx, { selfHosted: true });
-      expect(await selfHosted.deliver(await selfHosted.book(abroad, "agreed"), "booking_confirmation")).toMatchObject({ kind: "ready", delivery: { to: abroad, from: selfHosted.ownNumber } });
+      // A business's own local number can, on cloud or self-hosted.
+      for (const selfHosted of [false, true]) {
+        const business = await seed(tx, { selfHosted });
+        expect(await business.deliver(await business.book(abroad, "agreed"), "booking_confirmation")).toMatchObject({ kind: "ready", delivery: { to: abroad, from: business.ownNumber } });
+      }
     });
   });
 
-  it("sends nothing on cloud when no shared sender is configured", async () => {
+  it("sends nothing on cloud without a number of its own when no shared sender is configured", async () => {
     vi.stubEnv("TWILIO_ALERT_SMS_FROM", "");
     await rollbackTest(async (tx) => {
-      const cloud = await seed(tx, { selfHosted: false });
+      const cloud = await seed(tx, { selfHosted: false, ownNumber: false });
       expect(await cloud.deliver(await cloud.book(phone(), "agreed"), "booking_confirmation")).toMatchObject({ kind: "skipped" });
       expect(await cloud.snapshotSmsNumber()).toBeUndefined();
+      // A cloud business with its own number doesn't need the shared sender.
+      const owned = await seed(tx, { selfHosted: false });
+      expect(await owned.deliver(await owned.book(phone(), "agreed"), "booking_confirmation")).toMatchObject({ kind: "ready", delivery: { from: owned.ownNumber } });
+      expect(await owned.snapshotSmsNumber()).toBe(owned.ownNumber);
     });
   });
 });
@@ -211,9 +257,9 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
     brand.appBaseUrl = "https://demo.alloplace.com";
     await rollbackTest(async (tx) => {
       const customer = phone();
-      const subscribedAt = await seed(tx, { selfHosted: false });
-      const declinedAt = await seed(tx, { selfHosted: false });
-      const neverAskedAt = await seed(tx, { selfHosted: false });
+      const subscribedAt = await seed(tx, { selfHosted: false, ownNumber: false });
+      const declinedAt = await seed(tx, { selfHosted: false, ownNumber: false });
+      const neverAskedAt = await seed(tx, { selfHosted: false, ownNumber: false });
       const appointmentId = await subscribedAt.book(customer, "agreed");
       await declinedAt.book(customer, "declined");
       await neverAskedAt.book(customer);
@@ -236,7 +282,7 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
   it("takes a repeated STOP or START once, so START still restores the first status", async () => {
     await rollbackTest(async (tx) => {
       const customer = phone();
-      const business = await seed(tx, { selfHosted: false });
+      const business = await seed(tx, { selfHosted: false, ownNumber: false });
       await business.book(customer, "agreed");
       expect((await textShared(tx, customer, "STOP")).contactsChanged).toBe(1);
       expect((await textShared(tx, customer, "UNSUBSCRIBE")).contactsChanged).toBe(0);
@@ -262,7 +308,7 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
     brand.appBaseUrl = "https://demo.alloplace.com";
     await rollbackTest(async (tx) => {
       const customer = phone();
-      const business = await seed(tx, { selfHosted: false });
+      const business = await seed(tx, { selfHosted: false, ownNumber: false });
       await business.book(customer, "agreed");
       expect(await textShared(tx, customer, "help")).toEqual({ reply: sharedSenderHelpReply("AlloPlace"), contactsChanged: 0 });
       expect(await textShared(tx, customer, "Can I move my appointment?")).toEqual({ reply: null, contactsChanged: 0 });
@@ -290,16 +336,50 @@ describe.skipIf(!client)("STOP and START to the shared sender", () => {
 
 describe.skipIf(!client)("text consent a business sends through the API or MCP", () => {
   // The shared number's toll-free verification covers consent the receptionist collects on a call only.
-  it("doesn't count on cloud, where texts come from the shared number, and counts when self-hosted", async () => {
+  it("doesn't count where texts come from the shared number, and counts where they come from the business's own number", async () => {
     vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
     await rollbackTest(async (tx) => {
-      const cloud = await seed(tx, { selfHosted: false });
+      const shared = await seed(tx, { selfHosted: false, ownNumber: false });
       const customer = phone();
-      await cloud.bookByApi(customer);
-      expect(await cloud.consent(customer)).toEqual({ status: null, source: null, events: [] });
+      await shared.bookByApi(customer);
+      expect(await shared.consent(customer)).toEqual({ status: null, source: null, events: [] });
+      for (const selfHosted of [false, true]) {
+        const business = await seed(tx, { selfHosted });
+        await business.bookByApi(customer);
+        expect(await business.consent(customer)).toMatchObject({ status: "subscribed", events: ["reminder_consent_granted appointment_booking"] });
+      }
+    });
+  });
+});
+
+describe.skipIf(!client)("the SMS number snapshot refresh (migration 0107)", () => {
+  const migration = readFileSync(new URL("../../../db/migrations/0107_sms_number_snapshot_refresh.sql", import.meta.url), "utf8");
+
+  it("queues a refresh for each business whose newest snapshot names another number than its own", async () => {
+    vi.stubEnv("TWILIO_ALERT_SMS_FROM", SHARED);
+    await rollbackTest(async (tx) => {
+      const snapshotNaming = async (businessId: string, smsNumber: string | undefined) => {
+        await asOwner(tx);
+        await tx.insert(businessContextSnapshots).values({ businessId, version: randomUUID(), snapshot: { contactChannels: smsNumber ? { smsNumber } : {} } });
+      };
+      // Texted from the shared sender before this change.
+      const cloud = await seed(tx, { selfHosted: false });
+      await snapshotNaming(cloud.businessId, SHARED);
+      // Already names its own number.
       const selfHosted = await seed(tx, { selfHosted: true });
-      await selfHosted.bookByApi(customer);
-      expect(await selfHosted.consent(customer)).toMatchObject({ status: "subscribed", events: ["reminder_consent_granted appointment_booking"] });
+      await snapshotNaming(selfHosted.businessId, selfHosted.ownNumber);
+      // Has no number, so nothing changes for it.
+      const numberless = await seed(tx, { selfHosted: false, ownNumber: false });
+      await snapshotNaming(numberless.businessId, SHARED);
+
+      await asOwner(tx);
+      await tx.execute(sql.raw(migration));
+      // A second run queues nothing new.
+      await tx.execute(sql.raw(migration));
+      const queued = async (businessId: string) => (await tx.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.dedupeKey, `business:${businessId}:snapshot:sms-number-backfill`)))).map((row) => row.payload);
+      expect(await queued(cloud.businessId)).toEqual([{ businessId: cloud.businessId, reason: "sms_number_backfill" }]);
+      expect(await queued(selfHosted.businessId)).toEqual([]);
+      expect(await queued(numberless.businessId)).toEqual([]);
     });
   });
 });

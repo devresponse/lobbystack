@@ -39,16 +39,12 @@ const NO_KNOWLEDGE = "The business's knowledge base has nothing on this question
 // passages are the business's own documents and website, strongest match first.
 type KnowledgeMatchLike = { title?: unknown; text?: unknown; focusStart?: unknown; focusEnd?: unknown };
 
-/**
- * The chunk that ranked, without the neighbors search added around it. On a
- * 2026-10-19 demo call the whole passage was cut from its start, so the
- * council names in the matched chunk never reached GPT-Live, which invented some.
- */
-function focusedText(match: KnowledgeMatchLike): string | undefined {
+/** Where the chunk that ranked sits in a passage that also holds its neighbors, when search said. */
+function focusRange(match: KnowledgeMatchLike): { start: number; end: number } | undefined {
   const { text: body, focusStart: start, focusEnd: end } = match;
   if (typeof body !== "string" || typeof start !== "number" || typeof end !== "number") return undefined;
   if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end > body.length || end <= start) return undefined;
-  return start === 0 && end === body.length ? undefined : text(body.slice(start, end));
+  return start === 0 && end === body.length ? undefined : { start, end };
 }
 
 function knowledgeAnswer(output: Record<string, unknown>): string | undefined {
@@ -62,16 +58,30 @@ function knowledgeAnswer(output: Record<string, unknown>): string | undefined {
     if (!body) continue;
     const title = text(match.title);
     const prefix = `- ${title ? `${title}: ` : ""}`;
-    // The whole passage when it fits, otherwise the chunk that ranked without its neighbors.
-    const focused = focusedText(match)?.replace(/\s+/g, " ");
-    const line = [`${prefix}${body}`, ...(focused ? [`${prefix}${focused}`] : [])].find((candidate) => countKnowledgeTokens(`${candidate}\n`) <= budget);
-    if (line) {
-      facts.push(line);
-      budget -= countKnowledgeTokens(`${line}\n`);
-    } else if (!facts.length) {
-      // The best passage alone is too long: keep the start of the chunk that ranked rather than nothing.
-      facts.push(trimToTokens(`${prefix}${focused ?? body}`, budget));
+    const range = focusRange(match);
+    const raw = String(match.text);
+    // From the chunk that ranked to the end of the passage: the neighbor before it
+    // matters least. On 2026-10-19 demo calls the ranked chunk was a document's
+    // header and the names were in the chunk after it, so keeping the ranked chunk
+    // alone handed GPT-Live no names, and it invented some.
+    const fromFocus = range ? text(raw.slice(range.start))?.replace(/\s+/g, " ") : undefined;
+    const focusedOnly = range ? text(raw.slice(range.start, range.end))?.replace(/\s+/g, " ") : undefined;
+    const fits = (value: string) => countKnowledgeTokens(`${prefix}${value}\n`) <= budget;
+    const whole = [body, fromFocus].find((value): value is string => value !== undefined && fits(value));
+    if (whole !== undefined) {
+      facts.push(`${prefix}${whole}`);
+      budget -= countKnowledgeTokens(`${prefix}${whole}\n`);
+      continue;
+    }
+    if (!facts.length) {
+      // The best passage doesn't fit: keep as much of it as fits, from the chunk that ranked on.
+      facts.push(trimToTokens(`${prefix}${fromFocus ?? body}`, budget));
       break;
+    }
+    // A later passage that doesn't fit whole: its ranked chunk alone, when that fits.
+    if (focusedOnly !== undefined && fits(focusedOnly)) {
+      facts.push(`${prefix}${focusedOnly}`);
+      budget -= countKnowledgeTokens(`${prefix}${focusedOnly}\n`);
     }
   }
   return facts.length ? [header, ...facts].join("\n") : NO_KNOWLEDGE;
@@ -83,9 +93,16 @@ export function fitToAppend(value: string): string {
 }
 
 function trimToTokens(value: string, tokens: number): string {
-  let end = value.length;
-  while (end > 0 && countKnowledgeTokens(value.slice(0, end)) > tokens) end = Math.floor(end * 0.85);
-  const cut = value.slice(0, end);
+  // The longest start that fits, with a token left for the ellipsis. Cutting
+  // 15% at a time, as before, could drop a fifth of what would have fit.
+  let low = 0;
+  let high = value.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (countKnowledgeTokens(value.slice(0, middle)) <= tokens - 1) low = middle;
+    else high = middle - 1;
+  }
+  const cut = value.slice(0, low);
   const sentence = cut.lastIndexOf(". ");
   return `${sentence > cut.length / 2 ? cut.slice(0, sentence + 1) : cut}…`;
 }

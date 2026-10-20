@@ -99,19 +99,56 @@ describe("directToolAnswer", () => {
 
   // On a 2026-10-19 demo call the matched chunk came after a long neighbor, the
   // passage was cut from its start, and GPT-Live invented the names it lacked.
-  it("keeps the chunk that ranked when its neighbors don't fit", () => {
+  it("keeps the chunk that ranked, and what follows it, when the passage doesn't fit", () => {
     const before = "How to reach the council in writing through the strata manager. ".repeat(30);
     const ranked = "Current council: President Richard Anderson, Vice-President Gabrielle Gendron, Treasurer Peter Derry.";
     const after = "Privacy officer requests go in writing. ".repeat(30);
-    const textWithNeighbors = `${before}\n\n${ranked}\n\n${after}`;
     const focusStart = before.length + 2;
     const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [
-      { title: "Contacts", text: textWithNeighbors, focusStart, focusEnd: focusStart + ranked.length },
-      { title: "Parking", text: "Visitor parking is in stalls 1 to 3.", focusStart: 0, focusEnd: 36 },
+      { title: "Contacts", text: `${before}
+
+${ranked}
+
+${after}`, focusStart, focusEnd: focusStart + ranked.length },
     ] } }))!;
-    expect(answer).toContain(`- Contacts: ${ranked}`);
+    expect(answer).toContain(`- Contacts: ${ranked} Privacy officer requests go in writing.`);
     expect(answer).not.toContain("How to reach the council");
-    expect(answer).toContain("- Parking: Visitor parking is in stalls 1 to 3.");
+    expect(countKnowledgeTokens(answer)).toBeLessThanOrEqual(480);
+  });
+
+  // 2026-10-19 demo calls: the ranked chunk was the contacts document's header,
+  // and the names were in the chunk after it. Keeping the header alone handed
+  // GPT-Live no names, and it said invented ones.
+  it("keeps the names that follow a ranked document header", () => {
+    const headerChunk = `# Contacts for LMS 869
+
+Building: Pacific Place Landmark One. Tags: contacts, resident-manager. ${"Source: council minutes. ".repeat(12)}`;
+    const names = ["## Who's who", "", "- Resident Manager: K'shin", "- Strata manager: Casper Chan"].join("\n");
+    const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [
+      { title: "Contacts", text: `${headerChunk}
+
+${names}
+
+${"Other contacts follow. ".repeat(60)}`, focusStart: 0, focusEnd: headerChunk.length },
+    ] } }))!;
+    expect(answer).toContain("Resident Manager: K'shin");
+    expect(answer).toContain("Casper Chan");
+  });
+
+  it("adds a later passage's ranked chunk when the whole passage doesn't fit", () => {
+    const ranked = "Visitor parking is in stalls 1 to 3.";
+    const filler = "Unrelated parking history. ".repeat(80);
+    const answer = directToolAnswer(step({ toolName: "searchKnowledge", output: { outcome: "found", matches: [
+      { title: "Payment", text: "Cards accepted." },
+      { title: "Parking", text: `${filler}
+
+${ranked}
+
+${filler}`, focusStart: filler.length + 2, focusEnd: filler.length + 2 + ranked.length },
+    ] } }))!;
+    expect(answer).toContain("- Payment: Cards accepted.");
+    expect(answer).toContain(`- Parking: ${ranked}`);
+    expect(answer).not.toContain("Unrelated parking history");
   });
 
   it("trims a long ranked chunk from its own start, not from its neighbor's", () => {

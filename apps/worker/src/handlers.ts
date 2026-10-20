@@ -245,9 +245,9 @@ function twilioStatusCallback(input: { messageId?: string; notificationId?: stri
 
 /**
  * The Twilio account that sends from this number. The shared sender, which
- * texts operator alerts and cloud customers' appointment texts and codes,
- * goes through the alert account that owns it; any other number through the
- * default account.
+ * texts operator alerts, appointment texts and codes for cloud businesses
+ * without a number of their own, goes through the alert account that owns
+ * it; any other number through the default account.
  */
 function smsProviderFor(dependencies: WorkerDependencies, from: string | null | undefined): Pick<TwilioProvider, "sendSms"> | undefined {
   return from && dependencies.twilioAlerts?.from === from ? dependencies.twilioAlerts : dependencies.twilio;

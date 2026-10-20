@@ -1,6 +1,6 @@
 import { and, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 
-import { contacts, conversationSessions, conversations, enqueueOutbox, messages, phoneNumbers, providerEvents, smsConsentEvents, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { contacts, conversationSessions, conversations, enqueueOutbox, messages, providerEvents, smsConsentEvents, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { brandLinks, contactEmailFor, failedSmsProviderStatus, isTerminalTwilioMessageStatus, mapTwilioStatusToMessageStatus, normalizeTwilioMessageStatus, shouldApplyMessageStatusTransition, type SmsFailure, type SmsHoldReason } from "@lobbystack/shared";
 
 import { deploymentAppName } from "./branding";
@@ -9,6 +9,7 @@ import type { DomainContext } from "./context";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 import { queueOperatorAlertInTransaction } from "./notifications";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
+import { businessSmsNumber } from "./smsSender";
 import { recordUnitEconomicsEventInTransaction } from "./unitEconomics";
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 
@@ -70,17 +71,17 @@ export function sharedSenderStartReply(appName: string): string {
 
 /**
  * Handles a text a phone sent to the shared sender, the number that texts for
- * every cloud business (see resolveSmsSender). No business owns it and it
- * holds no conversations, so it answers only STOP, START and HELP; anything
- * else gets no reply and isn't stored.
+ * every cloud business without a number of its own (see resolveSmsSender).
+ * No business owns it and it holds no conversations, so it answers only STOP,
+ * START and HELP; anything else gets no reply and isn't stored.
  *
  * Twilio blocks every text from the shared number to a phone that sent STOP,
  * so STOP opts the phone out at every business that has it as a contact,
  * keeping the status each contact had. START undoes exactly that: a contact
  * the STOP opted out gets its earlier status back (subscribed, declined, or
  * never asked). A contact that opted out some other way, such as STOP to a
- * self-hosted business's own number, stays opted out. Returns the reply to
- * send back for HELP and START.
+ * business's own number, stays opted out. Returns the reply to send back
+ * for HELP and START.
  */
 export async function receiveSharedSenderSms(
   context: DomainContext,
@@ -232,9 +233,10 @@ export async function loadSmsReachInTransaction(tx: DatabaseTransaction, input: 
     const [contactText] = replyAllowed ? await tx.select({ id: messages.id }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, input.conversationId), eq(messages.direction, "inbound"), eq(messages.channel, "sms"))).limit(1) : [];
     if (!contactText) return { ok: false, reason: contact.consent === "opted_out" ? "opted_out" : "no_consent" };
   }
-  const [sender] = await tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.smsEnabled, true))).limit(1);
+  // A conversation is the business's own, so it never goes through the shared sender.
+  const sender = await businessSmsNumber(tx, input.businessId);
   if (!sender) return { ok: false, reason: "no_sender" };
-  return { ok: true, to: contact.phone, from: sender.e164 };
+  return { ok: true, to: contact.phone, from: sender };
 }
 
 const smsHoldMessages: Record<SmsHoldReason, string> = {

@@ -1742,7 +1742,8 @@ export async function createAppointmentForApi(context: DomainContext, caller: Ap
     if (input.staff_id) await assertBookableStaff(tx, caller.businessId, input.staff_id, input.service_id);
     // The shared number's toll-free verification covers consent the receptionist
     // collects on a call, not consent a business asserts through the API or MCP.
-    // A business that texts from the shared number (cloud) can't opt customers in here.
+    // A business that texts from the shared number (cloud, without a number of
+    // its own) can't opt customers in here.
     const consentCounts = !isSharedSmsSender(await resolveSmsSender(tx, caller.businessId));
     return { timezone, contactPhone: contactPhone!, consentCounts };
   });

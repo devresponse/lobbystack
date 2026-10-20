@@ -24,8 +24,7 @@ async function main(): Promise<void> {
   const foreignBusinessId = randomUUID();
   const callerPhone = "+14165550991";
   try {
-    // Self-hosted, so the change code goes out from the number registered below.
-    // A cloud business texts from TWILIO_ALERT_SMS_FROM, which CI doesn't set.
+    // The change code goes out from the business's own number, registered below.
     await db.db.insert(businesses).values([{ id: businessId, slug: `appointment-audit-${businessId}`, name: "Appointment audit certification", timezone: "UTC", businessType: "test", deploymentMode: "self_hosted_standard" }, { id: foreignBusinessId, slug: `appointment-audit-${foreignBusinessId}`, name: "Foreign appointment audit", timezone: "UTC", businessType: "test" }]);
     const [contact] = await db.db.insert(contacts).values({ businessId, phone: callerPhone, smsConsentStatus: "subscribed" }).returning({ id: contacts.id });
     const [service] = await db.db.insert(services).values({ businessId, name: "Audit service", slug: "audit-service", durationMinutes: 30 }).returning({ id: services.id });

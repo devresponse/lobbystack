@@ -180,7 +180,7 @@ export type BusinessContextSnapshot = {
   knowledgeSnippets?: Array<KnowledgeSnippet>;
   contactChannels: {
     phoneNumber?: string;
-    /** The number customer texts come from: the shared sender on cloud, the business's own number when self-hosted. */
+    /** The number customer texts come from: the business's own number, or the shared sender for a cloud business without one. */
     smsNumber?: string;
     email?: string;
   };

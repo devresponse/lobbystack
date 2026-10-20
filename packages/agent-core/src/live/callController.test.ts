@@ -1070,7 +1070,9 @@ describe("LiveCallController ending when the caller is done", () => {
     await sayGoodbye(socket);
     await vi.advanceTimersByTimeAsync(1_000);
     void controller.wrapUp("service_restart");
-    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
+    // The wrap-up asks for its goodbye once the receptionist's has played.
+    await vi.advanceTimersByTimeAsync(1_600);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ event_id: "wrap_up_service_restart" })]);
     await vi.advanceTimersByTimeAsync(20_000);
     expect(hangup).toHaveBeenCalledOnce();
     expect(onCancelled).not.toHaveBeenCalled();
@@ -1135,35 +1137,135 @@ describe("LiveCallController transcript and silence", () => {
 });
 
 describe("LiveCallController wrap-up", () => {
-  it("tells GPT-Live why the call is ending, and hangs up once the goodbye has played", async () => {
+  it("waits for the caller to pause, tells GPT-Live why the call is ending, and hangs up once the goodbye has played", async () => {
     fakeTimers();
     const { socket, controller, hangup, closed } = setup();
-    // The caller's words place the session timeline: 1,000 ms in, now.
+    // The caller's words place the session timeline: 1,000 ms in, now. They're still talking.
     socket.emit("session.input_transcript.delta", { delta: "So about that quote...", start_ms: 500, end_ms: 1_000 });
     const done = controller.wrapUp("duration_limit");
+    // 2.5 seconds without a word from either side is a pause.
+    await vi.advanceTimersByTimeAsync(2_400);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
     expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ delegation_id: null, event_id: "wrap_up_duration_limit", content: expect.stringContaining("reached its time limit") })]);
+    socket.emit("session.instructions.appended", { client_event_id: "wrap_up_duration_limit" });
     await vi.advanceTimersByTimeAsync(1_000);
-    // The goodbye runs to 4,500 ms on the timeline: 2.5 seconds from now.
-    socket.emit("session.output_transcript.delta", { delta: "I'm sorry, we're out of time. Please call back. Goodbye!", start_ms: 2_000, end_ms: 4_500 });
-    await vi.advanceTimersByTimeAsync(2_000);
+    // The goodbye runs to 7,100 ms on the timeline: 2.5 seconds from now.
+    socket.emit("session.output_transcript.delta", { delta: "I'm sorry, we're out of time. Please call back. Goodbye!", start_ms: 4_600, end_ms: 7_100 });
+    await vi.advanceTimersByTimeAsync(2_400);
     expect(hangup).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(200);
     expect(hangup).toHaveBeenCalledWith("live_1");
     socket.emit("session.closed", { reason: "close_requested", usage: { seconds: 300 } });
     await done;
-    expect(closed).toEqual([expect.objectContaining({ billedSeconds: 300 })]);
+    expect(closed).toEqual([expect.objectContaining({ billedSeconds: 300, wrapUp: { reason: "duration_limit", pauseWaitMs: 2_600, commands: 1, spoken: true, hangup: "goodbye_played" } })]);
   });
 
-  it("hangs up when GPT-Live stays silent, and asks for the goodbye only once", async () => {
+  it("asks for the goodbye only once the answer to a request under way has been said", async () => {
     fakeTimers();
-    const { socket, controller, hangup } = setup();
+    let answer!: () => void;
+    const { socket, controller } = setup({ generate: () => new Promise((resolve) => { answer = () => resolve(reply("A checkup takes 30 minutes.")); }) });
+    // The caller's question ends 1,000 ms into the session, now, and GPT-Live hands it over.
+    delegate(socket, "item_1", "How long is a checkup?", 1_000);
+    await vi.advanceTimersByTimeAsync(3_000);
+    void controller.wrapUp("duration_limit");
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
+    answer();
+    await vi.advanceTimersByTimeAsync(1_000);
+    // GPT-Live has the answer but hasn't started saying it.
+    expect(sentOfType(socket, "session.commentary.append")).toEqual([expect.objectContaining({ event_id: "answer_item_1" })]);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
+    // It says the answer until 8,000 ms on the timeline: 2 seconds from now.
+    socket.emit("session.output_transcript.delta", { delta: "A checkup takes 30 minutes.", start_ms: 6_000, end_ms: 8_000 });
+    await vi.advanceTimersByTimeAsync(2_800);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ event_id: "wrap_up_duration_limit" })]);
+  });
+
+  // GPT-Live can ignore a command appended mid-call, as it does greeting commands.
+  it("asks for the goodbye again while GPT-Live stays silent, and hangs up after the third command", async () => {
+    fakeTimers();
+    const { socket, controller, hangup, closed } = setup();
     void controller.wrapUp("silence_timeout");
     void controller.wrapUp("service_restart");
+    // Nobody is talking, so the command goes out at once, and only one.
+    expect(sentOfType(socket, "session.instructions.append").map((event) => event.event_id)).toEqual(["wrap_up_silence_timeout"]);
+    socket.emit("session.instructions.appended", { client_event_id: "wrap_up_silence_timeout" });
+    await vi.advanceTimersByTimeAsync(4_000);
     expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sentOfType(socket, "session.instructions.append").map((event) => event.event_id)).toEqual(["wrap_up_silence_timeout", "wrap_up_silence_timeout_2"]);
+    // Without an acknowledgment, the wait counts from when the command went out.
+    await vi.advanceTimersByTimeAsync(4_200);
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(4_000);
     expect(hangup).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(400);
+    await vi.advanceTimersByTimeAsync(200);
     expect(hangup).toHaveBeenCalledWith("live_1");
+    expect(sentOfType(socket, "session.instructions.append").every((event) => event.content.startsWith("Nobody has spoken for a while"))).toBe(true);
+    socket.emit("session.closed", { reason: "close_requested" });
+    expect(closed[0]!.wrapUp).toEqual({ reason: "silence_timeout", pauseWaitMs: 0, commands: 3, spoken: false, hangup: "silent" });
+  });
+
+  it("asks for the goodbye again only once a caller who talks over the command has stopped", async () => {
+    fakeTimers();
+    const { socket, controller } = setup();
+    void controller.wrapUp("duration_limit");
+    socket.emit("session.instructions.appended", { client_event_id: "wrap_up_duration_limit" });
+    // GPT-Live waits while the caller talks, from 1 to 6 seconds in.
+    for (let second = 1; second <= 6; second += 1) {
+      await vi.advanceTimersByTimeAsync(1_000);
+      socket.emit("session.input_transcript.delta", { delta: " and one more thing", start_ms: second * 1_000 - 1_000, end_ms: second * 1_000 });
+    }
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sentOfType(socket, "session.instructions.append").map((event) => event.event_id)).toEqual(["wrap_up_duration_limit", "wrap_up_duration_limit_2"]);
+  });
+
+  it("holds the hangup until a caller who answers the goodbye is quiet", async () => {
+    fakeTimers();
+    const { socket, controller, hangup } = setup();
+    // The caller's words place the session timeline: 1,000 ms in, now.
+    socket.emit("session.input_transcript.delta", { delta: "Hmm, let me think.", start_ms: 500, end_ms: 1_000 });
+    await vi.advanceTimersByTimeAsync(3_000);
+    void controller.wrapUp("duration_limit");
+    socket.emit("session.instructions.appended", { client_event_id: "wrap_up_duration_limit" });
+    // The goodbye plays until 6,000 ms on the timeline, and the caller answers it from 5,000 to 8,000.
+    socket.emit("session.output_transcript.delta", { delta: "We're out of time, please call back. Goodbye!", start_ms: 4_000, end_ms: 6_000 });
+    await vi.advanceTimersByTimeAsync(1_000);
+    for (let endMs = 5_500; endMs <= 8_000; endMs += 500) {
+      await vi.advanceTimersByTimeAsync(500);
+      socket.emit("session.input_transcript.delta", { delta: " thanks", start_ms: endMs - 500, end_ms: endMs });
+    }
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(hangup).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(hangup).toHaveBeenCalledWith("live_1");
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
+  });
+
+  it("hangs up 25 seconds after the wrap-up started at the latest, with the caller still talking", async () => {
+    fakeTimers();
+    const { socket, controller, hangup, closed } = setup();
+    const talk = (at: number) => socket.emit("session.input_transcript.delta", { delta: " and", start_ms: at, end_ms: at + 500 });
+    talk(0);
+    void controller.wrapUp("duration_limit");
+    let commandAt: number | undefined;
+    let hangupAt: number | undefined;
+    for (let at = 500; at <= 30_000; at += 500) {
+      await vi.advanceTimersByTimeAsync(500);
+      if (commandAt === undefined && sentOfType(socket, "session.instructions.append").length) commandAt = at;
+      if (hangupAt === undefined && hangup.mock.calls.length) hangupAt = at;
+      talk(at);
+    }
+    // The goodbye waits 10 seconds for a pause, then goes out anyway.
+    expect(commandAt).toBe(10_000);
+    expect(hangupAt).toBe(25_000);
+    socket.emit("session.closed", { reason: "close_requested" });
+    expect(closed[0]!.wrapUp).toEqual({ reason: "duration_limit", pauseWaitMs: 10_000, commands: 1, spoken: false, hangup: "timed_out" });
   });
 
   it("doesn't ask for a second goodbye once the agent has ended the call", () => {
@@ -1188,25 +1290,65 @@ describe("LiveCallController wrap-up", () => {
     expect(short.onTimeout).toHaveBeenCalledWith("duration_limit");
   });
 
-  it("counts the goodbye from OpenAI's acknowledgment, so speech already under way doesn't pass for it", async () => {
+  it("counts the goodbye from OpenAI's acknowledgment, so an answer still under way doesn't pass for it", async () => {
     fakeTimers();
     const { socket, controller, hangup } = setup();
     // The caller's words place the session timeline: 1,000 ms in, now.
-    socket.emit("session.input_transcript.delta", { delta: "And the price?", start_ms: 500, end_ms: 1_000 });
-    // The receptionist is finishing a sentence when the limit hits.
-    socket.emit("session.output_transcript.delta", { delta: "It's forty dollars.", start_ms: 900, end_ms: 1_100 });
+    socket.emit("session.input_transcript.delta", { delta: "And the prices?", start_ms: 500, end_ms: 1_000 });
+    // A long answer is still going when the 10-second wait for a pause ends.
+    const speak = (at: number) => socket.emit("session.output_transcript.delta", { delta: " and so on", start_ms: at + 1_000, end_ms: at + 1_500 });
+    speak(0);
     void controller.wrapUp("duration_limit");
+    for (let at = 500; at <= 10_000; at += 500) {
+      await vi.advanceTimersByTimeAsync(500);
+      speak(at);
+    }
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(300);
     socket.emit("session.instructions.appended", { client_event_id: "wrap_up_duration_limit" });
-    // Measured from the request, that sentence would have ended the call by now.
-    await vi.advanceTimersByTimeAsync(1_700);
+    // The answer's last words played out and no goodbye followed, so it's asked for again.
+    await vi.advanceTimersByTimeAsync(4_100);
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(2);
     expect(hangup).not.toHaveBeenCalled();
-    // The goodbye starts at 2,500 ms on the timeline and runs to 5,000 ms.
-    socket.emit("session.output_transcript.delta", { delta: "We're out of time, please call back. Goodbye!", start_ms: 2_500, end_ms: 5_000 });
-    await vi.advanceTimersByTimeAsync(1_800);
-    expect(hangup).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(400);
-    expect(hangup).toHaveBeenCalledWith("live_1");
+  });
+
+  it("tells the backend the call is ending when a request comes in after the goodbye was asked for", async () => {
+    fakeTimers();
+    const { socket, controller, generate } = setup();
+    void controller.wrapUp("duration_limit");
+    delegate(socket, "item_1", "Wait, can I book for Tuesday?", 1_000);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(generate.mock.calls[0]![0].prompt).toMatch(/\n\nThe call has reached its time limit and is ending now\. Don't start anything new, and say in your answer that the call is ending now\.$/);
+  });
+});
+
+describe("LiveCallController time limit warning", () => {
+  it("warns the caller at a pause a minute before the time limit's goodbye", async () => {
+    fakeTimers();
+    const { socket, onTimeout, closed } = setup({ maxDurationMs: 300_000 });
+    // The goodbye starts at 270 seconds, so the warning is due at 210, while the receptionist is talking.
+    await vi.advanceTimersByTimeAsync(209_500);
+    socket.emit("session.output_transcript.delta", { delta: "Anything else?", start_ms: 209_000, end_ms: 209_500 });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ delegation_id: null, event_id: "limit_warning", content: expect.stringContaining("time limit in about a minute") })]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(onTimeout).toHaveBeenCalledWith("duration_limit");
+    expect(sentOfType(socket, "session.instructions.append")).toHaveLength(1);
+    socket.emit("session.closed", { reason: "close_requested" });
+    expect(closed[0]!.limitWarningMs).toBe(210_600);
+  });
+
+  it("doesn't warn in the call's first minute, or once the call has ended", async () => {
+    fakeTimers();
+    // A 2-minute call's goodbye starts at 90 seconds, so its warning would come 30 seconds in.
+    const short = setup({ maxDurationMs: 120_000 });
+    const ended = setup({ maxDurationMs: 300_000 });
+    ended.controller.endAfterGoodbye();
+    await vi.advanceTimersByTimeAsync(300_000);
+    expect(sentOfType(short.socket, "session.instructions.append")).toEqual([]);
+    expect(sentOfType(ended.socket, "session.instructions.append")).toEqual([]);
   });
 });
 
@@ -1215,16 +1357,20 @@ describe("LiveCallController minute top-ups", () => {
   it("asks for more minutes a minute before the goodbye, and moves the goodbye by what it gets", async () => {
     fakeTimers();
     const topUp = vi.fn<() => Promise<number>>().mockResolvedValueOnce(300_000).mockResolvedValueOnce(0);
-    const { onTimeout } = setup({ maxDurationMs: 300_000, topUp });
+    const { socket, onTimeout } = setup({ maxDurationMs: 300_000, topUp });
     await vi.advanceTimersByTimeAsync(209_999);
     expect(topUp).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(topUp).toHaveBeenCalledOnce();
+    // More minutes came, so the caller hears no warning.
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([]);
     // Ten minutes now: the goodbye moved to 570 seconds, and the next ask to 510.
     await vi.advanceTimersByTimeAsync(300_000);
     expect(onTimeout).not.toHaveBeenCalled();
     expect(topUp).toHaveBeenCalledTimes(2);
-    // Nothing more was granted, so the call says goodbye at 570 seconds and asks no more.
+    // Nothing more was granted, so the caller hears the limit is near, the
+    // call says goodbye at 570 seconds, and it asks no more.
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ event_id: "limit_warning" })]);
     await vi.advanceTimersByTimeAsync(59_999);
     expect(onTimeout).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
@@ -1232,12 +1378,14 @@ describe("LiveCallController minute top-ups", () => {
     expect(topUp).toHaveBeenCalledTimes(2);
   });
 
-  it("says goodbye at the original time when the plan has no minutes left", async () => {
+  it("warns the caller and says goodbye at the original time when the plan has no minutes left", async () => {
     fakeTimers();
     const topUp = vi.fn(async () => 0);
-    const { onTimeout } = setup({ maxDurationMs: 300_000, topUp });
-    await vi.advanceTimersByTimeAsync(269_999);
+    const { socket, onTimeout } = setup({ maxDurationMs: 300_000, topUp });
+    await vi.advanceTimersByTimeAsync(210_000);
     expect(topUp).toHaveBeenCalledOnce();
+    expect(sentOfType(socket, "session.instructions.append")).toEqual([expect.objectContaining({ event_id: "limit_warning" })]);
+    await vi.advanceTimersByTimeAsync(59_999);
     expect(onTimeout).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     expect(onTimeout).toHaveBeenCalledWith("duration_limit");

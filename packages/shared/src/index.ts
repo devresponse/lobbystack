@@ -27,7 +27,8 @@ export function parseDeploymentMode(value: string | undefined): DeploymentMode |
   return deploymentModes.find((mode) => mode === trimmed);
 }
 
-export const DEFAULT_WEB_CALL_MAX_DURATION_MS = 5 * 60 * 1000;
+/** A browser call runs this long at most, unless WEB_CALL_MAX_DURATION_MS on the admin sets less. */
+export const DEFAULT_WEB_CALL_MAX_DURATION_MS = 30 * 60 * 1000;
 export const MAX_WEB_CALL_MAX_DURATION_MS = 30 * 60 * 1000;
 /** The longest a GPT-Live phone call runs, and the most minutes one call reserves. */
 export const MAX_PHONE_CALL_MS = 30 * 60 * 1000;

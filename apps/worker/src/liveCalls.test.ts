@@ -35,7 +35,7 @@ vi.mock("@lobbystack/agent-core", () => ({
   closeLiveSession: mocks.closeLiveSession,
   agentModelId: () => ({ provider: "openai", model: "gpt-6-luna" }),
   describeAgentUsage: (usage: { inputTokens: number; outputTokens: number }, latencyMs: number) => ({ provider: "openai", model: "gpt-6-luna", latencyMs, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, totalCostUsd: 0.00021 }),
-  WRAP_UP_MAX_MS: 30_000,
+  WRAP_UP_MAX_MS: 40_000,
   GREETING_RECORDING_TTL_SECONDS: 604_800,
   LIVE_VOICE: "marin",
   greetingRecordingKey: (greeting: string) => `recording:${greeting}`,
@@ -931,7 +931,7 @@ describe("recovering a call whose worker died", () => {
 
 describe("liveDrainTimeoutMs", () => {
   it("leaves room before Railway's SIGKILL for the goodbye and finalization", () => {
-    expect(liveDrainTimeoutMs({ RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860" })).toBe(1_825_000);
+    expect(liveDrainTimeoutMs({ RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "1860" })).toBe(1_815_000);
     expect(liveDrainTimeoutMs({ RAILWAY_DEPLOYMENT_DRAINING_SECONDS: "20" })).toBe(0);
   });
 
@@ -1101,6 +1101,16 @@ describe("live call latency telemetry", () => {
     options.onClose!({ sessionId: "live_2", durationMs: 12_000, delegations: [], usageConfirmed: true, lateAttach: false, outputAudio: { deltas: 55, coveredMs: 11_000, payloadBytes: 704_000 }, inputAudio: { chunks: 550, coveredMs: 11_000, loudMs: 1_400, payloadBytes: 704_000 } } as never);
     const closed = JSON.parse(String(info.mock.calls.find((call) => String(call[0]).includes("\"live.closed\""))![0]));
     expect(closed.inputAudio).toEqual({ chunks: 550, coveredMs: 11_000, loudMs: 1_400, payloadBytes: 704_000 });
+    info.mockRestore();
+  });
+
+  it("logs the time limit warning and how the wrap-up went on live.closed", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const options = await startCall();
+    const wrapUp = { reason: "duration_limit", pauseWaitMs: 2_600, commands: 2, spoken: true, hangup: "goodbye_played" };
+    options.onClose!({ sessionId: "live_2", durationMs: 300_000, delegations: [], usageConfirmed: true, lateAttach: false, outputAudio: { deltas: 0, coveredMs: 0, payloadBytes: 0 }, inputAudio: { chunks: 0, coveredMs: 0, loudMs: 0, payloadBytes: 0 }, limitWarningMs: 210_400, wrapUp } as never);
+    const closed = JSON.parse(String(info.mock.calls.find((call) => String(call[0]).includes("\"live.closed\""))![0]));
+    expect(closed).toMatchObject({ limitWarningMs: 210_400, wrapUp });
     info.mockRestore();
   });
 

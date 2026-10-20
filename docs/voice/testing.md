@@ -50,7 +50,7 @@ Each field answers one question:
 
 - **`PASS` or `FAIL`**: whether the call ended or went on, as the scenario expects
 - **`greeted at … s`**: when the receptionist first spoke, before the caller did, and how many greeting commands the worker sent. The caller waits 15 seconds for it. With `--recorded-greeting`, `by the recording` means OpenAI played the recording at that time, and `then said: "…"` shows what the receptionist said after it, before the caller spoke.
-- **`ended … after the caller`**: how long after the caller's last line the controller closed the session, or `still open` after 15 seconds
+- **`ended … after the caller`**: how long after the caller's last line the controller closed the session, or `still open` after 15 seconds. A call that reached its time limit adds when the caller was warned and how the wrap-up ended, for example `warned at 92.4 s, wrap-up goodbye_played after 1 command`.
 - **`hand-overs`**: each request GPT-Live handed to the backend after the opening question, by the tools the agent used. `reply` means the agent answered without a tool.
 - **`checks`**: each answer from the caller check, which runs when the caller speaks after the agent ended the call
 - **`goodbyes`**: how many of the receptionist's lines said goodbye. More than 1 means the caller heard a double goodbye.
@@ -112,6 +112,7 @@ Both scripts read their callers from `scripts/voice/scenarios.ts`. Every call fi
 - **`expect`**: `ends` when the receptionist should hang up after the last line, `continues` when the call should go on
 - **`lines`**: the caller's lines, each with an optional `pauseMs` of silence before it. The phone script rounds pauses to whole seconds.
 - **`mustNotSay`**: optional. The eval fails a run when any of the receptionist's lines matches this pattern. The phone script can't check it.
+- **`limitMs`**: optional. The call's time limit, as the worker sets it from the plan's minutes. The eval passes such a run only when the receptionist said goodbye and the controller hung up after it had played. The phone script can't set a call's limit, so it skips the scenario.
 
 Add a scenario when you fix a call that went wrong, so the eval catches the same failure next time. Put a scenario that books or changes an appointment in `BOOKING_SCENARIOS`, so it runs only when you name it.
 
@@ -119,4 +120,10 @@ The `ask-for-person` scenario asks for a real person, so it's in `PERSON_SCENARI
 
 ```bash
 OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --browser --scenario ask-for-person
+```
+
+The `time-limit` scenario is in `LIMIT_SCENARIOS` and runs only by name, because each run takes about 3 minutes of GPT-Live audio. Its caller keeps asking questions past a 3-minute limit. Run it after a change to how calls end at their limit, and read the receptionist's lines for the warning a minute before the goodbye:
+
+```bash
+OPENAI_API_KEY=your_openai_api_key pnpm voice:eval --scenario time-limit
 ```

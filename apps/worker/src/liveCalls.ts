@@ -617,7 +617,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
           return;
         }
         setPresence(request, false);
-        logEvent("info", "live.closed", { channel: request.channel, durationMs: summary.durationMs, billedSeconds: summary.billedSeconds, usageConfirmed: summary.usageConfirmed, closeReason: summary.closeReason, end, delegations: summary.delegations.length, outputAudio: summary.outputAudio, inputAudio: summary.inputAudio, lateAttach: summary.lateAttach, firstEventMs: summary.firstEventMs });
+        logEvent("info", "live.closed", { channel: request.channel, durationMs: summary.durationMs, billedSeconds: summary.billedSeconds, usageConfirmed: summary.usageConfirmed, closeReason: summary.closeReason, end, delegations: summary.delegations.length, outputAudio: summary.outputAudio, inputAudio: summary.inputAudio, lateAttach: summary.lateAttach, firstEventMs: summary.firstEventMs, limitWarningMs: summary.limitWarningMs, wrapUp: summary.wrapUp });
         const pending = retryWrite(() => finish(summary)).catch(reportFailure("live.finish"));
         finishing.add(pending);
         // The lock outlives the finish, so a recovery job can't take an

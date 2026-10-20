@@ -450,11 +450,11 @@ export function AgentBasicSettingsPage({
               </ItemContent>
               <ItemActions className="w-full sm:w-auto">
                 {isLoadingConfiguration ? (
-                  <Skeleton className="h-10 w-full rounded-md sm:w-[9.5ch]" />
+                  <Skeleton className="h-10 w-full rounded-md sm:w-32" />
                 ) : (
                   <NativeSelect
                     aria-label={t("agent:fields.defaultLocale.label")}
-                    className="w-full sm:w-[9.5ch]"
+                    className="w-full sm:w-32"
                     disabled={!canManageTenant}
                     id="agent-default-language"
                     onChange={(event) => {
@@ -528,10 +528,10 @@ export function AgentBasicSettingsPage({
                 <ItemDescription>{t("agent:fields.transferNumber.hint")}</ItemDescription>
                 <div className="pt-2">
                   {isLoadingConfiguration ? (
-                    <Skeleton className="h-10 w-32 rounded-md" />
+                    <Skeleton className="h-10 w-full rounded-md sm:w-48" />
                   ) : (
                     <PhoneInput
-                      className="w-full min-w-0 sm:w-[12ch]"
+                      className="w-full min-w-0 sm:w-48"
                       containerClassName="w-full sm:w-fit"
                       disabled={!canManageTenant}
                       id="agent-transfer-number"

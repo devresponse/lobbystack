@@ -96,7 +96,7 @@ function sessionConfig() {
   return session;
 }
 
-type RunResult = { scenario: CallScenario; passed: boolean; greetedAfterMs?: number; greetingCommands: number; recordingPlayed: boolean; afterRecording?: string; ended: boolean; endedAfterMs?: number; handOvers: string[]; checks: boolean[]; goodbyes: number; replies: string[]; forbidden?: string; error?: string };
+type RunResult = { scenario: CallScenario; passed: boolean; greetedAfterMs?: number; greetingCommands: number; recordingPlayed: boolean; afterRecording?: string; ended: boolean; endedAfterMs?: number; handOvers: string[]; checks: boolean[]; goodbyes: number; replies: string[]; forbidden?: string; limitWarningMs?: number; wrapUp?: LiveCallSummary["wrapUp"]; error?: string };
 
 async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentModel: NonNullable<typeof model>): Promise<RunResult> {
   const ws = new LiveWS(client);
@@ -154,6 +154,8 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       phone: false,
       setup: { agent, greeting: snapshot.greeting, ...(greetingRecording ? { greetingRecording: { audio: greetingRecording } } : {}), callerDone: async (conversation, abortSignal) => { const done = await callerIsDone(agentModel, conversation, abortSignal); checks.push(done); return done; } },
       connect: () => ws as unknown as SidebandWS,
+      // As the worker does, the time limit ends the call with a goodbye.
+      ...(scenario.limitMs ? { maxDurationMs: scenario.limitMs, onTimeout: (reason) => void controller.wrapUp(reason) } : {}),
       onDelegation: (timing) => { if (timing.offsetMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
       onGreeting: (event) => {
         if (event.step === "sent" && event.trigger !== "recording") greetingCommands += 1;
@@ -168,7 +170,11 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       onClose: resolve,
     });
   });
-  const closedAt = closed.then(() => sessionMs);
+  let callClosed = false;
+  const closedAt = closed.then(() => {
+    callClosed = true;
+    return sessionMs;
+  });
   controller.start();
 
   const started = new Promise<void>((resolve, reject) => {
@@ -187,13 +193,15 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   const waitForReply = async (maxMs: number) => {
     replied = false;
     const from = sessionMs;
-    while (sessionMs - from < maxMs && !(replied && sessionMs - lastReplyEndMs >= REPLY_QUIET_MS)) await sleep(CHUNK_MS);
+    while (!callClosed && sessionMs - from < maxMs && !(replied && sessionMs - lastReplyEndMs >= REPLY_QUIET_MS)) await sleep(CHUNK_MS);
   };
   let pump: ReturnType<typeof setInterval> | undefined;
   try {
     await Promise.race([started, sleep(15_000).then(() => { throw new Error("GPT-Live didn't start the session."); })]);
     // GPT-Live expects audio all the time, so the caller's silence is sent too.
     pump = setInterval(() => {
+      // Nothing more reaches a session the controller closed.
+      if (callClosed) return;
       const chunk = Buffer.alloc(CHUNK_BYTES);
       queue.copy(chunk, 0, 0, Math.min(CHUNK_BYTES, queue.length));
       queue = queue.subarray(Math.min(CHUNK_BYTES, queue.length));
@@ -207,6 +215,8 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     scenarioStartMs = sessionMs;
     for (const [index, line] of scenario.lines.entries()) {
       if (index > 0) await sleep(line.pauseMs ?? 0);
+      // The call reached its time limit.
+      if (callClosed) break;
       await play(line.text);
     }
     const lastLineAt = sessionMs;
@@ -221,8 +231,11 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     const forbidden = scenario.mustNotSay ? replies.find((line) => scenario.mustNotSay!.test(line)) : undefined;
     // After the recording, GPT-Live should wait for the caller instead of greeting again.
     const spokeAfterRecording = afterRecording.trim();
-    const passed = (scenario.expect === "ends" ? ended !== undefined : ended === undefined) && forbidden === undefined && !spokeAfterRecording;
-    return { scenario, passed, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, recordingPlayed, ...(spokeAfterRecording ? { afterRecording: spokeAfterRecording } : {}), ended: ended !== undefined, ...(endedAfterMs !== undefined ? { endedAfterMs } : {}), handOvers, checks, goodbyes, replies, ...(forbidden ? { forbidden } : {}) };
+    // At the time limit, the controller hangs up once the goodbye has played.
+    const summary = ended === undefined ? undefined : await closed;
+    const politeEnd = !scenario.limitMs || (summary?.wrapUp?.hangup === "goodbye_played" && goodbyes > 0);
+    const passed = (scenario.expect === "ends" ? ended !== undefined : ended === undefined) && forbidden === undefined && !spokeAfterRecording && politeEnd;
+    return { scenario, passed, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, recordingPlayed, ...(spokeAfterRecording ? { afterRecording: spokeAfterRecording } : {}), ended: ended !== undefined, ...(endedAfterMs !== undefined ? { endedAfterMs } : {}), handOvers, checks, goodbyes, replies, ...(forbidden ? { forbidden } : {}), ...(summary?.limitWarningMs !== undefined ? { limitWarningMs: summary.limitWarningMs } : {}), ...(summary?.wrapUp ? { wrapUp: summary.wrapUp } : {}) };
   } catch (error) {
     return { scenario, passed: false, ...(greetedAfterMs !== undefined ? { greetedAfterMs } : {}), greetingCommands, recordingPlayed, ended: false, handOvers, checks, goodbyes: 0, replies, error: error instanceof Error ? error.message : String(error) };
   } finally {
@@ -242,7 +255,8 @@ await Promise.all(Array.from({ length: Math.min(Number(values.concurrency), jobs
     const result = await run(jobs[next++]!, audio, model);
     results.push(result);
     const greeting = `${result.greetedAfterMs === undefined ? "no greeting in 15 s" : `greeted at ${(result.greetedAfterMs / 1000).toFixed(1)} s`}${result.recordingPlayed ? " by the recording" : ""}${result.greetingCommands ? ` after ${result.greetingCommands} command${result.greetingCommands > 1 ? "s" : ""}` : ""}${result.afterRecording ? `, then said: "${result.afterRecording}"` : ""}`;
-    const outcome = `${result.error ? `error: ${result.error}` : result.ended ? `ended ${((result.endedAfterMs ?? 0) / 1000).toFixed(1)} s after the caller` : "still open"}${result.forbidden ? ` | said what it mustn't: "${result.forbidden}"` : ""}`;
+    const wrapUp = result.wrapUp ? ` | ${result.limitWarningMs === undefined ? "no warning" : `warned at ${(result.limitWarningMs / 1000).toFixed(1)} s`}, wrap-up ${result.wrapUp.hangup ?? "unfinished"} after ${result.wrapUp.commands} command${result.wrapUp.commands === 1 ? "" : "s"}` : "";
+    const outcome = `${result.error ? `error: ${result.error}` : result.ended ? `ended ${((result.endedAfterMs ?? 0) / 1000).toFixed(1)} s after the caller` : "still open"}${wrapUp}${result.forbidden ? ` | said what it mustn't: "${result.forbidden}"` : ""}`;
     console.log(`${result.passed ? "PASS" : "FAIL"} ${result.scenario.name.padEnd(17)} ${greeting} | ${outcome} | hand-overs: ${result.handOvers.join(", ") || "none"} | checks: ${result.checks.map((done) => (done ? "done" : "continue")).join(", ") || "none"} | goodbyes: ${result.goodbyes} | receptionist: ${result.replies.map((line) => `"${line}"`).join(" / ")}`);
   }
 }));

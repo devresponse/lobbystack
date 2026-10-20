@@ -31,6 +31,11 @@ if (!values.from || !values.to) throw new Error("Pass --from (a number on that T
 const client = twilio(accountSid, authToken);
 
 for (const scenario of findScenarios(values.scenario)) {
+  // A phone call's time limit comes from the plan's minutes, so it can't be set here.
+  if (scenario.limitMs) {
+    console.log(`SKIP ${scenario.name.padEnd(17)} only pnpm voice:eval can set the call's time limit`);
+    continue;
+  }
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.pause({ length: GREETING_WAIT_S });
   twiml.say({ voice: VOICE }, OPENING);

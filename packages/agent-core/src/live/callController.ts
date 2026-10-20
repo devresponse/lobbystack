@@ -97,6 +97,10 @@ export type LiveCallSummary = {
   lateAttach: boolean;
   /** Where the first event with a timeline position started, in session milliseconds. */
   firstEventMs?: number;
+  /** When the caller was told the time limit was near, in milliseconds since the worker attached. */
+  limitWarningMs?: number;
+  /** How the worker ended a call that was still going. */
+  wrapUp?: LiveCallWrapUpSummary;
 };
 
 /** A finished stretch of speech by one side, numbered in call order. */
@@ -105,6 +109,21 @@ export type LiveCallTurn = { sequence: number; speaker: "caller" | "assistant"; 
 export type LiveCallTimeout = "silence_timeout" | "duration_limit";
 /** Why the worker ends a call that's still going: a timeout, or the worker restarting. */
 export type LiveCallWrapUp = LiveCallTimeout | "service_restart";
+/** How a wrap-up went, for the logs. */
+export type LiveCallWrapUpSummary = {
+  reason: LiveCallWrapUp;
+  /** How long the goodbye waited for a pause in the conversation. */
+  pauseWaitMs?: number;
+  /** Goodbye commands sent. GPT-Live can ignore one, so an unspoken one is sent again. */
+  commands: number;
+  /** The receptionist spoke after a goodbye command. */
+  spoken: boolean;
+  /**
+   * Why the worker hung up: the goodbye played and both sides went quiet,
+   * GPT-Live stayed silent after every command, or the wrap-up ran out of time.
+   */
+  hangup?: "goodbye_played" | "silent" | "timed_out";
+};
 /**
  * A transfer's progress: the REFER went out, OpenAI accepted it, the
  * destination answered, or the transfer failed and the call stays with the
@@ -275,15 +294,38 @@ const CALLER_DONE_QUIET_MS = 2_000;
 const CALLER_DONE_MAX_MS = 20_000;
 // A caller who spoke after the call was ended is checked once they've paused this long.
 const CALLER_CHECK_QUIET_MS = 800;
+// The conversation pauses once both sides have been quiet for GOODBYE_QUIET_MS
+// after the receptionist spoke, or this long after the caller did: GPT-Live
+// answers a caller sooner, and a caller can stop mid-thought.
+const CALLER_PAUSE_MS = 2_500;
+// A wrap-up's goodbye waits up to this long for a pause, so it doesn't cut
+// off the receptionist's answer or talk over the caller. GPT-Live waits for a
+// caller who is talking before it follows a command anyway.
+const WRAP_UP_PAUSE_WAIT_MS = 10_000;
 // A wrap-up's goodbye counts from OpenAI's acknowledgment of the command, or
 // from the request when no acknowledgment arrives by this long.
 const WRAP_UP_ACK_WAIT_MS = 2_000;
+// GPT-Live can ignore a command appended mid-call, as it does greeting
+// commands, so a goodbye still unspoken GOODBYE_START_MS after the command, or
+// after the caller last spoke, is asked for again, up to this many commands.
+const WRAP_UP_COMMANDS = 3;
+// A wrap-up hangs up at the latest this long after it started, whoever is
+// still talking: within the 30 seconds the duration limit's goodbye has.
+const WRAP_UP_GOODBYE_MAX_MS = 25_000;
 /** The longest a wrap-up takes: waiting for the goodbye, then for session.closed. */
-export const WRAP_UP_MAX_MS = GOODBYE_MAX_MS + FINALIZE_TIMEOUT_MS;
+export const WRAP_UP_MAX_MS = WRAP_UP_GOODBYE_MAX_MS + FINALIZE_TIMEOUT_MS;
 // The duration limit's goodbye starts this long before the limit, so it fits
 // inside the minutes the call reserved. A call that reserved under a minute
 // gets half its length to talk instead.
 const DURATION_WRAP_UP_LEAD_MS = 30_000;
+// The caller hears that the call is about to reach its time limit this long
+// before the limit's goodbye, at the next pause up to
+// LIMIT_WARNING_PAUSE_WAIT_MS later. A call with more minutes coming hears it
+// only once the top-up gets none. A call that only started a minute ago, or
+// whose goodbye is under LIMIT_WARNING_MIN_MS away, gets no warning.
+const LIMIT_WARNING_LEAD_MS = 60_000;
+const LIMIT_WARNING_PAUSE_WAIT_MS = 20_000;
+const LIMIT_WARNING_MIN_MS = 30_000;
 // A call that can top up its minutes asks this long before the limit's
 // goodbye, and asks again this often after a failure until the goodbye starts.
 const TOP_UP_LEAD_MS = 60_000;
@@ -311,6 +353,13 @@ const WRAP_UP: Record<LiveCallWrapUp, string> = {
   duration_limit: "The call has reached its time limit and is ending now. In the language of the conversation, tell the caller briefly, apologize, invite them to call back if they need more help, and say goodbye.",
   service_restart: "The phone service is restarting, so the call has to end now. In the language of the conversation, apologize briefly, ask the caller to call back in a minute, and say goodbye.",
 };
+// What the backend hears when a request comes in after the goodbye was asked for.
+const WRAP_UP_FACT: Record<LiveCallWrapUp, string> = {
+  silence_timeout: "The call is ending now because nobody spoke for a while.",
+  duration_limit: "The call has reached its time limit and is ending now.",
+  service_restart: "The phone service is restarting, so the call is ending now.",
+};
+const LIMIT_WARNING = "The call reaches its time limit in about a minute. In the language of the conversation, tell the caller briefly, then carry on where you left off.";
 const TRANSFER_FAILED = "The transfer to a person didn't go through. In the language of the conversation, tell the caller briefly and offer to take a message so the team can call them back.";
 
 // What GPT-Live hears once the caller has typed a PIN, since it never hears key presses.
@@ -363,6 +412,9 @@ const PROGRESS: Record<string, string> = {
 type PendingAppend = { kind: "greeting" | "recording" | "answer" | "update" | "wrap_up"; delegationId?: string };
 // OpenAI's sideband reference documents this command; the SDK's types don't have it yet.
 type AudioFixturePlay = { type: "session.output_audio.fixture.play"; audio: string; event_id: string };
+// A wrap-up under way: when it started, in performance.now() time, and its
+// latest goodbye command, with when it went out and OpenAI acknowledged it.
+type WrapUp = { reason: LiveCallWrapUp; requestedAt: number; eventId?: string; sentAt?: number; ackedAt?: number | undefined; summary: LiveCallWrapUpSummary };
 // A hangup waiting for the caller to be done. afterMs is where the request
 // that ended the call was made on the session timeline: the caller speaking
 // after it holds the hangup until a check says whether they're only saying
@@ -420,12 +472,14 @@ export class LiveCallController {
   private firstEventTimer: ReturnType<typeof setTimeout> | undefined;
   private transferTimer: ReturnType<typeof setTimeout> | undefined;
   private topUpTimer: ReturnType<typeof setTimeout> | undefined;
+  private limitWarningTimer: ReturnType<typeof setTimeout> | undefined;
   // Milliseconds top-ups added to the duration limit, and when, in Date.now()
   // time, the limit's goodbye starts.
   private grantedMs = 0;
   private durationWrapUpAt = 0;
-  // When OpenAI acknowledged the wrap-up command, in performance.now() time.
-  private wrapUpAckedAt: number | undefined;
+  // When the caller heard the time limit was near, in milliseconds since the attach.
+  private limitWarningMs: number | undefined;
+  private wrappingUp: WrapUp | undefined;
   private started = false;
   // When the worker saw session.started, in performance.now() time.
   private startedSeenAt: number | undefined;
@@ -631,20 +685,38 @@ export class LiveCallController {
     this.scheduleDurationLimit();
   }
 
-  // The duration limit's goodbye starts a little before the limit, and a call
-  // that can top up asks for more minutes a minute before that.
+  // The duration limit's goodbye starts a little before the limit. A minute
+  // before that, a call that can top up asks for more minutes, and any other
+  // call warns the caller.
   private scheduleDurationLimit(): void {
     if (!this.options.maxDurationMs) return;
     const limitMs = this.options.maxDurationMs + this.grantedMs;
     this.durationWrapUpAt = this.startedAt + limitMs - Math.min(DURATION_WRAP_UP_LEAD_MS, limitMs / 2);
     clearTimeout(this.durationTimer);
     clearTimeout(this.topUpTimer);
+    clearTimeout(this.limitWarningTimer);
     this.durationTimer = setTimeout(() => this.options.onTimeout?.("duration_limit"), this.durationWrapUpAt - Date.now());
     if (this.options.topUp) this.topUpTimer = setTimeout(() => void this.askForTopUp(), Math.max(0, this.durationWrapUpAt - TOP_UP_LEAD_MS - Date.now()));
+    else this.limitWarningTimer = setTimeout(() => this.warnOfLimit(), this.durationWrapUpAt - LIMIT_WARNING_LEAD_MS - Date.now());
+  }
+
+  // Tells the caller the call is about to reach its time limit, so the
+  // goodbye doesn't cut them off without warning. It waits for a pause, so it
+  // doesn't interrupt either side, and leaves out a transfer or a call that's
+  // already ending.
+  private warnOfLimit(): void {
+    const skip = () => this.ending || this.finished || this.transfer !== undefined || this.pendingHangup !== undefined;
+    const leftMs = this.durationWrapUpAt - Date.now();
+    if (skip() || this.limitWarningMs !== undefined || leftMs < LIMIT_WARNING_MIN_MS || Date.now() - this.startedAt < LIMIT_WARNING_LEAD_MS) return;
+    this.whenPaused(Math.min(LIMIT_WARNING_PAUSE_WAIT_MS, leftMs - LIMIT_WARNING_MIN_MS), () => {
+      this.limitWarningMs = Date.now() - this.startedAt;
+      this.send({ type: "session.instructions.append", delegation_id: null, content: LIMIT_WARNING, event_id: "limit_warning" });
+    }, skip);
   }
 
   // A grant moves the goodbye and the next ask. None leaves the goodbye where
-  // it is. A failed ask is tried again until the goodbye starts.
+  // it is, and the caller hears it's near. A failed ask is tried again until
+  // the goodbye starts.
   private async askForTopUp(): Promise<void> {
     if (this.ending || this.finished) return;
     let grantedMs: number;
@@ -658,7 +730,8 @@ export class LiveCallController {
       else if (!this.ending && !this.finished) void reportError(error, { operation: "live.top_up", sessionId: this.options.sessionId });
       return;
     }
-    if (!(grantedMs > 0) || this.ending || this.finished) return;
+    if (this.ending || this.finished) return;
+    if (!(grantedMs > 0)) return this.warnOfLimit();
     this.grantedMs += grantedMs;
     this.scheduleDurationLimit();
   }
@@ -697,7 +770,8 @@ export class LiveCallController {
       this.reportGreeting("acknowledged");
       this.retryGreetingIfSilent();
     }
-    if (pending?.kind === "wrap_up") this.wrapUpAckedAt = performance.now();
+    // Only the latest goodbye command counts: an earlier one went unspoken.
+    if (pending?.kind === "wrap_up" && this.wrappingUp?.eventId === clientEventId) this.wrappingUp.ackedAt = performance.now();
   }
 
   // The caller said something, so a greeting would talk over them.
@@ -885,25 +959,14 @@ export class LiveCallController {
    * followed, has played out. It stops waiting when the receptionist stays
    * silent, or after GOODBYE_MAX_MS. OpenAI's guide: close only when playback
    * has finished and no pending work needs the session.
-   *
-   * With `acknowledgedAt`, speech counts from OpenAI's acknowledgment of the
-   * command that asked for it, so words already under way when it was sent
-   * aren't taken for the reply. Without an acknowledgment by
-   * WRAP_UP_ACK_WAIT_MS, it counts from the request.
    */
-  private afterSpeech(then: () => void, acknowledgedAt?: () => number | undefined): void {
+  private afterSpeech(then: () => void): void {
     const requestedAt = performance.now();
     const check = () => {
       if (this.finished) return;
       const now = performance.now();
-      const acked = acknowledgedAt?.();
-      if (acknowledgedAt && acked === undefined && now - requestedAt < WRAP_UP_ACK_WAIT_MS) {
-        setTimeout(check, GOODBYE_POLL_MS);
-        return;
-      }
-      const from = acked ?? requestedAt;
       const answered = this.runningDelegations === 0;
-      const sentAt = Math.max(from, this.lastAnswerSentAt ?? from);
+      const sentAt = Math.max(requestedAt, this.lastAnswerSentAt ?? requestedAt);
       const spoke = this.lastSpeechAt >= sentAt;
       const silentTooLong = answered && !spoke && now - sentAt > GOODBYE_START_MS;
       const playedOut = spoke && now - this.lastSpeechAt > GOODBYE_QUIET_MS && now > this.playbackEndsAt();
@@ -911,6 +974,30 @@ export class LiveCallController {
       else setTimeout(check, GOODBYE_POLL_MS);
     };
     setTimeout(check, GOODBYE_POLL_MS);
+  }
+
+  // Nobody is talking or waiting for an answer: no request is running, no
+  // answer is about to be said, the receptionist's speech has played out, and
+  // both sides have been quiet a moment, longer after the caller.
+  private atPause(now: number): boolean {
+    if (this.runningDelegations > 0) return false;
+    if (this.lastAnswerSentAt !== undefined && this.lastAnswerSentAt > this.lastSpeechAt && now - this.lastAnswerSentAt <= GOODBYE_START_MS) return false;
+    const quietMs = Math.min(now - this.lastSpeechAt, now - this.playbackEndsAt(), now - this.lastCallerAt);
+    return quietMs >= (this.lastSpeechAt >= this.lastCallerAt ? GOODBYE_QUIET_MS : CALLER_PAUSE_MS);
+  }
+
+  // Runs `then` with how long it waited, at the next pause in the
+  // conversation or after `maxWaitMs`, unless the call finishes or
+  // `cancelled` says so first.
+  private whenPaused(maxWaitMs: number, then: (waitedMs: number) => void, cancelled: () => boolean = () => false): void {
+    const startedAt = performance.now();
+    const check = () => {
+      if (this.finished || cancelled()) return;
+      const now = performance.now();
+      if (this.atPause(now) || now - startedAt >= maxWaitMs) then(Math.round(now - startedAt));
+      else setTimeout(check, GOODBYE_POLL_MS);
+    };
+    check();
   }
 
   /** Ends the call once the receptionist has said goodbye. Nothing the caller says stops it. */
@@ -1022,17 +1109,60 @@ export class LiveCallController {
   }
 
   /**
-   * Ends a call that's still going: tells GPT-Live why and asks for a short
-   * goodbye, then ends the call once it has played. Resolves once OpenAI has
-   * finalized the call or the finalization timeout passed.
+   * Ends a call that's still going: at the next pause, tells GPT-Live why and
+   * asks for a short goodbye, then ends the call once it has played and the
+   * caller is quiet. Resolves once OpenAI has finalized the call or the
+   * finalization timeout passed.
    */
   wrapUp(reason: LiveCallWrapUp): Promise<void> {
     if (!this.ending && !this.finished) {
       this.ending = true;
-      this.send({ type: "session.instructions.append", delegation_id: null, content: WRAP_UP[reason], event_id: `wrap_up_${reason}` }, { kind: "wrap_up" });
-      this.afterSpeech(() => this.endSession(), () => this.wrapUpAckedAt);
+      const wrapUp: WrapUp = { reason, requestedAt: performance.now(), summary: { reason, commands: 0, spoken: false } };
+      this.wrappingUp = wrapUp;
+      this.whenPaused(WRAP_UP_PAUSE_WAIT_MS, (waitedMs) => {
+        wrapUp.summary.pauseWaitMs = waitedMs;
+        this.sendGoodbye(wrapUp);
+        setTimeout(() => this.hangUpAfterGoodbye(wrapUp), GOODBYE_POLL_MS);
+      });
     }
     return this.whenFinished;
+  }
+
+  private sendGoodbye(wrapUp: WrapUp): void {
+    const command = ++wrapUp.summary.commands;
+    wrapUp.eventId = command === 1 ? `wrap_up_${wrapUp.reason}` : `wrap_up_${wrapUp.reason}_${command}`;
+    wrapUp.sentAt = performance.now();
+    wrapUp.ackedAt = undefined;
+    this.send({ type: "session.instructions.append", delegation_id: null, content: WRAP_UP[wrapUp.reason], event_id: wrapUp.eventId }, { kind: "wrap_up" });
+  }
+
+  // Hangs up once the goodbye has played and the caller is quiet. Speech
+  // counts from OpenAI's acknowledgment of the command, so words already
+  // under way when it went out aren't taken for the goodbye. GPT-Live waits
+  // for a caller who is talking, so the wait for the goodbye runs from when
+  // they stop; a goodbye still unspoken then is asked for again.
+  private hangUpAfterGoodbye(wrapUp: WrapUp): void {
+    if (this.finished) return;
+    const now = performance.now();
+    const hangUp = (how: NonNullable<LiveCallWrapUpSummary["hangup"]>) => {
+      wrapUp.summary.hangup = how;
+      this.endSession();
+    };
+    if (now - wrapUp.requestedAt >= WRAP_UP_GOODBYE_MAX_MS) return hangUp("timed_out");
+    const sentAt = wrapUp.sentAt!;
+    if (wrapUp.ackedAt !== undefined || now - sentAt >= WRAP_UP_ACK_WAIT_MS) {
+      const from = Math.max(wrapUp.ackedAt ?? sentAt, this.lastAnswerSentAt ?? 0);
+      const spoke = this.lastSpeechAt >= from;
+      if (spoke) wrapUp.summary.spoken = true;
+      const answered = this.runningDelegations === 0;
+      const playedOut = spoke && now - this.lastSpeechAt > GOODBYE_QUIET_MS && now > this.playbackEndsAt();
+      if (answered && playedOut && now - this.lastCallerAt > GOODBYE_QUIET_MS) return hangUp("goodbye_played");
+      if (answered && !spoke && now - Math.max(from, this.lastCallerAt) > GOODBYE_START_MS) {
+        if (wrapUp.summary.commands >= WRAP_UP_COMMANDS) return hangUp("silent");
+        this.sendGoodbye(wrapUp);
+      }
+    }
+    setTimeout(() => this.hangUpAfterGoodbye(wrapUp), GOODBYE_POLL_MS);
   }
 
   /**
@@ -1263,6 +1393,8 @@ export class LiveCallController {
     // The spoken transcript can lag or omit earlier answers, so list them
     // explicitly; otherwise the agent re-answers requests it already handled.
     const earlier = this.delegations.filter((item) => !item.failed && !item.superseded && !item.endedCall).map((item) => `- ${item.answer}`);
+    // GPT-Live was asked for its goodbye, and the call ends within seconds.
+    const ending = this.wrappingUp?.summary.commands ? this.wrappingUp.reason : undefined;
     return [
       `Conversation so far:\n${this.conversationText()}`,
       // The delegation event carries no request text, so a late attach leaves
@@ -1274,6 +1406,7 @@ export class LiveCallController {
       this.latestPasscode ? `Keypad PIN check in this call. The caller types the PIN on the keypad, so it isn't in the conversation:\n${this.latestPasscode}` : "",
       this.unheardResults.length ? `Results of earlier requests the caller hasn't heard, because they asked something else first. Include them if they still matter:\n${this.unheardResults.map((result) => `- ${result}`).join("\n")}` : "",
       "The voice model handed you the caller's most recent request. Handle that request; earlier requests are already answered. Return the relevant facts, the request's current status, and the next step.",
+      ending ? `${WRAP_UP_FACT[ending]} Don't start anything new, and say in your answer that the call is ending now.` : "",
     ].filter(Boolean).join("\n\n");
   }
 
@@ -1473,7 +1606,7 @@ export class LiveCallController {
     // never heard from the session leaves the decision to its worker.
     const leaveSession = detached || (this.options.firstEventTimeoutMs !== undefined && !this.sessionAlive);
     if (!sessionClosed && !this.finalizeTimer && !leaveSession) this.endWithoutSideband();
-    for (const timer of [this.silenceTimer, this.durationTimer, this.topUpTimer, this.greetingTimer, this.finalizeTimer, this.firstEventTimer, this.transferTimer, this.passcode?.timer]) clearTimeout(timer);
+    for (const timer of [this.silenceTimer, this.durationTimer, this.topUpTimer, this.limitWarningTimer, this.greetingTimer, this.finalizeTimer, this.firstEventTimer, this.transferTimer, this.passcode?.timer]) clearTimeout(timer);
     this.passcode = undefined;
     this.abort.abort();
     this.socket?.close({ code: 1000, reason: "session finished" });
@@ -1501,6 +1634,8 @@ export class LiveCallController {
       },
       lateAttach: this.lateAttach,
       ...(this.firstEventMs !== undefined ? { firstEventMs: this.firstEventMs } : {}),
+      ...(this.limitWarningMs !== undefined ? { limitWarningMs: this.limitWarningMs } : {}),
+      ...(this.wrappingUp ? { wrapUp: { ...this.wrappingUp.summary } } : {}),
     });
     this.resolveFinished();
   }

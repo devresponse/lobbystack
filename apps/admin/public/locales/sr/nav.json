@@ -25,6 +25,7 @@
     "account": "Nalog",
     "toggleTheme": "Promeni temu",
     "signOut": "Odjavi se",
+    "version": "verzija: {{commit}}",
     "createBusiness": "Kreiraj firmu",
     "setupGuide": {
       "title": "Prvi koraci",

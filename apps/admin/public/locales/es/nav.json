@@ -25,6 +25,7 @@
     "account": "Cuenta",
     "toggleTheme": "Cambiar tema",
     "signOut": "Cerrar sesión",
+    "version": "versión: {{commit}}",
     "createBusiness": "Crear negocio",
     "setupGuide": {
       "title": "Primeros pasos",

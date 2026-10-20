@@ -9,7 +9,7 @@ import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 const route = vi.hoisted(() => ({ pathname: "/", router: { push: vi.fn(), refresh: vi.fn(), replace: vi.fn() } }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => ({ track: vi.fn(), identify: vi.fn(), reset: vi.fn(), setOptOut: vi.fn(), setSensitiveRoute: vi.fn() }) }));
 vi.mock("next/navigation", () => ({ usePathname: () => route.pathname, useRouter: () => route.router }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, values?: { commit?: string }) => values?.commit ? `${key} ${values.commit}` : key }) }));
 vi.mock("./live-upgrade-plan-provider", () => ({ LiveUpgradePlanProvider: ({ children }: { children: ReactNode }) => <UpgradePlanDialogProvider onOpen={vi.fn()}>{children}</UpgradePlanDialogProvider> }));
 vi.mock("./dashboard-utility-bar", () => ({ DashboardUtilityBar: () => null }));
 vi.mock("./nav-user", () => ({ NavUser: () => null }));
@@ -19,7 +19,7 @@ beforeEach(() => {
   // useIsMobile caches its MediaQueryList, so `matches` follows innerWidth like a real one.
   vi.stubGlobal("matchMedia", vi.fn(query => ({ get matches() { return query === "(max-width: 767px)" && window.innerWidth < 768; }, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
-afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.clearAllMocks(); });
 function setup(role = "business_owner") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Tenant name", active: true, role }] });
@@ -71,5 +71,19 @@ describe("original shared navigation", () => {
       view.navigate(href!);
       await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     }
+  });
+});
+describe("build version", () => {
+  it("shows the build's commit as the last line of the sidebar footer, under the account menu", () => {
+    vi.stubEnv("NEXT_PUBLIC_DISPLAY_VERSION", "52bcf45");
+    const view = setup();
+    const line = view.container.querySelector('[data-slot="sidebar-footer"]')?.lastElementChild;
+    expect(line?.textContent).toBe("sidebar.version 52bcf45");
+    expect(line?.className).toContain("group-data-[collapsible=icon]:hidden");
+  });
+  it("leaves the line out when the build named no version", () => {
+    vi.stubEnv("NEXT_PUBLIC_DISPLAY_VERSION", "");
+    setup();
+    expect(screen.queryByText(/sidebar\.version/)).toBeNull();
   });
 });

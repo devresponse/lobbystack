@@ -1,15 +1,26 @@
 import type { NextConfig } from "next";
 import { withPostHogConfig } from "@posthog/nextjs-config";
 
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
 
 import { publicAssetVersion } from "./asset-version";
-import { releaseVersion } from "./src/lib/release-version";
+import { displayVersion, releaseVersion } from "./src/lib/release-version";
 import { brandLogoSecurityHeaders, embeddableSecurityHeaders, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
 // One release identifies the build everywhere: browser error reports, the source
 // maps uploaded to PostHog, and the deployment ID below.
 const serviceVersion = releaseVersion();
+
+// The commit of the checkout being built, for a build that Railway or the image
+// workflow did not name. Docker builds leave .git out and find none.
+function checkoutCommit(): string | undefined {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 5000 });
+  } catch {
+    return undefined;
+  }
+}
 
 const nextConfig: NextConfig = {
   // PostHog's source map step writes the release ID into each JS chunk after
@@ -30,6 +41,9 @@ const nextConfig: NextConfig = {
   cacheMaxMemorySize: 0,
   env: {
     NEXT_PUBLIC_SERVICE_VERSION: serviceVersion,
+    // The "version: <commit>" line under the sidebar's account menu, so anyone
+    // signed in can tell which code a deployment runs.
+    NEXT_PUBLIC_DISPLAY_VERSION: displayVersion(process.env, checkoutCommit),
     // Keys the immutable `?v=` asset URLs to the files' content, not to a
     // deployment variable that can stay unchanged across deploys.
     NEXT_PUBLIC_ASSET_VERSION: publicAssetVersion(resolve(process.cwd(), "public"), serviceVersion),

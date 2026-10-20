@@ -158,6 +158,7 @@ function ReplacementSidebar({ user }: Pick<DashboardShellProps, "user">) {
       <SidebarFooter>
         <DashboardSetupGuideCard onNavigate={() => { if (isMobile) setOpenMobile(false); }} />
         <UserMenu user={user} />
+        <BuildVersion />
       </SidebarFooter>
       <SidebarRail />
     </Sidebar>
@@ -206,4 +207,13 @@ function UserMenu({ user }: Pick<DashboardShellProps, "user">) {
   const billing = useQuery({ queryKey: ["billing", business?.businessId], enabled: Boolean(business?.businessId), queryFn: () => requestJson<{ account: { plan: string | null } | null; permissions: BillingPermissions; availableCheckoutPlans: Array<"starter" | "pro">; availableCheckoutIntervals: Record<"starter" | "pro", string[]> }>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`) });
   const showUpgradeToPro = billing.data?.permissions.hasCheckoutAccess === true && (billing.data.account?.plan ?? "free_cloud") === "free_cloud" && (billing.data.availableCheckoutPlans ?? []).some(plan => billing.data?.availableCheckoutIntervals[plan].length);
   return <NavUser user={user} onSignOut={() => void signOut()} onUpgradeToPro={openUpgradePlanDialog} showUpgradeToPro={showUpgradeToPro} />;
+}
+
+// The commit the build came from (next.config.ts), so anyone signed in can tell
+// which code a deployment runs. Hidden when the build named none.
+function BuildVersion() {
+  const { t } = useTranslation("nav");
+  const version = process.env.NEXT_PUBLIC_DISPLAY_VERSION;
+  if (!version) return null;
+  return <p className="-mt-1 truncate px-3 text-[10px] leading-4 text-muted-foreground/50 group-data-[collapsible=icon]:hidden">{t("sidebar.version", { commit: version })}</p>;
 }

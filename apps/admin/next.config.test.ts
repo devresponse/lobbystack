@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import type { NextConfig } from "next";
 import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
@@ -52,6 +53,26 @@ describe("admin build release", () => {
     const commitArg = buildStage.indexOf("ARG RAILWAY_GIT_COMMIT_SHA\n");
     expect(commitArg).toBeGreaterThan(-1);
     expect(commitArg).toBeLessThan(buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build"));
+  });
+});
+
+describe("admin build version line", () => {
+  it("shows the deployed commit, shortened, under the account menu", async () => {
+    const { config } = await loadConfig(RAILWAY_BUILD) as { config: NextConfig };
+    expect(config.env?.NEXT_PUBLIC_DISPLAY_VERSION).toBe("f7d9405");
+  });
+
+  it("shows the commit an image build passes as SERVICE_VERSION", async () => {
+    const config = await loadConfig({ SERVICE_VERSION: "52bcf4583e5b3c2b1f0d6a1e9a7c3d4b5e6f7a8b" }) as NextConfig;
+    expect(config.env?.NEXT_PUBLIC_DISPLAY_VERSION).toBe("52bcf45");
+    const buildStage = dockerBuildStage();
+    expect(buildStage.indexOf("ARG SERVICE_VERSION=")).toBeLessThan(buildStage.indexOf("RUN pnpm --filter @lobbystack/admin... build"));
+  });
+
+  it("shows the checkout's commit for a local build", async () => {
+    const config = await loadConfig({}) as NextConfig;
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    expect(config.env?.NEXT_PUBLIC_DISPLAY_VERSION).toBe(head.slice(0, 7));
   });
 });
 

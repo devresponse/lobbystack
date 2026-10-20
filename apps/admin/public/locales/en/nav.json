@@ -25,6 +25,7 @@
     "account": "Account",
     "toggleTheme": "Toggle theme",
     "signOut": "Sign out",
+    "version": "version: {{commit}}",
     "createBusiness": "Create Business",
     "setupGuide": {
       "title": "Getting started",

@@ -2379,6 +2379,345 @@
         }
       }
     },
+    "/billing/catalog": {
+      "get": {
+        "operationId": "getBillingCatalog",
+        "summary": "Get the billing catalog",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices, the file they came from and whether it matches the deployed code. Empty until the first apply. Checkout and limits don't read it yet.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCatalog"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/catalog/runs": {
+      "post": {
+        "operationId": "applyBillingCatalog",
+        "summary": "Apply a billing.json",
+        "description": "Operator platform keys only. Writes the file's plans and prices in one transaction and records the run. Plans and prices left out of the file are retired, never deleted. Nothing in Polar changes. With dry_run true it changes nothing, stores no key and answers 200 with what the apply would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingCatalogApply"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCatalogRun"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listBillingCatalogRuns",
+        "summary": "List billing runs",
+        "description": "Operator platform keys only. Every run, newest first, with the rows it changed.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "catalog, polar or verify. Every kind when left out.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "catalog",
+                "polar",
+                "verify"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BillingCatalogRun"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/phone-numbers": {
       "get": {
         "operationId": "listPhoneNumbers",
@@ -11888,6 +12227,10 @@
                     },
                     "message": {
                       "type": "string"
+                    },
+                    "code": {
+                      "description": "Why, where an error has more than one reason, such as each refusal of a billing catalog apply.",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -14357,6 +14700,1857 @@
           "plan"
         ],
         "additionalProperties": false
+      },
+      "BillingCatalog": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string",
+            "description": "The brand this deployment shows."
+          },
+          "code_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 as 64 lowercase hex characters."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The hash of the brand's billing.json in the running code. Null when it has none."
+          },
+          "hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 as 64 lowercase hex characters."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest catalog run's hash. Null before the first apply."
+          },
+          "matches_code": {
+            "type": "boolean",
+            "description": "Both hashes are set and equal. false after a deploy that changed the file means it's time to apply it."
+          },
+          "last_run": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Null for a dry run, which stores nothing."
+                  },
+                  "kind": {
+                    "type": "string",
+                    "enum": [
+                      "catalog",
+                      "polar",
+                      "verify"
+                    ],
+                    "description": "catalog: an apply. polar and verify come with Polar seeding."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "applied",
+                      "unchanged",
+                      "failed",
+                      "passed",
+                      "drift",
+                      "preview"
+                    ],
+                    "description": "applied or unchanged for an apply; preview for a dry run."
+                  },
+                  "brand": {
+                    "type": "string"
+                  },
+                  "ver": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "description": "The file's version."
+                  },
+                  "hash": {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 of the normalized file."
+                  },
+                  "prev_hash": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "SHA-256 as 64 lowercase hex characters."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The previous catalog run's hash. Null on the first."
+                  },
+                  "code_hash": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "SHA-256 as 64 lowercase hex characters."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The file hash the running code was built with. Null when the brand has no billing.json in it."
+                  },
+                  "changes": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "table": {
+                          "type": "string",
+                          "enum": [
+                            "billing_plans",
+                            "billing_prices"
+                          ]
+                        },
+                        "key": {
+                          "type": "string",
+                          "description": "A plan's code, or code/period/currency for a price."
+                        },
+                        "action": {
+                          "type": "string",
+                          "enum": [
+                            "insert",
+                            "update",
+                            "retire",
+                            "restore"
+                          ]
+                        },
+                        "fields": {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "from": {},
+                              "to": {}
+                            },
+                            "required": [
+                              "from",
+                              "to"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "description": "For update and restore, each changed column with its old and new value. Empty otherwise."
+                        },
+                        "lowers_allowance": {
+                          "type": "boolean",
+                          "description": "An included amount, the storage limit or the number count goes down."
+                        },
+                        "raises_price": {
+                          "type": "boolean",
+                          "description": "A price or an overage rate goes up."
+                        }
+                      },
+                      "required": [
+                        "table",
+                        "key",
+                        "action",
+                        "fields",
+                        "lowers_allowance",
+                        "raises_price"
+                      ],
+                      "additionalProperties": false,
+                      "description": "One row an apply writes."
+                    },
+                    "description": "Every row written, plans then prices, each by key."
+                  },
+                  "problems": {
+                    "type": "array",
+                    "items": {},
+                    "description": "Drift a verify found. Always empty for an apply."
+                  },
+                  "blocked_by": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "brand_mismatch",
+                            "file_not_deployed",
+                            "catalog_changed",
+                            "plan_frozen",
+                            "currency_locked",
+                            "code_taken"
+                          ]
+                        },
+                        "message": {
+                          "type": "string"
+                        },
+                        "path": {
+                          "type": "string",
+                          "description": "The request field it is about, such as billing_file.plans.pro-launch."
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "path"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Something that stops an apply."
+                    },
+                    "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
+                  },
+                  "polar_env": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "sandbox",
+                          "production"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "polar_org": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "key_id": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The operator platform key that asked."
+                  },
+                  "partner": {
+                    "description": "That key's partner.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "started_at": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "ISO 8601 timestamp in UTC."
+                  },
+                  "ended_at": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "status",
+                  "brand",
+                  "ver",
+                  "hash",
+                  "prev_hash",
+                  "code_hash",
+                  "changes",
+                  "problems",
+                  "blocked_by",
+                  "polar_env",
+                  "polar_org",
+                  "key_id",
+                  "partner",
+                  "started_at",
+                  "ended_at"
+                ],
+                "additionalProperties": false,
+                "description": "One apply of a billing.json, or its dry run."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "profile": {
+            "anyOf": [
+              {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The latest applied file, normalized, in its own camel case."
+          },
+          "currency": {
+            "description": "The live prices' currency.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "The plan's permanent code, its key in billing.json."
+                },
+                "tier": {
+                  "type": "string",
+                  "enum": [
+                    "free_cloud",
+                    "starter",
+                    "pro",
+                    "enterprise"
+                  ],
+                  "description": "The built-in tier the code treats it as. Equals code for the four standard plans."
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "active",
+                    "retired"
+                  ],
+                  "description": "draft until Polar can sell it as defined, active, or retired."
+                },
+                "access": {
+                  "type": "string",
+                  "enum": [
+                    "public",
+                    "code",
+                    "hidden"
+                  ],
+                  "description": "public, code (promo code only) or hidden (operator only)."
+                },
+                "sold": {
+                  "type": "boolean"
+                },
+                "custom": {
+                  "type": "boolean"
+                },
+                "overage": {
+                  "type": "boolean"
+                },
+                "src": {
+                  "type": "string",
+                  "enum": [
+                    "file",
+                    "api"
+                  ]
+                },
+                "names": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Display names by language. Null for standard plans."
+                },
+                "voice_sec": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Voice seconds included a month."
+                },
+                "sms_seg": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Alert SMS segments included a month."
+                },
+                "calls_out": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Outbound call attempts included a month."
+                },
+                "chat_units": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Website chat AI units included a month."
+                },
+                "kb_bytes": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Knowledge storage limit in bytes."
+                },
+                "numbers": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Business phone numbers included."
+                },
+                "voice_rate": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Overage cents per voice minute."
+                },
+                "sms_rate": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Overage cents per alert SMS segment."
+                },
+                "call_rate": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Overage cents per outbound call attempt."
+                },
+                "months": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "How many months the plan lasts; null means no end."
+                },
+                "ends": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "enum": [
+                        "tier",
+                        "keep",
+                        "cancel"
+                      ]
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "offer_end": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "discount": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {}
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "polar_disc": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "SHA-256 as 64 lowercase hex characters."
+                },
+                "frozen_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "sort": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "retired_at": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "format": "date-time",
+                      "description": "ISO 8601 timestamp in UTC."
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "created_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "updated_at": {
+                  "type": "string",
+                  "format": "date-time",
+                  "description": "ISO 8601 timestamp in UTC."
+                },
+                "prices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      },
+                      "period": {
+                        "type": "string",
+                        "enum": [
+                          "monthly",
+                          "annual"
+                        ]
+                      },
+                      "currency": {
+                        "type": "string"
+                      },
+                      "cents": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The price for one period."
+                      },
+                      "per_month": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "cents for monthly, cents / 12 rounded down for annual."
+                      },
+                      "polar_id": {
+                        "description": "The Polar product that sells it, once Polar is seeded.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "retired_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "When it stopped being sold. Null for a live price."
+                      },
+                      "created_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      "updated_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "period",
+                      "currency",
+                      "cents",
+                      "per_month",
+                      "polar_id",
+                      "retired_at",
+                      "created_at",
+                      "updated_at"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Every price of the plan, live ones first."
+                }
+              },
+              "required": [
+                "code",
+                "tier",
+                "status",
+                "access",
+                "sold",
+                "custom",
+                "overage",
+                "src",
+                "names",
+                "voice_sec",
+                "sms_seg",
+                "calls_out",
+                "chat_units",
+                "kb_bytes",
+                "numbers",
+                "voice_rate",
+                "sms_rate",
+                "call_rate",
+                "months",
+                "ends",
+                "offer_end",
+                "discount",
+                "polar_disc",
+                "terms_hash",
+                "frozen_at",
+                "sort",
+                "retired_at",
+                "created_at",
+                "updated_at",
+                "prices"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Every plan, whatever its access or status, by sort then code."
+          }
+        },
+        "required": [
+          "brand",
+          "code_hash",
+          "hash",
+          "matches_code",
+          "last_run",
+          "profile",
+          "currency",
+          "plans"
+        ],
+        "additionalProperties": false,
+        "description": "The plans and prices this deployment holds. Checkout and limits don't read them yet."
+      },
+      "BillingCatalogApply": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The brand whose file this is. It must be the brand this deployment shows."
+          },
+          "billing_file": {
+            "type": "object",
+            "properties": {
+              "$schema": {
+                "type": "string"
+              },
+              "version": {
+                "type": "number",
+                "const": 1
+              },
+              "currency": {
+                "type": "string",
+                "pattern": "^[a-z]{3}$"
+              },
+              "polar": {
+                "type": "object",
+                "properties": {
+                  "allowMultipleSubscriptions": {
+                    "type": "boolean"
+                  },
+                  "portalPlanChanges": {
+                    "type": "boolean"
+                  },
+                  "upgradeProration": {
+                    "type": "string",
+                    "enum": [
+                      "invoice",
+                      "prorate",
+                      "next_period",
+                      "reset"
+                    ]
+                  },
+                  "downgradeProration": {
+                    "type": "string",
+                    "enum": [
+                      "invoice",
+                      "prorate",
+                      "next_period",
+                      "reset"
+                    ]
+                  }
+                },
+                "required": [
+                  "allowMultipleSubscriptions",
+                  "portalPlanChanges",
+                  "upgradeProration",
+                  "downgradeProration"
+                ],
+                "additionalProperties": false
+              },
+              "plans": {
+                "type": "object",
+                "properties": {
+                  "free_cloud": {
+                    "type": "object",
+                    "properties": {
+                      "sold": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "included": {
+                        "type": "object",
+                        "properties": {
+                          "voiceMinutes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000
+                          },
+                          "alertSmsSegments": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000
+                          },
+                          "outboundCallAttempts": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 100000
+                          },
+                          "chatAiUnits": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1000000
+                          }
+                        },
+                        "required": [
+                          "voiceMinutes",
+                          "alertSmsSegments",
+                          "outboundCallAttempts",
+                          "chatAiUnits"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "limits": {
+                        "type": "object",
+                        "properties": {
+                          "knowledgeStorageMb": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 1024
+                          },
+                          "businessNumbers": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 20
+                          }
+                        },
+                        "required": [
+                          "knowledgeStorageMb",
+                          "businessNumbers"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "sold",
+                      "included",
+                      "limits"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "starter": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "sold": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "prices": {
+                            "type": "object",
+                            "properties": {
+                              "monthlyCents": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10000000
+                              },
+                              "annualCents": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 120000000
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "included": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinutes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "alertSmsSegments": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "outboundCallAttempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "chatAiUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              }
+                            },
+                            "required": [
+                              "voiceMinutes",
+                              "alertSmsSegments",
+                              "outboundCallAttempts",
+                              "chatAiUnits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "knowledgeStorageMb": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1024
+                              },
+                              "businessNumbers": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 20
+                              }
+                            },
+                            "required": [
+                              "knowledgeStorageMb",
+                              "businessNumbers"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "overageCents": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinute": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "alertSmsSegment": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "outboundCallAttempt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              }
+                            },
+                            "required": [
+                              "voiceMinute",
+                              "alertSmsSegment",
+                              "outboundCallAttempt"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "sold",
+                          "prices",
+                          "included",
+                          "limits",
+                          "overageCents"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "sold": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "included": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinutes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "alertSmsSegments": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "outboundCallAttempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "chatAiUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              }
+                            },
+                            "required": [
+                              "voiceMinutes",
+                              "alertSmsSegments",
+                              "outboundCallAttempts",
+                              "chatAiUnits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "knowledgeStorageMb": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1024
+                              },
+                              "businessNumbers": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 20
+                              }
+                            },
+                            "required": [
+                              "knowledgeStorageMb",
+                              "businessNumbers"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "overageCents": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinute": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "alertSmsSegment": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "outboundCallAttempt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              }
+                            },
+                            "required": [
+                              "voiceMinute",
+                              "alertSmsSegment",
+                              "outboundCallAttempt"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "sold",
+                          "included",
+                          "limits",
+                          "overageCents"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "pro": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "sold": {
+                            "type": "boolean",
+                            "const": true
+                          },
+                          "prices": {
+                            "type": "object",
+                            "properties": {
+                              "monthlyCents": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10000000
+                              },
+                              "annualCents": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 120000000
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "included": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinutes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "alertSmsSegments": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "outboundCallAttempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "chatAiUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              }
+                            },
+                            "required": [
+                              "voiceMinutes",
+                              "alertSmsSegments",
+                              "outboundCallAttempts",
+                              "chatAiUnits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "knowledgeStorageMb": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1024
+                              },
+                              "businessNumbers": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 20
+                              }
+                            },
+                            "required": [
+                              "knowledgeStorageMb",
+                              "businessNumbers"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "overageCents": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinute": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "alertSmsSegment": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "outboundCallAttempt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              }
+                            },
+                            "required": [
+                              "voiceMinute",
+                              "alertSmsSegment",
+                              "outboundCallAttempt"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "sold",
+                          "prices",
+                          "included",
+                          "limits",
+                          "overageCents"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "sold": {
+                            "type": "boolean",
+                            "const": false
+                          },
+                          "included": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinutes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "alertSmsSegments": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "outboundCallAttempts": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 100000
+                              },
+                              "chatAiUnits": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000000
+                              }
+                            },
+                            "required": [
+                              "voiceMinutes",
+                              "alertSmsSegments",
+                              "outboundCallAttempts",
+                              "chatAiUnits"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "limits": {
+                            "type": "object",
+                            "properties": {
+                              "knowledgeStorageMb": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1024
+                              },
+                              "businessNumbers": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 20
+                              }
+                            },
+                            "required": [
+                              "knowledgeStorageMb",
+                              "businessNumbers"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "overageCents": {
+                            "type": "object",
+                            "properties": {
+                              "voiceMinute": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "alertSmsSegment": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              },
+                              "outboundCallAttempt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 1000
+                              }
+                            },
+                            "required": [
+                              "voiceMinute",
+                              "alertSmsSegment",
+                              "outboundCallAttempt"
+                            ],
+                            "additionalProperties": false
+                          }
+                        },
+                        "required": [
+                          "sold",
+                          "included",
+                          "limits",
+                          "overageCents"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "enterprise": {
+                    "type": "object",
+                    "properties": {
+                      "sold": {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      "custom": {
+                        "type": "boolean",
+                        "const": true
+                      }
+                    },
+                    "required": [
+                      "sold",
+                      "custom"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "required": [
+                  "free_cloud",
+                  "starter",
+                  "pro",
+                  "enterprise"
+                ],
+                "additionalProperties": {
+                  "type": "object",
+                  "properties": {
+                    "tier": {
+                      "type": "string",
+                      "enum": [
+                        "starter",
+                        "pro"
+                      ]
+                    },
+                    "access": {
+                      "type": "string",
+                      "enum": [
+                        "public",
+                        "code",
+                        "hidden"
+                      ]
+                    },
+                    "names": {
+                      "type": "object",
+                      "properties": {
+                        "en": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "fr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "es": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        },
+                        "sr": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 60
+                        }
+                      },
+                      "required": [
+                        "en",
+                        "fr",
+                        "es",
+                        "sr"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "sold": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "prices": {
+                      "type": "object",
+                      "properties": {
+                        "monthlyCents": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 10000000
+                        },
+                        "annualCents": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 120000000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "included": {
+                      "type": "object",
+                      "properties": {
+                        "voiceMinutes": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "alertSmsSegments": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "outboundCallAttempts": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 100000
+                        },
+                        "chatAiUnits": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "limits": {
+                      "type": "object",
+                      "properties": {
+                        "knowledgeStorageMb": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1024
+                        },
+                        "businessNumbers": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 20
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "overageCents": {
+                      "type": "object",
+                      "properties": {
+                        "voiceMinute": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
+                        "alertSmsSegment": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        },
+                        "outboundCallAttempt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 1000
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "months": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 36
+                    },
+                    "endsWith": {
+                      "type": "string",
+                      "enum": [
+                        "tier",
+                        "keep",
+                        "cancel"
+                      ]
+                    },
+                    "offerEndsAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "discount": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "percentage"
+                            },
+                            "basisPoints": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 10000
+                            },
+                            "duration": {
+                              "type": "string",
+                              "enum": [
+                                "once",
+                                "forever",
+                                "repeating"
+                              ]
+                            },
+                            "durationInMonths": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 36
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "basisPoints",
+                            "duration"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "fixed"
+                            },
+                            "amountCents": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 10000000
+                            },
+                            "duration": {
+                              "type": "string",
+                              "enum": [
+                                "once",
+                                "forever",
+                                "repeating"
+                              ]
+                            },
+                            "durationInMonths": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 36
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "amountCents",
+                            "duration"
+                          ],
+                          "additionalProperties": false
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "tier",
+                    "access",
+                    "names",
+                    "sold",
+                    "prices"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "version",
+              "currency",
+              "polar",
+              "plans"
+            ],
+            "additionalProperties": false,
+            "description": "The contents of brands/<brand>/billing.json, as written."
+          },
+          "replaces_hash": {
+            "description": "Apply only if the latest catalog run has this hash, so an apply by someone else in between stops this one. null: only if nothing was applied yet.",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 as 64 lowercase hex characters."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "allow_undeployed": {
+            "description": "true applies a file whose hash differs from the one the running code was built with, as on a sandbox. Defaults to false.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "description": "true shows what the apply would change and anything that would stop it, and changes nothing. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "brand",
+          "billing_file"
+        ],
+        "additionalProperties": false
+      },
+      "BillingCatalogRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null for a dry run, which stores nothing."
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "polar",
+              "verify"
+            ],
+            "description": "catalog: an apply. polar and verify come with Polar seeding."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "unchanged",
+              "failed",
+              "passed",
+              "drift",
+              "preview"
+            ],
+            "description": "applied or unchanged for an apply; preview for a dry run."
+          },
+          "brand": {
+            "type": "string"
+          },
+          "ver": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The file's version."
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "SHA-256 of the normalized file."
+          },
+          "prev_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 as 64 lowercase hex characters."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The previous catalog run's hash. Null on the first."
+          },
+          "code_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "SHA-256 as 64 lowercase hex characters."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The file hash the running code was built with. Null when the brand has no billing.json in it."
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "table": {
+                  "type": "string",
+                  "enum": [
+                    "billing_plans",
+                    "billing_prices"
+                  ]
+                },
+                "key": {
+                  "type": "string",
+                  "description": "A plan's code, or code/period/currency for a price."
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "insert",
+                    "update",
+                    "retire",
+                    "restore"
+                  ]
+                },
+                "fields": {
+                  "type": "object",
+                  "propertyNames": {
+                    "type": "string"
+                  },
+                  "additionalProperties": {
+                    "type": "object",
+                    "properties": {
+                      "from": {},
+                      "to": {}
+                    },
+                    "required": [
+                      "from",
+                      "to"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "For update and restore, each changed column with its old and new value. Empty otherwise."
+                },
+                "lowers_allowance": {
+                  "type": "boolean",
+                  "description": "An included amount, the storage limit or the number count goes down."
+                },
+                "raises_price": {
+                  "type": "boolean",
+                  "description": "A price or an overage rate goes up."
+                }
+              },
+              "required": [
+                "table",
+                "key",
+                "action",
+                "fields",
+                "lowers_allowance",
+                "raises_price"
+              ],
+              "additionalProperties": false,
+              "description": "One row an apply writes."
+            },
+            "description": "Every row written, plans then prices, each by key."
+          },
+          "problems": {
+            "type": "array",
+            "items": {},
+            "description": "Drift a verify found. Always empty for an apply."
+          },
+          "blocked_by": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "brand_mismatch",
+                    "file_not_deployed",
+                    "catalog_changed",
+                    "plan_frozen",
+                    "currency_locked",
+                    "code_taken"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "The request field it is about, such as billing_file.plans.pro-launch."
+                }
+              },
+              "required": [
+                "code",
+                "message",
+                "path"
+              ],
+              "additionalProperties": false,
+              "description": "Something that stops an apply."
+            },
+            "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
+          },
+          "polar_env": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "production"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "polar_org": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "key_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The operator platform key that asked."
+          },
+          "partner": {
+            "description": "That key's partner.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "brand",
+          "ver",
+          "hash",
+          "prev_hash",
+          "code_hash",
+          "changes",
+          "problems",
+          "blocked_by",
+          "polar_env",
+          "polar_org",
+          "key_id",
+          "partner",
+          "started_at",
+          "ended_at"
+        ],
+        "additionalProperties": false,
+        "description": "One apply of a billing.json, or its dry run."
       },
       "WidgetKey": {
         "type": "object",

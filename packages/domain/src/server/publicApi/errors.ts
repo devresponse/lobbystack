@@ -1,14 +1,17 @@
 import type { ApiErrorCode } from "@lobbystack/shared";
 
+/** One detail of an error: the field it is about and what is wrong, and, where an error has more than one reason, which. */
+export type PublicApiErrorDetail = { path: string; message: string; code?: string };
+
 /** An error with a stable public code. The v1 REST layer turns it into `{ error: { code, message } }`. */
 export class PublicApiError extends Error {
   readonly status: number;
   readonly code: ApiErrorCode;
-  readonly details: Array<{ path: string; message: string }> | undefined;
+  readonly details: PublicApiErrorDetail[] | undefined;
   /** Response headers, such as Retry-After on a 429. */
   readonly headers: Record<string, string> | undefined;
 
-  constructor(status: number, code: ApiErrorCode, message: string, details?: Array<{ path: string; message: string }>, headers?: Record<string, string>) {
+  constructor(status: number, code: ApiErrorCode, message: string, details?: PublicApiErrorDetail[], headers?: Record<string, string>) {
     super(message);
     this.name = "PublicApiError";
     this.status = status;

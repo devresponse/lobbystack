@@ -219,3 +219,62 @@ describe("public profile", () => {
     expect(api.sent).toHaveLength(1);
   });
 });
+
+describe("billing catalog", () => {
+  const brandFile = new URL("../../../brands/alloplace/billing.json", import.meta.url);
+  const hash = "39ad3052ec5281525db2009617afe71a8ea908973b0d29f3846ce16f86055acf";
+  const run = { id: "6a1f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", kind: "catalog", status: "applied", brand: "alloplace", ver: 1, hash, prev_hash: null, code_hash: hash, problems: [], blocked_by: [], polar_env: null, polar_org: null, key_id: "k", partner: "lobbystack", started_at: "2026-10-21T08:00:00.000Z", ended_at: "2026-10-21T08:00:00.100Z" };
+  const changes = [
+    { table: "billing_plans", key: "pro", action: "update", fields: { voice_sec: { from: 36000, to: 30000 } }, lowers_allowance: true, raises_price: false },
+    { table: "billing_prices", key: "pro/monthly/cad", action: "insert", fields: {}, lowers_allowance: false, raises_price: false },
+  ];
+
+  it("previews a billing.json from a file, sending dry_run and the brand, and shows what would change", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", prev_hash: "b".repeat(64), changes } } } });
+    const result = await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", `@${brandFile.pathname}`], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]!.body).toEqual({ brand: "alloplace", dry_run: true, billing_file: JSON.parse(await readFile(brandFile, "utf8")) });
+    expect(result.out).toContain("lowers an allowance");
+    expect(result.out).toContain("Applying would make these 2 changes. Nothing was written.");
+    expect(result.out).toContain(`--replaces-hash ${"b".repeat(64)}`);
+  });
+
+  it("lists every refusal a preview found", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { body: { data: { ...run, id: null, status: "preview", changes: [], blocked_by: [{ code: "file_not_deployed", message: "Deploy it first.", path: "billing_file" }] } } } });
+    const result = await runCli(["billing", "catalog-preview", "alloplace", "--billing-file", "{}"], { fetch: api.fetch });
+    expect(result.out).toBe("Applying would be refused, and nothing would change:\n  file_not_deployed (billing_file): Deploy it first.");
+  });
+
+  it("applies with an Idempotency-Key and a replaces hash, and says what it changed", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/catalog/runs": { status: 201, body: { data: { ...run, changes } } } });
+    const result = await runCli(["billing", "catalog-apply", "alloplace", "--billing-file", `@${brandFile.pathname}`, "--replaces-hash", "c".repeat(64), "--idempotency-key", "seed-1"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]).toMatchObject({ headers: { "idempotency-key": "seed-1" }, body: { brand: "alloplace", dry_run: false, replaces_hash: "c".repeat(64) } });
+    expect(result.out).toContain(`Applied 2 changes in run ${run.id}.`);
+    // One is made up when left out, so a retry after a timeout can't apply twice.
+    await runCli(["billing", "catalog-apply", "alloplace", "--billing-file", "{}"], { fetch: api.fetch });
+    expect(api.sent[1]!.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("shows the plans with their live prices, and whether the applied file is the deployed one", async () => {
+    const plan = (code: string, prices: unknown[]) => ({ code, tier: code, status: "active", access: "public", sold: true, prices });
+    const api = fakeApi({
+      "GET /api/v1/billing/catalog": [
+        { body: { data: { brand: "alloplace", code_hash: hash, hash, matches_code: true, last_run: run, plans: [plan("starter", [{ period: "monthly", currency: "cad", cents: 4900, retired_at: null }, { period: "annual", currency: "cad", cents: 49000, retired_at: null }, { period: "monthly", currency: "cad", cents: 3900, retired_at: "2026-10-20T00:00:00.000Z" }])] } } },
+        { body: { data: { brand: "alloplace", code_hash: hash, hash: null, matches_code: false, last_run: null, plans: [] } } },
+      ],
+    });
+    const shown = await runCli(["billing", "catalog"], { fetch: api.fetch });
+    expect(shown.out).toContain("49.00 CAD a month, 490.00 CAD a year");
+    expect(shown.out).not.toContain("39.00");
+    expect(shown.out).toContain("from file 39ad3052ec52, the file the running code was built with.");
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out).toBe("Nothing applied yet for alloplace. See what applying its file would change with lobbystack billing catalog-preview alloplace --billing-file @brands/alloplace/billing.json.");
+  });
+
+  it("lists runs of one kind", async () => {
+    const api = fakeApi({ "GET /api/v1/billing/catalog/runs": { body: { data: [{ ...run, changes }], next_cursor: null, has_more: false } } });
+    const result = await runCli(["billing", "catalog-runs", "--kind", "catalog"], { fetch: api.fetch });
+    expect(api.sent[0]!.query).toEqual({ kind: "catalog" });
+    expect(result.out).toContain(run.id);
+  });
+});

@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { apiOperations } from "@lobbystack/shared";
@@ -48,6 +48,9 @@ const domain = vi.hoisted(() => ({
   getCheckoutForApi: vi.fn(),
   setManagedPlanForApi: vi.fn(),
   endManagedPlanForApi: vi.fn(),
+  getBillingCatalogForApi: vi.fn(),
+  applyBillingCatalogForApi: vi.fn(),
+  listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   createRuleForApi: vi.fn(),
   updateRuleForApi: vi.fn(),
@@ -119,7 +122,7 @@ vi.mock("@lobbystack/domain", async () => ({
   ...domain,
 }));
 
-import { generatePlatformKey } from "@lobbystack/domain";
+import { PublicApiError, generatePlatformKey } from "@lobbystack/domain";
 
 import { verifyCalendarConnectLinkToken } from "../google-calendar-oauth";
 import { v1 } from "./routes";
@@ -589,6 +592,78 @@ describe("billing", () => {
     }
     expect(domain.setManagedPlanForApi).toHaveBeenCalledTimes(1);
     expect(domain.endManagedPlanForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets only an operator's platform key read and apply the billing catalog", async () => {
+    const billingFile = JSON.parse(readFileSync(new URL("../../../../../brands/alloplace/billing.json", import.meta.url), "utf8"));
+    const apply = (key: string, body: unknown, headers: Record<string, string> = {}) => v1.applyBillingCatalog(new Request("https://app.example.com/api/v1/billing/catalog/runs", { method: "POST", body: JSON.stringify(body), headers: { authorization: `Bearer ${key}`, ...headers } }));
+    const get = (key: string, path = "/billing/catalog") => new Request(`https://app.example.com/api/v1${path}`, { headers: { authorization: `Bearer ${key}` } });
+    const run = { id: "6a1f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", kind: "catalog", status: "applied", brand: "alloplace", ver: 1, hash: "a".repeat(64), prev_hash: null, code_hash: "a".repeat(64), changes: [], problems: [], blocked_by: [], polar_env: null, polar_org: null, key_id: "x", partner: "lobbystack", started_at: "2026-10-21T08:00:00.000Z", ended_at: "2026-10-21T08:00:00.100Z" };
+    // A per-business key, even with billing:manage, is refused: the catalog belongs to no one business.
+    expect((await v1.getBillingCatalog(call("/billing/catalog"))).status).toBe(403);
+    expect((await v1.applyBillingCatalog(call("/billing/catalog/runs", { method: "POST", body: JSON.stringify({ brand: "alloplace", billing_file: billingFile }), headers: { "Idempotency-Key": "k" } }))).status).toBe(403);
+    expect((await v1.listBillingCatalogRuns(call("/billing/catalog/runs"))).status).toBe(403);
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    const unscoped = generatePlatformKey({ name: "Onboarding", partner: "lobbystack", ownerEmail: "ops@example.com", access: "all", scopes: ["businesses:create"] });
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry, unscoped.entry]));
+    try {
+      // So is a partner's platform key, and an operator key without billing:manage.
+      const partnerGet = await v1.getBillingCatalog(get(partner.key));
+      expect(partnerGet.status).toBe(403);
+      expect(await partnerGet.json()).toMatchObject({ error: { code: "forbidden", message: expect.stringContaining("manage the billing catalog") } });
+      expect((await apply(partner.key, { brand: "alloplace", billing_file: billingFile }, { "Idempotency-Key": "k" })).status).toBe(403);
+      expect((await v1.listBillingCatalogRuns(get(partner.key, "/billing/catalog/runs"))).status).toBe(403);
+      const unscopedGet = await v1.getBillingCatalog(get(unscoped.key));
+      expect(unscopedGet.status).toBe(403);
+      expect(await unscopedGet.json()).toMatchObject({ error: { code: "insufficient_scope" } });
+      expect(domain.getBillingCatalogForApi).not.toHaveBeenCalled();
+      expect(domain.applyBillingCatalogForApi).not.toHaveBeenCalled();
+      expect(domain.listBillingCatalogRunsForApi).not.toHaveBeenCalled();
+
+      // The operator's key reads the catalog of the brand this deployment shows.
+      domain.getBillingCatalogForApi.mockResolvedValue({ brand: "lobbystack", plans: [] });
+      const catalog = await v1.getBillingCatalog(get(operator.key));
+      expect(catalog.status).toBe(200);
+      expect(await catalog.json()).toEqual({ data: { brand: "lobbystack", plans: [] } });
+      expect(domain.getBillingCatalogForApi).toHaveBeenCalledWith(expect.anything(), { deployment: { brand: expect.any(String) } });
+
+      // A dry run answers 200 and needs no key; the domain decides what a real apply without one gets.
+      domain.applyBillingCatalogForApi.mockResolvedValueOnce({ run: { ...run, id: null, status: "preview" }, replayed: false, status: 200 });
+      const preview = await apply(operator.key, { brand: "alloplace", billing_file: billingFile, dry_run: true });
+      expect(preview.status).toBe(200);
+      expect(await preview.json()).toMatchObject({ data: { id: null, status: "preview" } });
+      expect(domain.applyBillingCatalogForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ caller: { platformKeyId: operator.entry.id, partnerId: "lobbystack" }, idempotencyKey: null, body: expect.objectContaining({ brand: "alloplace", dry_run: true }) }));
+
+      domain.applyBillingCatalogForApi.mockResolvedValueOnce({ run, replayed: false, status: 201 });
+      const applied = await apply(operator.key, { brand: "alloplace", billing_file: billingFile }, { "Idempotency-Key": "seed-1" });
+      expect(applied.status).toBe(201);
+      expect(applied.headers.get("Idempotent-Replayed")).toBeNull();
+      expect(domain.applyBillingCatalogForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ idempotencyKey: "seed-1" }));
+      domain.applyBillingCatalogForApi.mockResolvedValueOnce({ run, replayed: true, status: 201 });
+      const replayed = await apply(operator.key, { brand: "alloplace", billing_file: billingFile }, { "Idempotency-Key": "seed-1" });
+      expect(replayed.status).toBe(201);
+      expect(replayed.headers.get("Idempotent-Replayed")).toBe("true");
+
+      // A refusal lists each reason with its code.
+      domain.applyBillingCatalogForApi.mockRejectedValueOnce(new PublicApiError(409, "conflict", "The billing.json can't be applied: brand_mismatch, plan_frozen.", [{ path: "brand", message: "Wrong brand.", code: "brand_mismatch" }, { path: "billing_file.plans.pro", message: "Frozen.", code: "plan_frozen" }]));
+      const refused = await apply(operator.key, { brand: "alloplace", billing_file: billingFile }, { "Idempotency-Key": "seed-2" });
+      expect(refused.status).toBe(409);
+      expect(await refused.json()).toMatchObject({ error: { code: "conflict", details: [{ path: "brand", code: "brand_mismatch" }, { path: "billing_file.plans.pro", code: "plan_frozen" }] } });
+
+      // A file that breaks the schema never reaches the domain, and names the field.
+      const calls = domain.applyBillingCatalogForApi.mock.calls.length;
+      const broken = await apply(operator.key, { brand: "alloplace", billing_file: { ...billingFile, plans: { ...billingFile.plans, Pro_Launch: { tier: "pro" } } } }, { "Idempotency-Key": "seed-3" });
+      expect(broken.status).toBe(400);
+      expect(JSON.stringify(await broken.json())).toContain("billing_file.plans");
+      expect((await apply(operator.key, { brand: "alloplace" }, { "Idempotency-Key": "seed-4" })).status).toBe(400);
+      expect(domain.applyBillingCatalogForApi.mock.calls.length).toBe(calls);
+
+      expect((await v1.listBillingCatalogRuns(get(operator.key, "/billing/catalog/runs?kind=catalog&limit=5"))).status).toBe(200);
+      expect(domain.listBillingCatalogRunsForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ kind: "catalog", limit: 5 }));
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("needs billing:manage", async () => {

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { billingPlanSlugs } from "../billing";
+import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { interfaceLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
@@ -52,7 +53,7 @@ export const apiErrorSchema = z.object({
   error: z.object({
     code: z.enum(apiErrorCodes),
     message: z.string(),
-    details: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
+    details: z.array(z.object({ path: z.string(), message: z.string(), code: z.string().optional().describe("Why, where an error has more than one reason, such as each refusal of a billing catalog apply.") })).optional(),
   }),
 });
 
@@ -211,6 +212,114 @@ export const apiCheckoutSchema = z.object({
 export const apiManagedPlanCreateSchema = z.strictObject({
   plan: z.literal("enterprise"),
 });
+
+// The billing catalog: every plan of a brand's billing.json, standard or not,
+// as migration 0108's tables hold it. The fields carry the columns' own names.
+
+const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/).describe("SHA-256 as 64 lowercase hex characters.");
+const nullableCount = z.number().int().nullable();
+
+export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken"] as const;
+export type BillingCatalogRefusalCode = (typeof billingCatalogRefusalCodes)[number];
+
+export const apiBillingCatalogApplySchema = z.strictObject({
+  brand: z.string().min(1).max(64).describe("The brand whose file this is. It must be the brand this deployment shows."),
+  billing_file: billingProfileSchema.describe("The contents of brands/<brand>/billing.json, as written."),
+  replaces_hash: sha256Hex.nullable().optional().describe("Apply only if the latest catalog run has this hash, so an apply by someone else in between stops this one. null: only if nothing was applied yet."),
+  allow_undeployed: z.boolean().optional().describe("true applies a file whose hash differs from the one the running code was built with, as on a sandbox. Defaults to false."),
+  dry_run: z.boolean().optional().describe("true shows what the apply would change and anything that would stop it, and changes nothing. Defaults to false."),
+});
+
+export const apiBillingCatalogChangeSchema = z.object({
+  table: z.enum(["billing_plans", "billing_prices"]),
+  key: z.string().describe("A plan's code, or code/period/currency for a price."),
+  action: z.enum(["insert", "update", "retire", "restore"]),
+  fields: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })).describe("For update and restore, each changed column with its old and new value. Empty otherwise."),
+  lowers_allowance: z.boolean().describe("An included amount, the storage limit or the number count goes down."),
+  raises_price: z.boolean().describe("A price or an overage rate goes up."),
+}).describe("One row an apply writes.");
+
+export const apiBillingCatalogRefusalSchema = z.object({
+  code: z.enum(billingCatalogRefusalCodes),
+  message: z.string(),
+  path: z.string().describe("The request field it is about, such as billing_file.plans.pro-launch."),
+}).describe("Something that stops an apply.");
+
+export const apiBillingCatalogRunSchema = z.object({
+  id: id.nullable().describe("Null for a dry run, which stores nothing."),
+  kind: z.enum(["catalog", "polar", "verify"]).describe("catalog: an apply. polar and verify come with Polar seeding."),
+  status: z.enum(["applied", "unchanged", "failed", "passed", "drift", "preview"]).describe("applied or unchanged for an apply; preview for a dry run."),
+  brand: z.string(),
+  ver: z.number().int().describe("The file's version."),
+  hash: sha256Hex.describe("SHA-256 of the normalized file."),
+  prev_hash: sha256Hex.nullable().describe("The previous catalog run's hash. Null on the first."),
+  code_hash: sha256Hex.nullable().describe("The file hash the running code was built with. Null when the brand has no billing.json in it."),
+  changes: z.array(apiBillingCatalogChangeSchema).describe("Every row written, plans then prices, each by key."),
+  problems: z.array(z.unknown()).describe("Drift a verify found. Always empty for an apply."),
+  blocked_by: z.array(apiBillingCatalogRefusalSchema).describe("For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."),
+  polar_env: z.enum(["sandbox", "production"]).nullable(),
+  polar_org: z.string().nullable(),
+  key_id: id.nullable().describe("The operator platform key that asked."),
+  partner: z.string().nullable().describe("That key's partner."),
+  started_at: timestamp,
+  ended_at: nullableTimestamp,
+}).describe("One apply of a billing.json, or its dry run.");
+
+export const apiBillingCatalogPriceSchema = z.object({
+  id,
+  period: z.enum(["monthly", "annual"]),
+  currency: z.string(),
+  cents: z.number().int().describe("The price for one period."),
+  per_month: z.number().int().describe("cents for monthly, cents / 12 rounded down for annual."),
+  polar_id: z.string().nullable().describe("The Polar product that sells it, once Polar is seeded."),
+  retired_at: nullableTimestamp.describe("When it stopped being sold. Null for a live price."),
+  created_at: timestamp,
+  updated_at: timestamp,
+});
+
+export const apiBillingCatalogPlanSchema = z.object({
+  code: z.string().describe("The plan's permanent code, its key in billing.json."),
+  tier: z.enum(billingPlanTiers).describe("The built-in tier the code treats it as. Equals code for the four standard plans."),
+  status: z.enum(["draft", "active", "retired"]).describe("draft until Polar can sell it as defined, active, or retired."),
+  access: z.enum(billingPlanAccessLevels).describe("public, code (promo code only) or hidden (operator only)."),
+  sold: z.boolean(),
+  custom: z.boolean(),
+  overage: z.boolean(),
+  src: z.enum(["file", "api"]),
+  names: z.record(z.string(), z.string()).nullable().describe("Display names by language. Null for standard plans."),
+  voice_sec: nullableCount.describe("Voice seconds included a month."),
+  sms_seg: nullableCount.describe("Alert SMS segments included a month."),
+  calls_out: nullableCount.describe("Outbound call attempts included a month."),
+  chat_units: nullableCount.describe("Website chat AI units included a month."),
+  kb_bytes: nullableCount.describe("Knowledge storage limit in bytes."),
+  numbers: nullableCount.describe("Business phone numbers included."),
+  voice_rate: nullableCount.describe("Overage cents per voice minute."),
+  sms_rate: nullableCount.describe("Overage cents per alert SMS segment."),
+  call_rate: nullableCount.describe("Overage cents per outbound call attempt."),
+  months: nullableCount.describe("How many months the plan lasts; null means no end."),
+  ends: z.enum(billingPlanEndings).nullable(),
+  offer_end: nullableTimestamp,
+  discount: z.record(z.string(), z.unknown()).nullable(),
+  polar_disc: z.string().nullable(),
+  terms_hash: sha256Hex,
+  frozen_at: nullableTimestamp,
+  sort: z.number().int(),
+  retired_at: nullableTimestamp,
+  created_at: timestamp,
+  updated_at: timestamp,
+  prices: z.array(apiBillingCatalogPriceSchema).describe("Every price of the plan, live ones first."),
+});
+
+export const apiBillingCatalogSchema = z.object({
+  brand: z.string().describe("The brand this deployment shows."),
+  code_hash: sha256Hex.nullable().describe("The hash of the brand's billing.json in the running code. Null when it has none."),
+  hash: sha256Hex.nullable().describe("The latest catalog run's hash. Null before the first apply."),
+  matches_code: z.boolean().describe("Both hashes are set and equal. false after a deploy that changed the file means it's time to apply it."),
+  last_run: apiBillingCatalogRunSchema.nullable(),
+  profile: z.record(z.string(), z.unknown()).nullable().describe("The latest applied file, normalized, in its own camel case."),
+  currency: z.string().nullable().describe("The live prices' currency."),
+  plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
+}).describe("The plans and prices this deployment holds. Checkout and limits don't read them yet.");
 
 const phoneNumberCountries = ["US", "CA", "GB", "AU"] as const;
 const phoneNumberKinds = ["local", "toll_free"] as const;
@@ -921,6 +1030,13 @@ export type ApiRuleCreate = z.infer<typeof apiRuleCreateSchema>;
 export type ApiRuleUpdate = z.infer<typeof apiRuleUpdateSchema>;
 export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
 export type ApiBilling = z.infer<typeof apiBillingSchema>;
+export type ApiBillingCatalog = z.infer<typeof apiBillingCatalogSchema>;
+export type ApiBillingCatalogApply = z.infer<typeof apiBillingCatalogApplySchema>;
+export type ApiBillingCatalogChange = z.infer<typeof apiBillingCatalogChangeSchema>;
+export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;
+export type ApiBillingCatalogPrice = z.infer<typeof apiBillingCatalogPriceSchema>;
+export type ApiBillingCatalogRefusal = z.infer<typeof apiBillingCatalogRefusalSchema>;
+export type ApiBillingCatalogRun = z.infer<typeof apiBillingCatalogRunSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;

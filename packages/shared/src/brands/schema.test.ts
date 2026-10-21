@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 
 import { compileBrands, type BrandSources } from "./schema";
@@ -88,6 +90,23 @@ describe("compileBrands", () => {
     expect(run({ "logo-email.png": svg }, { emailLogo: "logo-email.png" })).toThrow("logo-email.png must be a PNG of 256 KB or less");
     expect(run({ "og.png": png(1200, 630).subarray(0, 20) }, { ogImage: "og.png" })).toThrow("og.png has no readable size");
     expect(run({}, { ogImage: "og.png" })).toThrow("brands/alloplace/og.png does not exist");
+  });
+
+  it("checks and hashes a billing.json, naming its file and path in any problem", () => {
+    const billing = JSON.parse(readFileSync(new URL("../../../../brands/alloplace/billing.json", import.meta.url), "utf8"));
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = billing;
+    const compiled = compileBrands(withBilling);
+    expect(Object.keys(compiled.billingHashes)).toEqual(["alloplace"]);
+    expect(compiled.billingHashes.alloplace).toMatch(/^[0-9a-f]{64}$/);
+    // The hash covers the checked file, not its formatting or its $schema.
+    withBilling.brands.alloplace!.billing = { ...billing, $schema: "elsewhere.json" };
+    expect(compileBrands(withBilling).billingHashes).toEqual(compiled.billingHashes);
+    withBilling.brands.alloplace!.billing = { ...billing, currency: "CAD", plans: { ...billing.plans, starter: { ...billing.plans.starter, prices: { annualCents: 1 } }, Promo: {} } };
+    const run = () => compileBrands(withBilling);
+    expect(run).toThrow("brands/alloplace/billing.json currency: three lowercase letters");
+    expect(run).toThrow("brands/alloplace/billing.json plans.Promo.tier");
+    expect(compileBrands(sources()).billingHashes).toEqual({});
   });
 
   it("keeps a name with its environment suffix within the length limit", () => {

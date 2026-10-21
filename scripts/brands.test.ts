@@ -10,6 +10,13 @@ describe("brands", () => {
     expect(() => brandOutputs(readBrandSources())).not.toThrow();
   });
 
+  it("reads billing.json apart from the images, so the admin never serves it", () => {
+    const sources = readBrandSources();
+    expect(sources.brands.alloplace!.billing).toMatchObject({ version: 1, currency: "cad" });
+    expect(Object.keys(sources.brands.alloplace!.assets)).not.toContain("billing.json");
+    expect([...brandOutputs(sources).keys()].filter((path) => path.includes("billing"))).toEqual(["brands/billing.schema.json"]);
+  });
+
   it("has generated.ts, the schemas and the admin's brand images up to date: run pnpm brands:build", () => {
     for (const [path, content] of brandOutputs(readBrandSources())) {
       const committed = readFileSync(join(repositoryRoot, path));

@@ -1,4 +1,4 @@
-import { BRAND_INDEX, BRANDS } from "./generated";
+import { BILLING_PROFILE_HASHES, BRAND_INDEX, BRANDS } from "./generated";
 import type { BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // Which brand a deployment shows. A deployment knows its own address
@@ -104,6 +104,15 @@ export function resolveBrand(input: { appBaseUrl?: string | null | undefined; pr
  */
 export function brandImage(brand: Pick<ResolvedBrand, "origin">, image: BrandImage | null): BrandImage | null {
   return image && brand.origin ? { ...image, url: new URL(image.url, brand.origin).toString() } : null;
+}
+
+/**
+ * The SHA-256 of the brand's normalized billing.json as this build carries it,
+ * or null when the brand has none. A catalog apply refuses a file whose hash
+ * differs, so the tables only ever hold a file the running code was built with.
+ */
+export function billingProfileHash(brandId: string, hashes: Record<string, string> = BILLING_PROFILE_HASHES): string | null {
+  return Object.hasOwn(hashes, brandId) ? hashes[brandId]! : null;
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */

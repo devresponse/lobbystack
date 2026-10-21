@@ -1,12 +1,15 @@
 import { customType } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  char,
   doublePrecision,
   index,
   integer,
   jsonb,
   pgTable,
+  pgView,
   primaryKey,
   smallint,
   text,
@@ -1086,6 +1089,181 @@ export const billingUsageMonths = pgTable(
   (table) => [uniqueIndex("billing_usage_months_business_period_unique").on(table.businessId, table.periodKey), index("billing_usage_months_business_idx").on(table.businessId, table.lastRecordedAt)],
 );
 
+// The billing catalog of migration 0108: every plan of brands/<brand>/billing.json,
+// standard or not, its prices, and the runs that wrote them. The tables belong to
+// the whole deployment, so they have no business_id; only the worker writes them,
+// and rows are retired, never deleted. Nothing reads them at run time yet.
+export const billingRuns = pgTable(
+  "billing_runs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** catalog (an apply), or polar or verify (the next PR). */
+    kind: varchar("kind", { length: 8 }).notNull(),
+    /** applied or unchanged for a catalog run; failed, passed or drift later. */
+    status: varchar("status", { length: 10 }).notNull(),
+    /** The brand whose file it was. */
+    brand: varchar("brand", { length: 64 }).notNull(),
+    /** The file's version. */
+    ver: smallint("ver").notNull(),
+    /** SHA-256 of the normalized file. */
+    hash: char("hash", { length: 64 }).notNull(),
+    /** The previous catalog run's hash; null on the first. */
+    prevHash: char("prev_hash", { length: 64 }),
+    /** The file hash built into the code that ran it (BILLING_PROFILE_HASHES); null when the brand has none. */
+    codeHash: char("code_hash", { length: 64 }),
+    /** The normalized file. The latest catalog run's copy is the current profile. */
+    profile: jsonb("profile").$type<Record<string, unknown>>().notNull(),
+    /** One entry per row written. */
+    changes: jsonb("changes").$type<unknown[]>().notNull().default([]),
+    /** Drift a verify found; always empty for a catalog run. */
+    problems: jsonb("problems").$type<unknown[]>().notNull().default([]),
+    /** sandbox or production; the next PR's runs only. */
+    polarEnv: varchar("polar_env", { length: 10 }),
+    /** The Polar organization ID; the next PR's runs only. */
+    polarOrg: text("polar_org"),
+    /** The operator platform key that asked; null only for a scheduled verify. */
+    keyId: uuid("key_id"),
+    /** That key's partner. */
+    partner: varchar("partner", { length: 40 }),
+    /** The request's Idempotency-Key. */
+    idemKey: varchar("idem_key", { length: 255 }),
+    /** SHA-256 of the request, so a reused key with another body is refused. */
+    reqHash: char("req_hash", { length: 64 }),
+    /** When it started, kept to the millisecond so the runs cursor is one comparison. */
+    startedAt: timestamp("started_at", { withTimezone: true }).default(sql`date_trunc('milliseconds', now())`).notNull(),
+    /** When it finished. */
+    endedAt: timestamp("ended_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("billing_runs_idem_unique").on(table.keyId, table.idemKey).where(sql`${table.idemKey} is not null`),
+    index("billing_runs_kind_idx").on(table.kind, table.startedAt, table.id),
+    index("billing_runs_started_idx").on(table.startedAt, table.id),
+  ],
+);
+
+export const billingPlans = pgTable(
+  "billing_plans",
+  {
+    /** Permanent plan code, its key in billing.json. */
+    code: varchar("code", { length: 48 }).primaryKey(),
+    /** Built-in tier the code treats the plan as: free_cloud, starter, pro or enterprise. Equals code for the standard plans. */
+    tier: varchar("tier", { length: 16 }).notNull(),
+    /** draft (not sellable yet), active, or retired (no one new may take it). */
+    status: varchar("status", { length: 8 }).default("draft").notNull(),
+    /** Who can get it: public, code (promo code only) or hidden (operator only). */
+    access: varchar("access", { length: 8 }).default("public").notNull(),
+    /** Polar sells it; it has prices. */
+    sold: boolean("sold").default(false).notNull(),
+    /** Priced by hand outside Polar, with no fixed allowances (enterprise). */
+    custom: boolean("custom").default(false).notNull(),
+    /** Usage past the allowance is billed rather than blocked. */
+    overage: boolean("overage").default(false).notNull(),
+    /** Where the plan is defined: file (billing.json) or api (reserved for the promo PRs). */
+    src: varchar("src", { length: 8 }).default("file").notNull(),
+    /** Display names by language (en, fr, es, sr); null for standard plans, which use translations. */
+    names: jsonb("names").$type<Record<string, string>>(),
+    /** Voice seconds included a month. Null only for custom plans. */
+    voiceSec: integer("voice_sec"),
+    /** Alert SMS segments included a month. */
+    smsSeg: integer("sms_seg"),
+    /** Outbound call attempts (transfers) included a month. */
+    callsOut: integer("calls_out"),
+    /** Website chat AI units included a month (billingPlanCatalog calls them tokens). */
+    chatUnits: integer("chat_units"),
+    /** Knowledge storage limit in bytes. */
+    kbBytes: bigint("kb_bytes", { mode: "number" }),
+    /** Business phone numbers included. */
+    numbers: smallint("numbers"),
+    /** Overage cents per voice minute; null when overage isn't billed at fixed rates. */
+    voiceRate: integer("voice_rate"),
+    /** Overage cents per alert SMS segment. */
+    smsRate: integer("sms_rate"),
+    /** Overage cents per outbound call attempt. */
+    callRate: integer("call_rate"),
+    /** Months the plan lasts from the first charge; null means no end. */
+    months: smallint("months"),
+    /** After months: tier (back to the tier's standard plan), keep or cancel. */
+    ends: varchar("ends", { length: 8 }),
+    /** No new subscription after this moment. */
+    offerEnd: timestamp("offer_end", { withTimezone: true }),
+    /** Code-less Polar discount applied at checkout: type, basis_points or amount_cents, duration, duration_in_months. */
+    discount: jsonb("discount").$type<Record<string, unknown>>(),
+    /** Polar ID of that discount; filled by the next PR. */
+    polarDisc: text("polar_disc"),
+    /** SHA-256 of the terms subscribers and Polar depend on. A change makes a sold plan draft again. */
+    termsHash: char("terms_hash", { length: 64 }).notNull(),
+    /** When the first business took it; its terms are fixed from then. */
+    frozenAt: timestamp("frozen_at", { withTimezone: true }),
+    /** Order on plan cards and lists. */
+    sort: smallint("sort").default(100).notNull(),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When the plan was retired; set exactly when status is retired. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [uniqueIndex("billing_plans_polar_disc_unique").on(table.polarDisc).where(sql`${table.polarDisc} is not null`)],
+);
+
+export const billingPrices = pgTable(
+  "billing_prices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** The plan code. */
+    plan: varchar("plan", { length: 48 }).notNull().references(() => billingPlans.code),
+    /** monthly or annual. */
+    period: varchar("period", { length: 8 }).notNull(),
+    /** Three lowercase letters, from the file. */
+    currency: char("currency", { length: 3 }).notNull(),
+    /** Price for one period. */
+    cents: integer("cents").notNull(),
+    /** Price per month, computed: cents, or cents / 12 rounded down for annual. */
+    perMonth: integer("per_month").generatedAlwaysAs(sql`CASE WHEN period = 'annual' THEN cents / 12 ELSE cents END`),
+    /** The Polar product that sells it; filled by the next PR. */
+    polarId: text("polar_id"),
+    /** The run that last changed the row. */
+    runId: uuid("run_id").references(() => billingRuns.id),
+    /** When this price stopped being sold. The row keeps polar_id so its subscribers still match. */
+    retiredAt: timestamp("retired_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("billing_prices_live_unique").on(table.plan, table.period).where(sql`${table.retiredAt} is null`),
+    uniqueIndex("billing_prices_polar_unique").on(table.polarId).where(sql`${table.polarId} is not null`),
+  ],
+);
+
+/** The plans on offer now: active, offer not ended, each with its live prices. Reads with the caller's row-level security. */
+export const billingOffers = pgView("billing_offers", {
+  code: varchar("code", { length: 48 }).notNull(),
+  tier: varchar("tier", { length: 16 }).notNull(),
+  access: varchar("access", { length: 8 }).notNull(),
+  sold: boolean("sold").notNull(),
+  custom: boolean("custom").notNull(),
+  overage: boolean("overage").notNull(),
+  names: jsonb("names").$type<Record<string, string>>(),
+  voiceSec: integer("voice_sec"),
+  smsSeg: integer("sms_seg"),
+  callsOut: integer("calls_out"),
+  chatUnits: integer("chat_units"),
+  kbBytes: bigint("kb_bytes", { mode: "number" }),
+  numbers: smallint("numbers"),
+  voiceRate: integer("voice_rate"),
+  smsRate: integer("sms_rate"),
+  callRate: integer("call_rate"),
+  months: smallint("months"),
+  ends: varchar("ends", { length: 8 }),
+  offerEnd: timestamp("offer_end", { withTimezone: true }),
+  discount: jsonb("discount").$type<Record<string, unknown>>(),
+  polarDisc: text("polar_disc"),
+  sort: smallint("sort").notNull(),
+  period: varchar("period", { length: 8 }),
+  currency: char("currency", { length: 3 }),
+  cents: integer("cents"),
+  perMonth: integer("per_month"),
+  polarId: text("polar_id"),
+}).existing();
+
 export const complianceRecords = pgTable(
   "compliance_records",
   {
@@ -1820,6 +1998,9 @@ export const schema = {
   billingTransactions,
   billingUsageEvents,
   billingUsageMonths,
+  billingRuns,
+  billingPlans,
+  billingPrices,
   complianceRecords,
   feedbackSubmissions,
   affiliateProfiles,

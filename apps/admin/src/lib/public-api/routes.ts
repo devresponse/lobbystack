@@ -1,4 +1,5 @@
 import {
+  applyBillingCatalogForApi,
   cancelAppointmentForApi,
   cancelKnowledgeSourceForApi,
   claimPhoneNumberForApi,
@@ -31,6 +32,7 @@ import {
   generateContactPasscodesForApi,
   getAppointmentForApi,
   getAvailabilityForApi,
+  getBillingCatalogForApi,
   getBillingForApi,
   getBusinessForApi,
   getKnowledgeEntryForApi,
@@ -52,6 +54,7 @@ import {
   idempotencyRequestHash,
   listAccountCalendarsForApi,
   listAppointmentsForApi,
+  listBillingCatalogRunsForApi,
   listBusinessesForApi,
   listCalendarConnectionsForApi,
   listCallsForApi,
@@ -100,6 +103,7 @@ import { SecretBox } from "@lobbystack/providers";
 import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
+  apiBillingCatalogApplySchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiUserCreateSchema,
@@ -136,6 +140,7 @@ import {
   apiWebhookEndpointUpdateSchema,
   apiWidgetKeyCreateSchema,
   apiWidgetKeyUpdateSchema,
+  currentBrand,
   isWidgetKeyIssuanceEnabled,
   webhookEventScope,
   type ApiWebhookEndpoint,
@@ -179,9 +184,9 @@ function checkoutAvailable(plan: "starter" | "pro", interval: "monthly" | "annua
   return Boolean(process.env.POLAR_ACCESS_TOKEN && process.env.POLAR_ORGANIZATION_ID && process.env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]);
 }
 
-/** A managed plan bypasses Polar, so only the operator's own platform keys, with access to every business, may set one. */
-function requireOperatorKey(credential: ApiCredential): void {
-  if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", "Only an operator's platform key, one with access to every business, can manage a plan outside Polar.");
+/** A managed plan bypasses Polar and the catalog is every business's, so only the operator's own platform keys, with access to every business, may manage either. */
+function requireOperatorKey(credential: ApiCredential, action = "manage a plan outside Polar"): void {
+  if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", `Only an operator's platform key, one with access to every business, can ${action}.`);
 }
 
 /** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
@@ -311,6 +316,20 @@ export const v1 = {
   endManagedPlan: (request: Request) => handleApiRequest(request, "endManagedPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential);
     return { body: data(await endManagedPlanForApi(context, caller)) };
+  }),
+  getBillingCatalog: (request: Request) => handleApiRequest(request, "getBillingCatalog", async ({ context, credential }) => {
+    requireOperatorKey(credential, "manage the billing catalog");
+    return { body: data(await getBillingCatalogForApi(context, { deployment: { brand: currentBrand().id } })) };
+  }),
+  applyBillingCatalog: (request: Request) => handleApiRequest(request, "applyBillingCatalog", async ({ context, credential, idempotencyKey }) => {
+    requireOperatorKey(credential, "manage the billing catalog");
+    const body = await readApiBody(request, apiBillingCatalogApplySchema);
+    const result = await applyBillingCatalogForApi(context, { caller: { platformKeyId: credential.platformKeyId, partnerId: credential.partnerId }, idempotencyKey, body, deployment: { brand: currentBrand().id } });
+    return { status: result.status, body: data(result.run), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
+  }),
+  listBillingCatalogRuns: (request: Request) => handleApiRequest(request, "listBillingCatalogRuns", async ({ context, credential }) => {
+    requireOperatorKey(credential, "manage the billing catalog");
+    return { body: await listBillingCatalogRunsForApi(context, { ...pageQuery(request), kind: queryParam(request, "kind") }) };
   }),
   listPhoneNumbers: (request: Request) => handleApiRequest(request, "listPhoneNumbers", async ({ context, caller }) => ({ body: { data: await listPhoneNumbersForApi(context, caller), next_cursor: null, has_more: false } })),
   searchPhoneNumbers: (request: Request) => handleApiRequest(request, "searchPhoneNumbers", async ({ context, caller }) => {

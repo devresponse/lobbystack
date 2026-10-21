@@ -1,5 +1,5 @@
 import type { PolarCredits, PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
-import { billingMeterEventNames, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
+import { billingMeterEventNames, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPlan } from "./billingCatalog";
 
@@ -261,7 +261,7 @@ function newestFirst(a: PolarProduct, b: PolarProduct): number {
   return time(a) < time(b) ? 1 : time(a) > time(b) ? -1 : 0;
 }
 
-const trimSlash = (url: string) => url.trim().replace(/\/+$/, "");
+const trimSlash = (url: string) => trimTrailingSlashes(url.trim());
 
 function discountLive(discount: PolarDiscount, now: string): boolean {
   return discount.ends_at === null || new Date(discount.ends_at).getTime() > new Date(now).getTime();
@@ -692,7 +692,7 @@ export async function runPolarSteps(caller: PolarCaller, steps: readonly PolarSt
   const ids = new Map<string, string>();
   let webhookSecret: string | null = null;
   for (const step of steps) {
-    const path = step.path.replace(/\{\{([^}]+)\}\}/g, (_match, name: string) => resolveRefs(ref(name), ids) as string);
+    const path = step.path.replace(/\{\{([^{}]+)\}\}/g, (_match, name: string) => resolveRefs(ref(name), ids) as string);
     const result = (await caller.request(step.method, path, resolveRefs(step.body, ids))) as { id?: unknown; secret?: unknown } | null;
     if (step.produces) {
       if (typeof result?.id !== "string") throw new Error(`Polar made ${step.subject} but sent no id back. Run again: it is found by its tags.`);

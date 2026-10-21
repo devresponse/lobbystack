@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
-import { billingProfileSchema, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileSchema, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
 
 import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, POLAR_WEBHOOK_PATH, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -147,7 +147,7 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
   if (orgProblems.length) add("polar_org", "postgres_polar", "drift", "organization", `${orgProblems.join("; ")}.`);
   else add("polar_org", "postgres_polar", "ok", "organization", `Polar ${env} organization ${snapshot.organization.name}`);
   if (input.checkWebhookSecret && desired.webhook) {
-    const endpoint = snapshot.webhooks.find((entry) => entry.url.replace(/\/+$/, "") === desired.webhook!.url.replace(/\/+$/, ""));
+    const endpoint = snapshot.webhooks.find((entry) => trimTrailingSlashes(entry.url) === trimTrailingSlashes(desired.webhook!.url));
     if (endpoint) {
       if (!instance.secret_sha256) add("webhook_secret", "postgres_polar", "drift", "webhook", "POLAR_WEBHOOK_SECRET isn't set on the instance, so it refuses every Polar event.");
       else if (typeof endpoint.secret !== "string") add("webhook_secret", "postgres_polar", "drift", "webhook", "Polar didn't send the webhook's secret: the token needs webhooks:read.");

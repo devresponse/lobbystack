@@ -5,6 +5,8 @@
 // write that timed out may have landed, and the caller finds it again by its
 // metadata tags instead of repeating it.
 
+import { trimTrailingSlashes } from "@lobbystack/shared";
+
 export type PolarMetadata = Record<string, string | number | boolean>;
 
 export type PolarOrganization = {
@@ -116,7 +118,7 @@ export class PolarCatalogClient {
     for (let attempt = 1; ; attempt++) {
       let response: Response;
       try {
-        response = await this.send(`${this.config.baseUrl.replace(/\/+$/, "")}${path}`, {
+        response = await this.send(`${trimTrailingSlashes(this.config.baseUrl)}${path}`, {
           method,
           headers: { authorization: `Bearer ${this.config.token}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),

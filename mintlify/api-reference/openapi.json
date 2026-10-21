@@ -2383,7 +2383,7 @@
       "get": {
         "operationId": "getBillingCatalog",
         "summary": "Get the billing catalog",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices, the file they came from and whether it matches the deployed code. Empty until the first apply. Checkout and limits don't read it yet.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout and limits don't read it yet.",
         "tags": [
           "Platform"
         ],
@@ -2590,7 +2590,7 @@
       "get": {
         "operationId": "listBillingCatalogRuns",
         "summary": "List billing runs",
-        "description": "Operator platform keys only. Every run, newest first, with the rows it changed.",
+        "description": "Operator platform keys only. Every run, newest first, with the rows it changed and, for a verify, what it found.",
         "tags": [
           "Platform"
         ],
@@ -2689,6 +2689,131 @@
           },
           "403": {
             "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/catalog/polar-links": {
+      "post": {
+        "operationId": "linkBillingCatalog",
+        "summary": "Link Polar's products to the catalog",
+        "description": "Operator platform keys only. Records the Polar product that sells each live price of every sold plan, and the Polar discount of each plan that has one, then makes every sold plan active. pnpm billing apply calls it once Polar sells what the file says; nothing in Polar changes. The request names every live price of every sold plan, the catalog hash and the Polar organization; anything that doesn't fit is a 409 listing each reason in details. With dry_run true it changes nothing, stores no key and answers 200 with what the link would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingCatalogLink"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCatalogRun"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
             "content": {
               "application/json": {
                 "schema": {
@@ -14763,7 +14888,7 @@
                       "polar",
                       "verify"
                     ],
-                    "description": "catalog: an apply. polar and verify come with Polar seeding."
+                    "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
                   },
                   "status": {
                     "type": "string",
@@ -14775,7 +14900,7 @@
                       "drift",
                       "preview"
                     ],
-                    "description": "applied or unchanged for an apply; preview for a dry run."
+                    "description": "applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."
                   },
                   "brand": {
                     "type": "string"
@@ -14802,7 +14927,7 @@
                         "type": "null"
                       }
                     ],
-                    "description": "The previous catalog run's hash. Null on the first."
+                    "description": "The previous run of the same kind's hash. Null on the first."
                   },
                   "code_hash": {
                     "anyOf": [
@@ -14885,8 +15010,69 @@
                   },
                   "problems": {
                     "type": "array",
-                    "items": {},
-                    "description": "Drift a verify found. Always empty for an apply."
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "catalog_hash",
+                            "code_hash",
+                            "plan_rows",
+                            "not_linked",
+                            "org_settings",
+                            "meter",
+                            "credits",
+                            "product",
+                            "discount",
+                            "webhook",
+                            "leftover",
+                            "linked_id",
+                            "retired_id",
+                            "polar_org",
+                            "webhook_secret",
+                            "product_vars",
+                            "unreadable"
+                          ],
+                          "description": "Which check found it."
+                        },
+                        "pair": {
+                          "type": "string",
+                          "enum": [
+                            "file_postgres",
+                            "file_polar",
+                            "postgres_polar"
+                          ],
+                          "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                        },
+                        "level": {
+                          "type": "string",
+                          "enum": [
+                            "drift",
+                            "warn",
+                            "info"
+                          ],
+                          "description": "drift fails a verify; warn and info don't."
+                        },
+                        "subject": {
+                          "type": "string",
+                          "description": "What it is about, such as a plan, a price or a Polar object."
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "pair",
+                        "level",
+                        "subject",
+                        "message"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Something a verify found that isn't as the file says."
+                    },
+                    "description": "Every check a verify found not ok. Always empty for an apply or a link."
                   },
                   "blocked_by": {
                     "type": "array",
@@ -14901,7 +15087,15 @@
                             "catalog_changed",
                             "plan_frozen",
                             "currency_locked",
-                            "code_taken"
+                            "code_taken",
+                            "polar_org_mismatch",
+                            "polar_org_changed",
+                            "links_incomplete",
+                            "unknown_price",
+                            "terms_changed",
+                            "discount_mismatch",
+                            "id_taken",
+                            "id_changed"
                           ]
                         },
                         "message": {
@@ -14918,7 +15112,7 @@
                         "path"
                       ],
                       "additionalProperties": false,
-                      "description": "Something that stops an apply."
+                      "description": "Something that stops an apply or a link."
                     },
                     "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
                   },
@@ -15000,7 +15194,7 @@
                   "ended_at"
                 ],
                 "additionalProperties": false,
-                "description": "One apply of a billing.json, or its dry run."
+                "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
               },
               {
                 "type": "null"
@@ -15434,6 +15628,400 @@
               "additionalProperties": false
             },
             "description": "Every plan, whatever its access or status, by sort then code."
+          },
+          "polar": {
+            "type": "object",
+            "properties": {
+              "env": {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "production"
+                ],
+                "description": "The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."
+              },
+              "org": {
+                "description": "POLAR_ORGANIZATION_ID. Null when unset.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "secret_sha256": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[0-9a-f]{64}$",
+                    "description": "SHA-256 as 64 lowercase hex characters."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."
+              },
+              "product_vars": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "description": "The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout still reads, by plan/period, such as starter/monthly. Null when unset."
+              },
+              "last_link": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Stable identifier (UUID)."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "Null for a dry run, which stores nothing."
+                      },
+                      "kind": {
+                        "type": "string",
+                        "enum": [
+                          "catalog",
+                          "polar",
+                          "verify"
+                        ],
+                        "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "applied",
+                          "unchanged",
+                          "failed",
+                          "passed",
+                          "drift",
+                          "preview"
+                        ],
+                        "description": "applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."
+                      },
+                      "brand": {
+                        "type": "string"
+                      },
+                      "ver": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The file's version."
+                      },
+                      "hash": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "SHA-256 of the normalized file."
+                      },
+                      "prev_hash": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "description": "SHA-256 as 64 lowercase hex characters."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The previous run of the same kind's hash. Null on the first."
+                      },
+                      "code_hash": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "description": "SHA-256 as 64 lowercase hex characters."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The file hash the running code was built with. Null when the brand has no billing.json in it."
+                      },
+                      "changes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "table": {
+                              "type": "string",
+                              "enum": [
+                                "billing_plans",
+                                "billing_prices"
+                              ]
+                            },
+                            "key": {
+                              "type": "string",
+                              "description": "A plan's code, or code/period/currency for a price."
+                            },
+                            "action": {
+                              "type": "string",
+                              "enum": [
+                                "insert",
+                                "update",
+                                "retire",
+                                "restore"
+                              ]
+                            },
+                            "fields": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {
+                                "type": "object",
+                                "properties": {
+                                  "from": {},
+                                  "to": {}
+                                },
+                                "required": [
+                                  "from",
+                                  "to"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "description": "For update and restore, each changed column with its old and new value. Empty otherwise."
+                            },
+                            "lowers_allowance": {
+                              "type": "boolean",
+                              "description": "An included amount, the storage limit or the number count goes down."
+                            },
+                            "raises_price": {
+                              "type": "boolean",
+                              "description": "A price or an overage rate goes up."
+                            }
+                          },
+                          "required": [
+                            "table",
+                            "key",
+                            "action",
+                            "fields",
+                            "lowers_allowance",
+                            "raises_price"
+                          ],
+                          "additionalProperties": false,
+                          "description": "One row an apply writes."
+                        },
+                        "description": "Every row written, plans then prices, each by key."
+                      },
+                      "problems": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "catalog_hash",
+                                "code_hash",
+                                "plan_rows",
+                                "not_linked",
+                                "org_settings",
+                                "meter",
+                                "credits",
+                                "product",
+                                "discount",
+                                "webhook",
+                                "leftover",
+                                "linked_id",
+                                "retired_id",
+                                "polar_org",
+                                "webhook_secret",
+                                "product_vars",
+                                "unreadable"
+                              ],
+                              "description": "Which check found it."
+                            },
+                            "pair": {
+                              "type": "string",
+                              "enum": [
+                                "file_postgres",
+                                "file_polar",
+                                "postgres_polar"
+                              ],
+                              "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                            },
+                            "level": {
+                              "type": "string",
+                              "enum": [
+                                "drift",
+                                "warn",
+                                "info"
+                              ],
+                              "description": "drift fails a verify; warn and info don't."
+                            },
+                            "subject": {
+                              "type": "string",
+                              "description": "What it is about, such as a plan, a price or a Polar object."
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "pair",
+                            "level",
+                            "subject",
+                            "message"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Something a verify found that isn't as the file says."
+                        },
+                        "description": "Every check a verify found not ok. Always empty for an apply or a link."
+                      },
+                      "blocked_by": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string",
+                              "enum": [
+                                "brand_mismatch",
+                                "file_not_deployed",
+                                "catalog_changed",
+                                "plan_frozen",
+                                "currency_locked",
+                                "code_taken",
+                                "polar_org_mismatch",
+                                "polar_org_changed",
+                                "links_incomplete",
+                                "unknown_price",
+                                "terms_changed",
+                                "discount_mismatch",
+                                "id_taken",
+                                "id_changed"
+                              ]
+                            },
+                            "message": {
+                              "type": "string"
+                            },
+                            "path": {
+                              "type": "string",
+                              "description": "The request field it is about, such as billing_file.plans.pro-launch."
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message",
+                            "path"
+                          ],
+                          "additionalProperties": false,
+                          "description": "Something that stops an apply or a link."
+                        },
+                        "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
+                      },
+                      "polar_env": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "sandbox",
+                              "production"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "polar_org": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "key_id": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Stable identifier (UUID)."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The operator platform key that asked."
+                      },
+                      "partner": {
+                        "description": "That key's partner.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "started_at": {
+                        "type": "string",
+                        "format": "date-time",
+                        "description": "ISO 8601 timestamp in UTC."
+                      },
+                      "ended_at": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "kind",
+                      "status",
+                      "brand",
+                      "ver",
+                      "hash",
+                      "prev_hash",
+                      "code_hash",
+                      "changes",
+                      "problems",
+                      "blocked_by",
+                      "polar_env",
+                      "polar_org",
+                      "key_id",
+                      "partner",
+                      "started_at",
+                      "ended_at"
+                    ],
+                    "additionalProperties": false,
+                    "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The latest link. Null before the first."
+              }
+            },
+            "required": [
+              "env",
+              "org",
+              "secret_sha256",
+              "product_vars",
+              "last_link"
+            ],
+            "additionalProperties": false,
+            "description": "The Polar settings this deployment runs with."
           }
         },
         "required": [
@@ -15444,7 +16032,8 @@
           "last_run",
           "profile",
           "currency",
-          "plans"
+          "plans",
+          "polar"
         ],
         "additionalProperties": false,
         "description": "The plans and prices this deployment holds. Checkout and limits don't read them yet."
@@ -16290,6 +16879,127 @@
         ],
         "additionalProperties": false
       },
+      "BillingCatalogLink": {
+        "type": "object",
+        "properties": {
+          "brand": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The brand whose file Polar was set up from. It must be the brand this deployment shows."
+          },
+          "hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "description": "The hash of the file Polar was set up from. It must be the latest catalog run's."
+          },
+          "polar_env": {
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "production"
+            ],
+            "description": "The Polar server the products are on. It must be the one this deployment's POLAR_API_BASE_URL names."
+          },
+          "polar_org": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "The Polar organization the products are in. It must be this deployment's POLAR_ORGANIZATION_ID, and the one every earlier link named."
+          },
+          "plans": {
+            "maxItems": 60,
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64,
+                  "description": "A sold plan that isn't retired."
+                },
+                "terms_hash": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "The plan's terms_hash its Polar objects were made from. It must be the row's."
+                },
+                "polar_disc": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The Polar discount for a plan with a discount; null for any other plan."
+                },
+                "prices": {
+                  "minItems": 1,
+                  "maxItems": 2,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "period": {
+                        "type": "string",
+                        "enum": [
+                          "monthly",
+                          "annual"
+                        ]
+                      },
+                      "currency": {
+                        "type": "string",
+                        "pattern": "^[a-z]{3}$"
+                      },
+                      "polar_id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "description": "The Polar product that sells this price."
+                      }
+                    },
+                    "required": [
+                      "period",
+                      "currency",
+                      "polar_id"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Every live price of the plan."
+                }
+              },
+              "required": [
+                "code",
+                "terms_hash",
+                "polar_disc",
+                "prices"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Every sold plan that isn't retired, each with every live price."
+          },
+          "replace_ids": {
+            "description": "true lets a live price or a plan that already has a Polar product or discount take another one: the old price row is retired with its product, and a new live row takes the new one. Defaults to false.",
+            "type": "boolean"
+          },
+          "dry_run": {
+            "description": "true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "brand",
+          "hash",
+          "polar_env",
+          "polar_org",
+          "plans"
+        ],
+        "additionalProperties": false
+      },
       "BillingCatalogRun": {
         "type": "object",
         "properties": {
@@ -16313,7 +17023,7 @@
               "polar",
               "verify"
             ],
-            "description": "catalog: an apply. polar and verify come with Polar seeding."
+            "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
           },
           "status": {
             "type": "string",
@@ -16325,7 +17035,7 @@
               "drift",
               "preview"
             ],
-            "description": "applied or unchanged for an apply; preview for a dry run."
+            "description": "applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."
           },
           "brand": {
             "type": "string"
@@ -16352,7 +17062,7 @@
                 "type": "null"
               }
             ],
-            "description": "The previous catalog run's hash. Null on the first."
+            "description": "The previous run of the same kind's hash. Null on the first."
           },
           "code_hash": {
             "anyOf": [
@@ -16435,8 +17145,69 @@
           },
           "problems": {
             "type": "array",
-            "items": {},
-            "description": "Drift a verify found. Always empty for an apply."
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "catalog_hash",
+                    "code_hash",
+                    "plan_rows",
+                    "not_linked",
+                    "org_settings",
+                    "meter",
+                    "credits",
+                    "product",
+                    "discount",
+                    "webhook",
+                    "leftover",
+                    "linked_id",
+                    "retired_id",
+                    "polar_org",
+                    "webhook_secret",
+                    "product_vars",
+                    "unreadable"
+                  ],
+                  "description": "Which check found it."
+                },
+                "pair": {
+                  "type": "string",
+                  "enum": [
+                    "file_postgres",
+                    "file_polar",
+                    "postgres_polar"
+                  ],
+                  "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                },
+                "level": {
+                  "type": "string",
+                  "enum": [
+                    "drift",
+                    "warn",
+                    "info"
+                  ],
+                  "description": "drift fails a verify; warn and info don't."
+                },
+                "subject": {
+                  "type": "string",
+                  "description": "What it is about, such as a plan, a price or a Polar object."
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "pair",
+                "level",
+                "subject",
+                "message"
+              ],
+              "additionalProperties": false,
+              "description": "Something a verify found that isn't as the file says."
+            },
+            "description": "Every check a verify found not ok. Always empty for an apply or a link."
           },
           "blocked_by": {
             "type": "array",
@@ -16451,7 +17222,15 @@
                     "catalog_changed",
                     "plan_frozen",
                     "currency_locked",
-                    "code_taken"
+                    "code_taken",
+                    "polar_org_mismatch",
+                    "polar_org_changed",
+                    "links_incomplete",
+                    "unknown_price",
+                    "terms_changed",
+                    "discount_mismatch",
+                    "id_taken",
+                    "id_changed"
                   ]
                 },
                 "message": {
@@ -16468,7 +17247,7 @@
                 "path"
               ],
               "additionalProperties": false,
-              "description": "Something that stops an apply."
+              "description": "Something that stops an apply or a link."
             },
             "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
           },
@@ -16550,7 +17329,7 @@
           "ended_at"
         ],
         "additionalProperties": false,
-        "description": "One apply of a billing.json, or its dry run."
+        "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
       },
       "WidgetKey": {
         "type": "object",

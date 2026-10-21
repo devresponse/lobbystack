@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanSlugs } from "../billing";
+import { billingPlanSlugs, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { interfaceLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
@@ -219,7 +219,8 @@ export const apiManagedPlanCreateSchema = z.strictObject({
 const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/).describe("SHA-256 as 64 lowercase hex characters.");
 const nullableCount = z.number().int().nullable();
 
-export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken"] as const;
+// The first six stop an apply, catalog_changed and brand_mismatch a link too, and the rest only a link.
+export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken", "polar_org_mismatch", "polar_org_changed", "links_incomplete", "unknown_price", "terms_changed", "discount_mismatch", "id_taken", "id_changed"] as const;
 export type BillingCatalogRefusalCode = (typeof billingCatalogRefusalCodes)[number];
 
 export const apiBillingCatalogApplySchema = z.strictObject({
@@ -229,6 +230,41 @@ export const apiBillingCatalogApplySchema = z.strictObject({
   allow_undeployed: z.boolean().optional().describe("true applies a file whose hash differs from the one the running code was built with, as on a sandbox. Defaults to false."),
   dry_run: z.boolean().optional().describe("true shows what the apply would change and anything that would stop it, and changes nothing. Defaults to false."),
 });
+
+export const billingPolarEnvs = ["sandbox", "production"] as const satisfies ReadonlyArray<PolarEnv>;
+const polarObjectId = z.string().min(1).max(100);
+
+export const apiBillingCatalogLinkSchema = z.strictObject({
+  brand: z.string().min(1).max(64).describe("The brand whose file Polar was set up from. It must be the brand this deployment shows."),
+  hash: sha256Hex.describe("The hash of the file Polar was set up from. It must be the latest catalog run's."),
+  polar_env: z.enum(billingPolarEnvs).describe("The Polar server the products are on. It must be the one this deployment's POLAR_API_BASE_URL names."),
+  polar_org: polarObjectId.describe("The Polar organization the products are in. It must be this deployment's POLAR_ORGANIZATION_ID, and the one every earlier link named."),
+  plans: z.array(z.strictObject({
+    code: z.string().min(1).max(64).describe("A sold plan that isn't retired."),
+    terms_hash: sha256Hex.describe("The plan's terms_hash its Polar objects were made from. It must be the row's."),
+    polar_disc: polarObjectId.nullable().describe("The Polar discount for a plan with a discount; null for any other plan."),
+    prices: z.array(z.strictObject({
+      period: z.enum(["monthly", "annual"]),
+      currency: z.string().regex(/^[a-z]{3}$/),
+      polar_id: polarObjectId.describe("The Polar product that sells this price."),
+    })).min(1).max(2).describe("Every live price of the plan."),
+  })).max(60).describe("Every sold plan that isn't retired, each with every live price."),
+  replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a Polar product or discount take another one: the old price row is retired with its product, and a new live row takes the new one. Defaults to false."),
+  dry_run: z.boolean().optional().describe("true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false."),
+});
+
+export const billingCheckCodes = ["catalog_hash", "code_hash", "plan_rows", "not_linked", "org_settings", "meter", "credits", "product", "discount", "webhook", "leftover", "linked_id", "retired_id", "polar_org", "webhook_secret", "product_vars", "unreadable"] as const;
+export type BillingCheckCode = (typeof billingCheckCodes)[number];
+export const billingCheckPairs = ["file_postgres", "file_polar", "postgres_polar"] as const;
+export type BillingCheckPair = (typeof billingCheckPairs)[number];
+
+export const apiBillingCheckSchema = z.object({
+  code: z.enum(billingCheckCodes).describe("Which check found it."),
+  pair: z.enum(billingCheckPairs).describe("The two copies it compared: the repository file, the Postgres tables and Polar."),
+  level: z.enum(["drift", "warn", "info"]).describe("drift fails a verify; warn and info don't."),
+  subject: z.string().describe("What it is about, such as a plan, a price or a Polar object."),
+  message: z.string(),
+}).describe("Something a verify found that isn't as the file says.");
 
 export const apiBillingCatalogChangeSchema = z.object({
   table: z.enum(["billing_plans", "billing_prices"]),
@@ -243,19 +279,19 @@ export const apiBillingCatalogRefusalSchema = z.object({
   code: z.enum(billingCatalogRefusalCodes),
   message: z.string(),
   path: z.string().describe("The request field it is about, such as billing_file.plans.pro-launch."),
-}).describe("Something that stops an apply.");
+}).describe("Something that stops an apply or a link.");
 
 export const apiBillingCatalogRunSchema = z.object({
   id: id.nullable().describe("Null for a dry run, which stores nothing."),
-  kind: z.enum(["catalog", "polar", "verify"]).describe("catalog: an apply. polar and verify come with Polar seeding."),
-  status: z.enum(["applied", "unchanged", "failed", "passed", "drift", "preview"]).describe("applied or unchanged for an apply; preview for a dry run."),
+  kind: z.enum(["catalog", "polar", "verify"]).describe("catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."),
+  status: z.enum(["applied", "unchanged", "failed", "passed", "drift", "preview"]).describe("applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."),
   brand: z.string(),
   ver: z.number().int().describe("The file's version."),
   hash: sha256Hex.describe("SHA-256 of the normalized file."),
-  prev_hash: sha256Hex.nullable().describe("The previous catalog run's hash. Null on the first."),
+  prev_hash: sha256Hex.nullable().describe("The previous run of the same kind's hash. Null on the first."),
   code_hash: sha256Hex.nullable().describe("The file hash the running code was built with. Null when the brand has no billing.json in it."),
   changes: z.array(apiBillingCatalogChangeSchema).describe("Every row written, plans then prices, each by key."),
-  problems: z.array(z.unknown()).describe("Drift a verify found. Always empty for an apply."),
+  problems: z.array(apiBillingCheckSchema).describe("Every check a verify found not ok. Always empty for an apply or a link."),
   blocked_by: z.array(apiBillingCatalogRefusalSchema).describe("For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."),
   polar_env: z.enum(["sandbox", "production"]).nullable(),
   polar_org: z.string().nullable(),
@@ -263,7 +299,7 @@ export const apiBillingCatalogRunSchema = z.object({
   partner: z.string().nullable().describe("That key's partner."),
   started_at: timestamp,
   ended_at: nullableTimestamp,
-}).describe("One apply of a billing.json, or its dry run.");
+}).describe("One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link.");
 
 export const apiBillingCatalogPriceSchema = z.object({
   id,
@@ -310,6 +346,14 @@ export const apiBillingCatalogPlanSchema = z.object({
   prices: z.array(apiBillingCatalogPriceSchema).describe("Every price of the plan, live ones first."),
 });
 
+export const apiBillingCatalogPolarSchema = z.object({
+  env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),
+  org: z.string().nullable().describe("POLAR_ORGANIZATION_ID. Null when unset."),
+  secret_sha256: sha256Hex.nullable().describe("SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."),
+  product_vars: z.record(z.string(), z.string().nullable()).describe("The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout still reads, by plan/period, such as starter/monthly. Null when unset."),
+  last_link: apiBillingCatalogRunSchema.nullable().describe("The latest link. Null before the first."),
+}).describe("The Polar settings this deployment runs with.");
+
 export const apiBillingCatalogSchema = z.object({
   brand: z.string().describe("The brand this deployment shows."),
   code_hash: sha256Hex.nullable().describe("The hash of the brand's billing.json in the running code. Null when it has none."),
@@ -319,6 +363,7 @@ export const apiBillingCatalogSchema = z.object({
   profile: z.record(z.string(), z.unknown()).nullable().describe("The latest applied file, normalized, in its own camel case."),
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
+  polar: apiBillingCatalogPolarSchema,
 }).describe("The plans and prices this deployment holds. Checkout and limits don't read them yet.");
 
 const phoneNumberCountries = ["US", "CA", "GB", "AU"] as const;
@@ -1032,6 +1077,9 @@ export type ApiRuleReorder = z.infer<typeof apiRuleReorderSchema>;
 export type ApiBilling = z.infer<typeof apiBillingSchema>;
 export type ApiBillingCatalog = z.infer<typeof apiBillingCatalogSchema>;
 export type ApiBillingCatalogApply = z.infer<typeof apiBillingCatalogApplySchema>;
+export type ApiBillingCatalogLink = z.infer<typeof apiBillingCatalogLinkSchema>;
+export type ApiBillingCatalogPolar = z.infer<typeof apiBillingCatalogPolarSchema>;
+export type ApiBillingCheck = z.infer<typeof apiBillingCheckSchema>;
 export type ApiBillingCatalogChange = z.infer<typeof apiBillingCatalogChangeSchema>;
 export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;
 export type ApiBillingCatalogPrice = z.infer<typeof apiBillingCatalogPriceSchema>;

@@ -9,16 +9,21 @@ import {
   canonicalBillingProfileJson,
   normalizeBillingProfile,
   planTermsJson,
+  polarEnvForBaseUrl,
   resolveBillingPlans,
   type ApiBillingCatalog,
   type ApiBillingCatalogApply,
   type ApiBillingCatalogChange,
+  type ApiBillingCatalogLink,
   type ApiBillingCatalogPlan,
+  type ApiBillingCatalogPolar,
   type ApiBillingCatalogPrice,
   type ApiBillingCatalogRefusal,
   type ApiBillingCatalogRun,
+  type ApiBillingCheck,
   type BillingInterval,
   type BillingProfile,
+  type PolarEnv,
   type ResolvedBillingPlan,
 } from "@lobbystack/shared";
 
@@ -31,10 +36,12 @@ import { decodeCursor, pageSize, toPage, type Page, type PageRequest } from "./p
 // billing_prices, with a billing_runs row for every apply (migration 0108).
 // One apply seeds an empty deployment and updates a filled one alike: it
 // resolves the rows the file describes, compares them with the rows Postgres
-// holds, and writes the difference in one transaction. Nothing here touches
-// Polar, and nothing at run time reads these tables yet.
+// holds, and writes the difference in one transaction. A link then records
+// which Polar product sells each live price, and the worker records a verify
+// run each day. Nothing here calls Polar, and nothing at run time reads these
+// tables yet.
 
-// One apply at a time, across every admin process.
+// One apply or link at a time, across every admin process.
 const CATALOG_LOCK = sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`;
 
 type PlanStatus = "draft" | "active" | "retired";
@@ -308,7 +315,7 @@ function runResource(row: Row): ApiBillingCatalogRun {
     prev_hash: (row.prev_hash ?? null) as string | null,
     code_hash: (row.code_hash ?? null) as string | null,
     changes: row.changes as ApiBillingCatalogChange[],
-    problems: row.problems as unknown[],
+    problems: row.problems as ApiBillingCheck[],
     // A refused apply stores nothing, so a stored run was never blocked.
     blocked_by: [],
     polar_env: (row.polar_env ?? null) as ApiBillingCatalogRun["polar_env"],
@@ -320,14 +327,24 @@ function runResource(row: Row): ApiBillingCatalogRun {
   };
 }
 
-type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null };
+type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null; latestLink: Row | null };
 
-// The whole catalog, retired rows too, and the latest catalog run: section 7.5's Q9 and Q6.
+async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "polar" | "verify"): Promise<Row | null> {
+  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind = ${kind} order by started_at desc, id desc limit 1`)).rows;
+  return row ?? null;
+}
+
+// The whole catalog, retired rows too, the latest catalog run and the latest link: section 7.5's Q9 and Q6.
 async function readCatalog(tx: DatabaseTransaction): Promise<CatalogState> {
   const plans = (await tx.execute<Row>(sql`select * from public.billing_plans order by sort, code`)).rows.map(storedPlan);
   const prices = (await tx.execute<Row>(sql`select * from public.billing_prices order by plan, period, retired_at nulls first`)).rows.map(storedPrice);
-  const [latest] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind = 'catalog' order by started_at desc, id desc limit 1`)).rows;
-  return { plans, prices, latest: latest ?? null };
+  return { plans, prices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "polar") };
+}
+
+/** A run's start: when it holds the lock, to the millisecond, and after the latest run of its kind, so that run is always the last one written. */
+function runStart(latest: Row | null): Date {
+  const latestStart = latest ? iso(latest.started_at) : null;
+  return sql`greatest(date_trunc('milliseconds', clock_timestamp()), ${latestStart}::timestamptz + interval '1 millisecond')` as unknown as Date;
 }
 
 // Writing rows: the diff speaks in column names, drizzle in its field names.
@@ -363,12 +380,43 @@ async function runWrite(tx: DatabaseTransaction, write: BillingCatalogWrite, run
 
 // The operations.
 
+/** The Polar settings a process runs with, from its environment. */
+export type BillingDeploymentPolar = {
+  env: PolarEnv;
+  org: string | null;
+  /** SHA-256 of POLAR_WEBHOOK_SECRET; null where it isn't set, as on the worker. */
+  secretSha256: string | null;
+  /** The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout reads, by plan/period. */
+  productVars: Record<string, string | null>;
+};
+
 export type BillingCatalogDeployment = {
   /** The brand this deployment shows, as the sidebar resolves it. */
   brand: string;
   /** Each brand's billing.json hash in the running code. Defaults to the build's BILLING_PROFILE_HASHES. */
   codeHashes?: Record<string, string>;
+  /** Defaults to an instance with no Polar settings. */
+  polar?: BillingDeploymentPolar;
 };
+
+const productVarKeys = ["starter/monthly", "starter/annual", "pro/monthly", "pro/annual"] as const;
+
+/** POLAR_API_BASE_URL, POLAR_ORGANIZATION_ID, POLAR_WEBHOOK_SECRET (as its hash) and the four product ids, as a process's environment has them. */
+export function billingDeploymentPolar(env: Record<string, string | undefined>, options: { withSecret: boolean } = { withSecret: true }): BillingDeploymentPolar {
+  const value = (name: string) => env[name]?.trim() || null;
+  const secret = options.withSecret ? value("POLAR_WEBHOOK_SECRET") : null;
+  return {
+    env: polarEnvForBaseUrl(value("POLAR_API_BASE_URL")),
+    org: value("POLAR_ORGANIZATION_ID"),
+    secretSha256: secret ? sha256(secret) : null,
+    productVars: Object.fromEntries(productVarKeys.map((key) => {
+      const [plan, period] = key.split("/") as [string, string];
+      return [key, value(`POLAR_${plan.toUpperCase()}_${period.toUpperCase()}_PRODUCT_ID`)];
+    })),
+  };
+}
+
+const noPolar: BillingDeploymentPolar = { env: "production", org: null, secretSha256: null, productVars: Object.fromEntries(productVarKeys.map((key) => [key, null])) };
 
 /** The operator key that asks for an apply. */
 export type BillingCatalogCaller = { platformKeyId: string; partnerId: string };
@@ -438,10 +486,9 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
     // The run goes in first: every row written references it. It starts when it holds
     // the lock, not when its transaction began, and after the run before it, so the
     // latest run is always the last one applied, even for two that began together.
-    const latestStart = current.latest ? iso(current.latest.started_at) : null;
     const [run] = await tx.insert(billingRuns).values({
       kind: "catalog",
-      startedAt: sql`greatest(date_trunc('milliseconds', clock_timestamp()), ${latestStart}::timestamptz + interval '1 millisecond')` as unknown as Date,
+      startedAt: runStart(current.latest),
       // A file whose only edit is its polar settings is applied with no changes: the latest run's profile is the current one.
       status: changes.length === 0 && latestHash === hash ? "unchanged" : "applied",
       brand: body.brand,
@@ -463,6 +510,221 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
   }, dryRun ? { accessMode: "read only" } : {});
 }
 
+// Links: which Polar product sells each live price.
+
+/**
+ * The rows a link writes, and the refusals the tables alone can find. A link
+ * names every live price of every sold plan that isn't retired, each with its
+ * product, and each plan's discount. A row that has no product gets the one
+ * sent; a row with another product keeps it unless replace_ids is sent, which
+ * retires the row with its product and puts a new live row beside it, so a
+ * subscriber on the old product can still be matched. A sold plan in draft
+ * becomes active, since the link is complete. Pure, like the catalog diff.
+ */
+export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "plans" | "replace_ids">; current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }; now: string }): BillingCatalogDiff {
+  const writes: BillingCatalogWrite[] = [];
+  const refusals: ApiBillingCatalogRefusal[] = [];
+  const replace = input.body.replace_ids === true;
+  const refuse = (code: ApiBillingCatalogRefusal["code"], path: string, message: string) => refusals.push({ code, message, path });
+  const targets = new Map(input.current.plans.filter((plan) => plan.sold && plan.status !== "retired").map((plan) => [plan.code, plan]));
+  const livePrices = (code: string) => input.current.prices.filter((price) => price.plan === code && price.retired_at === null);
+  const owner = (polarId: string) => input.current.prices.find((price) => price.polar_id === polarId);
+  const sentIds = new Map<string, number>();
+  for (const plan of input.body.plans) for (const price of plan.prices) sentIds.set(price.polar_id, (sentIds.get(price.polar_id) ?? 0) + 1);
+  const sentDiscounts = new Map<string, number>();
+  for (const plan of input.body.plans) if (plan.polar_disc !== null) sentDiscounts.set(plan.polar_disc, (sentDiscounts.get(plan.polar_disc) ?? 0) + 1);
+
+  // Every sold plan, and every live price of it, is named: a half-linked plan could be sold at a price nobody linked.
+  const named = new Set(input.body.plans.map((plan) => plan.code));
+  for (const plan of targets.values()) {
+    if (!named.has(plan.code)) {
+      refuse("links_incomplete", "plans", `${plan.code} is sold and isn't in the link. Name every live price of every sold plan.`);
+      continue;
+    }
+    const sent = input.body.plans.find((entry) => entry.code === plan.code)!;
+    for (const price of livePrices(plan.code)) {
+      if (!sent.prices.some((entry) => entry.period === price.period && entry.currency === price.currency)) refuse("links_incomplete", `plans.${plan.code}`, `${priceKey(price)} is a live price of ${plan.code} and has no product in the link.`);
+    }
+  }
+
+  const seen = new Set<string>();
+  input.body.plans.forEach((sent, index) => {
+    const path = `plans[${index}]`;
+    const plan = targets.get(sent.code);
+    if (seen.has(sent.code)) {
+      refuse("unknown_price", `${path}.code`, `${sent.code} is named twice.`);
+      return;
+    }
+    seen.add(sent.code);
+    if (!plan) {
+      const stored = input.current.plans.find((entry) => entry.code === sent.code);
+      refuse("unknown_price", `${path}.code`, !stored ? `There's no plan ${sent.code}.` : stored.status === "retired" ? `${sent.code} is retired, so nothing sells it.` : `${sent.code} isn't sold through Polar.`);
+      return;
+    }
+    if (sent.terms_hash !== plan.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `${plan.code}'s terms are ${plan.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its Polar objects were made from other terms. Set Polar up from the latest file again.`);
+    if ((plan.discount === null) !== (sent.polar_disc === null)) refuse("discount_mismatch", `${path}.polar_disc`, plan.discount === null ? `${plan.code} has no discount, so it takes no Polar discount.` : `${plan.code} has a discount, so name its Polar discount.`);
+
+    const periods = new Set<string>();
+    const set: Record<string, unknown> = {};
+    const fields: ApiBillingCatalogChange["fields"] = {};
+    sent.prices.forEach((price, priceIndex) => {
+      const pricePath = `${path}.prices[${priceIndex}]`;
+      const row = livePrices(plan.code).find((entry) => entry.period === price.period && entry.currency === price.currency);
+      if (periods.has(price.period) || !row) {
+        refuse("unknown_price", pricePath, periods.has(price.period) ? `${plan.code} ${price.period} is named twice.` : `${plan.code} has no live ${price.period} price in ${price.currency}.`);
+        return;
+      }
+      periods.add(price.period);
+      const taken = owner(price.polar_id);
+      if ((taken && taken.id !== row.id) || (sentIds.get(price.polar_id) ?? 0) > 1) {
+        refuse("id_taken", `${pricePath}.polar_id`, taken && taken.id !== row.id ? `Product ${price.polar_id} is already linked to ${priceKey(taken)}${taken.retired_at ? ", a retired price" : ""}. One product sells one price.` : `Product ${price.polar_id} is named for more than one price. One product sells one price.`);
+        return;
+      }
+      if (row.polar_id === price.polar_id) return;
+      if (row.polar_id === null) {
+        writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "update", fields: { polar_id: { from: null, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { polar_id: price.polar_id }, id: row.id });
+        return;
+      }
+      if (!replace) {
+        refuse("id_changed", `${pricePath}.polar_id`, `${priceKey(row)} is sold by product ${row.polar_id}. Send replace_ids to retire that row with its product and link ${price.polar_id} to a new one.`);
+        return;
+      }
+      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "retire", fields: {}, lowers_allowance: false, raises_price: false }, set: { retired_at: input.now }, id: row.id });
+      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "insert", fields: { polar_id: { from: row.polar_id, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { plan: row.plan, period: row.period, currency: row.currency, cents: row.cents, polar_id: price.polar_id } });
+    });
+
+    if (sent.polar_disc !== null && plan.discount !== null && sent.polar_disc !== plan.polar_disc) {
+      const taken = input.current.plans.find((entry) => entry.polar_disc === sent.polar_disc);
+      if (taken || (sentDiscounts.get(sent.polar_disc) ?? 0) > 1) refuse("id_taken", `${path}.polar_disc`, `Discount ${sent.polar_disc} is already ${taken ? `linked to ${taken.code}` : "named for another plan"}. One discount belongs to one plan.`);
+      else if (plan.polar_disc !== null && !replace) refuse("id_changed", `${path}.polar_disc`, `${plan.code} has discount ${plan.polar_disc}. Send replace_ids to link ${sent.polar_disc} instead.`);
+      else {
+        set.polar_disc = sent.polar_disc;
+        fields.polar_disc = { from: plan.polar_disc, to: sent.polar_disc };
+      }
+    }
+    if (plan.status === "draft") {
+      set.status = "active";
+      fields.status = { from: "draft", to: "active" };
+    }
+    if (Object.keys(fields).length) writes.push({ change: { table: "billing_plans", key: plan.code, action: "update", fields, lowers_allowance: false, raises_price: false }, set });
+  });
+
+  writes.sort((a, b) => byKey(a.change.table, b.change.table) || byKey(a.change.key, b.change.key) || actionOrder[a.change.action] - actionOrder[b.change.action]);
+  return { writes, refusals };
+}
+
+/**
+ * Records the Polar products and discounts that sell the catalog, or with
+ * dry_run shows what it would record. It refuses a link made from another
+ * file than the latest catalog run, from another Polar organization than the
+ * deployment's or the first link's, or that leaves a sold plan half linked;
+ * each reason is a detail of one 409. Idempotency as for an apply.
+ */
+export async function linkBillingCatalogForApi(context: DomainContext, input: { caller: BillingCatalogCaller; idempotencyKey: string | null; body: ApiBillingCatalogLink; deployment: BillingCatalogDeployment }): Promise<{ run: ApiBillingCatalogRun; replayed: boolean; status: 200 | 201 }> {
+  const { body, caller, deployment } = input;
+  const dryRun = body.dry_run === true;
+  if (!dryRun && !input.idempotencyKey) throw missingKey();
+  const polar = deployment.polar ?? noPolar;
+  const codeHash = billingProfileHash(body.brand, deployment.codeHashes);
+  const requestHash = idempotencyRequestHash({ operation: "linkBillingCatalog", brand: body.brand, hash: body.hash, polar_env: body.polar_env, polar_org: body.polar_org, plans: body.plans, replace_ids: body.replace_ids === true });
+
+  return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
+    if (!dryRun) {
+      // The catalog apply's lock: a link never interleaves with an apply or another link.
+      await tx.execute(CATALOG_LOCK);
+      const [reused] = (await tx.execute<Row>(sql`select * from public.billing_runs where key_id = ${caller.platformKeyId}::uuid and idem_key = ${input.idempotencyKey}`)).rows;
+      if (reused) {
+        if (reused.req_hash !== requestHash) throw new PublicApiError(422, "idempotency_key_reused", "This Idempotency-Key was used with a different request.");
+        return { run: runResource(reused), replayed: true, status: 201 as const };
+      }
+    }
+    const current = await readCatalog(tx);
+    const latestHash = (current.latest?.hash ?? null) as string | null;
+    const refusals: ApiBillingCatalogRefusal[] = [];
+    if (body.brand !== deployment.brand) refusals.push({ code: "brand_mismatch", message: `This deployment shows the ${deployment.brand} brand, not ${body.brand}.`, path: "brand" });
+    if (body.hash !== latestHash) refusals.push({ code: "catalog_changed", message: latestHash === null ? "Nothing was applied yet. Apply the file before linking Polar to it." : `The latest catalog run has hash ${latestHash}, so Polar was set up from another file. Run pnpm billing apply again.`, path: "hash" });
+    if (polar.org === null) refusals.push({ code: "polar_org_mismatch", message: "POLAR_ORGANIZATION_ID isn't set on this deployment, so it can't take products from any Polar organization.", path: "polar_org" });
+    else if (body.polar_env !== polar.env || body.polar_org !== polar.org) refusals.push({ code: "polar_org_mismatch", message: `This deployment uses Polar ${polar.env} organization ${polar.org}, not ${body.polar_env} ${body.polar_org}.`, path: body.polar_env !== polar.env ? "polar_env" : "polar_org" });
+    const latestLink = current.latestLink;
+    if (latestLink && (latestLink.polar_env !== body.polar_env || latestLink.polar_org !== body.polar_org)) {
+      refusals.push({ code: "polar_org_changed", message: `This deployment was linked to Polar ${String(latestLink.polar_env)} organization ${String(latestLink.polar_org)}, and it stays with it. Live payments get a deployment of their own.`, path: "polar_org" });
+    }
+    const now = new Date().toISOString();
+    const diff = diffBillingLinks({ body, current, now });
+    refusals.push(...diff.refusals);
+    const changes = diff.writes.map((write) => write.change);
+    const base = {
+      kind: "polar" as const,
+      brand: body.brand,
+      ver: Number(current.latest?.ver ?? 1),
+      hash: body.hash,
+      prev_hash: (latestLink?.hash ?? null) as string | null,
+      code_hash: codeHash,
+      changes,
+      problems: [],
+      polar_env: body.polar_env,
+      polar_org: body.polar_org,
+      key_id: caller.platformKeyId,
+      partner: caller.partnerId,
+    };
+    if (dryRun) return { run: { id: null, status: "preview" as const, ...base, blocked_by: refusals, started_at: now, ended_at: now }, replayed: false, status: 200 as const };
+    if (refusals.length) throw new PublicApiError(409, "conflict", `Polar's products can't be linked: ${[...new Set(refusals.map((refusal) => refusal.code))].join(", ")}. details lists each reason.`, refusals.map((refusal) => ({ path: refusal.path, message: refusal.message, code: refusal.code })));
+
+    const [run] = await tx.insert(billingRuns).values({
+      kind: "polar",
+      startedAt: runStart(latestLink),
+      status: changes.length ? "applied" : "unchanged",
+      brand: body.brand,
+      ver: base.ver,
+      hash: body.hash,
+      prevHash: base.prev_hash,
+      codeHash,
+      // The catalog run with the same hash holds the profile.
+      profile: {},
+      changes,
+      problems: [],
+      polarEnv: body.polar_env,
+      polarOrg: body.polar_org,
+      keyId: caller.platformKeyId,
+      partner: caller.partnerId,
+      idemKey: input.idempotencyKey,
+      reqHash: requestHash,
+    }).returning({ id: billingRuns.id });
+    for (const write of billingCatalogWriteOrder(diff.writes)) await runWrite(tx, write, run!.id);
+    const [finished] = (await tx.execute<Row>(sql`update public.billing_runs set ended_at = clock_timestamp() where id = ${run!.id}::uuid returning *`)).rows;
+    return { run: runResource(finished!), replayed: false, status: 201 as const };
+  }, dryRun ? { accessMode: "read only" } : {});
+}
+
+/**
+ * Stores the worker's daily check as a verify run against the catalog run it
+ * read, with no key: no one asked for it. Returns the run and the status of
+ * the verify before it, so a recovery can be told apart from a pass.
+ */
+export async function recordBillingVerifyRun(context: DomainContext, input: { catalog: { brand: string; ver: number; hash: string }; codeHash: string | null; status: "passed" | "drift" | "failed"; problems: ApiBillingCheck[]; polarEnv: PolarEnv; polarOrg: string }): Promise<{ run: ApiBillingCatalogRun; previousStatus: string | null }> {
+  return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
+    await tx.execute(CATALOG_LOCK);
+    const previous = await latestRun(tx, "verify");
+    const [run] = await tx.insert(billingRuns).values({
+      kind: "verify",
+      startedAt: runStart(previous),
+      status: input.status,
+      brand: input.catalog.brand,
+      ver: input.catalog.ver,
+      hash: input.catalog.hash,
+      prevHash: (previous?.hash ?? null) as string | null,
+      codeHash: input.codeHash,
+      profile: {},
+      changes: [],
+      problems: input.problems,
+      polarEnv: input.polarEnv,
+      polarOrg: input.polarOrg,
+    }).returning({ id: billingRuns.id });
+    const [finished] = (await tx.execute<Row>(sql`update public.billing_runs set ended_at = clock_timestamp() where id = ${run!.id}::uuid returning *`)).rows;
+    return { run: runResource(finished!), previousStatus: (previous?.status ?? null) as string | null };
+  });
+}
+
 function priceResource(price: StoredBillingPrice): ApiBillingCatalogPrice {
   const { plan: _plan, run_id: _runId, ...rest } = price;
   return rest;
@@ -475,11 +737,13 @@ function planResource(plan: StoredBillingPlan, prices: StoredBillingPrice[]): Ap
   return { ...rest, discount: rest.discount as Record<string, unknown> | null, prices: ordered.map(priceResource) };
 }
 
-/** Every plan and price the deployment holds, the latest apply, and whether it matches the file in the running code. */
+/** Every plan and price the deployment holds, the latest apply, whether it matches the file in the running code, and the Polar settings it runs with. */
 export async function getBillingCatalogForApi(context: DomainContext, input: { deployment: BillingCatalogDeployment }): Promise<ApiBillingCatalog> {
   const current = await withBusinessTransaction(context.db, { actorType: "worker" }, readCatalog, { accessMode: "read only" });
   const codeHash = billingProfileHash(input.deployment.brand, input.deployment.codeHashes);
   const latest = current.latest ? runResource(current.latest) : null;
+  const polar = input.deployment.polar ?? noPolar;
+  const polarBlock: ApiBillingCatalogPolar = { env: polar.env, org: polar.org, secret_sha256: polar.secretSha256, product_vars: polar.productVars, last_link: current.latestLink ? runResource(current.latestLink) : null };
   return {
     brand: input.deployment.brand,
     code_hash: codeHash,
@@ -489,6 +753,7 @@ export async function getBillingCatalogForApi(context: DomainContext, input: { d
     profile: (current.latest?.profile ?? null) as Record<string, unknown> | null,
     currency: current.prices.find((price) => price.retired_at === null)?.currency ?? null,
     plans: current.plans.map((plan) => planResource(plan, current.prices)),
+    polar: polarBlock,
   };
 }
 

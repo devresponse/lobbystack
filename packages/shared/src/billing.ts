@@ -67,6 +67,20 @@ export const billingErrorCodes = {
 export type BillingErrorCode =
   (typeof billingErrorCodes)[keyof typeof billingErrorCodes];
 
+/** The two Polar servers: sandbox for test payments, production for real ones. Each has its own organizations, ids and tokens. */
+export const polarBaseUrls = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;
+export type PolarEnv = keyof typeof polarBaseUrls;
+
+/** The server a POLAR_API_BASE_URL names: sandbox for sandbox-api.polar.sh, else production, as an unset one means api.polar.sh. */
+export function polarEnvForBaseUrl(baseUrl: string | null | undefined): PolarEnv {
+  if (!baseUrl) return "production";
+  try {
+    return new URL(baseUrl).hostname === "sandbox-api.polar.sh" ? "sandbox" : "production";
+  } catch {
+    return "production";
+  }
+}
+
 export const billingMeterEventNames = {
   voiceMinutes: "billing.voice_minutes",
   alertSmsSegments: "billing.alert_sms_segments",

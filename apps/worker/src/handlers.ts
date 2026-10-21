@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
 import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
 import { realtimeEventSchema, type JobEnvelope } from "@lobbystack/contracts";
-import { getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, smsErrorCode, type BillingUsageKind } from "@lobbystack/shared";
+import { currentBrand, getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, smsErrorCode, type BillingUsageKind } from "@lobbystack/shared";
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
@@ -15,9 +15,11 @@ import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhon
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
+import { runDailyBillingVerify, type DailyBillingVerifyOutcome } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import { invitationSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import type OpenAI from "openai";
@@ -62,6 +64,8 @@ export type WorkerDependencies = {
   twilio?: Pick<TwilioProvider, "sendSms"> & Partial<Pick<TwilioProvider, "getMessagePricing" | "getCallPricing" | "findTrunkCall" | "releasePhoneNumber" | "verifyPhone" | "findOwnedPhoneNumber" | "purchasePhoneNumber" | "addNumberToSipTrunk">>;
   twilioAlerts?: Pick<TwilioProvider, "sendSms"> & { from: string };
   polar?: { recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>; createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> };
+  /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
+  polarCatalog?: { readSnapshot(): Promise<PolarSnapshot> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
   crawler?: { crawl(input: { url: string; limit?: number }): Promise<Array<{ url: string; title?: string; markdown?: string }>> };
   calendar?: CalendarOperations;
@@ -204,6 +208,27 @@ async function recordBillingUsageSyncFailed(
     });
   } catch {
     // Billing sync telemetry is best-effort and must not mask the provider error.
+  }
+}
+
+/**
+ * Tells PostHog about the daily billing check: a drift or a failure every day
+ * it lasts, and the first pass after one. The events belong to the deployment,
+ * not a business, so they go straight to PostHog instead of through
+ * `recordProductEvent`. Best-effort, like the other operations events.
+ */
+async function recordBillingCatalogCheck(dependencies: WorkerDependencies, outcome: Exclude<DailyBillingVerifyOutcome, { status: "skipped" }>): Promise<void> {
+  const recovered = outcome.status === "passed" && (outcome.previousStatus === "drift" || outcome.previousStatus === "failed");
+  if (outcome.status === "passed" && !recovered) return;
+  const event = recovered ? "ops.billing.profile_drift_recovered" : "ops.billing.profile_drift";
+  const problemCodes = [...new Set(outcome.problems.filter((problem) => problem.level === "drift").map((problem) => problem.code))].sort();
+  const properties = { status: outcome.status, problemCodes, problemCount: outcome.problems.filter((problem) => problem.level === "drift").length, polarEnv: outcome.polarEnv };
+  logEvent(recovered ? "info" : "warn", event, { ...properties, problemCodes: problemCodes.join(","), runId: outcome.runId });
+  if (!dependencies.productAnalytics) return;
+  try {
+    await dependencies.productAnalytics.capture([{ event, distinctId: "system:deployment", properties, timestamp: new Date().toISOString() }]);
+  } catch {
+    // The run is stored either way, and lobbystack billing catalog-runs --kind verify lists it.
   }
 }
 
@@ -1025,6 +1050,14 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const createdAt = typeof job.payload.createdAt === "string" && job.payload.createdAt.trim() ? job.payload.createdAt.trim() : undefined;
       const result = await generateAffiliatePayoutRun(dependencies.domain, { ...(periodKey ? { periodKey } : {}), ...(createdAt ? { createdAt } : {}) });
       return { status: "completed", entityId: result.payoutRunId };
+    }
+    case "billing.verifyCatalog": {
+      if (!dependencies.polarCatalog) return { status: "skipped" };
+      const polarCatalog = dependencies.polarCatalog;
+      const outcome = await runDailyBillingVerify(dependencies.domain, { brand: currentBrand().id, env: process.env, readPolar: () => polarCatalog.readSnapshot() });
+      if (outcome.status === "skipped") return { status: "skipped" };
+      await recordBillingCatalogCheck(dependencies, outcome);
+      return { status: "completed", entityId: `${outcome.runId}:${outcome.status}` };
     }
     case "outbox.backlogSample": {
       const businessId = businessIdOrThrow(job);

@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { billingProfileSchema, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
-import { billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
+import { billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 
 // The diff on plain rows, no database: what an apply would write and in what order.
 
@@ -218,5 +218,150 @@ describe("billing catalog diff", () => {
     const linked = stored(desiredBillingPlans(before));
     linked.prices[0]!.polar_id = "price_1";
     expect(diff(after, linked).refusals).toEqual([expect.objectContaining({ code: "currency_locked", path: "billing_file.currency" })]);
+  });
+});
+
+describe("billing link diff", () => {
+  const launchFile = profile((file) => {
+    file.plans["pro-launch"] = { ...proLaunch, discount: { type: "percentage", basisPoints: 2500, duration: "repeating", durationInMonths: 3 } };
+  });
+  type LinkPlans = Parameters<typeof diffBillingLinks>[0]["body"]["plans"];
+
+  /** A link naming product prod_<plan>_<period> for every live price of every sold plan, and disc_<plan> for each discount. */
+  function linkFor(current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }): LinkPlans {
+    return current.plans.filter((plan) => plan.sold && plan.status !== "retired").map((plan) => ({
+      code: plan.code,
+      terms_hash: plan.terms_hash,
+      polar_disc: plan.discount ? `disc_${plan.code}` : null,
+      prices: current.prices.filter((price) => price.plan === plan.code && price.retired_at === null).map((price) => ({ period: price.period, currency: price.currency, polar_id: `prod_${plan.code}_${price.period}` })),
+    }));
+  }
+
+  function link(current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }, plans: LinkPlans, replaceIds = false) {
+    return diffBillingLinks({ body: { plans, replace_ids: replaceIds }, current, now });
+  }
+
+  /** The rows after a link went through. */
+  function linked(current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }) {
+    const plans = linkFor(current);
+    for (const plan of current.plans) {
+      const sent = plans.find((entry) => entry.code === plan.code);
+      if (!sent) continue;
+      plan.status = "active";
+      plan.polar_disc = sent.polar_disc;
+    }
+    for (const price of current.prices) price.polar_id = plans.find((entry) => entry.code === price.plan)?.prices.find((entry) => entry.period === price.period)?.polar_id ?? null;
+    return current;
+  }
+
+  it("links every live price of every sold plan, and makes each sold plan active with its discount", () => {
+    const current = stored(desiredBillingPlans(launchFile));
+    const { writes, refusals } = link(current, linkFor(current));
+    expect(refusals).toEqual([]);
+    expect(writes.map((write) => `${write.change.action} ${write.change.table} ${write.change.key}`)).toEqual([
+      "update billing_plans pro",
+      "update billing_plans pro-launch",
+      "update billing_plans starter",
+      "update billing_prices pro-launch/monthly/cad",
+      "update billing_prices pro/annual/cad",
+      "update billing_prices pro/monthly/cad",
+      "update billing_prices starter/annual/cad",
+      "update billing_prices starter/monthly/cad",
+    ]);
+    expect(writes[1]).toMatchObject({ set: { polar_disc: "disc_pro-launch", status: "active" }, change: { fields: { polar_disc: { from: null, to: "disc_pro-launch" }, status: { from: "draft", to: "active" } } } });
+    expect(writes[0]!.set).toEqual({ status: "active" });
+    expect(writes[4]).toMatchObject({ id: "pro-annual-cad", set: { polar_id: "prod_pro_annual" }, change: { fields: { polar_id: { from: null, to: "prod_pro_annual" } } } });
+  });
+
+  it("writes nothing when the same products are linked again", () => {
+    const current = linked(stored(desiredBillingPlans(launchFile)));
+    expect(link(current, linkFor(current))).toEqual({ writes: [], refusals: [] });
+  });
+
+  it("refuses a link that leaves a sold plan or a live price out", () => {
+    const current = stored(desiredBillingPlans(launchFile));
+    const plans = linkFor(current).filter((plan) => plan.code !== "starter");
+    plans.find((plan) => plan.code === "pro")!.prices.pop();
+    expect(link(current, plans).refusals).toEqual([
+      { code: "links_incomplete", path: "plans", message: "starter is sold and isn't in the link. Name every live price of every sold plan." },
+      { code: "links_incomplete", path: "plans.pro", message: "pro/monthly/cad is a live price of pro and has no product in the link." },
+    ]);
+  });
+
+  it("refuses plans and prices that nothing sells: unknown, retired, unsold, named twice or in another period or currency", () => {
+    const current = stored(desiredBillingPlans(launchFile));
+    current.plans.find((plan) => plan.code === "pro-launch")!.status = "retired";
+    const plans = linkFor(current);
+    plans.push({ code: "gold", terms_hash: "0".repeat(64), polar_disc: null, prices: [{ period: "monthly", currency: "cad", polar_id: "prod_gold" }] });
+    plans.push({ code: "pro-launch", terms_hash: "0".repeat(64), polar_disc: "disc_x", prices: [{ period: "monthly", currency: "cad", polar_id: "prod_x" }] });
+    plans.push({ code: "enterprise", terms_hash: "0".repeat(64), polar_disc: null, prices: [{ period: "monthly", currency: "cad", polar_id: "prod_y" }] });
+    plans.push({ code: "pro", terms_hash: "0".repeat(64), polar_disc: null, prices: [] });
+    const starter = plans.find((plan) => plan.code === "starter")!;
+    starter.prices = [{ period: "monthly", currency: "usd", polar_id: "prod_usd" }, ...starter.prices];
+    const pro = plans.find((plan) => plan.code === "pro")!;
+    pro.prices = [pro.prices[0]!, { ...pro.prices[0]!, polar_id: "prod_again" }];
+    expect(link(current, plans).refusals.map((refusal) => `${refusal.code} ${refusal.path}: ${refusal.message}`)).toEqual([
+      "links_incomplete plans.pro: pro/monthly/cad is a live price of pro and has no product in the link.",
+      "unknown_price plans[0].prices[0]: starter has no live monthly price in usd.",
+      "unknown_price plans[1].prices[1]: pro annual is named twice.",
+      "unknown_price plans[2].code: There's no plan gold.",
+      "unknown_price plans[3].code: pro-launch is retired, so nothing sells it.",
+      "unknown_price plans[4].code: enterprise isn't sold through Polar.",
+      "unknown_price plans[5].code: pro is named twice.",
+    ]);
+  });
+
+  it("refuses terms that changed since Polar was set up, and a discount the plan doesn't have or lacks", () => {
+    const current = stored(desiredBillingPlans(launchFile));
+    const plans = linkFor(current);
+    plans.find((plan) => plan.code === "pro")!.terms_hash = "f".repeat(64);
+    plans.find((plan) => plan.code === "starter")!.polar_disc = "disc_starter";
+    plans.find((plan) => plan.code === "pro-launch")!.polar_disc = null;
+    expect(link(current, plans).refusals.map((refusal) => `${refusal.code} ${refusal.path}`)).toEqual([
+      "discount_mismatch plans[0].polar_disc",
+      "terms_changed plans[1].terms_hash",
+      "discount_mismatch plans[2].polar_disc",
+    ]);
+  });
+
+  it("refuses a product or discount linked to another price or plan, or named twice", () => {
+    const current = linked(stored(desiredBillingPlans(launchFile)));
+    current.prices.push({ ...current.prices.find((price) => price.plan === "starter" && price.period === "annual")!, id: "starter-annual-old", polar_id: "prod_old", retired_at: earlier });
+    current.plans.push({ ...current.plans.find((plan) => plan.code === "pro-launch")!, code: "pro-launch-2025", status: "retired", polar_disc: "disc_other", retired_at: earlier });
+    const plans = linkFor(current);
+    plans.find((plan) => plan.code === "pro")!.prices[0]!.polar_id = "prod_starter_monthly";
+    plans.find((plan) => plan.code === "starter")!.prices[0]!.polar_id = "prod_old";
+    plans.find((plan) => plan.code === "pro-launch")!.polar_disc = "disc_other";
+    const twice = link(current, plans, true).refusals.map((refusal) => refusal.message);
+    expect(twice).toEqual([
+      "Product prod_old is already linked to starter/annual/cad, a retired price. One product sells one price.",
+      // Starter monthly keeps its product, which the link also names for Pro annual.
+      "Product prod_starter_monthly is named for more than one price. One product sells one price.",
+      "Product prod_starter_monthly is already linked to starter/monthly/cad. One product sells one price.",
+      "Discount disc_other is already linked to pro-launch-2025. One discount belongs to one plan.",
+    ]);
+    const fresh = stored(desiredBillingPlans(launchFile));
+    const same = linkFor(fresh);
+    same.find((plan) => plan.code === "pro")!.prices[1]!.polar_id = "prod_pro_annual";
+    expect(link(fresh, same).refusals.map((refusal) => `${refusal.code} ${refusal.path}`)).toEqual(["id_taken plans[1].prices[0].polar_id", "id_taken plans[1].prices[1].polar_id"]);
+  });
+
+  it("keeps a linked price's product unless replace_ids retires its row and links the new product to a new row at the same price", () => {
+    const current = linked(stored(desiredBillingPlans(launchFile)));
+    const plans = linkFor(current);
+    plans.find((plan) => plan.code === "pro")!.prices.find((price) => price.period === "monthly")!.polar_id = "prod_pro_monthly_2";
+    plans.find((plan) => plan.code === "pro-launch")!.polar_disc = "disc_pro-launch_2";
+    expect(link(current, plans).refusals).toEqual([
+      { code: "id_changed", path: "plans[1].prices[1].polar_id", message: "pro/monthly/cad is sold by product prod_pro_monthly. Send replace_ids to retire that row with its product and link prod_pro_monthly_2 to a new one." },
+      { code: "id_changed", path: "plans[2].polar_disc", message: "pro-launch has discount disc_pro-launch. Send replace_ids to link disc_pro-launch_2 instead." },
+    ]);
+    const replaced = link(current, plans, true);
+    expect(replaced.refusals).toEqual([]);
+    expect(replaced.writes.map((write) => [write.change.action, write.change.key, write.set])).toEqual([
+      ["update", "pro-launch", { polar_disc: "disc_pro-launch_2" }],
+      ["retire", "pro/monthly/cad", { retired_at: now }],
+      ["insert", "pro/monthly/cad", { plan: "pro", period: "monthly", currency: "cad", cents: 10000, polar_id: "prod_pro_monthly_2" }],
+    ]);
+    expect(replaced.writes[1]!.id).toBe("pro-monthly-cad");
   });
 });

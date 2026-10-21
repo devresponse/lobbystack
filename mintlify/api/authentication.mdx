@@ -69,7 +69,7 @@ Each endpoint except `GET /me` requires one scope. A key without it gets `403` w
 | `messages:read` | `GET /messages` |
 | `knowledge:read` | `GET /knowledge`, `GET /knowledge/{entry_id}`, `GET /knowledge/sources`, `GET /knowledge/sources/{source_id}` |
 | `knowledge:write` | `POST /knowledge`, `PATCH` and `DELETE` on `/knowledge/{entry_id}`, `POST /knowledge/sources`, `PATCH` and `DELETE` on `/knowledge/sources/{source_id}`, `POST /knowledge/sources/{source_id}/expand`, `/retry` and `/cancel`, `POST /knowledge/uploads` and `POST /knowledge/uploads/{upload_id}/complete` |
-| `billing:manage` | `GET` and `PATCH /billing`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` and, with an operator's platform key, `POST` and `DELETE /billing/managed-plan`, `GET /billing/catalog`, and `GET` and `POST /billing/catalog/runs` |
+| `billing:manage` | `GET` and `PATCH /billing`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` and, with an operator's platform key, `POST` and `DELETE /billing/managed-plan`, `GET /billing/catalog`, `GET` and `POST /billing/catalog/runs`, and `POST /billing/catalog/polar-links` |
 | `phone_numbers:manage` | `GET /phone-numbers`, `POST /phone-numbers/search`, `POST /phone-numbers/claims`, `GET /phone-numbers/claims/{claim_id}`, `DELETE /phone-numbers/{phone_number_id}` and `POST /phone-numbers/{phone_number_id}/replace` |
 | `team:manage` | `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/{invitation_id}`, `PATCH` and `DELETE` on `/team/members/{membership_id}`, `POST /team/claim-link` |
 | `webhooks:manage` | `GET`, `POST`, `PATCH` and `DELETE` on `/webhooks`, and `POST /webhooks/{webhook_id}/test` |
@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access. An operator's key also manages the deployment's billing catalog with `GET /billing/catalog` and `GET` and `POST /billing/catalog/runs`, which act on no one business and take no header.
+Without the header, the request returns `400` with the code `business_required`. A business the key can't reach returns `404`. `GET /me` works without the header and shows the key's partner and access. An operator's key also manages the deployment's billing catalog with `GET /billing/catalog`, `GET` and `POST /billing/catalog/runs`, and `POST /billing/catalog/polar-links`, which act on no one business and take no header.
 
 `POST /team/claim-link` hands a business to its owner. Once they accept, a partner's key no longer reaches it, and an operator's key still does. Either way, `GET /businesses` stops listing it.
 

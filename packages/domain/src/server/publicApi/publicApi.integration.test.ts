@@ -7,6 +7,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
 import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
+import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
 import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
 import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
@@ -919,9 +920,23 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await updateBillingForApi(context, caller, { spending_cap_cents: 2_500 })).toMatchObject({ plan: "pro", managed: false, billing_interval: "monthly", spending_cap_cents: 2_500 });
       await updateBillingForApi(context, caller, { spending_cap_cents: 2_500 });
       expect(await audited("api.billing.updated")).toBe(1);
-      // A Starter business can still move up to Pro.
-      await admin!.db.update(billingAccounts).set({ plan: "starter" }).where(eq(billingAccounts.businessId, businessId));
-      expect(await createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true })).toMatchObject({ plan: "pro", status: "pending" });
+      // A Starter business can still move up to Pro, which the worker does on its Polar subscription.
+      await admin!.db.update(billingAccounts).set({ plan: "starter", subscriptionId: "sub-starter" }).where(eq(billingAccounts.businessId, businessId));
+      const move = await createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true });
+      expect(move).toMatchObject({ plan: "pro", status: "pending" });
+      expect(await loadBillingCheckoutRequest(context, { businessId, requestId: move.id })).toMatchObject({ target: "pro", billingInterval: "annual", subscription: { id: "sub-starter", plan: "starter", billingInterval: "monthly" } });
+      expect(await claimBillingCheckoutRequest(context, { businessId, requestId: move.id })).toBe(true);
+      expect(await markBillingPlanChanged(context, { businessId, requestId: move.id })).toBe(true);
+      expect(await markBillingPlanChanged(context, { businessId, requestId: move.id })).toBe(false);
+      const changed = await getCheckoutForApi(context, caller, move.id);
+      expect(changed).toMatchObject({ status: "changed", checkout_url: null, error: null, paid: false });
+      expect(apiCheckoutSchema.safeParse(changed).success).toBe(true);
+      // Polar's webhook puts the business on Pro, and the change reads as paid.
+      await admin!.db.update(billingAccounts).set({ plan: "pro", billingInterval: "annual" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getCheckoutForApi(context, caller, move.id)).toMatchObject({ status: "changed", paid: true });
+      // A subscription that has ended leaves nothing to change, so the business gets a checkout.
+      await admin!.db.update(billingAccounts).set({ plan: "starter", billingInterval: "monthly", subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await loadBillingCheckoutRequest(context, { businessId, requestId: move.id })).toMatchObject({ subscription: null });
     } finally {
       // Deleting the business deletes its billing rows, keys and memberships; outbox rows only lose their business.
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));

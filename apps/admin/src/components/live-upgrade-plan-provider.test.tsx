@@ -7,7 +7,7 @@ import { LiveUpgradePlanProvider } from "./live-upgrade-plan-provider";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { isUpgradeInProgress } from "@/lib/upgrade-in-progress";
 
-const alerts = vi.hoisted(() => ({ error: vi.fn() }));
+const alerts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: alerts }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 const clients: QueryClient[] = [];
@@ -43,6 +43,54 @@ describe("restarting a plan that lapsed", () => {
   it("treats a past_due Starter as still on the plan, matching the number gate", async () => {
     await openPlansFor("past_due");
     expect(screen.getByRole("button", { name: "billing.upgradeDialog.actions.currentPlan" })).toBeTruthy();
+  });
+});
+
+describe("changing the plan of a business that already pays", () => {
+  async function upgradeStarter(answer: () => Record<string, unknown>) {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { account: { plan: "starter", billingInterval: "monthly", subscriptionState: "active" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: "request" }) : Response.json({ checkoutUrl: null, error: null, synced: false, refusal: null, ...answer() }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    return { client, assign, fetchMock };
+  }
+
+  it("says the subscription changes in place, closes the picker and refreshes the plan once Polar confirms it", async () => {
+    let synced = false;
+    const { client, assign, fetchMock } = await upgradeStarter(() => ({ status: "changed", synced }));
+    expect(screen.getByText("billing.upgradeDialog.changesSubscription")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(alerts.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(client.getQueryState(["billing", "business"])?.isInvalidated).toBe(false);
+    synced = true;
+    await waitFor(() => expect(client.getQueryState(["billing", "business"])?.isInvalidated).toBe(true), { timeout: 3_000 });
+    const polls = fetchMock.mock.calls.length;
+    await new Promise(resolve => setTimeout(resolve, 1_700));
+    expect(fetchMock.mock.calls.length).toBe(polls);
+    expect(alerts.success).toHaveBeenCalledOnce();
+    expect(assign).not.toHaveBeenCalled();
+    expect(alerts.error).not.toHaveBeenCalled();
+  });
+
+  it("gives Polar's reason when it refuses the change", async () => {
+    await upgradeStarter(() => ({ status: "error", error: "Polar couldn't charge the saved payment method for the new plan.", refusal: "payment_failed" }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.toast.planChangeRefused.payment_failed"));
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(alerts.success).not.toHaveBeenCalled();
+  });
+
+  it("says the plan didn't change, not that checkout failed, for any other error", async () => {
+    await upgradeStarter(() => ({ status: "error", error: "Polar plan change failed." }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.toast.planChangeFailed"));
   });
 });
 

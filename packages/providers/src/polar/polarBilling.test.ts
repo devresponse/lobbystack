@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { PolarBillingProvider } from "./polarBilling";
+import { PolarBillingProvider, PolarRequestError } from "./polarBilling";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -26,5 +26,36 @@ describe("PolarBillingProvider", () => {
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(request.headers).get("idempotency-key")).toBe("billing-checkout:request-1");
     expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_email: "owner@example.com", external_customer_id: "business:1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", customer_metadata: { externalCustomerId: "business:1" } });
+  });
+  it("moves a subscription to another product with only the product and proration in the body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: false, ended_at: null, pending_update: null }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" })).resolves.toEqual({ id: "sub-1", status: "active", productId: "product-pro", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/subscriptions/sub-1", expect.objectContaining({ method: "PATCH" }));
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({ product_id: "product-pro", proration_behavior: "invoice" });
+  });
+
+  it("reads a pending change's product, and a subscription Polar doesn't know as null", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: true, ended_at: null, pending_update: { product_id: "product-starter" } }) })
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: "ResourceNotFound", detail: "Not found" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.getSubscription("sub-1")).resolves.toMatchObject({ productId: "product-pro", cancelAtPeriodEnd: true, pendingProductId: "product-starter" });
+    await expect(provider.getSubscription("sub-gone")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenLastCalledWith("https://polar.example/v1/subscriptions/sub-gone", expect.anything());
+  });
+
+  it("keeps Polar's status and error name on a refusal", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "AlreadyCanceledSubscription", detail: "This subscription is already canceled or will be at the end of the period." }) }));
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    const refusal = await provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(PolarRequestError);
+    expect(refusal).toMatchObject({ status: 403, errorName: "AlreadyCanceledSubscription", message: "Polar request failed with status 403." });
   });
 });

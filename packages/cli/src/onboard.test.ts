@@ -60,6 +60,7 @@ type Mode = { key: "platform"; access: "partner" | "all" } | { key: "business" }
 function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
   let next = 1;
   const id = () => `00000000-0000-4000-8000-${String(next++).padStart(12, "0")}`;
+  const planChanges = new Set<string>();
   const world = {
     businesses: mode.key === "business" ? [BUSINESS] : [] as string[],
     /** Whether a partner's key still reaches the business. */
@@ -215,11 +216,13 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
       if (world.billing.plan !== "free_cloud" && !(world.billing.plan === "starter" && body!.plan === "pro")) return error(409, "conflict", "This business already pays for a plan. Change it in the billing portal.");
       const checkout = { id: id(), plan: body!.plan, interval: body!.interval, status: "pending", checkout_url: null, error: null, paid: false, created_at: new Date().toISOString() };
       world.checkouts.set(checkout.id, checkout);
+      // A Starter business already pays, so the API changes that subscription instead of making a page.
+      if (world.billing.plan === "starter") planChanges.add(checkout.id);
       return ok(checkout, 201);
     }
     if (matches("GET /billing/checkout/*", route)) {
       const checkout = world.checkouts.get(path.split("/")[3]!)!;
-      Object.assign(checkout, { status: "ready", checkout_url: `https://polar.example/checkout/${String(checkout.id)}` });
+      Object.assign(checkout, planChanges.has(String(checkout.id)) ? { status: "changed" } : { status: "ready", checkout_url: `https://polar.example/checkout/${String(checkout.id)}` });
       return ok(checkout);
     }
     if (route === "GET /phone-numbers") return page(world.numbers);
@@ -524,20 +527,26 @@ describe("lobbystack onboard", () => {
     expect(world.business.name).toBe("Acme Plumbing");
   });
 
-  it("starts a checkout for a move to Pro, and reports other plan changes without holding up the rest", async () => {
+  it("moves Starter to Pro without a page, and reports other plan changes without holding up the rest", async () => {
     const { world, fetch } = fakeWorld({ key: "business" });
     await writeFile(manifest, checkoutYaml);
     world.billing = { plan: "starter", managed: false, billing_interval: "monthly" };
     world.numbers.push({ id: "number", phone_number: "+14165550199", status: "active" });
-    expect((await onboard(["--yes"], fetch)).code).toBe(exitCodes.waiting);
+    const questions: string[] = [];
+    const moved = await onboard([], fetch, { confirm: async (question) => { questions.push(question); return true; } });
+    expect(questions).toContain("Move Acme Plumbing from starter monthly to pro monthly? Polar charges the difference to the saved payment method.");
     expect(world.writes).toContain("POST /billing/checkout");
+    expect(moved.out).toContain("plan           changed      starter monthly to pro monthly");
+    expect(moved.out).not.toContain("isn't paid yet");
+    // Nothing waits on a payment page, so the run finishes onboarding.
+    expect(world.writes).toContain("POST /onboarding/complete");
 
     world.billing = { plan: "pro", managed: false, billing_interval: "annual" };
     const differs = await onboard(["--yes"], fetch);
     expect(differs.code).toBe(exitCodes.ok);
     expect(differs.out).toContain("plan           differs      pro annual is in force");
     expect(differs.out).toContain("The business matches the manifest, except:\n- The business pays for pro annual, and the manifest asks for pro monthly. Change it in Polar's billing portal");
-    expect(world.writes.slice(-2)).toEqual(["POST /onboarding/complete", "POST /team/claim-link"]);
+    expect(count(world.writes, /^POST \/billing\/checkout$/)).toBe(1);
   });
 
   it("replaces an old checkout page only when a person says so, and one for another plan at once", async () => {

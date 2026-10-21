@@ -1887,7 +1887,7 @@
       "post": {
         "operationId": "createCheckout",
         "summary": "Start a checkout",
-        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro; other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
+        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
         "tags": [
           "Billing"
         ],
@@ -14743,12 +14743,13 @@
               "pending",
               "processing",
               "ready",
+              "changed",
               "error"
             ],
-            "description": "pending or processing: Polar is making the page. ready: checkout_url is set. error: making the page failed; start another checkout."
+            "description": "pending or processing: Polar is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so Polar moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once Polar confirms it. error: Polar made no page or change; error says why, and another checkout can be started."
           },
           "checkout_url": {
-            "description": "The Polar page where the customer pays. Send it to them.",
+            "description": "The Polar page where the customer pays. Send it to them. Null unless status is ready.",
             "type": [
               "string",
               "null"

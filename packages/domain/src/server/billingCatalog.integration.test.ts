@@ -7,7 +7,7 @@ import { createDatabaseClient, withBusinessTransaction, type Database, type Data
 import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
-import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { runDailyBillingVerify } from "./billingVerify";
@@ -126,6 +126,8 @@ const hashOf = (value: Record<string, any>) => createHash("sha256").update(canon
 describe.skipIf(!testUrl)("billing catalog apply", () => {
   it("seeds an empty deployment, records unchanged for the same file, and applied with no changes for a polar-only edit", async () => {
     await rollbackTest(async (tx) => {
+      // Before any apply, a plan change charges as the shipped files say.
+      expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "invoice", downgrade: "next_period" });
       const first = await apply(tx, file());
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "catalog", status: "applied", brand: "alloplace", ver: 1, prev_hash: null, code_hash: deployedHash, hash: deployedHash, key_id: caller.platformKeyId, partner: "lobbystack" } });
       expect(actions(first.run)).toEqual(["insert enterprise", "insert free_cloud", "insert pro", "insert starter", "insert pro/annual/cad", "insert pro/monthly/cad", "insert starter/annual/cad", "insert starter/monthly/cad"]);
@@ -147,6 +149,9 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(catalog).toMatchObject({ brand: "alloplace", hash: polarOnly.run.hash, matches_code: false, currency: "cad", last_run: { id: polarOnly.run.id } });
       expect(catalog.profile).toMatchObject({ polar: { portalPlanChanges: false } });
       expect(catalog.profile).not.toHaveProperty("$schema");
+      // After one, as the latest file says.
+      await apply(tx, file((value) => { value.polar.upgradeProration = "prorate"; }));
+      expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "prorate", downgrade: "next_period" });
     });
   });
 

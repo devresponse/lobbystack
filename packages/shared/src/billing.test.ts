@@ -9,6 +9,9 @@ import {
   contentRetentionDaysForPlan,
   getKnowledgeStorageLimitBytes,
   getPolarMeteredUsagePayload,
+  planChangeDirection,
+  planChangeRefusalOf,
+  planChangeRefusals,
 } from "./billing";
 
 describe("knowledge storage limits", () => {
@@ -138,5 +141,21 @@ describe("billableVoiceSeconds with provider rounding", () => {
 
   it("still exempts spam regardless of the measured time", () => {
     expect(billableVoiceSeconds(300, "spam_ended", 299.5)).toBe(0);
+  });
+});
+
+describe("plan changes", () => {
+  it("counts a dearer tier, or annual billing on the same tier, as an upgrade", () => {
+    expect(planChangeDirection({ plan: "starter", interval: "annual" }, { plan: "pro", interval: "monthly" })).toBe("upgrade");
+    expect(planChangeDirection({ plan: "starter", interval: "monthly" }, { plan: "starter", interval: "annual" })).toBe("upgrade");
+    expect(planChangeDirection({ plan: "pro", interval: "monthly" }, { plan: "starter", interval: "annual" })).toBe("downgrade");
+    expect(planChangeDirection({ plan: "pro", interval: "annual" }, { plan: "pro", interval: "monthly" })).toBe("downgrade");
+    expect(planChangeDirection({ plan: "pro", interval: "annual" }, { plan: "pro", interval: "annual" })).toBe("none");
+  });
+
+  it("reads a refusal back from the sentence the worker stored, and nothing else", () => {
+    expect(planChangeRefusalOf(planChangeRefusals.payment_failed)).toBe("payment_failed");
+    expect(planChangeRefusalOf("Polar checkout creation failed.")).toBeNull();
+    expect(planChangeRefusalOf(null)).toBeNull();
   });
 });

@@ -247,7 +247,17 @@
     "toast": {
       "checkoutSuccess": "Le paiement a bien été lancé.",
       "checkoutFailed": "Impossible d'ouvrir le paiement.",
-      "portalFailed": "Impossible d'ouvrir le portail client."
+      "portalFailed": "Impossible d'ouvrir le portail client.",
+      "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que Polar l'aura confirmé.",
+      "planChangeFailed": "Impossible de changer votre forfait.",
+      "planChangeRefused": {
+        "payment_failed": "Votre moyen de paiement enregistré n'a pas pu être débité pour le nouveau forfait. Mettez-le à jour dans Gérer l'abonnement, puis réessayez.",
+        "subscription_ending": "Votre abonnement doit prendre fin, son forfait ne peut donc pas changer. Réactivez-le d'abord dans Gérer l'abonnement.",
+        "change_pending": "Un changement précédent de votre abonnement est encore en cours. Réessayez dans une minute.",
+        "subscription_unavailable": "Votre abonnement ne peut pas changer pour le moment. Vérifiez-le dans Gérer l'abonnement.",
+        "product_unavailable": "Ce forfait ne peut pas être acheté pour le moment. Contactez l'assistance.",
+        "token_scope": "Les changements de forfait ne sont pas encore configurés ici. Contactez l'assistance."
+      }
     },
     "pastDueBanner": {
       "title": "Échec du paiement",
@@ -287,6 +297,7 @@
       "manageBilling": "Gérer la facturation",
       "manageSubscription": "Gérer l'abonnement",
       "openingCheckout": "Ouverture du paiement...",
+      "changingPlan": "Changement de forfait...",
       "openingPortal": "Ouverture du portail...",
       "viewInvoice": "Voir la facture",
       "retry": "Réessayer"
@@ -325,6 +336,7 @@
     "upgradeDialog": {
       "title": "Changer de forfait",
       "description": "Choisissez le forfait qui convient le mieux à votre équipe.",
+      "changesSubscription": "Vous avez déjà un abonnement : il sera modifié au lieu d'ouvrir un paiement. Toute différence est débitée sur votre moyen de paiement enregistré.",
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez 20 %",

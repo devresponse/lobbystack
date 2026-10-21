@@ -15,8 +15,8 @@ export const claimWait: WaitSpec = {
 export const checkoutWait: WaitSpec = {
   operation: "getCheckout",
   param: "checkout_id",
-  done: (data) => data.status === "ready" || data.status === "error",
-  failed: (data) => (data.status === "error" ? `Polar couldn't make the checkout page: ${reason(data)}. Start another checkout.` : undefined),
+  done: (data) => data.status === "ready" || data.status === "changed" || data.status === "error",
+  failed: (data) => (data.status === "error" ? `Polar couldn't make the checkout page or change the plan: ${reason(data)}. Start another checkout.` : undefined),
 };
 
 export const sourceWait: WaitSpec = {

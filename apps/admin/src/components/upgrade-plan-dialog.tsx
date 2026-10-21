@@ -78,6 +78,7 @@ export function UpgradePlanDialog({
   availableCheckoutPlans,
   availableCheckoutIntervals,
   billingInterval,
+  changesPlan = false,
   currentPlan,
   loading,
   loadingPlan,
@@ -91,6 +92,8 @@ export function UpgradePlanDialog({
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
   billingInterval: BillingInterval;
+  /** The business already pays, so a plan button changes its subscription instead of opening a checkout. */
+  changesPlan?: boolean;
   currentPlan: BillingPlanSlug;
   loading: "checkout" | "portal" | null;
   loadingPlan: HostedUpgradePlan | null;
@@ -126,6 +129,11 @@ export function UpgradePlanDialog({
           <DialogDescription>
             {t("billing.upgradeDialog.description")}
           </DialogDescription>
+          {changesPlan ? (
+            <p className="text-sm text-muted-foreground">
+              {t("billing.upgradeDialog.changesSubscription")}
+            </p>
+          ) : null}
         </DialogHeader>
 
         <div className="flex justify-center">
@@ -169,9 +177,12 @@ export function UpgradePlanDialog({
             const isSelectedIntervalAvailable =
               checkoutPlan === null ||
               availableCheckoutIntervals[checkoutPlan].includes(selectedBillingInterval);
+            // Moving a paid plan down happens in the billing portal, so only an upgrade changes it here.
+            const isDowngrade = changesPlan && currentPlan === "pro" && checkoutPlan === "starter";
             const isAvailable =
               isEnterprisePlan ||
               (checkoutPlan !== null &&
+                !isDowngrade &&
                 availableCheckoutPlans.includes(checkoutPlan) &&
                 isSelectedIntervalAvailable);
             const actionLabel = isCurrentPlan
@@ -234,7 +245,7 @@ export function UpgradePlanDialog({
                     checkoutPlan !== null &&
                     checkoutPlan === loadingPlan
                   }
-                  loadingLabel={t("billing.actions.openingCheckout")}
+                  loadingLabel={t(changesPlan ? "billing.actions.changingPlan" : "billing.actions.openingCheckout")}
                   onClick={() => {
                     if (checkoutPlan !== null) {
                       onStartCheckout(checkoutPlan, selectedBillingInterval);

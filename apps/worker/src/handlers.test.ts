@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { vi } from "vitest";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
+import { PolarRequestError, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
+import { planChangeRefusals } from "@lobbystack/shared";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
@@ -33,6 +35,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     loadBillingCheckoutRequest: vi.fn(),
     loadBillingUsageEvent: vi.fn(),
     loadPendingProductEvents: vi.fn(),
+    loadPlanChangeProration: vi.fn(),
+    markBillingPlanChanged: vi.fn(),
     markBillingUsageSynced: vi.fn(),
     markBillingCheckoutCreated: vi.fn(),
     markBillingCheckoutFailed: vi.fn(),
@@ -80,7 +84,7 @@ afterEach(() => {
   brand.appBaseUrl = null;
 });
 
-import { handleJob } from "./handlers";
+import { handleJob, type WorkerDependencies } from "./handlers";
 
 function billingJob(payload: Record<string, unknown>): JobEnvelope {
   return {
@@ -542,7 +546,7 @@ describe("worker handlers", () => {
     vi.stubEnv("APP_BASE_URL", "https://app.example/");
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete" } as Awaited<ReturnType<typeof loadBillingCheckoutRequest>>);
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", subscription: null });
     vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
     const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
 
@@ -564,6 +568,94 @@ describe("worker handlers", () => {
       returnUrl: "https://app.example/settings/plan",
     }));
     vi.unstubAllEnvs();
+  });
+
+  describe("a business that already pays", () => {
+    const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_STARTER_ANNUAL_PRODUCT_ID: "product-starter-annual", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly", POLAR_PRO_ANNUAL_PRODUCT_ID: "product-pro-annual" };
+    const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, ...extra });
+
+    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+      const businessId = randomUUID();
+      const requestId = randomUUID();
+      const domain = { db: undefined as never };
+      for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
+      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+      vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
+      vi.mocked(markBillingPlanChanged).mockResolvedValue(true);
+      vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly" } });
+      const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
+      return { businessId, requestId, domain, run };
+    }
+
+    it("moves Starter to Pro on the same subscription, invoiced now, instead of a second checkout", async () => {
+      const createCheckout = vi.fn();
+      const getSubscription = vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly"));
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("product-pro-annual"));
+      const { businessId, requestId, domain, run } = await changePlan({ target: "pro", billingInterval: "annual", plan: "starter", polar: { createCheckout, getSubscription, changeSubscriptionProduct } });
+
+      await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
+      expect(getSubscription).toHaveBeenCalledWith("sub-1");
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "product-pro-annual", prorationBehavior: "invoice" });
+      expect(markBillingPlanChanged).toHaveBeenCalledWith(domain, { businessId, requestId });
+      expect(createCheckout).not.toHaveBeenCalled();
+    });
+
+    it("moves Pro to Starter from the next period, going by Polar's product rather than the stored plan", async () => {
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly", { pendingProductId: "product-starter-monthly" }));
+      const { run } = await changePlan({ target: "starter", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly")), changeSubscriptionProduct } });
+
+      await expect(run).resolves.toMatchObject({ status: "completed" });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-starter-monthly", prorationBehavior: "next_period" }));
+    });
+
+    it("marks a change Polar already made without making it twice", async () => {
+      const changeSubscriptionProduct = vi.fn();
+      const { run } = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly")), changeSubscriptionProduct } });
+
+      await expect(run).resolves.toMatchObject({ status: "completed" });
+      expect(changeSubscriptionProduct).not.toHaveBeenCalled();
+      expect(markBillingPlanChanged).toHaveBeenCalled();
+    });
+
+    it("tells the business why when Polar can't charge the change, without retrying", async () => {
+      const changeSubscriptionProduct = vi.fn().mockRejectedValue(new PolarRequestError(402, "PaymentFailed"));
+      const { businessId, requestId, domain, run } = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly")), changeSubscriptionProduct } });
+
+      await expect(run).resolves.toEqual({ status: "skipped", entityId: requestId });
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: planChangeRefusals.payment_failed });
+      expect(markBillingPlanChanged).not.toHaveBeenCalled();
+    });
+
+    it("refuses a subscription set to end, and names a token without write access as the operator's to fix", async () => {
+      const ending = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly", { cancelAtPeriodEnd: true })), changeSubscriptionProduct: vi.fn() } });
+      await expect(ending.run).resolves.toMatchObject({ status: "skipped" });
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(ending.domain, { businessId: ending.businessId, requestId: ending.requestId, error: planChangeRefusals.subscription_ending });
+
+      const scope = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockRejectedValue(new PolarRequestError(403, "insufficient_scope")), changeSubscriptionProduct: vi.fn() } });
+      await expect(scope.run).resolves.toMatchObject({ status: "skipped" });
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(scope.domain, { businessId: scope.businessId, requestId: scope.requestId, error: planChangeRefusals.token_scope });
+    });
+
+    it("retries when Polar fails for another reason", async () => {
+      const error = new PolarRequestError(503, null);
+      const { businessId, requestId, domain, run } = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly")), changeSubscriptionProduct: vi.fn().mockRejectedValue(error) } });
+
+      await expect(run).rejects.toBe(error);
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Polar plan change failed." });
+    });
+
+    it("opens a checkout when Polar's subscription has already ended", async () => {
+      vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
+      const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
+      const changeSubscriptionProduct = vi.fn();
+      const { run } = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { createCheckout, getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly", { status: "canceled", endedAt: "2026-10-01T00:00:00Z" })), changeSubscriptionProduct } });
+
+      await expect(run).resolves.toMatchObject({ status: "completed" });
+      expect(changeSubscriptionProduct).not.toHaveBeenCalled();
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-pro-monthly" }));
+    });
   });
 
   it("runs the global affiliate payout job without a business context", async () => {

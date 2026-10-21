@@ -247,7 +247,17 @@
     "toast": {
       "checkoutSuccess": "El pago se completó correctamente.",
       "checkoutFailed": "No se pudo abrir el pago.",
-      "portalFailed": "No se pudo abrir el portal del cliente."
+      "portalFailed": "No se pudo abrir el portal del cliente.",
+      "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto Polar lo confirme.",
+      "planChangeFailed": "No se pudo cambiar su plan.",
+      "planChangeRefused": {
+        "payment_failed": "No se pudo cobrar el nuevo plan a su método de pago guardado. Actualícelo en Gestionar suscripción y vuelva a intentarlo.",
+        "subscription_ending": "Su suscripción está programada para terminar, así que su plan no puede cambiar. Reactívela primero en Gestionar suscripción.",
+        "change_pending": "Todavía se está aplicando un cambio anterior a su suscripción. Vuelva a intentarlo en un minuto.",
+        "subscription_unavailable": "Su suscripción no puede cambiar en este momento. Revísela en Gestionar suscripción.",
+        "product_unavailable": "Este plan no se puede comprar en este momento. Contacte con soporte.",
+        "token_scope": "Los cambios de plan aún no están configurados aquí. Contacte con soporte."
+      }
     },
     "pastDueBanner": {
       "title": "Pago no realizado",
@@ -287,6 +297,7 @@
       "manageBilling": "Gestionar facturación",
       "manageSubscription": "Gestionar suscripción",
       "openingCheckout": "Abriendo el pago...",
+      "changingPlan": "Cambiando de plan...",
       "openingPortal": "Abriendo el portal...",
       "viewInvoice": "Ver factura",
       "retry": "Reintentar"
@@ -325,6 +336,7 @@
     "upgradeDialog": {
       "title": "Cambiar de plan",
       "description": "Elija el plan que mejor se adapte a su equipo.",
+      "changesSubscription": "Ya tiene una suscripción, así que se modificará en lugar de abrir un pago. Cualquier diferencia se cobra a su método de pago guardado.",
       "enterpriseSubject": "Plan Enterprise",
       "billingIntervalLabel": "Periodicidad de facturación",
       "annualDiscount": "Ahorre un 20 %",

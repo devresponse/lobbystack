@@ -52,6 +52,43 @@ export function isPaidSubscription(plan: string | null | undefined, state: strin
   return ["starter", "pro", "enterprise"].includes(plan ?? "") && (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }
 
+const planTierRank: Record<HostedCheckoutPlanSlug, number> = { starter: 1, pro: 2 };
+
+/**
+ * What moving a paying business between Starter and Pro is: an upgrade to a
+ * dearer tier, or to annual billing on the same tier; a downgrade the other
+ * way; or none when the plan and interval stay the same.
+ */
+export function planChangeDirection(
+  from: { plan: HostedCheckoutPlanSlug; interval: BillingInterval },
+  to: { plan: HostedCheckoutPlanSlug; interval: BillingInterval },
+): "upgrade" | "downgrade" | "none" {
+  const tier = planTierRank[to.plan] - planTierRank[from.plan];
+  if (tier !== 0) return tier > 0 ? "upgrade" : "downgrade";
+  if (from.interval === to.interval) return "none";
+  return to.interval === "annual" ? "upgrade" : "downgrade";
+}
+
+/**
+ * Why Polar didn't move a paying business to the plan it picked. The worker
+ * stores the sentence as the checkout request's error, which API callers read;
+ * the dashboard turns it back into the code to say it in the viewer's language.
+ */
+export const planChangeRefusals = {
+  payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
+  subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
+  change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
+  subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
+  product_unavailable: "Polar refused the new plan's product. Check that the plan's POLAR_*_PRODUCT_ID names a live recurring product.",
+  token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
+} as const;
+export type PlanChangeRefusal = keyof typeof planChangeRefusals;
+
+/** The refusal a checkout request's error states, or null for any other error. */
+export function planChangeRefusalOf(error: string | null | undefined): PlanChangeRefusal | null {
+  return (Object.keys(planChangeRefusals) as PlanChangeRefusal[]).find((code) => planChangeRefusals[code] === error) ?? null;
+}
+
 export const billingTransactionKinds = ["order", "refund"] as const;
 export type BillingTransactionKind = (typeof billingTransactionKinds)[number];
 

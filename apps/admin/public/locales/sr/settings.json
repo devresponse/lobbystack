@@ -247,7 +247,17 @@
     "toast": {
       "checkoutSuccess": "Plaćanje je uspešno završeno.",
       "checkoutFailed": "Nije moguće otvoriti plaćanje.",
-      "portalFailed": "Nije moguće otvoriti portal za korisnike."
+      "portalFailed": "Nije moguće otvoriti portal za korisnike.",
+      "planChanged": "Vaš paket se menja. Prikazaće se ovde čim ga Polar potvrdi.",
+      "planChangeFailed": "Nije moguće promeniti Vaš paket.",
+      "planChangeRefused": {
+        "payment_failed": "Nije bilo moguće naplatiti novi paket sa sačuvanog načina plaćanja. Ažurirajte ga u delu Upravljaj pretplatom, pa pokušajte ponovo.",
+        "subscription_ending": "Vaša pretplata treba da istekne, pa se njen paket ne može promeniti. Prvo je obnovite u delu Upravljaj pretplatom.",
+        "change_pending": "Prethodna promena Vaše pretplate se još primenjuje. Pokušajte ponovo za minut.",
+        "subscription_unavailable": "Vaša pretplata se trenutno ne može promeniti. Proverite je u delu Upravljaj pretplatom.",
+        "product_unavailable": "Ovaj paket se trenutno ne može kupiti. Obratite se podršci.",
+        "token_scope": "Promene paketa ovde još nisu podešene. Obratite se podršci."
+      }
     },
     "pastDueBanner": {
       "title": "Plaćanje nije uspelo",
@@ -287,6 +297,7 @@
       "manageBilling": "Upravljaj naplatom",
       "manageSubscription": "Upravljaj pretplatom",
       "openingCheckout": "Otvaranje plaćanja...",
+      "changingPlan": "Menjanje paketa...",
       "openingPortal": "Otvaranje portala...",
       "viewInvoice": "Prikaži račun",
       "retry": "Pokušaj ponovo"
@@ -325,6 +336,7 @@
     "upgradeDialog": {
       "title": "Nadogradite paket",
       "description": "Izaberite paket koji najviše odgovara Vašem timu.",
+      "changesSubscription": "Već imate pretplatu, pa će ona biti izmenjena umesto otvaranja plaćanja. Svaka razlika se naplaćuje sa sačuvanog načina plaćanja.",
       "enterpriseSubject": "Enterprise paket",
       "billingIntervalLabel": "Period naplate",
       "annualDiscount": "Uštedite 20%",

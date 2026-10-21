@@ -6,7 +6,8 @@ import { brandJsonSchemas, brandsModuleSource, compileBrands, type BrandSources 
 
 // Compiles the brands under brands/ into the files the apps read:
 // packages/shared/src/brands/generated.ts, each brand's images under
-// apps/admin/public/brand/<id>/, and JSON Schemas for editors. A test in
+// apps/admin/public/brand/<id>/, and JSON Schemas for editors. A brand's
+// billing.json is checked and hashed but never copied anywhere. A test in
 // scripts/brands.test.ts fails when any of them falls behind brands/.
 
 export const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -18,16 +19,18 @@ export function readBrandSources(root = repositoryRoot): BrandSources {
     const path = join(folder, id);
     if (!statSync(path).isDirectory()) continue;
     const assets: Record<string, Uint8Array> = {};
-    for (const name of readdirSync(path)) {
-      if (name !== "brand.json") assets[name] = readFileSync(join(path, name));
+    const names = readdirSync(path);
+    for (const name of names) {
+      if (name !== "brand.json" && name !== "billing.json") assets[name] = readFileSync(join(path, name));
     }
-    let file: unknown;
-    try {
-      file = JSON.parse(readFileSync(join(path, "brand.json"), "utf8"));
-    } catch (error) {
-      throw new Error(`brands/${id}/brand.json: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    brands[id] = { file, assets };
+    const json = (name: string): unknown => {
+      try {
+        return JSON.parse(readFileSync(join(path, name), "utf8"));
+      } catch (error) {
+        throw new Error(`brands/${id}/${name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    brands[id] = { file: json("brand.json"), ...(names.includes("billing.json") ? { billing: json("billing.json") } : {}), assets };
   }
   return { index: JSON.parse(readFileSync(join(folder, "index.json"), "utf8")), brands };
 }
@@ -40,6 +43,7 @@ export function brandOutputs(sources: BrandSources): Map<string, string | Uint8A
   outputs.set("packages/shared/src/brands/generated.ts", brandsModuleSource(compiled));
   outputs.set("brands/brand.schema.json", `${JSON.stringify(schemas.brand, null, 2)}\n`);
   outputs.set("brands/index.schema.json", `${JSON.stringify(schemas.index, null, 2)}\n`);
+  outputs.set("brands/billing.schema.json", `${JSON.stringify(schemas.billing, null, 2)}\n`);
   for (const [path, bytes] of Object.entries(compiled.publicAssets)) outputs.set(`apps/admin/public${path}`, bytes);
   return outputs;
 }

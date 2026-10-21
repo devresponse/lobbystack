@@ -69,7 +69,7 @@ Chaque point de terminaison, sauf `GET /me`, exige une portée. Une clé qui ne 
 | `messages:read` | `GET /messages` |
 | `knowledge:read` | `GET /knowledge`, `GET /knowledge/{entry_id}`, `GET /knowledge/sources`, `GET /knowledge/sources/{source_id}` |
 | `knowledge:write` | `POST /knowledge`, `PATCH` et `DELETE` sur `/knowledge/{entry_id}`, `POST /knowledge/sources`, `PATCH` et `DELETE` sur `/knowledge/sources/{source_id}`, `POST /knowledge/sources/{source_id}/expand`, `/retry` et `/cancel`, `POST /knowledge/uploads` et `POST /knowledge/uploads/{upload_id}/complete` |
-| `billing:manage` | `GET` et `PATCH /billing`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` et, avec la clé de plateforme d'un opérateur, `POST` et `DELETE /billing/managed-plan` |
+| `billing:manage` | `GET` et `PATCH /billing`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` et, avec la clé de plateforme d'un opérateur, `POST` et `DELETE /billing/managed-plan`, `GET /billing/catalog`, et `GET` et `POST /billing/catalog/runs` |
 | `phone_numbers:manage` | `GET /phone-numbers`, `POST /phone-numbers/search`, `POST /phone-numbers/claims`, `GET /phone-numbers/claims/{claim_id}`, `DELETE /phone-numbers/{phone_number_id}` et `POST /phone-numbers/{phone_number_id}/replace` |
 | `team:manage` | `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/{invitation_id}`, `PATCH` et `DELETE` sur `/team/members/{membership_id}`, `POST /team/claim-link` |
 | `webhooks:manage` | `GET`, `POST`, `PATCH` et `DELETE` sur `/webhooks`, et `POST /webhooks/{webhook_id}/test` |
@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé.
+Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé. La clé d'un exploitant gère aussi le catalogue de facturation du déploiement avec `GET /billing/catalog` et `GET` et `POST /billing/catalog/runs`, qui n'agissent sur aucune entreprise et ne prennent pas l'en-tête.
 
 `POST /team/claim-link` remet une entreprise à son propriétaire. Une fois qu'il l'accepte, la clé d'un partenaire n'atteint plus l'entreprise, alors que celle d'un exploitant l'atteint toujours. Dans les deux cas, `GET /businesses` ne la liste plus.
 

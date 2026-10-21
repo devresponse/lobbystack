@@ -63,3 +63,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
     "environments": []
   }
 };
+
+/** The SHA-256 of each brand's normalized billing.json, which a catalog apply compares with the file it is sent. */
+export const BILLING_PROFILE_HASHES: Record<string, string> = {
+  "alloplace": "39ad3052ec5281525db2009617afe71a8ea908973b0d29f3846ce16f86055acf"
+};

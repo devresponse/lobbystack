@@ -180,6 +180,33 @@ function onboardingTable(data: Row): string {
   return `${formatTable(checklist.map((item) => ({ ...item, required: item.required ? "yes" : "" })), columns("id", "status", "required"))}\n\nStage: ${String(data.stage)}. ${data.complete ? "Onboarding is complete." : missing.length ? `Still needed to finish: ${missing.join(", ")}.` : "Ready to finish with lobbystack onboarding complete."}`;
 }
 
+/** "4900 cad monthly" as "49.00 CAD a month". */
+function priceText(price: Row): string {
+  return `${(Number(price.cents) / 100).toFixed(2)} ${String(price.currency).toUpperCase()} ${price.period === "annual" ? "a year" : "a month"}`;
+}
+
+/** Every plan the deployment holds with its live prices, and whether the applied file is the deployed one. */
+function catalogTables(data: Row): string {
+  const plans = (data.plans as Row[]).map((plan) => ({ ...plan, prices: (plan.prices as Row[]).filter((price) => price.retired_at === null).map(priceText).join(", ") }));
+  const run = data.last_run as Row | null;
+  if (!run) return `Nothing applied yet for ${String(data.brand)}. See what applying its file would change with lobbystack billing catalog-preview ${String(data.brand)} --billing-file @brands/${String(data.brand)}/billing.json.`;
+  const matches = data.matches_code ? "the file the running code was built with" : data.code_hash ? "not the file the running code was built with: apply the deployed one" : "and the running code has no billing.json for this brand";
+  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.`;
+}
+
+/** What an apply changed, or with a preview would change, and anything that stops it. */
+function catalogChanges(data: Row): string {
+  const changes = (data.changes as Row[]).map((change) => ({ ...change, fields: Object.keys(change.fields as Row).join(", "), warns: [change.lowers_allowance ? "lowers an allowance" : "", change.raises_price ? "raises a price" : ""].filter(Boolean).join(", ") }));
+  const blocked = data.blocked_by as Row[];
+  const table = changes.length ? `${formatTable(changes, columns("action", "table", "key", "fields", "warns"))}\n\n` : "";
+  const count = `${changes.length} ${changes.length === 1 ? "change" : "changes"}`;
+  if (data.status === "preview") {
+    if (blocked.length) return `${table}Applying would be refused, and nothing would change:\n${blocked.map((refusal) => `  ${String(refusal.code)} (${String(refusal.path)}): ${String(refusal.message)}`).join("\n")}`;
+    return `${table}${changes.length ? `Applying would make these ${count}` : "The tables already match this file"}. Nothing was written. Apply it with lobbystack billing catalog-apply ${String(data.brand)} --billing-file <the same file>${data.prev_hash ? ` --replaces-hash ${String(data.prev_hash)}` : ""}.`;
+  }
+  return `${table}${data.status === "unchanged" ? "The tables already matched this file" : `Applied ${count}`} in run ${String(data.id)}.`;
+}
+
 /** The page's settings, with the address on one line. */
 function publicProfileText(data: Row): string {
   const address = data.address as Row;
@@ -266,13 +293,17 @@ export const groups: Record<string, Group> = Object.fromEntries([
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
   }),
-  group("billing", "The plan, its checkout and the spending cap.", {
+  group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog.", {
     status: { operation: "getBilling" },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
     "managed-plan": { operation: "setManagedPlan", fixed: { plan: "enterprise" } },
     "end-managed-plan": { operation: "endManagedPlan" },
+    catalog: { operation: "getBillingCatalog", show: catalogTables },
+    "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, show: catalogChanges },
+    "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, show: catalogChanges },
+    "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "started_at") },
   }),
   group("numbers", "Find, claim, replace and release phone numbers.", {
     list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "release_scheduled_at") },

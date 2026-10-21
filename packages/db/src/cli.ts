@@ -170,11 +170,45 @@ async function main(): Promise<void> {
             ,('lobbystack_finance_export', 'appointments', 'SELECT')
             ,('lobbystack_finance_export', 'unit_economics_events', 'SELECT')
             ,('lobbystack_finance_export', 'billing_transactions', 'SELECT')
+            ,('lobbystack_worker', 'billing_runs', 'SELECT')
+            ,('lobbystack_worker', 'billing_runs', 'INSERT')
+            ,('lobbystack_worker', 'billing_runs', 'UPDATE')
+            ,('lobbystack_worker', 'billing_plans', 'SELECT')
+            ,('lobbystack_worker', 'billing_plans', 'INSERT')
+            ,('lobbystack_worker', 'billing_plans', 'UPDATE')
+            ,('lobbystack_worker', 'billing_prices', 'SELECT')
+            ,('lobbystack_worker', 'billing_prices', 'INSERT')
+            ,('lobbystack_worker', 'billing_prices', 'UPDATE')
+            ,('lobbystack_readonly', 'billing_runs', 'SELECT')
+            ,('lobbystack_readonly', 'billing_plans', 'SELECT')
+            ,('lobbystack_readonly', 'billing_prices', 'SELECT')
+            ,('lobbystack_app', 'billing_plans', 'SELECT')
+            ,('lobbystack_app', 'billing_prices', 'SELECT')
+            ,('lobbystack_app', 'billing_offers', 'SELECT')
+            ,('lobbystack_worker', 'billing_offers', 'SELECT')
+            ,('lobbystack_readonly', 'billing_offers', 'SELECT')
           ) as expected(role_name, table_name, privilege_type)
           where not has_table_privilege(expected.role_name, 'public.' || expected.table_name, expected.privilege_type)
         `);
         if (grantFailures.rows.length > 0) {
           throw new Error(`Database grant verification failed for: ${grantFailures.rows.map((row) => `${row.role_name}:${row.table_name}:${row.privilege_type}`).join(", ")}`);
+        }
+        // The billing catalog is retired, never deleted, and its view reads with each caller's own policies.
+        const billingCatalogFailures = await migrator.db.execute<{ failure: string }>(sql`
+          select role_name || ':' || table_name || ':DELETE' as failure
+          from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
+          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices']) as table_name
+          where exists (select 1 from pg_roles where rolname = role_name)
+            and has_table_privilege(role_name, 'public.' || table_name, 'DELETE')
+          union all
+          select 'billing_offers:security_invoker'
+          where not exists (
+            select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace
+            where n.nspname = 'public' and c.relname = 'billing_offers' and c.relkind = 'v' and 'security_invoker=true' = any(c.reloptions)
+          )
+        `);
+        if (billingCatalogFailures.rows.length > 0) {
+          throw new Error(`Billing catalog verification failed for: ${billingCatalogFailures.rows.map((row) => row.failure).join(", ")}`);
         }
         const affiliateUserGrantFailures = await migrator.db.execute<{ column_name: string }>(sql`
           select expected.column_name

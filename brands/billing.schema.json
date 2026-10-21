@@ -1,0 +1,805 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "const": 1
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[a-z]{3}$"
+    },
+    "polar": {
+      "type": "object",
+      "properties": {
+        "allowMultipleSubscriptions": {
+          "type": "boolean"
+        },
+        "portalPlanChanges": {
+          "type": "boolean"
+        },
+        "upgradeProration": {
+          "type": "string",
+          "enum": [
+            "invoice",
+            "prorate",
+            "next_period",
+            "reset"
+          ]
+        },
+        "downgradeProration": {
+          "type": "string",
+          "enum": [
+            "invoice",
+            "prorate",
+            "next_period",
+            "reset"
+          ]
+        }
+      },
+      "required": [
+        "allowMultipleSubscriptions",
+        "portalPlanChanges",
+        "upgradeProration",
+        "downgradeProration"
+      ],
+      "additionalProperties": false
+    },
+    "plans": {
+      "type": "object",
+      "properties": {
+        "free_cloud": {
+          "type": "object",
+          "properties": {
+            "sold": {
+              "type": "boolean",
+              "const": false
+            },
+            "included": {
+              "type": "object",
+              "properties": {
+                "voiceMinutes": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "alertSmsSegments": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "outboundCallAttempts": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100000
+                },
+                "chatAiUnits": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1000000
+                }
+              },
+              "required": [
+                "voiceMinutes",
+                "alertSmsSegments",
+                "outboundCallAttempts",
+                "chatAiUnits"
+              ],
+              "additionalProperties": false
+            },
+            "limits": {
+              "type": "object",
+              "properties": {
+                "knowledgeStorageMb": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 1024
+                },
+                "businessNumbers": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 20
+                }
+              },
+              "required": [
+                "knowledgeStorageMb",
+                "businessNumbers"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "sold",
+            "included",
+            "limits"
+          ],
+          "additionalProperties": false
+        },
+        "starter": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "sold": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "prices": {
+                  "type": "object",
+                  "properties": {
+                    "monthlyCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000
+                    },
+                    "annualCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120000000
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "included": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinutes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "alertSmsSegments": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "outboundCallAttempts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "chatAiUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  },
+                  "required": [
+                    "voiceMinutes",
+                    "alertSmsSegments",
+                    "outboundCallAttempts",
+                    "chatAiUnits"
+                  ],
+                  "additionalProperties": false
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "knowledgeStorageMb": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1024
+                    },
+                    "businessNumbers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 20
+                    }
+                  },
+                  "required": [
+                    "knowledgeStorageMb",
+                    "businessNumbers"
+                  ],
+                  "additionalProperties": false
+                },
+                "overageCents": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "alertSmsSegment": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "outboundCallAttempt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "voiceMinute",
+                    "alertSmsSegment",
+                    "outboundCallAttempt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "sold",
+                "prices",
+                "included",
+                "limits",
+                "overageCents"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "sold": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "included": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinutes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "alertSmsSegments": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "outboundCallAttempts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "chatAiUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  },
+                  "required": [
+                    "voiceMinutes",
+                    "alertSmsSegments",
+                    "outboundCallAttempts",
+                    "chatAiUnits"
+                  ],
+                  "additionalProperties": false
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "knowledgeStorageMb": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1024
+                    },
+                    "businessNumbers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 20
+                    }
+                  },
+                  "required": [
+                    "knowledgeStorageMb",
+                    "businessNumbers"
+                  ],
+                  "additionalProperties": false
+                },
+                "overageCents": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "alertSmsSegment": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "outboundCallAttempt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "voiceMinute",
+                    "alertSmsSegment",
+                    "outboundCallAttempt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "sold",
+                "included",
+                "limits",
+                "overageCents"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "pro": {
+          "oneOf": [
+            {
+              "type": "object",
+              "properties": {
+                "sold": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "prices": {
+                  "type": "object",
+                  "properties": {
+                    "monthlyCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 10000000
+                    },
+                    "annualCents": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 120000000
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "included": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinutes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "alertSmsSegments": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "outboundCallAttempts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "chatAiUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  },
+                  "required": [
+                    "voiceMinutes",
+                    "alertSmsSegments",
+                    "outboundCallAttempts",
+                    "chatAiUnits"
+                  ],
+                  "additionalProperties": false
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "knowledgeStorageMb": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1024
+                    },
+                    "businessNumbers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 20
+                    }
+                  },
+                  "required": [
+                    "knowledgeStorageMb",
+                    "businessNumbers"
+                  ],
+                  "additionalProperties": false
+                },
+                "overageCents": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "alertSmsSegment": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "outboundCallAttempt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "voiceMinute",
+                    "alertSmsSegment",
+                    "outboundCallAttempt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "sold",
+                "prices",
+                "included",
+                "limits",
+                "overageCents"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "sold": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "included": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinutes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "alertSmsSegments": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "outboundCallAttempts": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 100000
+                    },
+                    "chatAiUnits": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000000
+                    }
+                  },
+                  "required": [
+                    "voiceMinutes",
+                    "alertSmsSegments",
+                    "outboundCallAttempts",
+                    "chatAiUnits"
+                  ],
+                  "additionalProperties": false
+                },
+                "limits": {
+                  "type": "object",
+                  "properties": {
+                    "knowledgeStorageMb": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1024
+                    },
+                    "businessNumbers": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 20
+                    }
+                  },
+                  "required": [
+                    "knowledgeStorageMb",
+                    "businessNumbers"
+                  ],
+                  "additionalProperties": false
+                },
+                "overageCents": {
+                  "type": "object",
+                  "properties": {
+                    "voiceMinute": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "alertSmsSegment": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    },
+                    "outboundCallAttempt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 1000
+                    }
+                  },
+                  "required": [
+                    "voiceMinute",
+                    "alertSmsSegment",
+                    "outboundCallAttempt"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "sold",
+                "included",
+                "limits",
+                "overageCents"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "enterprise": {
+          "type": "object",
+          "properties": {
+            "sold": {
+              "type": "boolean",
+              "const": false
+            },
+            "custom": {
+              "type": "boolean",
+              "const": true
+            }
+          },
+          "required": [
+            "sold",
+            "custom"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "free_cloud",
+        "starter",
+        "pro",
+        "enterprise"
+      ],
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "tier": {
+            "type": "string",
+            "enum": [
+              "starter",
+              "pro"
+            ]
+          },
+          "access": {
+            "type": "string",
+            "enum": [
+              "public",
+              "code",
+              "hidden"
+            ]
+          },
+          "names": {
+            "type": "object",
+            "properties": {
+              "en": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "fr": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "es": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              },
+              "sr": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 60
+              }
+            },
+            "required": [
+              "en",
+              "fr",
+              "es",
+              "sr"
+            ],
+            "additionalProperties": false
+          },
+          "sold": {
+            "type": "boolean",
+            "const": true
+          },
+          "prices": {
+            "type": "object",
+            "properties": {
+              "monthlyCents": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10000000
+              },
+              "annualCents": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 120000000
+              }
+            },
+            "additionalProperties": false
+          },
+          "included": {
+            "type": "object",
+            "properties": {
+              "voiceMinutes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "alertSmsSegments": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "outboundCallAttempts": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 100000
+              },
+              "chatAiUnits": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000000
+              }
+            },
+            "additionalProperties": false
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "knowledgeStorageMb": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1024
+              },
+              "businessNumbers": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 20
+              }
+            },
+            "additionalProperties": false
+          },
+          "overageCents": {
+            "type": "object",
+            "properties": {
+              "voiceMinute": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "alertSmsSegment": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              },
+              "outboundCallAttempt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 1000
+              }
+            },
+            "additionalProperties": false
+          },
+          "months": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 36
+          },
+          "endsWith": {
+            "type": "string",
+            "enum": [
+              "tier",
+              "keep",
+              "cancel"
+            ]
+          },
+          "offerEndsAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d(?:\\.\\d+)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$"
+          },
+          "discount": {
+            "oneOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "percentage"
+                  },
+                  "basisPoints": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000
+                  },
+                  "duration": {
+                    "type": "string",
+                    "enum": [
+                      "once",
+                      "forever",
+                      "repeating"
+                    ]
+                  },
+                  "durationInMonths": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 36
+                  }
+                },
+                "required": [
+                  "type",
+                  "basisPoints",
+                  "duration"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "fixed"
+                  },
+                  "amountCents": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10000000
+                  },
+                  "duration": {
+                    "type": "string",
+                    "enum": [
+                      "once",
+                      "forever",
+                      "repeating"
+                    ]
+                  },
+                  "durationInMonths": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 36
+                  }
+                },
+                "required": [
+                  "type",
+                  "amountCents",
+                  "duration"
+                ],
+                "additionalProperties": false
+              }
+            ]
+          }
+        },
+        "required": [
+          "tier",
+          "access",
+          "names",
+          "sold",
+          "prices"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "version",
+    "currency",
+    "polar",
+    "plans"
+  ],
+  "additionalProperties": false
+}

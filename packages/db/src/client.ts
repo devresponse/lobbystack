@@ -92,6 +92,8 @@ export async function withBusinessTransaction<T>(
   db: Database,
   context: RlsContext,
   callback: (tx: DatabaseTransaction) => Promise<T>,
+  // "read only" makes PostgreSQL refuse any write, for a read that must change nothing.
+  options: { accessMode?: "read only" | "read write" } = {},
 ): Promise<T> {
   const maxRetries = 3;
   const tracer = getTracer("lobbystack-db");
@@ -111,7 +113,7 @@ export async function withBusinessTransaction<T>(
       const result = await db.transaction(async (tx) => {
         await tx.execute(rlsContextStatement(context));
         return await callback(tx);
-      });
+      }, options.accessMode ? { accessMode: options.accessMode } : undefined);
       span.end();
       transactionDurationHistogram.record(Date.now() - startedAt, {
         actor_type: context.actorType,

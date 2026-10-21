@@ -79,7 +79,7 @@ type Dependencies = {
   runIdempotent?: typeof runIdempotent;
 };
 
-export function apiError(status: number, code: ApiErrorCode, message: string, init: { headers?: Record<string, string>; details?: Array<{ path: string; message: string }> } = {}): NextResponse {
+export function apiError(status: number, code: ApiErrorCode, message: string, init: { headers?: Record<string, string>; details?: Array<{ path: string; message: string; code?: string }> } = {}): NextResponse {
   return NextResponse.json({ error: { code, message, ...(init.details?.length ? { details: init.details } : {}) } }, { status, headers: init.headers ?? {} });
 }
 

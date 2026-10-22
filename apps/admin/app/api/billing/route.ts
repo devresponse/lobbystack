@@ -1,9 +1,9 @@
-import { isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
+import { billingIntervals, billingPlanPrice, hostedCheckoutPlanSlugs, isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
 import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths } from "@lobbystack/db";
-import { billingAccess, getKnowledgeStorageUsageBytes, loadBillingContext, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBillingContext, polarCheckoutConfigured, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -24,15 +24,18 @@ export async function GET(request: Request) {
       const { plan: effectivePlan } = await loadBillingContext(tx, businessId);
       const month = usageMonth[0];
       const cap = account[0]?.overageSpendingCapCents ?? null;
-      const permissions = billingAccess(membership.role, account[0] ?? null, Boolean(process.env.POLAR_ACCESS_TOKEN && process.env.POLAR_ORGANIZATION_ID));
+      const permissions = billingAccess(membership.role, account[0] ?? null, polarCheckoutConfigured(process.env));
+      // The plans as the catalog has them, or this build's before an apply. A price can be bought here when a Polar product sells it.
+      const { catalog, links } = await loadBillingCatalog(tx, process.env);
+      const plans = billingPlanList(catalog, { checkout: permissions.hasCheckoutAccess, links });
       const availableCheckoutIntervals: HostedCheckoutPlanIntervals = { starter: [], pro: [] };
-      if (permissions.hasCheckoutAccess) for (const plan of ["starter", "pro"] as const) {
-        for (const interval of ["monthly", "annual"] as const) {
-          if (process.env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]) availableCheckoutIntervals[plan].push(interval);
+      for (const plan of hostedCheckoutPlanSlugs) {
+        for (const interval of billingIntervals) {
+          if (billingPlanPrice(plans.plans.find((offer) => offer.slug === plan), interval)?.checkoutAvailable) availableCheckoutIntervals[plan].push(interval);
         }
       }
-      const availableCheckoutPlans = (["starter", "pro"] as const).filter(plan => availableCheckoutIntervals[plan].length > 0);
-      return { availableCheckoutPlans, availableCheckoutIntervals, account: account[0] ?? null, effectivePlan, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus: month ? { ...month, usageComplete: Number(incompleteUsage[0]?.count ?? 0) === 0, overageSpendingCapCents: cap, overageSpendingCapReached: cap !== null && month.overageSpendCents > 0 && month.overageSpendCents >= cap } : null, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      const availableCheckoutPlans = hostedCheckoutPlanSlugs.filter(plan => availableCheckoutIntervals[plan].length > 0);
+      return { availableCheckoutPlans, availableCheckoutIntervals, plans, account: account[0] ?? null, effectivePlan, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus: month ? { ...month, usageComplete: Number(incompleteUsage[0]?.count ?? 0) === 0, overageSpendingCapCents: cap, overageSpendingCapReached: cap !== null && month.overageSpendCents > 0 && month.overageSpendCents >= cap } : null, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

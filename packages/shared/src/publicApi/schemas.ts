@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanSlugs, type PolarEnv } from "../billing";
+import { billingPlanSlugs, cloudBillingPlanSlugs, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { interfaceLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
@@ -350,7 +350,7 @@ export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),
   org: z.string().nullable().describe("POLAR_ORGANIZATION_ID. Null when unset."),
   secret_sha256: sha256Hex.nullable().describe("SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."),
-  product_vars: z.record(z.string(), z.string().nullable()).describe("The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout still reads, by plan/period, such as starter/monthly. Null when unset."),
+  product_vars: z.record(z.string(), z.string().nullable()).describe("The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly, which checkout reads until a link makes the plan active. Null when unset."),
   last_link: apiBillingCatalogRunSchema.nullable().describe("The latest link. Null before the first."),
 }).describe("The Polar settings this deployment runs with.");
 
@@ -364,7 +364,42 @@ export const apiBillingCatalogSchema = z.object({
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
   polar: apiBillingCatalogPolarSchema,
-}).describe("The plans and prices this deployment holds. Checkout and limits don't read them yet.");
+}).describe("The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook and the plan screens read them; limits don't yet.");
+
+export const apiBillingPlanPriceSchema = z.object({
+  interval: z.enum(billingIntervals),
+  currency: z.string().describe("Three lowercase letters, such as cad."),
+  amount_cents: z.number().int().describe("The price for one period."),
+  monthly_amount_cents: z.number().int().describe("amount_cents for monthly, amount_cents / 12 rounded down for annual."),
+  checkout_available: z.boolean().describe("true when POST /billing/checkout can sell it here: Polar is set up and one of its products sells this price."),
+});
+
+export const apiBillingPlanSchema = z.object({
+  slug: z.enum(cloudBillingPlanSlugs),
+  custom: z.boolean().describe("Priced by agreement, with no fixed allowances."),
+  overage_billable: z.boolean().describe("Usage past the allowance is billed rather than blocked."),
+  included: z.object({
+    voice_seconds: nullableCount.describe("Voice seconds included a month."),
+    alert_sms_segments: nullableCount.describe("Alert SMS segments included a month."),
+    outbound_call_attempts: nullableCount.describe("Outbound call attempts (transfers) included a month."),
+    chat_ai_units: nullableCount.describe("Website chat AI units included a month."),
+    knowledge_storage_bytes: nullableCount.describe("Knowledge storage limit in bytes."),
+    business_numbers: nullableCount.describe("Business phone numbers included."),
+  }).describe("What the plan includes. Null means custom."),
+  overage_rates: z.object({
+    voice_minute_cents: nullableCount,
+    alert_sms_segment_cents: nullableCount,
+    outbound_call_attempt_cents: nullableCount,
+  }).describe("Cents for each unit past the allowance, in the plans' currency. Null where usage past it is blocked or priced by agreement."),
+  sort: z.number().int().describe("The order plan cards show them in."),
+  prices: z.array(apiBillingPlanPriceSchema).describe("Empty for a plan Polar doesn't sell, such as free_cloud and enterprise."),
+});
+
+export const apiBillingPlansSchema = z.object({
+  currency: z.string().describe("The prices' currency, three lowercase letters."),
+  source: z.enum(["catalog", "built_in"]).describe("catalog once the deployment applied a billing.json; built_in before that: the plans the running code ships with, in US dollars."),
+  plans: z.array(apiBillingPlanSchema).describe("Free, Starter, Pro and Enterprise, by sort."),
+}).describe("The standard plans this deployment offers, with their allowances and prices.");
 
 const phoneNumberCountries = ["US", "CA", "GB", "AU"] as const;
 const phoneNumberKinds = ["local", "toll_free"] as const;
@@ -1085,6 +1120,7 @@ export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;
 export type ApiBillingCatalogPrice = z.infer<typeof apiBillingCatalogPriceSchema>;
 export type ApiBillingCatalogRefusal = z.infer<typeof apiBillingCatalogRefusalSchema>;
 export type ApiBillingCatalogRun = z.infer<typeof apiBillingCatalogRunSchema>;
+export type ApiBillingPlans = z.infer<typeof apiBillingPlansSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;

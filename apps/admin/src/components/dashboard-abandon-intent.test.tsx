@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanList } from "@lobbystack/shared";
 
 import { DashboardAbandonIntent } from "./dashboard-abandon-intent";
 import { LiveUpgradePlanProvider } from "./live-upgrade-plan-provider";
@@ -17,7 +18,7 @@ vi.mock("@/lib/abandon-intent-survey", () => ({
   captureSurveyDismissed: survey.dismissed,
   captureSurveyResponse: survey.response,
 }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
 
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
@@ -206,7 +207,7 @@ describe("abandon intent during an upgrade", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
-    client.setQueryData(["billing", "business"], { account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
     vi.stubGlobal("fetch", vi.fn(checkout));
     render(
       <QueryClientProvider client={client}>

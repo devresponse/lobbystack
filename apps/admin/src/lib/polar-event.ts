@@ -1,11 +1,16 @@
+import { polarProductLinks, type PolarProductLinks } from "@lobbystack/domain";
 import { isUuid } from "@lobbystack/shared";
 
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
 const text = (value: unknown): string | undefined => typeof value === "string" && value.length > 0 ? value : undefined;
 
-/** Translate signed Polar subscription/order payloads into our billing vocabulary. */
-export function normalizePolarEvent(type: string, data: RecordValue, env: Record<string, string | undefined> = process.env) {
+/**
+ * Translate signed Polar subscription/order payloads into our billing vocabulary.
+ * The product names the plan through the billing catalog's links, or without
+ * them through the four product variables.
+ */
+export function normalizePolarEvent(type: string, data: RecordValue, links: Pick<PolarProductLinks, "planFor"> = polarProductLinks({ plans: [], prices: [] }, process.env)) {
   const customer = record(data.customer);
   const customerMetadata = record(customer.metadata);
   const subscription = type.startsWith("subscription.") ? data : record(data.subscription);
@@ -28,7 +33,7 @@ export function normalizePolarEvent(type: string, data: RecordValue, env: Record
   const businessId = references.find(isUuid);
   const candidate = businessId ?? references[0];
   const productId = text(subscription.product_id) ?? text(data.product_id);
-  const match = (["starter", "pro"] as const).flatMap(plan => (["monthly", "annual"] as const).map(interval => ({ plan, interval, id: env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`] }))).find(product => product.id && product.id === productId);
+  const match = links.planFor(productId);
   const subscriptionId = text(subscription.id) ?? text(data.subscription_id);
   const customerId = text(customer.id) ?? text(data.customer_id);
   const subscriptionState = text(subscription.status);

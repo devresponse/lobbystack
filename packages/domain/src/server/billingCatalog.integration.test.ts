@@ -8,6 +8,7 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { billingPlanList, listBillingPlansForApi, loadBillingCatalog, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { runDailyBillingVerify } from "./billingVerify";
@@ -442,6 +443,55 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       const error = await refusal(link(tx, { hash: deployedHash, plans, polar_env: "production", polar_org: "org_live" }, { deployment: moved }));
       expect(error.details!.map((detail) => detail.code)).toEqual(["polar_org_changed"]);
       expect(error.details![0]!.message).toContain("Live payments get a deployment of their own.");
+    });
+  });
+});
+
+describe.skipIf(!testUrl)("billing catalog at run time", () => {
+  const sells = { POLAR_ACCESS_TOKEN: "polar_oat_x", POLAR_ORGANIZATION_ID: "org_test", POLAR_PRO_MONTHLY_PRODUCT_ID: "var_pro_month" };
+
+  it("shows the built-in plans and sells through the variables until an apply, then the file's plans in its currency, linked products once linked", async () => {
+    await rollbackTest(async (tx) => {
+      const before = await listBillingPlansForApi(context(tx), sells);
+      expect(before).toMatchObject({ currency: "usd", source: "built_in" });
+      expect(before.plans.find((plan) => plan.slug === "pro")!.prices.map((price) => [price.interval, price.amount_cents, price.checkout_available])).toEqual([["monthly", 10_000, true], ["annual", 96_000, false]]);
+      expect((await readPolarProductLinks(context(tx), sells)).planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly" });
+
+      await apply(tx, file());
+      // Applied, not linked: the file's numbers in CAD, still sold through the variables.
+      const applied = await listBillingPlansForApi(context(tx), sells);
+      expect(applied).toMatchObject({ currency: "cad", source: "catalog" });
+      expect(applied.plans.map((plan) => plan.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+      const pro = applied.plans.find((plan) => plan.slug === "pro")!;
+      expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
+      expect(pro.prices.map((price) => [price.interval, price.currency, price.amount_cents, price.monthly_amount_cents, price.checkout_available])).toEqual([["monthly", "cad", 10_000, 10_000, true], ["annual", "cad", 96_000, 8_000, false]]);
+      expect(applied.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [] });
+
+      const { plans } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans });
+      const linked = new Map(plans.flatMap((plan) => plan.prices.map((price) => [`${plan.code}/${price.period}`, price.polar_id])));
+      const links = await readPolarProductLinks(context(tx), sells);
+      expect(links.productFor("pro", "annual")).toBe(linked.get("pro/annual"));
+      expect(links.productFor("pro", "monthly")).toBe(linked.get("pro/monthly"));
+      expect(links.planFor(linked.get("starter/annual"))).toEqual({ plan: "starter", interval: "annual" });
+      expect((await listBillingPlansForApi(context(tx), sells)).plans.flatMap((plan) => plan.prices.map((price) => price.checkout_available))).toEqual([true, true, true, true]);
+      // Without Polar's token nothing sells, linked or not.
+      expect((await listBillingPlansForApi(context(tx), { POLAR_ORGANIZATION_ID: "org_test" })).plans.flatMap((plan) => plan.prices.map((price) => price.checkout_available))).toEqual([false, false, false, false]);
+    });
+  });
+
+  it("lets the app read the public standard plans and their links, with hidden Enterprise kept to its built-in terms", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans });
+      await as(tx, "lobbystack_app");
+      const { catalog, links } = await loadBillingCatalog(tx, {});
+      expect(catalog.plans.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro"]);
+      const list = billingPlanList(catalog, { checkout: true, links });
+      expect(list).toMatchObject({ currency: "cad", source: "catalog" });
+      expect(list.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [], sortOrder: 30 });
+      expect(list.plans.find((plan) => plan.slug === "starter")!.prices.every((price) => price.checkoutAvailable)).toBe(true);
     });
   });
 });

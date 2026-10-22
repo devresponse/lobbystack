@@ -196,55 +196,54 @@
     "popular": "Popular",
     "enterpriseSubject": "Plan Enterprise",
     "compareTitle": "Compare los planes en detalle",
-    "compareDescription": "Pruebe 30 minutos de voz en el navegador con Free, sin número de teléfono. Starter y Pro incluyen un número dedicado y uso mensual incluido.",
+    "compareDescription": "Pruebe {{minutes}} minutos de voz en el navegador con Free, sin número de teléfono. Starter y Pro incluyen un número dedicado y uso mensual incluido.",
     "featureHeader": "Función",
     "billingInterval": {
       "label": "Periodo de facturación",
       "monthly": "Mensual",
       "annual": "Anual",
-      "save": "Ahorre un 20 %"
+      "save": "Ahorre un {{percent}} %"
     },
     "tiers": {
       "free_cloud": {
         "name": "Free",
-        "price": "$0",
         "period": "",
         "description": "Pruebe {{appName}} con suficiente uso para verlo en acción.",
         "cta": "Empezar gratis",
         "highlights": {
-          "voiceMinutes": "30 minutos de voz en el navegador incluidos",
+          "voiceMinutes_one": "{{count}} minuto de voz en el navegador incluido",
+          "voiceMinutes_many": "{{count}} minutos de voz en el navegador incluidos",
+          "voiceMinutes_other": "{{count}} minutos de voz en el navegador incluidos",
           "bookingContacts": "Sin número de teléfono",
           "support": "Soporte de la comunidad"
         }
       },
       "starter": {
         "name": "Starter",
-        "price": {
-          "monthly": "$30",
-          "annual": "$24"
-        },
         "period": "/mes",
         "description": {
-          "monthly": "Facturación mensual. Incluye 150 minutos de voz que se renuevan cada mes.",
-          "annual": "Facturación anual. Incluye 150 minutos de voz que se renuevan cada mes."
+          "monthly": "Facturación mensual. Incluye {{minutes}} minutos de voz que se renuevan cada mes.",
+          "annual": "Facturación anual. Incluye {{minutes}} minutos de voz que se renuevan cada mes."
         },
         "cta": {
           "monthly": "Starter mensual",
           "annual": "Starter anual"
         },
         "highlights": {
-          "voiceMinutes": "150 minutos de voz incluidos\nLuego $0.20/min",
-          "dedicatedNumber": "1 número del negocio dedicado",
-          "alertSms": "50 segmentos de SMS de alerta",
+          "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
+          "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} número del negocio dedicado",
+          "dedicatedNumber_many": "{{count}} números del negocio dedicados",
+          "dedicatedNumber_other": "{{count}} números del negocio dedicados",
+          "alertSms_one": "{{count}} segmento de SMS de alerta",
+          "alertSms_many": "{{count}} segmentos de SMS de alerta",
+          "alertSms_other": "{{count}} segmentos de SMS de alerta",
           "support": "Soporte por correo electrónico"
         }
       },
       "pro": {
         "name": "Pro",
-        "price": {
-          "monthly": "$100",
-          "annual": "$80"
-        },
         "period": "/mes",
         "description": {
           "monthly": "Facturación mensual. Más uso incluido para un volumen de llamadas en aumento.",
@@ -255,9 +254,15 @@
           "annual": "Pro anual"
         },
         "highlights": {
-          "voiceMinutes": "500 minutos de voz incluidos\nLuego $0.18/min",
-          "dedicatedNumber": "1 número del negocio dedicado",
-          "alertSms": "200 segmentos de SMS de alerta",
+          "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
+          "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} número del negocio dedicado",
+          "dedicatedNumber_many": "{{count}} números del negocio dedicados",
+          "dedicatedNumber_other": "{{count}} números del negocio dedicados",
+          "alertSms_one": "{{count}} segmento de SMS de alerta",
+          "alertSms_many": "{{count}} segmentos de SMS de alerta",
+          "alertSms_other": "{{count}} segmentos de SMS de alerta",
           "support": "Soporte prioritario por correo electrónico"
         }
       },
@@ -328,31 +333,31 @@
         "usage": {
           "voiceMinutes": {
             "freeIncluded": "{{minutes}} minutos en el navegador",
-            "starterIncluded": "150 incluidos",
-            "starterThen": "luego $0.20/min",
-            "proIncluded": "500 incluidos",
-            "proThen": "luego $0.18/min"
+            "included_one": "{{count}} incluido",
+            "included_many": "{{count}} incluidos",
+            "included_other": "{{count}} incluidos",
+            "then": "luego {{rate}}/min"
           },
           "outboundCalls": {
-            "starterIncluded": "20 incluidos",
-            "starterThen": "luego $0.02/intento",
-            "proIncluded": "100 incluidos",
-            "proThen": "luego $0.02/intento"
+            "included_one": "{{count}} incluido",
+            "included_many": "{{count}} incluidos",
+            "included_other": "{{count}} incluidos",
+            "then": "luego {{rate}}/intento"
           },
           "alertSms": {
-            "starterIncluded": "50 incluidos",
-            "starterThen": "luego $0.02/segmento",
-            "proIncluded": "200 incluidos",
-            "proThen": "luego $0.02/segmento"
+            "included_one": "{{count}} incluido",
+            "included_many": "{{count}} incluidos",
+            "included_other": "{{count}} incluidos",
+            "then": "luego {{rate}}/segmento"
           },
           "knowledgeStorage": {
-            "free": "1 MB",
-            "starter": "5 MB",
-            "pro": "20 MB"
+            "megabytes": "{{amount}} MB",
+            "gigabytes": "{{amount}} GB"
           },
           "phoneNumbers": {
-            "starter": "1 dedicado",
-            "pro": "1 dedicado"
+            "dedicated_one": "{{count}} dedicado",
+            "dedicated_many": "{{count}} dedicados",
+            "dedicated_other": "{{count}} dedicados"
           }
         },
         "data": {
@@ -378,6 +383,8 @@
     "continue": "Continuar",
     "continuing": "Continuando...",
     "continueFailed": "No pudimos continuar en este momento. Inténtelo de nuevo.",
+    "loadFailed": "No pudimos cargar los planes. Inténtelo de nuevo.",
+    "retry": "Reintentar",
     "current": {
       "title": "Este negocio ya tiene el plan {{plan}}.",
       "description": "Su plan ya está listo, así que puede pasar a su número de teléfono."

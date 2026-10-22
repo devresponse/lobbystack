@@ -10,13 +10,10 @@ import { Surface } from "./ui/surface";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { intlLocale } from "@/lib/locale";
+import { currencySymbol, formatMoney } from "@/lib/billing-plans";
 
-type SpendingCapStatus = { plan: string; overageSpendingCapCents: number | null; overageSpendCents: number; overageSpendCentsComplete: boolean; overageSpendingCapReached: boolean; hasBillingManagementAccess: boolean };
-/** Formats cents as currency, dropping the decimals for whole amounts. */
-export function formatMoney(cents: number, currency = "usd", locale = "en"): string {
-  return new Intl.NumberFormat(intlLocale(locale), { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: cents % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(cents / 100);
-}
+/** currency is the plans' currency, which the cap and the overage it counts are in. */
+type SpendingCapStatus = { plan: string; currency: string; overageSpendingCapCents: number | null; overageSpendCents: number; overageSpendCentsComplete: boolean; overageSpendingCapReached: boolean; hasBillingManagementAccess: boolean };
 
 export function SpendingCapSection({
   status,
@@ -47,6 +44,7 @@ export function SpendingCapSection({
 
   const capCents = status.overageSpendingCapCents;
   const spendCents = status.overageSpendCents;
+  const currencyCode = status.currency.toUpperCase();
   const progressPercent =
     capCents === null
       ? 0
@@ -57,7 +55,7 @@ export function SpendingCapSection({
   async function saveCap() {
     const capCents = parseCapInputToCents(capInput, locale);
     if (capCents === null) {
-      toast.error(t("billing.spendingCap.invalidAmount"));
+      toast.error(t("billing.spendingCap.invalidAmount", { currency: currencyCode }));
       return;
     }
 
@@ -103,8 +101,8 @@ export function SpendingCapSection({
                       ? "billing.spendingCap.spendOfCap"
                       : "billing.spendingCap.spendAtLeastOfCap",
                     {
-                      spend: formatMoney(spendCents, "usd", locale),
-                      cap: formatMoney(capCents, "usd", locale),
+                      spend: formatMoney(spendCents, status.currency, locale),
+                      cap: formatMoney(capCents, status.currency, locale),
                     },
                   )}
                 </span>
@@ -135,11 +133,11 @@ export function SpendingCapSection({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
               <div className="flex w-full max-w-xs flex-col gap-2">
                 <Label htmlFor="overage-spending-cap">
-                  {t("billing.spendingCap.amountLabel")}
+                  {t("billing.spendingCap.amountLabel", { currency: currencyCode })}
                 </Label>
                 <div className="relative">
                   <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                    $
+                    {currencySymbol(status.currency, locale)}
                   </span>
                   <Input
                     id="overage-spending-cap"

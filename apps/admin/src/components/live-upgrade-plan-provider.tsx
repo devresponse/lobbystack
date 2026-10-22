@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanSlug, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
@@ -18,6 +18,7 @@ type Billing = {
   account: { plan: string | null; billingInterval: string | null; subscriptionState: string | null } | null;
   availableCheckoutPlans: HostedUpgradePlan[];
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
+  plans: BillingPlanList;
 };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan };
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
@@ -26,7 +27,7 @@ type CheckoutStatus = { status: string; checkoutUrl: string | null; error: strin
 const PLAN_CHANGE_SYNC_MS = 90_000;
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
-  const { t } = useTranslation("settings");
+  const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
   const [interval, setInterval] = useState<BillingInterval>("annual");
@@ -122,11 +123,13 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       currentPlan={plan}
       loading={pending ? "checkout" : null}
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
+      locale={i18n.language}
       onBillingIntervalChange={setInterval}
       onContactEnterprise={() => window.location.assign(`mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(t("billing.upgradeDialog.enterpriseSubject"))}`)}
       onOpenChange={setOpen}
       onStartCheckout={(target, billingInterval) => mutation.mutate({ businessId, target, billingInterval })}
       open={open}
+      plans={billing.data.plans}
       t={t}
     /> : null}
   </UpgradePlanDialogProvider>;

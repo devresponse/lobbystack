@@ -6,12 +6,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingPlanSurface } from "./onboarding-plan-surface";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
+import { builtInBillingPlanList, type BillingPlanList } from "@lobbystack/shared";
 
 const route = vi.hoisted(() => ({ router: { push: vi.fn(), replace: vi.fn() }, search: new URLSearchParams() }));
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => telemetryRef.current!.telemetry }));
 vi.mock("next/navigation", () => ({ useRouter: () => route.router, useSearchParams: () => route.search }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+const translate = vi.hoisted(() => vi.fn((key: string, _options?: Record<string, unknown>) => key));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: translate }) }));
 vi.mock("./onboarding-plan-comparison", () => ({ OnboardingPlanComparison: () => null }));
 const clients: QueryClient[] = [];
 let store: Record<string, string> = {};
@@ -26,10 +28,10 @@ beforeEach(() => {
   });
 });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud") {
+function setup(synced: boolean | "error" = false, monthlyOnly = false, effectivePlan = "free_cloud", plans: BillingPlanList = builtInBillingPlanList()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] } });
+  client.setQueryData(["billing", "business"], { checkoutAvailable: true, effectivePlan, availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: monthlyOnly ? ["monthly"] : ["monthly", "annual"] }, plans });
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
     if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "new-checkout" });
@@ -121,6 +123,48 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     setup(false, false, effectivePlan);
     expect(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "plan.continue" })).toBeNull();
+  });
+  it("prices the cards from the plan list in its currency", async () => {
+    const plans = builtInBillingPlanList();
+    plans.currency = "cad";
+    const starter = plans.plans.find((plan) => plan.slug === "starter")!;
+    starter.included.voiceSeconds = 12_000;
+    starter.overageRates.voiceMinuteCents = 25;
+    starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2625, checkoutAvailable: true }];
+    setup(false, false, "free_cloud", plans);
+    expect(screen.getByText("CA$26.25")).toBeTruthy();
+    expect(screen.getByText("CA$0")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("plan.tiers.starter.highlights.voiceMinutes", { count: 200, rate: "CA$0.25" });
+    expect(translate).toHaveBeenCalledWith("plan.tiers.starter.description.annual", { minutes: 200 });
+    // Starter saves 25% a year and Pro 20%, so the badge promises the smaller.
+    expect(translate).toHaveBeenCalledWith("plan.billingInterval.save", { percent: 20 });
+    await userEvent.click(screen.getByRole("tab", { name: "plan.billingInterval.monthly" }));
+    expect(screen.getByText("CA$35")).toBeTruthy();
+  });
+  it("promises no annual saving when no plan sells a year", () => {
+    const plans = builtInBillingPlanList();
+    for (const plan of plans.plans) plan.prices = plan.prices.filter((price) => price.interval === "monthly");
+    setup(false, false, "free_cloud", plans);
+    expect(translate.mock.calls.some(([key]) => key === "plan.billingInterval.save")).toBe(false);
+  });
+  it("waits for the plans, and offers a retry and Free when they don't load", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
+    let fail = true;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.startsWith("/api/billing?")) return fail ? Response.json({ error: "Billing is unavailable" }, { status: 500 }) : Response.json({ checkoutAvailable: true, effectivePlan: "free_cloud", availableCheckoutPlans: ["pro"], availableCheckoutIntervals: { starter: [], pro: ["monthly"] }, plans: builtInBillingPlanList() });
+      if (url.includes("/api/onboarding/stage?")) return Response.json({ ok: true });
+      throw new Error(`Unexpected request ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><OnboardingPlanSurface /></QueryClientProvider>);
+    expect(screen.queryByRole("button", { name: "plan.tiers.pro.cta.annual" })).toBeNull();
+    expect(await screen.findByText("plan.loadFailed")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.free_cloud.cta" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/onboarding/stage?businessId=business", expect.objectContaining({ body: JSON.stringify({ to: "attribution" }) })));
+    fail = false;
+    await userEvent.click(screen.getByRole("button", { name: "plan.retry" }));
+    expect(await screen.findByRole("button", { name: "plan.tiers.pro.cta.monthly" })).toBeTruthy();
   });
   it("selects the only configured interval and disables unavailable plans", async () => {
     setup(false, true);

@@ -2,6 +2,8 @@ import {
   applyBillingCatalogForApi,
   billingDeploymentPolar,
   cancelAppointmentForApi,
+  polarCheckoutConfigured,
+  readPolarProductLinks,
   cancelKnowledgeSourceForApi,
   claimPhoneNumberForApi,
   completeOnboardingForApi,
@@ -57,6 +59,7 @@ import {
   listAppointmentsForApi,
   linkBillingCatalogForApi,
   listBillingCatalogRunsForApi,
+  listBillingPlansForApi,
   listBusinessesForApi,
   listCalendarConnectionsForApi,
   listCallsForApi,
@@ -98,6 +101,7 @@ import {
   updateWidgetKeyForApi,
   updateWebhookEndpoint,
   type CalendarAccess,
+  type DomainContext,
   type WebhookEndpointDetail,
   type WebhookManager,
 } from "@lobbystack/domain";
@@ -182,9 +186,10 @@ function webhookManager(caller: RestApiCaller): WebhookManager {
   return { kind: "api_key", apiKeyId: caller.apiKeyId };
 }
 
-/** Whether this deployment can sell a plan and interval through Polar, as the dashboard decides. */
-function checkoutAvailable(plan: "starter" | "pro", interval: "monthly" | "annual"): boolean {
-  return Boolean(process.env.POLAR_ACCESS_TOKEN && process.env.POLAR_ORGANIZATION_ID && process.env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]);
+/** Whether this deployment can sell a plan and interval through Polar, as the dashboard decides: the catalog's link, or before one its variable. */
+async function checkoutAvailable(context: DomainContext, plan: "starter" | "pro", interval: "monthly" | "annual"): Promise<boolean> {
+  if (!polarCheckoutConfigured(process.env)) return false;
+  return (await readPolarProductLinks(context)).productFor(plan, interval) !== null;
 }
 
 /** A managed plan bypasses Polar and the catalog is every business's, so only the operator's own platform keys, with access to every business, may manage either. */
@@ -313,8 +318,9 @@ export const v1 = {
   updateBilling: (request: Request) => handleApiRequest(request, "updateBilling", async ({ context, caller }) => ({ body: data(await updateBillingForApi(context, caller, await readApiBody(request, apiBillingUpdateSchema))) })),
   createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
     const body = await readApiBody(request, apiCheckoutCreateSchema);
-    return { body: data(await createCheckoutForApi(context, caller, body, { available: checkoutAvailable(body.plan, body.interval) })) };
+    return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval) })) };
   }),
+  listBillingPlans: (request: Request) => handleApiRequest(request, "listBillingPlans", async ({ context }) => ({ body: data(await listBillingPlansForApi(context)) })),
   getCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getCheckout", async ({ context, caller }) => ({ body: data(await getCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
   setManagedPlan: (request: Request) => handleApiRequest(request, "setManagedPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential);

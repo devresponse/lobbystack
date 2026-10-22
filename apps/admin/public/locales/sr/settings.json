@@ -324,9 +324,15 @@
       "paygMonthlySuffix": "+ plaćanje po potrošnji",
       "includedTitle": "Šta je uključeno:",
       "includedStorageLabel": "skladišnog prostora",
-      "includedVoiceLabel": "minuta razgovora",
-      "includedSmsLabel": "SMS upozorenja",
-      "includedOutboundLabel": "pokušaja preusmeravanja",
+      "includedVoice_one": "{{count}} minut razgovora",
+      "includedVoice_few": "{{count}} minuta razgovora",
+      "includedVoice_other": "{{count}} minuta razgovora",
+      "includedSms_one": "{{count}} SMS upozorenje",
+      "includedSms_few": "{{count}} SMS upozorenja",
+      "includedSms_other": "{{count}} SMS upozorenja",
+      "includedOutbound_one": "{{count}} pokušaj preusmeravanja",
+      "includedOutbound_few": "{{count}} pokušaja preusmeravanja",
+      "includedOutbound_other": "{{count}} pokušaja preusmeravanja",
       "includedStorageCustom": "Prilagođen skladišni prostor",
       "includedVoiceCustom": "Prilagođen broj minuta razgovora",
       "includedSmsCustom": "Prilagođen broj SMS poruka",
@@ -339,7 +345,9 @@
       "changesSubscription": "Već imate pretplatu, pa će ona biti izmenjena umesto otvaranja plaćanja. Svaka razlika se naplaćuje sa sačuvanog načina plaćanja.",
       "enterpriseSubject": "Enterprise paket",
       "billingIntervalLabel": "Period naplate",
-      "annualDiscount": "Uštedite 20%",
+      "annualDiscount": "Uštedite {{percent}}%",
+      "customPrice": "Po dogovoru",
+      "perMonth": "/mes.",
       "billingIntervals": {
         "monthly": "Mesečno",
         "annual": "Godišnje"
@@ -358,7 +366,9 @@
             "annual": "Isprobajte glas u pregledaču"
           },
           "highlights": {
-            "voiceMinutes": "30 minuta razgovora u pregledaču",
+            "voiceMinutes_one": "{{count}} minut razgovora u pregledaču",
+            "voiceMinutes_few": "{{count}} minuta razgovora u pregledaču",
+            "voiceMinutes_other": "{{count}} minuta razgovora u pregledaču",
             "allFeatures": "Bez broja telefona",
             "support": "Podrška zajednice"
           }
@@ -370,10 +380,15 @@
             "annual": "Mesečno, uz godišnju naplatu"
           },
           "highlights": {
-            "voiceMinutes": "150 minuta razgovora uključeno\nZatim 0,20 $/min",
-            "dedicatedNumber": "1 namenski poslovni broj",
-            "phoneNumber": "50 SMS segmenata za upozorenja",
-            "overages": "0,20 $/min za dodatne minute razgovora",
+            "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
+            "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} namenski poslovni broj",
+            "dedicatedNumber_few": "{{count}} namenska poslovna broja",
+            "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
+            "phoneNumber_one": "{{count}} SMS segment za upozorenja",
+            "phoneNumber_few": "{{count}} SMS segmenta za upozorenja",
+            "phoneNumber_other": "{{count}} SMS segmenata za upozorenja",
             "support": "Podrška putem imejla"
           }
         },
@@ -384,9 +399,15 @@
             "annual": "Mesečno, uz godišnju naplatu"
           },
           "highlights": {
-            "voiceMinutes": "500 minuta razgovora uključeno\nZatim 0,18 $/min",
-            "dedicatedNumber": "1 namenski poslovni broj",
-            "alertSms": "200 SMS segmenata za upozorenja",
+            "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
+            "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} namenski poslovni broj",
+            "dedicatedNumber_few": "{{count}} namenska poslovna broja",
+            "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
+            "alertSms_one": "{{count}} SMS segment za upozorenja",
+            "alertSms_few": "{{count}} SMS segmenta za upozorenja",
+            "alertSms_other": "{{count}} SMS segmenata za upozorenja",
             "support": "Prioritetna podrška putem imejla"
           }
         },
@@ -445,7 +466,7 @@
     "spendingCap": {
       "title": "Mesečni limit potrošnje",
       "placeholder": "25.00",
-      "amountLabel": "Limit prekoračenja (USD)",
+      "amountLabel": "Limit prekoračenja ({{currency}})",
       "noCap": "Limit potrošnje nije podešen",
       "currentSpend": "Trenutni trošak prekoračenja",
       "spendOfCap": "{{spend}} od {{cap}}",
@@ -460,7 +481,7 @@
       "removing": "Uklanjanje...",
       "saved": "Mesečni limit prekoračenja je sačuvan.",
       "removed": "Mesečni limit prekoračenja je uklonjen.",
-      "invalidAmount": "Unesite iznos u USD koji nije negativan, sa najviše dve decimale.",
+      "invalidAmount": "Unesite iznos u {{currency}} koji nije negativan, sa najviše dve decimale.",
       "saveFailed": "Nije moguće sačuvati mesečni limit prekoračenja.",
       "removeFailed": "Nije moguće ukloniti mesečni limit prekoračenja."
     },

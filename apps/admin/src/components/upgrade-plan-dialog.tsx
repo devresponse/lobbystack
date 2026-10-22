@@ -11,11 +11,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { findPlan, formatMoney, monthlyPriceCents, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
-import type {
-  BillingInterval,
-  BillingPlanSlug,
-  HostedCheckoutPlanIntervals,
+import {
+  annualSavingPercent,
+  type BillingInterval,
+  type BillingPlanList,
+  type BillingPlanSlug,
+  type HostedCheckoutPlanIntervals,
 } from "@lobbystack/shared";
 
 export type HostedUpgradePlan = "starter" | "pro";
@@ -24,51 +27,25 @@ type BillingTranslation = TFunction<"settings">;
 
 type UpgradePlanCard = {
   slug: "free_cloud" | HostedUpgradePlan | "enterprise";
-  price: Record<BillingInterval, string>;
-  period: string;
   highlights: string[];
   highlighted?: boolean;
 };
 
+// Prices and allowances come from the plan list; the cards keep their order and words.
 const upgradePlanCards: UpgradePlanCard[] = [
-  {
-    slug: "free_cloud",
-    price: {
-      monthly: "$0",
-      annual: "$0",
-    },
-    period: "",
-    highlights: ["voiceMinutes", "allFeatures", "support"],
-  },
-  {
-    slug: "starter",
-    price: {
-      monthly: "$30",
-      annual: "$24",
-    },
-    period: "/mo",
-    highlights: ["voiceMinutes", "dedicatedNumber", "phoneNumber", "support"],
-  },
-  {
-    slug: "pro",
-    price: {
-      monthly: "$100",
-      annual: "$80",
-    },
-    period: "/mo",
-    highlights: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"],
-    highlighted: true,
-  },
-  {
-    slug: "enterprise",
-    price: {
-      monthly: "Custom",
-      annual: "Custom",
-    },
-    period: "",
-    highlights: ["phoneNumbers", "selfHosted", "support"],
-  },
+  { slug: "free_cloud", highlights: ["voiceMinutes", "allFeatures", "support"] },
+  { slug: "starter", highlights: ["voiceMinutes", "dedicatedNumber", "phoneNumber", "support"] },
+  { slug: "pro", highlights: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"], highlighted: true },
+  { slug: "enterprise", highlights: ["phoneNumbers", "selfHosted", "support"] },
 ];
+
+/** What a highlight's string takes: voice minutes and their rate, or the count it names. */
+function highlightValues(highlight: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
+  if (highlight === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
+  if (highlight === "dedicatedNumber") return { count: values.businessNumbers };
+  if (highlight === "phoneNumber" || highlight === "alertSms") return { count: values.alertSmsSegments };
+  return {};
+}
 
 function isHostedUpgradePlan(slug: UpgradePlanCard["slug"]): slug is HostedUpgradePlan {
   return slug === "starter" || slug === "pro";
@@ -82,11 +59,13 @@ export function UpgradePlanDialog({
   currentPlan,
   loading,
   loadingPlan,
+  locale,
   onBillingIntervalChange,
   onContactEnterprise,
   onOpenChange,
   onStartCheckout,
   open,
+  plans,
   t,
 }: {
   availableCheckoutPlans: Array<"starter" | "pro">;
@@ -97,13 +76,17 @@ export function UpgradePlanDialog({
   currentPlan: BillingPlanSlug;
   loading: "checkout" | "portal" | null;
   loadingPlan: HostedUpgradePlan | null;
+  locale: string;
   onBillingIntervalChange: (billingInterval: BillingInterval) => void;
   onContactEnterprise: () => void;
   onOpenChange: (open: boolean) => void;
   onStartCheckout: (target: HostedUpgradePlan, billingInterval: BillingInterval) => void;
   open: boolean;
+  /** The deployment's plans, from GET /api/billing. */
+  plans: BillingPlanList;
   t: BillingTranslation;
 }) {
+  const annualSaving = annualSavingPercent(plans);
   const availableBillingIntervals = (["monthly", "annual"] as const).filter(
     (interval) =>
       availableCheckoutPlans.some((plan) =>
@@ -159,9 +142,9 @@ export function UpgradePlanDialog({
                 variant="outline"
               >
                 {t(`billing.upgradeDialog.billingIntervals.${interval}`)}
-                {interval === "annual" ? (
+                {interval === "annual" && annualSaving !== null ? (
                   <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    {t("billing.upgradeDialog.annualDiscount")}
+                    {t("billing.upgradeDialog.annualDiscount", { percent: annualSaving })}
                   </span>
                 ) : null}
               </Button>
@@ -185,6 +168,11 @@ export function UpgradePlanDialog({
                 !isDowngrade &&
                 availableCheckoutPlans.includes(checkoutPlan) &&
                 isSelectedIntervalAvailable);
+            const offer = findPlan(plans, card.slug);
+            const values = planValues(offer, plans.currency, locale);
+            // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
+            const monthly = checkoutPlan !== null ? monthlyPriceCents(offer, selectedBillingInterval) : undefined;
+            const price = card.slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : isEnterprisePlan || offer?.custom ? t("billing.upgradeDialog.customPrice") : monthly !== undefined ? formatMoney(monthly, plans.currency, locale) : "—";
             const actionLabel = isCurrentPlan
               ? t("billing.upgradeDialog.actions.currentPlan")
               : checkoutPlan !== null
@@ -207,11 +195,11 @@ export function UpgradePlanDialog({
                   </h3>
                   <div className="mt-4 flex items-baseline gap-1">
                     <span className="font-heading text-4xl font-medium tracking-[-0.05em] tabular-nums">
-                      {card.price[selectedBillingInterval]}
+                      {price}
                     </span>
-                    {card.period ? (
+                    {monthly !== undefined ? (
                       <span className="text-sm text-muted-foreground">
-                        {card.period}
+                        {t("billing.upgradeDialog.perMonth")}
                       </span>
                     ) : null}
                   </div>
@@ -230,6 +218,7 @@ export function UpgradePlanDialog({
                         <span className="whitespace-pre-line">
                           {t(
                             `billing.upgradeDialog.plans.${card.slug}.highlights.${highlight}`,
+                            highlightValues(highlight, values),
                           )}
                         </span>
                       </li>

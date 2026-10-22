@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanList } from "@lobbystack/shared";
 import { DashboardShell } from "./dashboard-shell";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 const route = vi.hoisted(() => ({ pathname: "/", router: { push: vi.fn(), refresh: vi.fn(), replace: vi.fn() } }));
@@ -23,7 +24,7 @@ afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.
 function setup(role = "business_owner") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Tenant name", active: true, role }] });
-  client.setQueryData(["billing", "business"], { account: null, permissions: { hasCheckoutAccess: false }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] } });
+  client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: null, permissions: { hasCheckoutAccess: false }, availableCheckoutPlans: [], availableCheckoutIntervals: { starter: [], pro: [] } });
   client.setQueryData(["phone-numbers", "business"], { phoneNumbers: [] });
   client.setQueryData(["setup", "business"], { steps: [] });
   const content = () => <QueryClientProvider client={client}><DashboardShell user={{ email: "operator@example.invalid", name: "Operator" }}><p>Page content</p></DashboardShell></QueryClientProvider>;

@@ -236,6 +236,8 @@ export async function loadBillingCheckoutRequest(
   customerEmail: string;
   externalCustomerId: string;
   onboardingStage: string;
+  /** The live Polar subscription the business already pays with, which a plan change moves instead of starting a second one. */
+  subscription: { id: string; plan: "starter" | "pro"; billingInterval: BillingInterval | null } | null;
 } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const row = (await tx.select({
@@ -249,6 +251,11 @@ export async function loadBillingCheckoutRequest(
       error: billingCheckoutRequests.error,
       customerEmail: users.email,
       billingKey: billingAccounts.billingKey,
+      subscriptionId: billingAccounts.subscriptionId,
+      plan: billingAccounts.plan,
+      currentInterval: billingAccounts.billingInterval,
+      subscriptionState: billingAccounts.subscriptionState,
+      source: billingAccounts.source,
       onboardingStage: businesses.onboardingStage,
     }).from(billingCheckoutRequests)
       .innerJoin(users, eq(users.id, billingCheckoutRequests.requestedByUserId))
@@ -257,11 +264,14 @@ export async function loadBillingCheckoutRequest(
       .where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId)))
       .limit(1))[0];
     if (!row || !isBillingCheckoutTarget(row.target) || !isBillingInterval(row.billingInterval)) return null;
+    const { billingKey, subscriptionId, plan, currentInterval, subscriptionState, source, ...request } = row;
+    const paying = subscriptionId && source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(subscriptionState) && (plan === "starter" || plan === "pro");
     return {
-      ...row,
+      ...request,
       target: row.target,
       billingInterval: row.billingInterval,
-      externalCustomerId: row.billingKey ?? `business:${input.businessId}`,
+      externalCustomerId: billingKey ?? `business:${input.businessId}`,
+      subscription: paying ? { id: subscriptionId, plan, billingInterval: currentInterval && isBillingInterval(currentInterval) ? currentInterval : null } : null,
     };
   });
 }
@@ -289,6 +299,24 @@ export async function markBillingCheckoutCreated(
     const rows = await tx.update(billingCheckoutRequests).set({ status: "ready", checkoutId: input.checkoutId, checkoutUrl: input.checkoutUrl, error: null, updatedAt: new Date() }).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "processing"))).returning({ id: billingCheckoutRequests.id });
     if (rows.length > 0) {
       await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_checkout_request", aggregateId: input.requestId, dedupeKey: `billing-checkout:${input.requestId}:ready`, payload: { type: "billing.updated", entityId: input.requestId } });
+    }
+    return rows.length > 0;
+  });
+}
+
+/**
+ * A request a paying business made, done by moving its Polar subscription to
+ * the plan instead of opening a checkout. The plan itself changes when Polar's
+ * webhook arrives.
+ */
+export async function markBillingPlanChanged(
+  context: DomainContext,
+  input: { businessId: string; requestId: string },
+): Promise<boolean> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const rows = await tx.update(billingCheckoutRequests).set({ status: "changed", error: null, updatedAt: new Date() }).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "processing"))).returning({ id: billingCheckoutRequests.id });
+    if (rows.length > 0) {
+      await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_checkout_request", aggregateId: input.requestId, dedupeKey: `billing-checkout:${input.requestId}:changed`, payload: { type: "billing.updated", entityId: input.requestId } });
     }
     return rows.length > 0;
   });

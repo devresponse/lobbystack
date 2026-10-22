@@ -285,7 +285,7 @@ async function syncBusinessDetails(run: Run): Promise<void> {
 const paidPlans = new Set(["starter", "pro", "enterprise", "self_host"]);
 const hasPaidPlan = (billing: Billing) => billing.managed || paidPlans.has(billing.plan);
 
-/** Whether the manifest's checkout plan is one a checkout can still get: any plan for a free business, and Pro for a Starter one. */
+/** Whether the manifest's checkout plan is one a checkout can still get: any plan for a free business, and Pro for a Starter one, which changes the Starter subscription. */
 function checkoutNeeded(manifest: Manifest, billing: Billing): boolean {
   const wanted = manifest.plan && "checkout" in manifest.plan ? manifest.plan.checkout : undefined;
   if (!wanted || billing.managed) return false;
@@ -666,7 +666,9 @@ async function syncCheckout(run: Run, billing: Billing): Promise<void> {
     run.notes.push(`The business pays for ${current}, and the manifest asks for ${label}. Change it in Polar's billing portal, or change plan in the manifest.`);
     return;
   }
-  if (run.plan) return run.log({ step: "plan", action: "would start", detail: `a ${label} checkout` });
+  // A Starter business already pays, so its move to Pro changes that subscription, with no page.
+  const changesPlan = billing.plan === "starter";
+  if (run.plan) return run.log({ step: "plan", action: "would start", detail: changesPlan ? `a change from ${current} to ${label}` : `a ${label} checkout` });
   // A platform key's checkout is made out to the business's owner, so it waits until they've claimed the business.
   const owner = run.manifest.owner?.email;
   if (run.access === "all" && owner && !(await ownsBusiness(run, owner))) {
@@ -677,7 +679,8 @@ async function syncCheckout(run: Run, billing: Billing): Promise<void> {
   let checkout = run.state.checkout_id ? (await run.client.call("getCheckout", { params: { checkout_id: run.state.checkout_id } })).data as Row : undefined;
   let stale = false;
   if (!checkout || checkout.status === "error" || checkout.plan !== plan || checkout.interval !== interval) {
-    await needsYes(run, `Start a ${label} checkout for ${run.manifest.business.name}?`, "A checkout asks someone to pay, so it needs a yes.");
+    if (changesPlan) await needsYes(run, `Move ${run.manifest.business.name} from ${current} to ${label}? Polar charges the difference to the saved payment method.`, "A plan change charges the business, so it needs a yes.");
+    else await needsYes(run, `Start a ${label} checkout for ${run.manifest.business.name}?`, "A checkout asks someone to pay, so it needs a yes.");
     checkout = await startCheckout(run, plan, interval);
   } else if (Date.now() - Date.parse(String(checkout.created_at)) >= 60 * 60_000) {
     // A page this old may have run out, or may not have, in which case someone could pay both, so only a person replaces it, never --yes.
@@ -688,6 +691,7 @@ async function syncCheckout(run: Run, billing: Billing): Promise<void> {
   checkout = await waitUntilDone(run.client, checkoutWait, checkout, run.sleep);
   const failure = checkoutWait.failed(checkout);
   if (failure) throw new CliError(failure, exitCodes.failed);
+  if (checkout.status === "changed") return run.log({ step: "plan", action: "changed", detail: `${current} to ${label}` });
   run.log({ step: "plan", action: "waiting", detail: `for payment at ${String(checkout.checkout_url)}` });
   run.waiting.push(`The ${label} plan isn't paid yet. Send ${String(checkout.checkout_url)} to whoever pays, then run this again.${stale ? " If that page has run out, run this in a terminal, without --yes, to start a new one." : ""}`);
 }

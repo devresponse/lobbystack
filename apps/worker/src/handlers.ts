@@ -5,10 +5,10 @@ import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
 import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
 import { realtimeEventSchema, type JobEnvelope } from "@lobbystack/contracts";
-import { currentBrand, getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, smsErrorCode, type BillingUsageKind } from "@lobbystack/shared";
+import { currentBrand, getPolarMeteredUsagePayload, liveSubscriptionStates, normalizeInterfaceLocale, permanentSmsErrorCode, planChangeDirection, planChangeRefusals, smsErrorCode, type BillingUsageKind, type PlanChangeRefusal } from "@lobbystack/shared";
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, loadSmsDeliveryTarget, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
@@ -19,6 +19,7 @@ import { runDailyBillingVerify, type DailyBillingVerifyOutcome } from "@lobbysta
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import { invitationSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import { PolarRequestError, type PolarProrationBehavior, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
@@ -63,7 +64,12 @@ export type WorkerDependencies = {
   email?: Pick<SmtpEmailProvider, "sendTemplate">;
   twilio?: Pick<TwilioProvider, "sendSms"> & Partial<Pick<TwilioProvider, "getMessagePricing" | "getCallPricing" | "findTrunkCall" | "releasePhoneNumber" | "verifyPhone" | "findOwnedPhoneNumber" | "purchasePhoneNumber" | "addNumberToSipTrunk">>;
   twilioAlerts?: Pick<TwilioProvider, "sendSms"> & { from: string };
-  polar?: { recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>; createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> };
+  polar?: {
+    recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>;
+    createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }>;
+    getSubscription?(subscriptionId: string): Promise<PolarSubscription | null>;
+    changeSubscriptionProduct?(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior }): Promise<PolarSubscription>;
+  };
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
   polarCatalog?: { readSnapshot(): Promise<PolarSnapshot> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
@@ -753,6 +759,11 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       }
       const request = await loadBillingCheckoutRequest(dependencies.domain, { businessId, requestId });
       if (!request) return { status: "skipped", entityId: requestId };
+      // A business that already pays moves its subscription: Polar refuses a second one.
+      if (request.subscription) {
+        const changed = await changeBillingPlan(dependencies, { businessId, requestId, target: request.target, billingInterval: request.billingInterval, subscription: request.subscription });
+        if (changed) return changed;
+      }
       try {
         const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
         const checkout = await dependencies.polar.createCheckout({
@@ -1323,6 +1334,78 @@ async function indexKnowledgeText(
     }).catch(() => undefined);
   }
   return indexed;
+}
+
+/** The plan and interval a product sells, by the four product variables; undefined for any other product. */
+function polarProductPlan(productId: string): { plan: "starter" | "pro"; interval: "monthly" | "annual" } | undefined {
+  for (const plan of ["starter", "pro"] as const) {
+    for (const interval of ["monthly", "annual"] as const) {
+      if (process.env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`] === productId) return { plan, interval };
+    }
+  }
+  return undefined;
+}
+
+/** Polar's answer to a plan change as the refusal to tell the business, or undefined when trying again may work. */
+function planChangeRefusalFor(error: unknown): PlanChangeRefusal | undefined {
+  if (!(error instanceof PolarRequestError)) return undefined;
+  if (error.status === 401 || error.errorName === "insufficient_scope" || error.errorName === "invalid_token") return "token_scope";
+  if (error.status === 402) return "payment_failed";
+  if (error.status === 403 && error.errorName === "AlreadyCanceledSubscription") return "subscription_ending";
+  if (error.status === 403 || error.status === 404) return "subscription_unavailable";
+  if (error.status === 409) return "change_pending";
+  if (error.status === 422) return "product_unavailable";
+  return undefined;
+}
+
+/**
+ * Moves a paying business's Polar subscription to the plan it asked for. An
+ * upgrade is charged as billing.json's polar.upgradeProration says, a
+ * downgrade as downgradeProration. Null when Polar's subscription has already
+ * ended, so the business needs a new checkout after all.
+ */
+async function changeBillingPlan(
+  dependencies: WorkerDependencies,
+  input: { businessId: string; requestId: string; target: "starter" | "pro"; billingInterval: "monthly" | "annual"; subscription: { id: string; plan: "starter" | "pro"; billingInterval: "monthly" | "annual" | null } },
+): Promise<JobResult | null> {
+  const { businessId, requestId } = input;
+  const polar = dependencies.polar;
+  if (!polar?.getSubscription || !polar.changeSubscriptionProduct) {
+    await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "Billing plan changes are not configured." });
+    return { status: "skipped", entityId: requestId };
+  }
+  try {
+    const productId = polarCheckoutProductId(input.target, input.billingInterval);
+    const subscription = await polar.getSubscription(input.subscription.id);
+    if (!subscription || subscription.endedAt || !(liveSubscriptionStates as readonly string[]).includes(subscription.status)) return null;
+    // A retry after Polar made the change, or a change already waiting for the next period.
+    if (subscription.productId === productId || subscription.pendingProductId === productId) {
+      await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
+      return { status: "completed", entityId: requestId };
+    }
+    if (subscription.cancelAtPeriodEnd) {
+      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals.subscription_ending });
+      return { status: "skipped", entityId: requestId };
+    }
+    // Polar's own product says what the business pays for now; the account can lag a webhook behind it.
+    const current = polarProductPlan(subscription.productId) ?? { plan: input.subscription.plan, interval: input.subscription.billingInterval ?? input.billingInterval };
+    const direction = planChangeDirection(current, { plan: input.target, interval: input.billingInterval });
+    const proration = await loadPlanChangeProration(dependencies.domain);
+    await polar.changeSubscriptionProduct({ subscriptionId: subscription.id, productId, prorationBehavior: direction === "downgrade" ? proration.downgrade : proration.upgrade });
+    await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
+    return { status: "completed", entityId: requestId };
+  } catch (error) {
+    const refusal = planChangeRefusalFor(error);
+    if (refusal) {
+      // Asking again gets the same answer, so the business hears why instead of a retry.
+      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals[refusal] });
+      // These two are the operator's to fix, not the business's.
+      if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`Polar refused a plan change: ${planChangeRefusals[refusal]}`), { operation: "job.billing.createCheckout", businessId, requestId });
+      return { status: "skipped", entityId: requestId };
+    }
+    await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "Polar plan change failed." });
+    throw error;
+  }
 }
 
 function polarCheckoutProductId(target: "starter" | "pro", billingInterval: "monthly" | "annual"): string {

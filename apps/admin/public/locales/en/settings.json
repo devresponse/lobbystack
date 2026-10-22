@@ -247,7 +247,17 @@
     "toast": {
       "checkoutSuccess": "Checkout completed successfully.",
       "checkoutFailed": "Unable to open checkout.",
-      "portalFailed": "Unable to open the customer portal."
+      "portalFailed": "Unable to open the customer portal.",
+      "planChanged": "Your plan is changing. It shows here as soon as Polar confirms it.",
+      "planChangeFailed": "Unable to change your plan.",
+      "planChangeRefused": {
+        "payment_failed": "Your saved payment method couldn't be charged for the new plan. Update it under Manage subscription, then try again.",
+        "subscription_ending": "Your subscription is set to end, so its plan can't change. Resume it under Manage subscription first.",
+        "change_pending": "An earlier change to your subscription is still being applied. Try again in a minute.",
+        "subscription_unavailable": "Your subscription can't change right now. Check it under Manage subscription.",
+        "product_unavailable": "This plan can't be bought right now. Contact support.",
+        "token_scope": "Plan changes aren't set up here yet. Contact support."
+      }
     },
     "pastDueBanner": {
       "title": "Payment unsuccessful",
@@ -287,6 +297,7 @@
       "manageBilling": "Manage billing",
       "manageSubscription": "Manage subscription",
       "openingCheckout": "Opening checkout...",
+      "changingPlan": "Changing plan...",
       "openingPortal": "Opening portal...",
       "viewInvoice": "View invoice",
       "retry": "Try again"
@@ -325,6 +336,7 @@
     "upgradeDialog": {
       "title": "Upgrade plan",
       "description": "Choose the plan that works best for your team.",
+      "changesSubscription": "You already have a subscription, so this changes it instead of opening a checkout. Any difference is charged to your saved payment method.",
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
       "annualDiscount": "Save 20%",

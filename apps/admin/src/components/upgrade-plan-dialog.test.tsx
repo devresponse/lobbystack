@@ -40,6 +40,15 @@ describe("main upgrade dialog", () => {
       if (button.textContent?.includes("billing.upgradeDialog.actions")) expect(button.hasAttribute("disabled")).toBe(true);
     }
   });
+  it("for a business that already pays, says the subscription changes and offers only an upgrade", async () => {
+    const props = setup({ changesPlan: true, currentPlan: "pro" });
+    expect(screen.getByText("billing.upgradeDialog.changesSubscription")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "billing.upgradeDialog.actions.starter" }).hasAttribute("disabled")).toBe(true);
+    cleanup();
+    setup({ changesPlan: true, currentPlan: "starter", loading: "checkout", loadingPlan: "pro" });
+    expect(screen.getByText("billing.actions.changingPlan")).toBeTruthy();
+    expect(props.onStartCheckout).not.toHaveBeenCalled();
+  });
   it("opens enterprise contact without creating a checkout", async () => {
     const props = setup();
     await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.enterprise" }));

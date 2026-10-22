@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 
 import { billingAccounts, billingCheckoutRequests } from "@lobbystack/db";
 import { createBillingCheckoutRequest, type BillingCheckoutTarget, type BillingInterval } from "@lobbystack/domain";
+import { planChangeRefusalOf } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -19,8 +20,9 @@ export async function GET(request: Request) {
       const row = (await tx.select({ id: billingCheckoutRequests.id, status: billingCheckoutRequests.status, checkoutId: billingCheckoutRequests.checkoutId, checkoutUrl: billingCheckoutRequests.checkoutUrl, error: billingCheckoutRequests.error, target: billingCheckoutRequests.target, billingInterval: billingCheckoutRequests.billingInterval }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, requestId), eq(billingCheckoutRequests.businessId, businessId))).limit(1))[0];
       if (!row) throw new Error("Checkout request not found.");
       const account = (await tx.select({ plan: billingAccounts.plan, interval: billingAccounts.billingInterval, state: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
-      const synced = row.status === "ready" && account?.plan === row.target && account.interval === row.billingInterval && ["active", "trialing"].includes(account.state ?? "");
-      return { ...row, synced };
+      // A checkout someone paid, or a plan change Polar made, once Polar's webhook has put the business on the plan.
+      const synced = ["ready", "changed"].includes(row.status) && account?.plan === row.target && account.interval === row.billingInterval && ["active", "trialing"].includes(account.state ?? "");
+      return { ...row, synced, refusal: planChangeRefusalOf(row.error) };
     }, { minimumRole: "business_admin" }));
   } catch (error) {
     return asApiResponse(error);

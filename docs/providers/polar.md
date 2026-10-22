@@ -92,8 +92,8 @@ Set `POLAR_ACCEPT_LEGACY_BUSINESS_IDS=true` only in production. It lets signed w
 Use this sequence to check where a checkout stops:
 
 1. The admin API writes a checkout request and enqueues `billing.createCheckout`.
-2. The worker creates the Polar checkout with the configured product ID.
-3. The browser opens the checkout URL after the request becomes ready.
+2. The worker creates the Polar checkout with the configured product ID. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
+3. The browser opens the checkout URL after the request becomes ready, or for a plan change waits until the webhook moves the business onto the plan.
 4. Polar sends subscription and order events to the Next.js webhook route.
 5. The route stores each provider event once and enqueues `billing.reconcile`.
 6. The worker updates local subscription and transaction records.
@@ -128,6 +128,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 
 - Confirm only business administrators can start checkout or open the portal.
 - Complete monthly and annual checkout for Starter and Pro.
+- Upgrade a paying Starter business to Pro from **Settings** > **Billing**, and confirm Polar invoices the difference and the page shows Pro.
 - Confirm invalid webhook signatures receive an unauthorized response.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.

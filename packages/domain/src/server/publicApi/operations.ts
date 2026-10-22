@@ -375,7 +375,7 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
   if (!row || (row.target !== "starter" && row.target !== "pro") || (row.billingInterval !== "monthly" && row.billingInterval !== "annual")) throw notFound("Checkout");
   const [account] = await tx.select({ plan: billingAccounts.plan, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A checkout canceled because the business moved to a managed plan reads as failed.
-  const status = row.status === "canceled" ? "error" : (["pending", "processing", "ready", "error"] as const).find((value) => value === row.status) ?? "pending";
+  const status = row.status === "canceled" ? "error" : (["pending", "processing", "ready", "changed", "error"] as const).find((value) => value === row.status) ?? "pending";
   return {
     id: row.id,
     plan: row.target,
@@ -384,7 +384,7 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
     checkout_url: status === "ready" ? row.checkoutUrl : null,
     error: status === "error" ? row.error : null,
     // The dashboard counts a checkout as paid the same way, once Polar's webhook has moved the business onto the plan.
-    paid: status === "ready" && account?.plan === row.target && account.billingInterval === row.billingInterval && ["active", "trialing"].includes(account.subscriptionState ?? ""),
+    paid: (status === "ready" || status === "changed") && account?.plan === row.target && account.billingInterval === row.billingInterval && ["active", "trialing"].includes(account.subscriptionState ?? ""),
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -407,8 +407,9 @@ async function checkoutPayerId(context: DomainContext, caller: ApiCaller): Promi
 
 /**
  * Asks Polar for a page where the customer pays. Like the dashboard, it sells
- * any plan to a free business and Pro to a Starter one; other changes to a
- * paid plan happen in Polar's billing portal. Callers say whether this
+ * any plan to a free business and Pro to a Starter one, which the worker does
+ * by changing the Starter subscription rather than with a page; other changes
+ * to a paid plan happen in Polar's billing portal. Callers say whether this
  * deployment sells the plan and interval.
  */
 export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean }): Promise<ApiCheckout> {

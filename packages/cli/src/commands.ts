@@ -318,7 +318,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
   group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog.", {
     status: { operation: "getBilling" },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
-    checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
+    checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
     "managed-plan": { operation: "setManagedPlan", fixed: { plan: "enterprise" } },
     "end-managed-plan": { operation: "endManagedPlan" },

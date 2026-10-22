@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanSlug, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanSlug, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
@@ -20,6 +20,10 @@ type Billing = {
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
 };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan };
+type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
+
+// How long a plan change waits for Polar's webhook before it stops checking. The plan page shows it whenever it lands.
+const PLAN_CHANGE_SYNC_MS = 90_000;
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const { t } = useTranslation("settings");
@@ -31,19 +35,27 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   // Redirect once per checkout. A page restored from the browser's cache can rerun the
   // effect with the old ready checkout and send them straight back to it.
   const redirectedRequestId = useRef<string | null>(null);
+  const announcedRequestId = useRef<string | null>(null);
   const businessId = useActiveBusiness().business?.businessId;
   const billing = useQuery({ queryKey: ["billing", businessId], enabled: Boolean(businessId && open), queryFn: () => requestJson<Billing>(`/api/billing?businessId=${encodeURIComponent(businessId!)}`) });
+  const rawPlan = billing.data?.account?.plan;
+  // A cancelled or lapsed tier is not the plan someone is on, and marking its
+  // card as current leaves them unable to start the tier they just lost.
+  const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
+  // Starter or Pro already paid through Polar: picking another plan changes that subscription.
+  const changesPlan = plan === "starter" || plan === "pro";
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
     mutationFn: (input: { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval }) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: (result, input) => { if (activeBusinessId() === input.businessId) setCheckout({ businessId: input.businessId, requestId: result.requestId, target: input.target }); },
-    onError: (_error, input) => { if (activeBusinessId() === input.businessId) toast.error(t("billing.toast.checkoutFailed")); },
+    onError: (_error, input) => { if (activeBusinessId() === input.businessId) toast.error(t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed")); },
   });
   const result = useQuery({
     queryKey: ["billing-checkout", checkout?.businessId, checkout?.requestId],
     enabled: Boolean(checkout && checkout.businessId === businessId),
-    queryFn: () => requestJson<{ status: string; checkoutUrl: string | null; error: string | null }>(`/api/billing/checkout?businessId=${encodeURIComponent(checkout!.businessId)}&requestId=${encodeURIComponent(checkout!.requestId)}`),
-    refetchInterval: query => ["ready", "error"].includes(query.state.data?.status ?? "") ? false : 1500,
+    queryFn: () => requestJson<CheckoutStatus>(`/api/billing/checkout?businessId=${encodeURIComponent(checkout!.businessId)}&requestId=${encodeURIComponent(checkout!.requestId)}`),
+    // A plan change keeps checking until Polar's webhook has moved the business onto the plan.
+    refetchInterval: query => ["ready", "error"].includes(query.state.data?.status ?? "") || (query.state.data?.status === "changed" && query.state.data.synced) ? false : 1500,
   });
   useEffect(() => { setOpen(false); setCheckout(null); }, [businessId]);
   const resetCheckoutRequest = mutation.reset;
@@ -69,12 +81,28 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       setLeaving(true);
       window.location.assign(result.data.checkoutUrl);
     }
-    if (result.data?.status === "error" || result.isError) { toast.error(t("billing.toast.checkoutFailed")); setCheckout(null); }
-  }, [businessId, checkout, result.data, result.isError, t]);
-  const rawPlan = billing.data?.account?.plan;
-  // A cancelled or lapsed tier is not the plan someone is on, and marking its
-  // card as current leaves them unable to start the tier they just lost.
-  const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
+    if (result.data?.status === "error" || result.isError) {
+      const refusal = result.data?.refusal;
+      toast.error(refusal ? t(`billing.toast.planChangeRefused.${refusal}`) : t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"));
+      setCheckout(null);
+    }
+  }, [businessId, changesPlan, checkout, result.data, result.isError, t]);
+  useEffect(() => {
+    // A business that already pays has its subscription changed in place, with no checkout page to visit.
+    if (!checkout || checkout.businessId !== businessId || result.data?.status !== "changed") return;
+    if (announcedRequestId.current !== checkout.requestId) {
+      announcedRequestId.current = checkout.requestId;
+      setOpen(false);
+      toast.success(t("billing.toast.planChanged"));
+    }
+    const finish = () => {
+      void client.invalidateQueries({ queryKey: ["billing", checkout.businessId] });
+      setCheckout(null);
+    };
+    if (result.data.synced) { finish(); return; }
+    const timer = window.setTimeout(finish, PLAN_CHANGE_SYNC_MS);
+    return () => window.clearTimeout(timer);
+  }, [businessId, checkout, client, result.data, t]);
   const pending = mutation.isPending && mutation.variables.businessId === businessId || checkout?.businessId === businessId;
   // The picker only renders once billing loads. If that request fails, an open flag alone
   // would hold the survey off for the rest of the visit.
@@ -90,6 +118,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       availableCheckoutPlans={billing.data.availableCheckoutPlans ?? []}
       availableCheckoutIntervals={billing.data.availableCheckoutIntervals ?? { starter: [], pro: [] }}
       billingInterval={interval}
+      changesPlan={changesPlan}
       currentPlan={plan}
       loading={pending ? "checkout" : null}
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}

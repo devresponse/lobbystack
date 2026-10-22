@@ -757,6 +757,22 @@ export async function getBillingCatalogForApi(context: DomainContext, input: { d
   };
 }
 
+const prorations = ["invoice", "prorate", "next_period", "reset"] as const;
+export type PlanChangeProration = (typeof prorations)[number];
+
+/**
+ * How a plan change asks Polar to charge: billing.json's polar.upgradeProration
+ * for an upgrade and downgradeProration for a downgrade, from the latest apply.
+ * Before the first apply, the values the brand files ship with: an upgrade is
+ * invoiced at once and a downgrade waits for the next period.
+ */
+export async function loadPlanChangeProration(context: DomainContext): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
+  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
+  const polar = (latest?.profile as { polar?: Record<string, unknown> } | null | undefined)?.polar;
+  const pick = (value: unknown, fallback: PlanChangeProration): PlanChangeProration => (prorations as readonly unknown[]).includes(value) ? value as PlanChangeProration : fallback;
+  return { upgrade: pick(polar?.upgradeProration, "invoice"), downgrade: pick(polar?.downgradeProration, "next_period") };
+}
+
 const runKinds = ["catalog", "polar", "verify"] as const;
 
 /** Every run, newest first, with the rows it changed: section 7.5's Q8, one row comparison per page. */

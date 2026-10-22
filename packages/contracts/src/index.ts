@@ -231,6 +231,7 @@ export const queueForJobType = {
   "prospectDemo.expire": "maintenance",
   "onboarding.sendFollowup": "default",
   "affiliate.generatePayoutRun": "maintenance",
+  "billing.verifyCatalog": "maintenance",
   "telemetry.flush": "maintenance",
   "outbox.backlogSample": "maintenance",
   "realtime.publish": "default",

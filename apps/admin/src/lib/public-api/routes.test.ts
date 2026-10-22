@@ -50,6 +50,8 @@ const domain = vi.hoisted(() => ({
   endManagedPlanForApi: vi.fn(),
   getBillingCatalogForApi: vi.fn(),
   applyBillingCatalogForApi: vi.fn(),
+  linkBillingCatalogForApi: vi.fn(),
+  billingDeploymentPolar: vi.fn(() => ({ env: "sandbox", org: "org_test", secretSha256: null, productVars: {} })),
   listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
   listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   createRuleForApi: vi.fn(),
@@ -626,7 +628,9 @@ describe("billing", () => {
       const catalog = await v1.getBillingCatalog(get(operator.key));
       expect(catalog.status).toBe(200);
       expect(await catalog.json()).toEqual({ data: { brand: "lobbystack", plans: [] } });
-      expect(domain.getBillingCatalogForApi).toHaveBeenCalledWith(expect.anything(), { deployment: { brand: expect.any(String) } });
+      // With the Polar settings this process runs with.
+      expect(domain.getBillingCatalogForApi).toHaveBeenCalledWith(expect.anything(), { deployment: { brand: expect.any(String), polar: { env: "sandbox", org: "org_test", secretSha256: null, productVars: {} } } });
+      expect(domain.billingDeploymentPolar).toHaveBeenLastCalledWith(process.env);
 
       // A dry run answers 200 and needs no key; the domain decides what a real apply without one gets.
       domain.applyBillingCatalogForApi.mockResolvedValueOnce({ run: { ...run, id: null, status: "preview" }, replayed: false, status: 200 });
@@ -661,6 +665,39 @@ describe("billing", () => {
 
       expect((await v1.listBillingCatalogRuns(get(operator.key, "/billing/catalog/runs?kind=catalog&limit=5"))).status).toBe(200);
       expect(domain.listBillingCatalogRunsForApi).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ kind: "catalog", limit: 5 }));
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("lets only an operator's platform key link Polar's products to the catalog", async () => {
+    const body = { brand: "alloplace", hash: "a".repeat(64), polar_env: "sandbox", polar_org: "org_test", plans: [{ code: "pro", terms_hash: "b".repeat(64), polar_disc: null, prices: [{ period: "monthly", currency: "cad", polar_id: "prod_1" }] }] };
+    const link = (key: string, value: unknown, headers: Record<string, string> = {}) => v1.linkBillingCatalog(new Request("https://app.example.com/api/v1/billing/catalog/polar-links", { method: "POST", body: JSON.stringify(value), headers: { authorization: `Bearer ${key}`, ...headers } }));
+    const run = { id: "6a1f2b3c-4d5e-4f60-8a71-9b82c3d4e5f6", kind: "polar", status: "applied", brand: "alloplace", ver: 1, hash: "a".repeat(64), prev_hash: null, code_hash: "a".repeat(64), changes: [], problems: [], blocked_by: [], polar_env: "sandbox", polar_org: "org_test", key_id: "x", partner: "lobbystack", started_at: "2026-10-21T08:00:00.000Z", ended_at: "2026-10-21T08:00:00.100Z" };
+    expect((await v1.linkBillingCatalog(call("/billing/catalog/polar-links", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": "k" } }))).status).toBe(403);
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry]));
+    try {
+      expect((await link(partner.key, body, { "Idempotency-Key": "k" })).status).toBe(403);
+      expect(domain.linkBillingCatalogForApi).not.toHaveBeenCalled();
+
+      domain.linkBillingCatalogForApi.mockResolvedValueOnce({ run: { ...run, id: null, status: "preview" }, replayed: false, status: 200 });
+      const preview = await link(operator.key, { ...body, dry_run: true });
+      expect(preview.status).toBe(200);
+      expect(domain.linkBillingCatalogForApi).toHaveBeenLastCalledWith(expect.anything(), { caller: { platformKeyId: operator.entry.id, partnerId: "lobbystack" }, idempotencyKey: null, body: { ...body, dry_run: true }, deployment: { brand: expect.any(String), polar: expect.objectContaining({ org: "org_test" }) } });
+
+      domain.linkBillingCatalogForApi.mockResolvedValueOnce({ run, replayed: true, status: 201 });
+      const replayed = await link(operator.key, body, { "Idempotency-Key": "link-1" });
+      expect(replayed.status).toBe(201);
+      expect(replayed.headers.get("Idempotent-Replayed")).toBe("true");
+      expect(await replayed.json()).toMatchObject({ data: { kind: "polar", status: "applied" } });
+
+      // A link that breaks the schema never reaches the domain.
+      const calls = domain.linkBillingCatalogForApi.mock.calls.length;
+      expect((await link(operator.key, { ...body, polar_env: "live" }, { "Idempotency-Key": "link-2" })).status).toBe(400);
+      expect((await link(operator.key, { ...body, plans: [{ ...body.plans[0], prices: [] }] }, { "Idempotency-Key": "link-3" })).status).toBe(400);
+      expect(domain.linkBillingCatalogForApi.mock.calls.length).toBe(calls);
     } finally {
       vi.unstubAllEnvs();
     }

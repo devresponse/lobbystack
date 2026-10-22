@@ -4,9 +4,13 @@ import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { apiBillingCatalogApplySchema, billingProfileHash, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
+import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
 
-import { applyBillingCatalogForApi, getBillingCatalogForApi, listBillingCatalogRunsForApi, type BillingCatalogDeployment } from "./billingCatalog";
+import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
+import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
+import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
+import { createFakePolar, type FakePolar } from "./billingPolar.testing";
+import { runDailyBillingVerify } from "./billingVerify";
 import { PublicApiError } from "./publicApi/errors";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -317,6 +321,166 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect((await listBillingCatalogRunsForApi(context(tx), { kind: "catalog" })).data).toHaveLength(3);
       expect((await listBillingCatalogRunsForApi(context(tx), { kind: "polar" })).data).toEqual([]);
       await expect(listBillingCatalogRunsForApi(context(tx), { kind: "other" })).rejects.toMatchObject({ status: 400, details: [{ path: "kind" }] });
+    });
+  });
+});
+
+// Polar's side for the link tests: a stand-in organization the file was applied to.
+const polarEnv = { APP_BASE_URL: "https://demo.alloplace.com", POLAR_API_BASE_URL: "https://sandbox-api.polar.sh", POLAR_ORGANIZATION_ID: "org_test" };
+const polarClient = (fake: FakePolar) => new PolarCatalogClient({ token: "polar_oat_test", baseUrl: "https://sandbox-api.polar.sh", fetch: fake.fetch, sleep: async () => undefined });
+
+/** Sets a fresh Polar stand-in up from a file, as pnpm billing apply does, and returns it with the link it would send. */
+async function seededPolar(billingFile: Record<string, any>) {
+  const fake = createFakePolar();
+  const profile = billingProfileSchema.parse(billingFile);
+  const plans = desiredBillingPlans(profile);
+  const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
+  const planned = planPolarChanges({ catalog, snapshot: await polarClient(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false, allowLess: false } });
+  await runPolarSteps(polarClient(fake), planned.steps);
+  const links = polarLinkPlans({ catalog, plans, snapshot: await polarClient(fake).readSnapshot() });
+  return { fake, plans: links.plans };
+}
+
+/** The deployment with Polar settings: the stand-in's organization and the product variables a link sets. */
+function polarDeployment(extra: Record<string, string> = {}): BillingCatalogDeployment {
+  return { brand: "alloplace", polar: billingDeploymentPolar({ ...polarEnv, ...extra }) };
+}
+
+async function link(tx: DatabaseTransaction, body: Record<string, unknown>, options: { key?: string | null; deployment?: BillingCatalogDeployment } = {}) {
+  const parsed = apiBillingCatalogLinkSchema.parse({ brand: "alloplace", polar_env: "sandbox", polar_org: "org_test", ...body });
+  return await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: options.key === undefined ? randomUUID() : options.key, body: parsed, deployment: options.deployment ?? polarDeployment() });
+}
+
+/** The product variables a deployment would set after a link, by name. */
+function productVariables(plans: Array<{ code: string; prices: Array<{ period: string; polar_id: string }> }>): Record<string, string> {
+  return Object.fromEntries(plans.filter((plan) => plan.code === "starter" || plan.code === "pro").flatMap((plan) => plan.prices.map((price) => [`POLAR_${plan.code.toUpperCase()}_${price.period.toUpperCase()}_PRODUCT_ID`, price.polar_id])));
+}
+
+describe.skipIf(!testUrl)("billing catalog Polar links", () => {
+  it("refuses a link before an apply, for another brand, file or organization, or without POLAR_ORGANIZATION_ID, listing every reason and writing nothing", async () => {
+    await rollbackTest(async (tx) => {
+      const { plans } = await seededPolar(file());
+      const early = await refusal(link(tx, { hash: deployedHash, plans }));
+      expect(early).toMatchObject({ status: 409, code: "conflict" });
+      expect(early.details!.map((detail) => `${detail.code} ${detail.message}`)).toEqual(["catalog_changed Nothing was applied yet. Apply the file before linking Polar to it.", "unknown_price There's no plan starter.", "unknown_price There's no plan pro."]);
+
+      await apply(tx, file());
+      const wrong = await refusal(link(tx, { brand: "cadre", hash: "b".repeat(64), polar_org: "org_other", plans }));
+      expect(wrong.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["brand_mismatch brand", "catalog_changed hash", "polar_org_mismatch polar_org"]);
+      const unset = await refusal(link(tx, { hash: deployedHash, plans }, { deployment: { brand: "alloplace", polar: billingDeploymentPolar({}) } }));
+      expect(unset.details!.map((detail) => detail.code)).toEqual(["polar_org_mismatch"]);
+      expect(unset.details![0]!.message).toContain("POLAR_ORGANIZATION_ID isn't set");
+      const production = await refusal(link(tx, { hash: deployedHash, plans, polar_env: "production" }));
+      expect(production.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["polar_org_mismatch polar_env"]);
+
+      const preview = await link(tx, { hash: deployedHash, plans, polar_org: "org_other", dry_run: true }, { key: null });
+      expect(preview).toMatchObject({ status: 200, run: { id: null, status: "preview", kind: "polar" } });
+      expect(preview.run.blocked_by.map((item) => item.code)).toEqual(["polar_org_mismatch"]);
+      expect(preview.run.changes).toHaveLength(6);
+      expect(await count(tx, "billing_runs")).toBe(1);
+      expect((await rows(tx, sql`select count(*) as n from public.billing_prices where polar_id is not null`))[0]!.n).toBe("0");
+    });
+  });
+
+  it("links every sold price, makes the sold plans active, and records unchanged for the same products, with key replays", async () => {
+    await rollbackTest(async (tx) => {
+      const applied = await apply(tx, file());
+      const { plans } = await seededPolar(file());
+      const first = await link(tx, { hash: deployedHash, plans }, { key: "link-1" });
+      expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "polar", status: "applied", hash: deployedHash, prev_hash: null, polar_env: "sandbox", polar_org: "org_test", key_id: caller.platformKeyId, problems: [] } });
+      expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad"]);
+      expect(Object.fromEntries((await rows(tx, sql`select code, status from public.billing_plans`)).map((row) => [row.code, row.status]))).toEqual({ free_cloud: "active", starter: "active", pro: "active", enterprise: "active" });
+      const linkedIds = (await rows(tx, sql`select polar_id from public.billing_prices order by polar_id`)).map((row) => row.polar_id);
+      expect(linkedIds).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.polar_id)).sort());
+      // The rows a link changes carry its run; the rest keep the apply's.
+      expect((await rows(tx, sql`select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
+      expect((await plan(tx, "free_cloud")).run_id).toBe(applied.run.id);
+
+      expect(await link(tx, { hash: deployedHash, plans }, { key: "link-1" })).toEqual({ ...first, replayed: true });
+      expect(await refusal(link(tx, { hash: deployedHash, plans, replace_ids: true }, { key: "link-1" }))).toMatchObject({ status: 422, code: "idempotency_key_reused" });
+      expect(await refusal(link(tx, { hash: deployedHash, plans }, { key: null }))).toMatchObject({ status: 400, details: [{ path: "Idempotency-Key" }] });
+      const again = await link(tx, { hash: deployedHash, plans });
+      expect(again.run).toMatchObject({ status: "unchanged", changes: [], prev_hash: deployedHash });
+
+      const catalog = await getBillingCatalogForApi(context(tx), { deployment: polarDeployment({ POLAR_WEBHOOK_SECRET: "polar_whs_x" }) });
+      expect(catalog.polar).toMatchObject({ env: "sandbox", org: "org_test", secret_sha256: createHash("sha256").update("polar_whs_x").digest("hex"), last_link: { id: again.run.id } });
+      expect(catalog.plans.find((entry) => entry.code === "pro")!.prices.every((price) => price.polar_id !== null)).toBe(true);
+      expect((await listBillingCatalogRunsForApi(context(tx), { kind: "polar" })).data.map((run) => run.id)).toEqual([again.run.id, first.run.id]);
+    });
+  });
+
+  it("refuses a new product for a linked price unless replace_ids, which retires the row with its product and keeps the cents", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans });
+      const [before] = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
+      const swapped = structuredClone(plans);
+      swapped.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "monthly")!.polar_id = "product_new";
+      expect((await refusal(link(tx, { hash: deployedHash, plans: swapped }))).details).toEqual([expect.objectContaining({ code: "id_changed" })]);
+      const replaced = await link(tx, { hash: deployedHash, plans: swapped, replace_ids: true });
+      expect(actions(replaced.run)).toEqual(["retire pro/monthly/cad", "insert pro/monthly/cad"]);
+      const after = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
+      expect(after.map((row) => [row.cents, row.polar_id, row.retired_at === null])).toEqual([[10000, "product_new", true], [10000, before!.polar_id, false]]);
+      expect(after[1]!.id).toBe(before!.id);
+      // The old product can't be linked again: it stays with its retired row.
+      expect((await refusal(link(tx, { hash: deployedHash, plans, replace_ids: true }))).details).toEqual([expect.objectContaining({ code: "id_taken", message: expect.stringContaining("a retired price") })]);
+    });
+  });
+
+  it("keeps a deployment with the Polar organization it was first linked to", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans });
+      const moved = polarDeployment({ POLAR_ORGANIZATION_ID: "org_live", POLAR_API_BASE_URL: "https://api.polar.sh" });
+      const error = await refusal(link(tx, { hash: deployedHash, plans, polar_env: "production", polar_org: "org_live" }, { deployment: moved }));
+      expect(error.details!.map((detail) => detail.code)).toEqual(["polar_org_changed"]);
+      expect(error.details![0]!.message).toContain("Live payments get a deployment of their own.");
+    });
+  });
+});
+
+describe.skipIf(!testUrl)("billing catalog daily check", () => {
+  it("skips until the deployment has a Polar organization and a link, then stores a verify run without a key", async () => {
+    await rollbackTest(async (tx) => {
+      const unused = async () => { throw new Error("Polar wasn't to be read."); };
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: {}, readPolar: unused })).toEqual({ status: "skipped", reason: "POLAR_ORGANIZATION_ID isn't set" });
+      await apply(tx, file());
+      expect(await runDailyBillingVerify(context(tx), { brand: "alloplace", env: polarEnv, readPolar: unused })).toEqual({ status: "skipped", reason: "nothing was linked yet" });
+
+      const { fake, plans } = await seededPolar(file());
+      await link(tx, { hash: deployedHash, plans });
+      const env = { ...polarEnv, ...productVariables(plans) };
+      const readPolar = () => polarClient(fake).readSnapshot();
+      const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
+      expect(passed).toMatchObject({ status: "passed", previousStatus: null, problems: [], polarEnv: "sandbox" });
+      const [stored] = await rows(tx, sql`select * from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);
+      expect(stored).toMatchObject({ kind: "verify", status: "passed", hash: deployedHash, code_hash: deployedHash, key_id: null, idem_key: null, partner: null, polar_env: "sandbox", polar_org: "org_test", profile: {} });
+
+      fake.state.products.find((product) => product.name === "Pro monthly")!.prices.find((price) => price.amount_type === "fixed")!.price_amount = 12000;
+      const drift = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
+      expect(drift).toMatchObject({ status: "drift", previousStatus: "passed" });
+      expect(drift.status !== "skipped" && drift.problems.map((problem) => `${problem.pair} ${problem.code}`)).toEqual(["file_polar product", "postgres_polar linked_id"]);
+
+      const failed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar: async () => { throw new Error("Polar answered 401 to GET /v1/organizations/"); } });
+      expect(failed).toMatchObject({ status: "failed", previousStatus: "drift", problems: [{ code: "unreadable", message: "Polar answered 401 to GET /v1/organizations/" }] });
+      const verifies = (await listBillingCatalogRunsForApi(context(tx), { kind: "verify" })).data;
+      expect(verifies.map((run) => run.status)).toEqual(["failed", "drift", "passed"]);
+      expect(verifies[1]!.problems).toHaveLength(2);
+      expect(verifies[0]!.prev_hash).toBe(deployedHash);
+    });
+  });
+
+  it("records a verify run as the worker with no key, and returns the status before it", async () => {
+    await rollbackTest(async (tx) => {
+      const first = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "drift", problems: [{ code: "catalog_hash", pair: "file_postgres", level: "drift", subject: "catalog", message: "x" }], polarEnv: "sandbox", polarOrg: "org_test" });
+      expect(first).toMatchObject({ previousStatus: null, run: { kind: "verify", status: "drift", key_id: null, prev_hash: null, problems: [{ code: "catalog_hash" }] } });
+      const second = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "passed", problems: [], polarEnv: "sandbox", polarOrg: "org_test" });
+      expect(second.previousStatus).toBe("drift");
+      expect(second.run.started_at > first.run.started_at).toBe(true);
+      await as(tx, "lobbystack_app");
+      expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'sandbox', 'org_test')`)).code).toBe("42501");
     });
   });
 });

@@ -1,5 +1,6 @@
 import {
   applyBillingCatalogForApi,
+  billingDeploymentPolar,
   cancelAppointmentForApi,
   cancelKnowledgeSourceForApi,
   claimPhoneNumberForApi,
@@ -54,6 +55,7 @@ import {
   idempotencyRequestHash,
   listAccountCalendarsForApi,
   listAppointmentsForApi,
+  linkBillingCatalogForApi,
   listBillingCatalogRunsForApi,
   listBusinessesForApi,
   listCalendarConnectionsForApi,
@@ -104,6 +106,7 @@ import {
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
   apiBillingCatalogApplySchema,
+  apiBillingCatalogLinkSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiUserCreateSchema,
@@ -187,6 +190,11 @@ function checkoutAvailable(plan: "starter" | "pro", interval: "monthly" | "annua
 /** A managed plan bypasses Polar and the catalog is every business's, so only the operator's own platform keys, with access to every business, may manage either. */
 function requireOperatorKey(credential: ApiCredential, action = "manage a plan outside Polar"): void {
   if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", `Only an operator's platform key, one with access to every business, can ${action}.`);
+}
+
+/** The brand this deployment shows and the Polar settings it runs with, for the billing catalog. */
+function billingDeployment() {
+  return { brand: currentBrand().id, polar: billingDeploymentPolar(process.env) };
 }
 
 /** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
@@ -319,12 +327,18 @@ export const v1 = {
   }),
   getBillingCatalog: (request: Request) => handleApiRequest(request, "getBillingCatalog", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage the billing catalog");
-    return { body: data(await getBillingCatalogForApi(context, { deployment: { brand: currentBrand().id } })) };
+    return { body: data(await getBillingCatalogForApi(context, { deployment: billingDeployment() })) };
   }),
   applyBillingCatalog: (request: Request) => handleApiRequest(request, "applyBillingCatalog", async ({ context, credential, idempotencyKey }) => {
     requireOperatorKey(credential, "manage the billing catalog");
     const body = await readApiBody(request, apiBillingCatalogApplySchema);
-    const result = await applyBillingCatalogForApi(context, { caller: { platformKeyId: credential.platformKeyId, partnerId: credential.partnerId }, idempotencyKey, body, deployment: { brand: currentBrand().id } });
+    const result = await applyBillingCatalogForApi(context, { caller: { platformKeyId: credential.platformKeyId, partnerId: credential.partnerId }, idempotencyKey, body, deployment: billingDeployment() });
+    return { status: result.status, body: data(result.run), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
+  }),
+  linkBillingCatalog: (request: Request) => handleApiRequest(request, "linkBillingCatalog", async ({ context, credential, idempotencyKey }) => {
+    requireOperatorKey(credential, "manage the billing catalog");
+    const body = await readApiBody(request, apiBillingCatalogLinkSchema);
+    const result = await linkBillingCatalogForApi(context, { caller: { platformKeyId: credential.platformKeyId, partnerId: credential.partnerId }, idempotencyKey, body, deployment: billingDeployment() });
     return { status: result.status, body: data(result.run), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
   }),
   listBillingCatalogRuns: (request: Request) => handleApiRequest(request, "listBillingCatalogRuns", async ({ context, credential }) => {

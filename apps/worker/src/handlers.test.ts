@@ -11,6 +11,7 @@ import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
+import { runDailyBillingVerify } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file.
 const brand = vi.hoisted(() => ({ appBaseUrl: null as string | null }));
@@ -27,6 +28,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     claimBillingCheckoutRequest: vi.fn(),
     expireProspectDemos: vi.fn(),
     generateAffiliatePayoutRun: vi.fn(),
+    runDailyBillingVerify: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),
     loadBillingCheckoutRequest: vi.fn(),
     loadBillingUsageEvent: vi.fn(),
@@ -582,6 +584,40 @@ describe("worker handlers", () => {
 
     expect(result).toEqual({ status: "completed", entityId: payoutRunId });
     expect(generateAffiliatePayoutRun).toHaveBeenCalledWith(domain, { periodKey: "2026-07", createdAt: "2026-08-01T00:00:00.000Z" });
+  });
+
+  it("runs the daily billing check for the deployment and tells PostHog about a drift, a failure and the first pass after", async () => {
+    const domain = { db: undefined as never };
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.verifyCatalog", queue: "maintenance", businessId: null, payload: {}, trace: {}, idempotencyKey: "billing-verify", scheduled: true };
+    const capture = vi.fn(async () => undefined);
+    const readSnapshot = vi.fn(async () => { throw new Error("not read in this test"); });
+    // Without a Polar token there's nothing to compare with.
+    expect(await handleJob(job, { domain })).toEqual({ status: "skipped" });
+    expect(runDailyBillingVerify).not.toHaveBeenCalled();
+
+    const drift = { code: "product", pair: "file_polar", level: "drift", subject: "Product \"Pro monthly\"", message: "x" } as const;
+    const warn = { code: "code_hash", pair: "file_postgres", level: "warn", subject: "code", message: "y" } as const;
+    vi.mocked(runDailyBillingVerify)
+      .mockResolvedValueOnce({ status: "skipped", reason: "nothing was linked yet" })
+      .mockResolvedValueOnce({ status: "drift", previousStatus: "passed", problems: [drift, { ...drift, code: "linked_id", pair: "postgres_polar" }, { ...drift, subject: "Product \"Pro annual\"" }, warn], polarEnv: "sandbox", runId: "run-1" })
+      .mockResolvedValueOnce({ status: "failed", previousStatus: "drift", problems: [{ ...drift, code: "unreadable", subject: "Polar" }], polarEnv: "sandbox", runId: "run-2" })
+      .mockResolvedValueOnce({ status: "passed", previousStatus: "failed", problems: [warn], polarEnv: "sandbox", runId: "run-3" })
+      .mockResolvedValueOnce({ status: "passed", previousStatus: "passed", problems: [], polarEnv: "sandbox", runId: "run-4" });
+    const dependencies = { domain, polarCatalog: { readSnapshot }, productAnalytics: { capture } };
+    expect(await handleJob(job, dependencies)).toEqual({ status: "skipped" });
+    expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readPolar: expect.any(Function) });
+    await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readPolar().catch(() => undefined);
+    expect(readSnapshot).toHaveBeenCalledTimes(1);
+
+    expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-1:drift" });
+    expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-2:failed" });
+    expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-3:passed" });
+    expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-4:passed" });
+    expect(capture.mock.calls.map((call) => (call as unknown as [Array<{ event: string; distinctId: string; properties: unknown }>])[0].map(({ event, distinctId, properties }) => ({ event, distinctId, properties })))).toEqual([
+      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "drift", problemCodes: ["linked_id", "product"], problemCount: 3, polarEnv: "sandbox" } }],
+      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "failed", problemCodes: ["unreadable"], problemCount: 1, polarEnv: "sandbox" } }],
+      [{ event: "ops.billing.profile_drift_recovered", distinctId: "system:deployment", properties: { status: "passed", problemCodes: [], problemCount: 0, polarEnv: "sandbox" } }],
+    ]);
   });
 
   it("expires due prospect demos without a business context", async () => {

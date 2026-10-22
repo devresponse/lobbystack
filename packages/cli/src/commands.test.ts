@@ -271,6 +271,54 @@ describe("billing catalog", () => {
     expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out).toBe("Nothing applied yet for alloplace. See what applying its file would change with lobbystack billing catalog-preview alloplace --billing-file @brands/alloplace/billing.json.");
   });
 
+  it("shows how many live prices Polar sells, and the organization the catalog is linked to", async () => {
+    const price = (period: string, polarId: string | null) => ({ period, currency: "cad", cents: 3000, polar_id: polarId, retired_at: null });
+    const plans = [
+      { code: "starter", tier: "starter", status: "active", access: "public", sold: true, prices: [price("monthly", "prod_1"), price("annual", "prod_2")] },
+      { code: "pro", tier: "pro", status: "draft", access: "public", sold: true, prices: [price("monthly", null), price("annual", "prod_3")] },
+      { code: "enterprise", tier: "enterprise", status: "active", access: "hidden", sold: false, prices: [] },
+    ];
+    const base = { brand: "alloplace", code_hash: hash, hash, matches_code: true, last_run: run, plans };
+    const polar = { env: "sandbox", org: "org_test", secret_sha256: null, product_vars: {}, last_link: null };
+    const api = fakeApi({
+      "GET /api/v1/billing/catalog": [
+        { body: { data: { ...base, polar: { ...polar, last_link: { ...run, kind: "polar", polar_env: "sandbox", polar_org: "org_test", started_at: "2026-10-21T09:00:00.000Z" } } } } },
+        { body: { data: { ...base, polar } } },
+        { body: { data: { ...base, polar: { ...polar, org: null } } } },
+      ],
+    });
+    const linked = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(linked).toMatch(/starter .*2 of 2 linked/);
+    expect(linked).toMatch(/pro .*1 of 2 linked/);
+    expect(linked).not.toMatch(/enterprise .*linked/);
+    expect(linked.endsWith("Linked to Polar sandbox organization org_test 2026-10-21T09:00:00.000Z.")).toBe(true);
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out.endsWith("Polar sandbox organization org_test, not linked yet: run pnpm billing apply.")).toBe(true);
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out.endsWith("POLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet.")).toBe(true);
+  });
+
+  it("links Polar's products from a file, with an Idempotency-Key, and says what it changed or what stops it", async () => {
+    const linkRun = { ...run, kind: "polar", polar_env: "sandbox", polar_org: "org_test" };
+    const priceChange = { table: "billing_prices", key: "pro/monthly/cad", action: "update", fields: { polar_id: { from: null, to: "prod_1" } }, lowers_allowance: false, raises_price: false };
+    const api = fakeApi({
+      "POST /api/v1/billing/catalog/polar-links": [
+        { status: 201, body: { data: { ...linkRun, changes: [priceChange] } } },
+        { body: { data: { ...linkRun, id: null, status: "preview", changes: [], blocked_by: [{ code: "polar_org_changed", message: "It stays with org_test.", path: "polar_org" }] } } },
+        { status: 201, body: { data: { ...linkRun, status: "unchanged", changes: [] } } },
+      ],
+    });
+    const plans = [{ code: "pro", terms_hash: "b".repeat(64), polar_disc: null, prices: [{ period: "monthly", currency: "cad", polar_id: "prod_1" }] }];
+    const body = JSON.stringify({ hash, polar_env: "sandbox", polar_org: "org_test", plans });
+    const linked = await runCli(["billing", "catalog-link", "alloplace", "--data", body, "--idempotency-key", "link-1"], { fetch: api.fetch });
+    expect(linked.code).toBe(exitCodes.ok);
+    expect(api.sent[0]).toMatchObject({ headers: { "idempotency-key": "link-1" }, body: { brand: "alloplace", hash, polar_env: "sandbox", polar_org: "org_test", plans } });
+    expect(linked.out).toContain("polar_id");
+    expect(linked.out).toContain(`Linked Polar sandbox organization org_test with 1 change in run ${run.id}.`);
+    const refused = await runCli(["billing", "catalog-link", "alloplace", "--data", body, "--dry-run"], { fetch: api.fetch });
+    expect(api.sent[1]!.body).toMatchObject({ dry_run: true });
+    expect(refused.out).toBe("Linking would be refused, and nothing would change:\n  polar_org_changed (polar_org): It stays with org_test.");
+    expect((await runCli(["billing", "catalog-link", "alloplace", "--data", body], { fetch: api.fetch })).out).toBe(`The tables already had these products in run ${run.id}.`);
+  });
+
   it("lists runs of one kind", async () => {
     const api = fakeApi({ "GET /api/v1/billing/catalog/runs": { body: { data: [{ ...run, changes }], next_cursor: null, has_more: false } } });
     const result = await runCli(["billing", "catalog-runs", "--kind", "catalog"], { fetch: api.fetch });

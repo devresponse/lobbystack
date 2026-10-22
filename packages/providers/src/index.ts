@@ -6,6 +6,7 @@ export * from "./email/smtp";
 export * from "./email/webhook";
 export * from "./google/calendar";
 export * from "./polar/polarBilling";
+export * from "./polar/polarCatalog";
 export * from "./polar/webhook";
 export * from "./storage/s3";
 export * from "./storage/local";

@@ -1,6 +1,6 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listSchedulerBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
-import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode } from "@lobbystack/shared";
+import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode, polarBaseUrls } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
 import { createEmbeddingProvider } from "@lobbystack/providers/ai/embeddingProvider";
@@ -8,6 +8,7 @@ import { FirecrawlProvider } from "@lobbystack/providers/crawling/firecrawl";
 import { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import { GoogleCalendarProvider } from "@lobbystack/providers/google/calendar";
 import { PolarBillingProvider } from "@lobbystack/providers/polar/polarBilling";
+import { PolarCatalogClient } from "@lobbystack/providers/polar/polarCatalog";
 import { createStorageProvider } from "@lobbystack/providers/storage/provider";
 import { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import { getMeter, initializeTelemetry, redactOtelExceptionText, shutdownTelemetry } from "@lobbystack/telemetry/node";
@@ -61,6 +62,13 @@ function createPolarProvider(): PolarBillingProvider | undefined {
   const accessToken = process.env.POLAR_ACCESS_TOKEN;
   const organizationId = process.env.POLAR_ORGANIZATION_ID;
   return accessToken && organizationId ? new PolarBillingProvider({ accessToken, organizationId, ...(process.env.POLAR_API_BASE_URL ? { baseUrl: process.env.POLAR_API_BASE_URL } : {}) }) : undefined;
+}
+
+// The daily billing check reads with the same token, which needs Polar's six read scopes for it.
+function createPolarCatalog(): WorkerDependencies["polarCatalog"] {
+  const token = process.env.POLAR_ACCESS_TOKEN?.trim();
+  if (!token || !process.env.POLAR_ORGANIZATION_ID?.trim()) return undefined;
+  return new PolarCatalogClient({ token, baseUrl: process.env.POLAR_API_BASE_URL?.trim() || polarBaseUrls.production });
 }
 
 function createAlertSmsProvider(): WorkerDependencies["twilioAlerts"] {
@@ -153,6 +161,7 @@ async function main(): Promise<void> {
   const twilioAlerts = createAlertSmsProvider();
   const storage = createStorageProvider();
   const polar = createPolarProvider();
+  const polarCatalog = createPolarCatalog();
   const crawler = createCrawlerProvider();
   const calendar = createCalendarProvider();
   const productAnalytics = createProductAnalytics();
@@ -180,6 +189,7 @@ async function main(): Promise<void> {
     ...(openai ? { liveSessions: openai.live.sessions } : {}),
     recoverLiveCall: liveCalls.recover,
     ...(polar ? { polar } : {}),
+    ...(polarCatalog ? { polarCatalog } : {}),
     enqueueProductEventRetentionContinuation: async (input) => {
       await withBusinessTransaction(database.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
         await enqueueOutbox(tx, {

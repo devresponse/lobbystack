@@ -118,6 +118,8 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.usage_sync_failed",
   "ops.billing.usage_sync_recovered",
   "ops.billing.unit_economics_rollup_recorded",
+  "ops.billing.profile_drift",
+  "ops.billing.profile_drift_recovered",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -247,7 +249,11 @@ export type TelemetryRequirementKey =
   | "plan"
   | "prospectDemoId"
   | "campaignId"
-  | "endedBy";
+  | "endedBy"
+  | "status"
+  | "problemCodes"
+  | "problemCount"
+  | "polarEnv";
 
 export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "web.auth.login_succeeded": ["deploymentMode", "pathname"],
@@ -540,6 +546,9 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
     "deploymentMode",
     "monthKey",
   ],
+  // The deployment's daily billing check: deployment-wide, so no business or deployment mode.
+  "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "polarEnv"],
+  "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "polarEnv"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

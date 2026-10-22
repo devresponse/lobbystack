@@ -38,8 +38,8 @@ import { decodeCursor, pageSize, toPage, type Page, type PageRequest } from "./p
 // resolves the rows the file describes, compares them with the rows Postgres
 // holds, and writes the difference in one transaction. A link then records
 // which Polar product sells each live price, and the worker records a verify
-// run each day. Nothing here calls Polar, and nothing at run time reads these
-// tables yet.
+// run each day. Nothing here calls Polar. Checkout, plan changes, Polar's
+// webhook and the plan screens read the tables through billingPlans.ts.
 
 // One apply or link at a time, across every admin process.
 const CATALOG_LOCK = sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`;
@@ -386,7 +386,7 @@ export type BillingDeploymentPolar = {
   org: string | null;
   /** SHA-256 of POLAR_WEBHOOK_SECRET; null where it isn't set, as on the worker. */
   secretSha256: string | null;
-  /** The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout reads, by plan/period. */
+  /** The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout reads until a link makes the plan active, by plan/period. */
   productVars: Record<string, string | null>;
 };
 

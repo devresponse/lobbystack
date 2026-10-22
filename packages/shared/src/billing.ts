@@ -233,6 +233,115 @@ export function getKnowledgeStorageLimitBytes(
   return billingPlanCatalog[plan].knowledgeStorageBytes;
 }
 
+/** One price of a plan as the screens show it. */
+export type BillingPlanPrice = {
+  interval: BillingInterval;
+  /** Three lowercase letters, such as cad. */
+  currency: string;
+  /** The price for one period. */
+  amountCents: number;
+  /** amountCents, or for annual amountCents / 12 rounded down. */
+  monthlyAmountCents: number;
+  /** A Polar product sells it here, so a plan button can start a checkout or a plan change. */
+  checkoutAvailable: boolean;
+};
+
+/** A standard plan as the screens show it: what it includes, what usage past that costs, and its prices. Null means custom. */
+export type BillingPlanOffer = {
+  slug: CloudBillingPlanSlug;
+  /** Priced by hand, with no fixed allowances. */
+  custom: boolean;
+  /** Usage past the allowance is billed rather than blocked. */
+  overagesBillable: boolean;
+  included: {
+    voiceSeconds: number | null;
+    alertSmsSegments: number | null;
+    outboundCallAttempts: number | null;
+    chatAiUnits: number | null;
+    knowledgeStorageBytes: number | null;
+    businessNumbers: number | null;
+  };
+  /** Cents for each unit past the allowance. */
+  overageRates: {
+    voiceMinuteCents: number | null;
+    alertSmsSegmentCents: number | null;
+    outboundCallAttemptCents: number | null;
+  };
+  sortOrder: number;
+  /** None for a plan Polar doesn't sell, such as Free. */
+  prices: BillingPlanPrice[];
+};
+
+/**
+ * The standard plans a deployment shows: from its billing catalog once a
+ * billing.json is applied, else the ones this build ships with, in US dollars.
+ */
+export type BillingPlanList = {
+  currency: string;
+  source: "catalog" | "built_in";
+  plans: BillingPlanOffer[];
+};
+
+/** The plans this build ships with, which a deployment shows until its first catalog apply. */
+export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutPlanSlug, interval: BillingInterval) => boolean = () => false): BillingPlanList {
+  const currency = "usd";
+  return {
+    currency,
+    source: "built_in",
+    plans: cloudBillingPlanSlugs.map((slug, index) => {
+      const plan = billingPlanCatalog[slug];
+      const prices: BillingPlanPrice[] = [];
+      if (slug === "starter" || slug === "pro") {
+        const starterOrPro = billingPlanCatalog[slug];
+        prices.push({ interval: "monthly", currency, amountCents: starterOrPro.monthlyChargeCents, monthlyAmountCents: starterOrPro.monthlyChargeCents, checkoutAvailable: checkoutAvailable(slug, "monthly") });
+        prices.push({ interval: "annual", currency, amountCents: starterOrPro.annualChargeCents, monthlyAmountCents: starterOrPro.annualEffectiveMonthlyChargeCents, checkoutAvailable: checkoutAvailable(slug, "annual") });
+      }
+      return {
+        slug,
+        custom: slug === "enterprise",
+        overagesBillable: plan.overagesBillable,
+        included: {
+          voiceSeconds: plan.voiceSecondsIncluded,
+          alertSmsSegments: plan.alertSmsSegmentsIncluded,
+          outboundCallAttempts: plan.outboundCallAttemptsIncluded,
+          chatAiUnits: plan.chatAiTokensIncluded,
+          knowledgeStorageBytes: plan.knowledgeStorageBytes,
+          businessNumbers: plan.includedBusinessNumbers,
+        },
+        overageRates: {
+          voiceMinuteCents: plan.voiceOverageRatePerMinuteCents,
+          alertSmsSegmentCents: plan.alertSmsOverageRatePerSegmentCents,
+          outboundCallAttemptCents: plan.outboundCallAttemptOverageRateCents,
+        },
+        sortOrder: index * 10,
+        prices,
+      };
+    }),
+  };
+}
+
+/** A plan's price for an interval, if it has one. */
+export function billingPlanPrice(plan: Pick<BillingPlanOffer, "prices"> | undefined, interval: BillingInterval): BillingPlanPrice | undefined {
+  return plan?.prices.find((price) => price.interval === interval);
+}
+
+/**
+ * The whole percent annual billing saves over twelve monthly payments, as
+ * every plan with both prices saves at least: null when none has both or
+ * annual saves nothing.
+ */
+export function annualSavingPercent(list: Pick<BillingPlanList, "plans">): number | null {
+  const savings = list.plans.flatMap((plan) => {
+    const monthly = billingPlanPrice(plan, "monthly");
+    const annual = billingPlanPrice(plan, "annual");
+    const year = (monthly?.amountCents ?? 0) * 12;
+    // Whole cents keep the percent exact: 1 - 0.8 in floating point floors to 19.
+    return annual && year > 0 ? [Math.floor(((year - annual.amountCents) * 100) / year)] : [];
+  });
+  const least = savings.length ? Math.min(...savings) : 0;
+  return least > 0 ? least : null;
+}
+
 export const contentRetentionCategories = [
   "messages",
   "transcripts",

@@ -2,7 +2,8 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), insert: vi.fn(), enqueue: vi.fn(), scope: vi.fn(), where: vi.fn() }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), insert: vi.fn(), enqueue: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn() }));
+vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog }));
 vi.mock("@lobbystack/providers", () => import("../../../../../../packages/providers/src/polar/webhook"));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
 vi.mock("@lobbystack/db", async importOriginal => ({
@@ -34,6 +35,7 @@ beforeEach(() => {
   vi.stubEnv("POLAR_WEBHOOK_SECRET", secret);
   vi.stubEnv("POLAR_ACCEPT_LEGACY_BUSINESS_IDS", "false");
   mocks.lookup.mockResolvedValue([{ id: businessId }]);
+  mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
   logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
@@ -45,6 +47,14 @@ it("routes a signed UUID delivery and deduplicates retries before enqueueing", a
   expect(mocks.enqueue).toHaveBeenCalledTimes(1);
   expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ providerEventId: "delivery-1", businessId }));
   expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
+});
+
+it("names the plan through the catalog's Polar links, read as the worker", async () => {
+  mocks.catalog.mockResolvedValue({ plans: [], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, polar_id: "prod_pro_year", retired: false }] });
+  const body = JSON.stringify({ type: "subscription.updated", data: { id: "sub-1", status: "active", product_id: "prod_pro_year", customer: { external_id: `business:${businessId}` } } });
+  expect((await POST(request(businessId, { body }))).status).toBe(200);
+  expect(mocks.scope).toHaveBeenCalledWith({ actorType: "worker" });
+  expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ plan: "pro", billingInterval: "annual" }) }));
 });
 
 it("resolves legacy references only with the explicit compatibility flag", async () => {

@@ -220,6 +220,26 @@ describe("public profile", () => {
   });
 });
 
+describe("billing plans", () => {
+  it("lists the plans with their allowances and prices, saying which checkout can't sell here", async () => {
+    const included = (minutes: number | null, sms: number | null, numbers: number | null) => ({ voice_seconds: minutes === null ? null : minutes * 60, alert_sms_segments: sms, outbound_call_attempts: sms, chat_ai_units: null, knowledge_storage_bytes: null, business_numbers: numbers });
+    const rates = (cents: number | null) => ({ voice_minute_cents: cents, alert_sms_segment_cents: cents === null ? null : 2, outbound_call_attempt_cents: cents === null ? null : 2 });
+    const price = (interval: string, amount: number, available: boolean) => ({ interval, currency: "cad", amount_cents: amount, monthly_amount_cents: interval === "annual" ? amount / 12 : amount, checkout_available: available });
+    const api = fakeApi({ "GET /api/v1/billing/plans": { body: { data: { currency: "cad", source: "catalog", plans: [
+      { slug: "free_cloud", custom: false, overage_billable: false, included: included(30, 10, 0), overage_rates: rates(null), sort: 0, prices: [] },
+      { slug: "starter", custom: false, overage_billable: true, included: included(150, 50, 1), overage_rates: rates(20), sort: 10, prices: [price("monthly", 3000, true), price("annual", 28_800, false)] },
+      { slug: "enterprise", custom: true, overage_billable: true, included: included(null, null, null), overage_rates: rates(null), sort: 30, prices: [] },
+    ] } } } });
+    const result = await runCli(["billing", "plans"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]).toMatchObject({ method: "GET", path: "/api/v1/billing/plans" });
+    expect(result.out).toMatch(/free_cloud\s+30\s+10\s+10\s+0\s+-\s+free/);
+    expect(result.out).toMatch(/starter\s+150\s+50\s+50\s+1\s+0\.20\s+30\.00 a month, 288\.00 a year \(not sold here\)/);
+    expect(result.out).toMatch(/enterprise\s+custom\s+custom\s+custom\s+custom\s+-\s+custom/);
+    expect(result.out).toContain("Prices in CAD, from the billing catalog.");
+  });
+});
+
 describe("billing catalog", () => {
   const brandFile = new URL("../../../brands/alloplace/billing.json", import.meta.url);
   const hash = "39ad3052ec5281525db2009617afe71a8ea908973b0d29f3846ce16f86055acf";

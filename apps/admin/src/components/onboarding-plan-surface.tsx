@@ -6,7 +6,7 @@ import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { brandLinks, contactEmailFor } from "@lobbystack/shared";
+import { annualSavingPercent, brandLinks, contactEmailFor, type BillingPlanList } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -14,12 +14,13 @@ import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
 import { useTelemetry } from "@/components/product-analytics";
+import { findPlan, formatMoney, monthlyPriceCents, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
 
 type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
 type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null };
-type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] } };
+type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList };
 
 const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
   { slug: "free_cloud", features: ["voiceMinutes", "bookingContacts", "support"] },
@@ -27,6 +28,14 @@ const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
   { slug: "pro", highlight: true, features: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"] },
   { slug: "enterprise", features: ["phoneNumbers", "selfHosted", "support"] },
 ];
+
+/** What a highlight's string takes: voice minutes and their rate, or the count it names. */
+function featureValues(feature: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
+  if (feature === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
+  if (feature === "dedicatedNumber") return { count: values.businessNumbers };
+  if (feature === "alertSms") return { count: values.alertSmsSegments };
+  return {};
+}
 
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";
 
@@ -55,7 +64,7 @@ function markCheckoutReported(key: string): void {
 }
 
 export function OnboardingPlanSurface() {
-  const { t } = useTranslation("onboarding");
+  const { i18n, t } = useTranslation("onboarding");
   const { navigate, navigating, router } = useStepNavigation();
   const telemetry = useTelemetry();
   const searchParams = useSearchParams();
@@ -159,31 +168,50 @@ export function OnboardingPlanSurface() {
     </section>;
   }
 
+  // Prices and allowances come from the deployment's plan list, so the cards wait for it.
+  const plans = billing.data?.plans;
+  if (!plans) {
+    if (!billing.isError) return <div className="flex justify-center py-16"><LoaderCircle aria-hidden="true" className="size-6 animate-spin text-muted-foreground" /></div>;
+    return <section className="mx-auto flex w-full max-w-md flex-col items-center gap-4 rounded-2xl border border-border/60 bg-background p-8 text-center">
+      <p className="text-sm leading-relaxed text-muted-foreground">{t("plan.loadFailed")}</p>
+      <Button className="w-full rounded-full" onClick={() => void billing.refetch()} type="button">{t("plan.retry")}</Button>
+      {/* Free needs no plan list, so onboarding can still go on without it. */}
+      <Button className="w-full rounded-full" disabled={!business || Boolean(pendingPlan)} onClick={() => act("free_cloud")} type="button" variant="outline">{pendingPlan === "free_cloud" ? <LoaderCircle className="size-4 animate-spin" /> : t("plan.tiers.free_cloud.cta")}</Button>
+      {selectFree.isError ? <FieldError>{selectFree.error?.message ?? t("plan.continueFailed")}</FieldError> : null}
+    </section>;
+  }
+  const locale = i18n.language;
+  const annualSaving = annualSavingPercent(plans);
+
   return (
     <div className="flex flex-col gap-12">
 
       <div className="flex justify-center">
         <div aria-label={t("plan.billingInterval.label")} className="inline-flex rounded-full border border-border bg-input/30 p-1" role="tablist">
-          {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-9 rounded-full px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" ? <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">{t("plan.billingInterval.save")}</span> : null}</Button>)}
+          {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-9 rounded-full px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualSaving !== null ? <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">{t("plan.billingInterval.save", { percent: annualSaving })}</span> : null}</Button>)}
         </div>
       </div>
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {tiers.map((tier) => {
           const paid = tier.slug === "starter" || tier.slug === "pro";
           const busy = tier.slug === "free_cloud" ? pendingPlan === "free_cloud" : paid && pendingPlan === "paid";
-          const price = paid ? t(`plan.tiers.${tier.slug}.price.${interval}`) : t(`plan.tiers.${tier.slug}.price`);
-          const description = paid ? t(`plan.tiers.${tier.slug}.description.${interval}`) : t(`plan.tiers.${tier.slug}.description`);
+          const offer = findPlan(plans, tier.slug);
+          const values = planValues(offer, plans.currency, locale);
+          // Free costs nothing and Enterprise is priced by agreement; a paid plan shows a month of the selected interval.
+          const monthly = paid ? monthlyPriceCents(offer, interval) : undefined;
+          const price = tier.slug === "free_cloud" ? formatMoney(0, plans.currency, locale) : paid && !offer?.custom ? (monthly === undefined ? "—" : formatMoney(monthly, plans.currency, locale)) : t("plan.tiers.enterprise.price");
+          const description = paid ? t(`plan.tiers.${tier.slug}.description.${interval}`, { minutes: values.minutes }) : t(`plan.tiers.${tier.slug}.description`);
           const cta = paid ? t(`plan.tiers.${tier.slug}.cta.${interval}`) : t(`plan.tiers.${tier.slug}.cta`);
           return <section className={cn("relative flex flex-col rounded-2xl border bg-background p-8", tier.highlight ? "border-foreground/30 shadow-sm" : "border-border/60")} key={tier.slug}>
             {tier.highlight ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{t("plan.popular")}</div> : null}
             <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${tier.slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${tier.slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
             <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[tier.slug as "starter" | "pro"].includes(interval))))} onClick={() => act(tier.slug)} type="button" variant={tier.highlight ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
-            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{tier.features.map((feature) => <li className="flex items-start gap-2.5 text-sm" key={feature}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{t(`plan.tiers.${tier.slug}.highlights.${feature}`)}</span></li>)}</ul></div>
+            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{tier.features.map((feature) => <li className="flex items-start gap-2.5 text-sm" key={feature}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{t(`plan.tiers.${tier.slug}.highlights.${feature}`, featureValues(feature, values))}</span></li>)}</ul></div>
           </section>;
         })}
       </div>
       {selectFree.isError || startCheckout.isError || checkoutError ? <FieldError>{selectFree.error?.message ?? startCheckout.error?.message ?? checkoutError ?? t("plan.continueFailed")}</FieldError> : null}
-      <OnboardingPlanComparison t={t} />
+      <OnboardingPlanComparison locale={locale} plans={plans} t={t} />
     </div>
   );
 }

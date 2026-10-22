@@ -3,13 +3,14 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanList } from "@lobbystack/shared";
 import { LiveUpgradePlanProvider } from "./live-upgrade-plan-provider";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { isUpgradeInProgress } from "@/lib/upgrade-in-progress";
 
 const alerts = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
 vi.mock("sonner", () => ({ toast: alerts }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string) => key }) }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 function OpenButton() { const open = useOpenUpgradePlanDialog(); return <button onClick={open}>Open plans</button>; }
@@ -19,7 +20,7 @@ describe("restarting a plan that lapsed", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
-    client.setQueryData(["billing", "business"], { account: { plan: "starter", subscriptionState }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "starter", subscriptionState }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Checkout unavailable" }, { status: 503 })));
     render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
     await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
@@ -51,7 +52,7 @@ describe("changing the plan of a business that already pays", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
-    client.setQueryData(["billing", "business"], { account: { plan: "starter", billingInterval: "monthly", subscriptionState: "active" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "starter", billingInterval: "monthly", subscriptionState: "active" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign });
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: "request" }) : Response.json({ checkoutUrl: null, error: null, synced: false, refusal: null, ...answer() }));
@@ -99,7 +100,7 @@ describe("checkout workspace isolation", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
-    client.setQueryData(["billing", "business"], { account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
     const fetchMock = vi.fn(async () => Response.json({ error: "Checkout unavailable" }, { status: 503 }));
     vi.stubGlobal("fetch", fetchMock);
     render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
@@ -120,7 +121,7 @@ describe("checkout workspace isolation", () => {
     clients.push(client);
     const workspaces = (active: string) => ({ businesses: ["a", "b"].map(businessId => ({ businessId, active: businessId === active, role: "business_owner" })) });
     client.setQueryData(["businesses"], workspaces("a"));
-    for (const businessId of ["a", "b"]) client.setQueryData(["billing", businessId], { account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
+    for (const businessId of ["a", "b"]) client.setQueryData(["billing", businessId], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
     let resolve!: (response: Response) => void;
     let reject!: (error: Error) => void;
     const pending = new Promise<Response>((accept, fail) => { resolve = accept; reject = fail; });
@@ -148,7 +149,7 @@ describe("telling the dashboard an upgrade is under way", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
-    client.setQueryData(["billing", "business"], { account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
     vi.stubGlobal("fetch", vi.fn(fetchMock));
     const view = render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
     expect(isUpgradeInProgress()).toBe(false);

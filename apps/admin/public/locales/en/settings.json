@@ -324,9 +324,12 @@
       "paygMonthlySuffix": "+ pay-as-you-go usage",
       "includedTitle": "What's included:",
       "includedStorageLabel": "storage",
-      "includedVoiceLabel": "voice minutes",
-      "includedSmsLabel": "SMS alerts",
-      "includedOutboundLabel": "transfer attempts",
+      "includedVoice_one": "{{count}} voice minute",
+      "includedVoice_other": "{{count}} voice minutes",
+      "includedSms_one": "{{count}} SMS alert",
+      "includedSms_other": "{{count}} SMS alerts",
+      "includedOutbound_one": "{{count}} transfer attempt",
+      "includedOutbound_other": "{{count}} transfer attempts",
       "includedStorageCustom": "Custom storage allowance",
       "includedVoiceCustom": "Custom voice allowance",
       "includedSmsCustom": "Custom SMS allowance",
@@ -339,7 +342,9 @@
       "changesSubscription": "You already have a subscription, so this changes it instead of opening a checkout. Any difference is charged to your saved payment method.",
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
-      "annualDiscount": "Save 20%",
+      "annualDiscount": "Save {{percent}}%",
+      "customPrice": "Custom",
+      "perMonth": "/mo",
       "billingIntervals": {
         "monthly": "Monthly",
         "annual": "Annual"
@@ -358,7 +363,8 @@
             "annual": "Test voice in your browser"
           },
           "highlights": {
-            "voiceMinutes": "30 browser voice minutes included",
+            "voiceMinutes_one": "{{count}} browser voice minute included",
+            "voiceMinutes_other": "{{count}} browser voice minutes included",
             "allFeatures": "No telephone number",
             "support": "Community support"
           }
@@ -370,10 +376,12 @@
             "annual": "Per month, billed annually"
           },
           "highlights": {
-            "voiceMinutes": "150 voice minutes included\nThen $0.20/min",
-            "dedicatedNumber": "1 dedicated business number",
-            "phoneNumber": "50 alert SMS segments",
-            "overages": "$0.20/min voice overages",
+            "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
+            "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} dedicated business number",
+            "dedicatedNumber_other": "{{count}} dedicated business numbers",
+            "phoneNumber_one": "{{count}} alert SMS segment",
+            "phoneNumber_other": "{{count}} alert SMS segments",
             "support": "Email support"
           }
         },
@@ -384,9 +392,12 @@
             "annual": "Per month, billed annually"
           },
           "highlights": {
-            "voiceMinutes": "500 voice minutes included\nThen $0.18/min",
-            "dedicatedNumber": "1 dedicated business number",
-            "alertSms": "200 alert SMS segments",
+            "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
+            "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} dedicated business number",
+            "dedicatedNumber_other": "{{count}} dedicated business numbers",
+            "alertSms_one": "{{count}} alert SMS segment",
+            "alertSms_other": "{{count}} alert SMS segments",
             "support": "Priority email support"
           }
         },
@@ -445,7 +456,7 @@
     "spendingCap": {
       "title": "Monthly spending cap",
       "placeholder": "25.00",
-      "amountLabel": "Overage cap (USD)",
+      "amountLabel": "Overage cap ({{currency}})",
       "noCap": "No spending cap is set",
       "currentSpend": "Current overage spend",
       "spendOfCap": "{{spend}} of {{cap}}",
@@ -460,7 +471,7 @@
       "removing": "Removing...",
       "saved": "Monthly overage cap saved.",
       "removed": "Monthly overage cap removed.",
-      "invalidAmount": "Enter a non-negative USD amount with no more than two decimal places.",
+      "invalidAmount": "Enter a non-negative {{currency}} amount with no more than two decimal places.",
       "saveFailed": "Unable to save the monthly overage cap.",
       "removeFailed": "Unable to remove the monthly overage cap."
     },

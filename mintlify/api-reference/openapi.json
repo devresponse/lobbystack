@@ -2027,6 +2027,111 @@
         }
       }
     },
+    "/billing/plans": {
+      "get": {
+        "operationId": "listBillingPlans",
+        "summary": "List the plans",
+        "description": "The standard plans this deployment offers, as the dashboard's plan cards show them: what each includes, its overage rates, and its prices with whether checkout can sell them here. They come from the deployment's billing catalog once a billing.json is applied, in its currency, and before that from the running code, in US dollars. Every business sees the same plans.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingPlans"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/billing/checkout/{checkout_id}": {
       "get": {
         "operationId": "getCheckout",
@@ -2383,7 +2488,7 @@
       "get": {
         "operationId": "getBillingCatalog",
         "summary": "Get the billing catalog",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout and limits don't read it yet.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout, plan changes, Polar's webhook and the plan screens read it; limits don't yet.",
         "tags": [
           "Platform"
         ],
@@ -15672,7 +15777,7 @@
                     "null"
                   ]
                 },
-                "description": "The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout still reads, by plan/period, such as starter/monthly. Null when unset."
+                "description": "The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly, which checkout reads until a link makes the plan active. Null when unset."
               },
               "last_link": {
                 "anyOf": [
@@ -16037,7 +16142,7 @@
           "polar"
         ],
         "additionalProperties": false,
-        "description": "The plans and prices this deployment holds. Checkout and limits don't read them yet."
+        "description": "The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook and the plan screens read them; limits don't yet."
       },
       "BillingCatalogApply": {
         "type": "object",
@@ -17331,6 +17436,257 @@
         ],
         "additionalProperties": false,
         "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+      },
+      "BillingPlans": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string",
+            "description": "The prices' currency, three lowercase letters."
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "built_in"
+            ],
+            "description": "catalog once the deployment applied a billing.json; built_in before that: the plans the running code ships with, in US dollars."
+          },
+          "plans": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "enum": [
+                    "free_cloud",
+                    "starter",
+                    "pro",
+                    "enterprise"
+                  ]
+                },
+                "custom": {
+                  "type": "boolean",
+                  "description": "Priced by agreement, with no fixed allowances."
+                },
+                "overage_billable": {
+                  "type": "boolean",
+                  "description": "Usage past the allowance is billed rather than blocked."
+                },
+                "included": {
+                  "type": "object",
+                  "properties": {
+                    "voice_seconds": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Voice seconds included a month."
+                    },
+                    "alert_sms_segments": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Alert SMS segments included a month."
+                    },
+                    "outbound_call_attempts": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Outbound call attempts (transfers) included a month."
+                    },
+                    "chat_ai_units": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Website chat AI units included a month."
+                    },
+                    "knowledge_storage_bytes": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Knowledge storage limit in bytes."
+                    },
+                    "business_numbers": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Business phone numbers included."
+                    }
+                  },
+                  "required": [
+                    "voice_seconds",
+                    "alert_sms_segments",
+                    "outbound_call_attempts",
+                    "chat_ai_units",
+                    "knowledge_storage_bytes",
+                    "business_numbers"
+                  ],
+                  "additionalProperties": false,
+                  "description": "What the plan includes. Null means custom."
+                },
+                "overage_rates": {
+                  "type": "object",
+                  "properties": {
+                    "voice_minute_cents": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "alert_sms_segment_cents": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "outbound_call_attempt_cents": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "voice_minute_cents",
+                    "alert_sms_segment_cents",
+                    "outbound_call_attempt_cents"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Cents for each unit past the allowance, in the plans' currency. Null where usage past it is blocked or priced by agreement."
+                },
+                "sort": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The order plan cards show them in."
+                },
+                "prices": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "interval": {
+                        "type": "string",
+                        "enum": [
+                          "monthly",
+                          "annual"
+                        ]
+                      },
+                      "currency": {
+                        "type": "string",
+                        "description": "Three lowercase letters, such as cad."
+                      },
+                      "amount_cents": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "The price for one period."
+                      },
+                      "monthly_amount_cents": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "amount_cents for monthly, amount_cents / 12 rounded down for annual."
+                      },
+                      "checkout_available": {
+                        "type": "boolean",
+                        "description": "true when POST /billing/checkout can sell it here: Polar is set up and one of its products sells this price."
+                      }
+                    },
+                    "required": [
+                      "interval",
+                      "currency",
+                      "amount_cents",
+                      "monthly_amount_cents",
+                      "checkout_available"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "Empty for a plan Polar doesn't sell, such as free_cloud and enterprise."
+                }
+              },
+              "required": [
+                "slug",
+                "custom",
+                "overage_billable",
+                "included",
+                "overage_rates",
+                "sort",
+                "prices"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Free, Starter, Pro and Enterprise, by sort."
+          }
+        },
+        "required": [
+          "currency",
+          "source",
+          "plans"
+        ],
+        "additionalProperties": false,
+        "description": "The standard plans this deployment offers, with their allowances and prices."
       },
       "WidgetKey": {
         "type": "object",

@@ -196,55 +196,50 @@
     "popular": "Popular",
     "enterpriseSubject": "Enterprise plan",
     "compareTitle": "Compare plans in detail",
-    "compareDescription": "Test 30 browser voice minutes on Free, without a telephone number. Starter and Pro include a dedicated number and monthly usage allowances.",
+    "compareDescription": "Test {{minutes}} browser voice minutes on Free, without a telephone number. Starter and Pro include a dedicated number and monthly usage allowances.",
     "featureHeader": "Feature",
     "billingInterval": {
       "label": "Billing interval",
       "monthly": "Monthly",
       "annual": "Annual",
-      "save": "Save 20%"
+      "save": "Save {{percent}}%"
     },
     "tiers": {
       "free_cloud": {
         "name": "Free",
-        "price": "$0",
         "period": "",
         "description": "Try {{appName}} with enough usage to see it work.",
         "cta": "Start free",
         "highlights": {
-          "voiceMinutes": "30 browser voice minutes included",
+          "voiceMinutes_one": "{{count}} browser voice minute included",
+          "voiceMinutes_other": "{{count}} browser voice minutes included",
           "bookingContacts": "No telephone number",
           "support": "Community support"
         }
       },
       "starter": {
         "name": "Starter",
-        "price": {
-          "monthly": "$30",
-          "annual": "$24"
-        },
         "period": "/mo",
         "description": {
-          "monthly": "Billed monthly. Includes 150 voice minutes that reset monthly.",
-          "annual": "Billed annually. Includes 150 voice minutes that reset monthly."
+          "monthly": "Billed monthly. Includes {{minutes}} voice minutes that reset monthly.",
+          "annual": "Billed annually. Includes {{minutes}} voice minutes that reset monthly."
         },
         "cta": {
           "monthly": "Start monthly",
           "annual": "Start annual"
         },
         "highlights": {
-          "voiceMinutes": "150 voice minutes included\nThen $0.20/min",
-          "dedicatedNumber": "1 dedicated business number",
-          "alertSms": "50 alert SMS segments",
+          "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
+          "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} dedicated business number",
+          "dedicatedNumber_other": "{{count}} dedicated business numbers",
+          "alertSms_one": "{{count}} alert SMS segment",
+          "alertSms_other": "{{count}} alert SMS segments",
           "support": "Email support"
         }
       },
       "pro": {
         "name": "Pro",
-        "price": {
-          "monthly": "$100",
-          "annual": "$80"
-        },
         "period": "/mo",
         "description": {
           "monthly": "Billed monthly. More included usage for growing call volume.",
@@ -255,9 +250,12 @@
           "annual": "Go Pro annual"
         },
         "highlights": {
-          "voiceMinutes": "500 voice minutes included\nThen $0.18/min",
-          "dedicatedNumber": "1 dedicated business number",
-          "alertSms": "200 alert SMS segments",
+          "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
+          "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} dedicated business number",
+          "dedicatedNumber_other": "{{count}} dedicated business numbers",
+          "alertSms_one": "{{count}} alert SMS segment",
+          "alertSms_other": "{{count}} alert SMS segments",
           "support": "Priority email support"
         }
       },
@@ -328,31 +326,27 @@
         "usage": {
           "voiceMinutes": {
             "freeIncluded": "{{minutes}} browser minutes",
-            "starterIncluded": "150 included",
-            "starterThen": "then $0.20/min",
-            "proIncluded": "500 included",
-            "proThen": "then $0.18/min"
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included",
+            "then": "then {{rate}}/min"
           },
           "outboundCalls": {
-            "starterIncluded": "20 included",
-            "starterThen": "then $0.02/attempt",
-            "proIncluded": "100 included",
-            "proThen": "then $0.02/attempt"
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included",
+            "then": "then {{rate}}/attempt"
           },
           "alertSms": {
-            "starterIncluded": "50 included",
-            "starterThen": "then $0.02/segment",
-            "proIncluded": "200 included",
-            "proThen": "then $0.02/segment"
+            "included_one": "{{count}} included",
+            "included_other": "{{count}} included",
+            "then": "then {{rate}}/segment"
           },
           "knowledgeStorage": {
-            "free": "1 MB",
-            "starter": "5 MB",
-            "pro": "20 MB"
+            "megabytes": "{{amount}} MB",
+            "gigabytes": "{{amount}} GB"
           },
           "phoneNumbers": {
-            "starter": "1 dedicated",
-            "pro": "1 dedicated"
+            "dedicated_one": "{{count}} dedicated",
+            "dedicated_other": "{{count}} dedicated"
           }
         },
         "data": {
@@ -378,6 +372,8 @@
     "continue": "Continue",
     "continuing": "Continuing...",
     "continueFailed": "We couldn't continue right now. Please try again.",
+    "loadFailed": "We couldn't load the plans. Please try again.",
+    "retry": "Try again",
     "current": {
       "title": "This business is already on the {{plan}} plan.",
       "description": "Its plan is already set up, so you can go on to its phone number."

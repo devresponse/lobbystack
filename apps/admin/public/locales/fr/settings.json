@@ -324,9 +324,15 @@
       "paygMonthlySuffix": "+ utilisation à l'usage",
       "includedTitle": "Ce qui est inclus :",
       "includedStorageLabel": "stockage",
-      "includedVoiceLabel": "minutes vocales",
-      "includedSmsLabel": "alertes SMS",
-      "includedOutboundLabel": "tentatives de transfert",
+      "includedVoice_one": "{{count}} minute vocale",
+      "includedVoice_many": "{{count}} minutes vocales",
+      "includedVoice_other": "{{count}} minutes vocales",
+      "includedSms_one": "{{count}} alerte SMS",
+      "includedSms_many": "{{count}} alertes SMS",
+      "includedSms_other": "{{count}} alertes SMS",
+      "includedOutbound_one": "{{count}} tentative de transfert",
+      "includedOutbound_many": "{{count}} tentatives de transfert",
+      "includedOutbound_other": "{{count}} tentatives de transfert",
       "includedStorageCustom": "Volume de stockage sur mesure",
       "includedVoiceCustom": "Volume vocal sur mesure",
       "includedSmsCustom": "Volume SMS sur mesure",
@@ -339,7 +345,9 @@
       "changesSubscription": "Vous avez déjà un abonnement : il sera modifié au lieu d'ouvrir un paiement. Toute différence est débitée sur votre moyen de paiement enregistré.",
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
-      "annualDiscount": "Économisez 20 %",
+      "annualDiscount": "Économisez {{percent}} %",
+      "customPrice": "Sur mesure",
+      "perMonth": "/mois",
       "billingIntervals": {
         "monthly": "Mensuel",
         "annual": "Annuel"
@@ -358,7 +366,9 @@
             "annual": "Testez la voix dans votre navigateur"
           },
           "highlights": {
-            "voiceMinutes": "30 minutes vocales dans le navigateur",
+            "voiceMinutes_one": "{{count}} minute vocale dans le navigateur",
+            "voiceMinutes_many": "{{count}} minutes vocales dans le navigateur",
+            "voiceMinutes_other": "{{count}} minutes vocales dans le navigateur",
             "allFeatures": "Aucun numéro de téléphone",
             "support": "Soutien communautaire"
           }
@@ -370,10 +380,15 @@
             "annual": "Par mois, facturé annuellement"
           },
           "highlights": {
-            "voiceMinutes": "150 minutes vocales incluses\nPuis 0,20 $/min",
-            "dedicatedNumber": "1 numéro d'entreprise dédié",
-            "phoneNumber": "50 segments SMS d'alerte",
-            "overages": "Dépassements vocaux à 0,20 $/min",
+            "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
+            "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
+            "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
+            "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
+            "phoneNumber_one": "{{count}} segment SMS d'alerte",
+            "phoneNumber_many": "{{count}} segments SMS d'alerte",
+            "phoneNumber_other": "{{count}} segments SMS d'alerte",
             "support": "Soutien par courriel"
           }
         },
@@ -384,9 +399,15 @@
             "annual": "Par mois, facturé annuellement"
           },
           "highlights": {
-            "voiceMinutes": "500 minutes vocales incluses\nPuis 0,18 $/min",
-            "dedicatedNumber": "1 numéro d'entreprise dédié",
-            "alertSms": "200 segments SMS d'alerte",
+            "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
+            "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
+            "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
+            "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
+            "alertSms_one": "{{count}} segment SMS d'alerte",
+            "alertSms_many": "{{count}} segments SMS d'alerte",
+            "alertSms_other": "{{count}} segments SMS d'alerte",
             "support": "Soutien prioritaire par courriel"
           }
         },
@@ -445,7 +466,7 @@
     "spendingCap": {
       "title": "Plafond mensuel de dépenses",
       "placeholder": "25,00",
-      "amountLabel": "Plafond de dépassement (USD)",
+      "amountLabel": "Plafond de dépassement ({{currency}})",
       "noCap": "Aucun plafond de dépenses défini",
       "currentSpend": "Dépenses de dépassement actuelles",
       "spendOfCap": "{{spend}} sur {{cap}}",
@@ -460,7 +481,7 @@
       "removing": "Suppression...",
       "saved": "Plafond mensuel de dépassement enregistré.",
       "removed": "Plafond mensuel de dépassement supprimé.",
-      "invalidAmount": "Saisissez un montant USD positif ou nul avec au plus deux décimales.",
+      "invalidAmount": "Saisissez un montant {{currency}} positif ou nul avec au plus deux décimales.",
       "saveFailed": "Impossible d’enregistrer le plafond mensuel de dépassement.",
       "removeFailed": "Impossible de supprimer le plafond mensuel de dépassement."
     },

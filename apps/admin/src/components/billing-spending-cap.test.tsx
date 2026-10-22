@@ -10,10 +10,11 @@ const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(locale = "en", cap: number | null = null, admin = true, complete = true, plan = "pro") {
+const translate = vi.fn((key: string) => key);
+function setup(locale = "en", cap: number | null = null, admin = true, complete = true, plan = "pro", currency = "usd") {
   const client = new QueryClient(); clients.push(client);
   const fetchMock = vi.fn(async () => Response.json({ ok: true })); vi.stubGlobal("fetch", fetchMock);
-  render(<QueryClientProvider client={client}><SpendingCapSection businessId="business" locale={locale} t={key => key} status={{ plan, overageSpendingCapCents: cap, overageSpendCents: 250, overageSpendCentsComplete: complete, overageSpendingCapReached: false, hasBillingManagementAccess: admin }} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><SpendingCapSection businessId="business" locale={locale} t={translate} status={{ plan, currency, overageSpendingCapCents: cap, overageSpendCents: 250, overageSpendCentsComplete: complete, overageSpendingCapReached: false, hasBillingManagementAccess: admin }} /></QueryClientProvider>);
   return fetchMock;
 }
 describe("original billing cap behavior", () => {
@@ -42,6 +43,15 @@ describe("original billing cap behavior", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.getByText("billing.spendingCap.adminOnly")).toBeTruthy();
     expect(screen.getByText("billing.spendingCap.spendAtLeastOfCap")).toBeTruthy();
+  });
+  it("names the plans' currency in the label, the amounts and the field", () => {
+    setup("en", 1000, true, true, "pro", "cad");
+    expect(translate).toHaveBeenCalledWith("billing.spendingCap.amountLabel", { currency: "CAD" });
+    expect(translate).toHaveBeenCalledWith("billing.spendingCap.spendOfCap", { spend: "CA$2.50", cap: "CA$10" });
+    expect(screen.getByText("$")).toBeTruthy();
+    cleanup();
+    setup("fr", 1000, true, true, "pro", "eur");
+    expect(screen.getByText("€")).toBeTruthy();
   });
   it.each(["free_cloud", "self_host", "enterprise"])("does not expose a cap for %s", plan => {
     setup("en", null, true, true, plan);

@@ -196,55 +196,54 @@
     "popular": "Populaire",
     "enterpriseSubject": "Forfait Entreprise",
     "compareTitle": "Comparer les forfaits en détail",
-    "compareDescription": "Testez 30 minutes vocales dans le navigateur sur Free, sans numéro de téléphone. Starter et Pro comprennent un numéro dédié et des volumes mensuels.",
+    "compareDescription": "Testez {{minutes}} minutes vocales dans le navigateur sur Free, sans numéro de téléphone. Starter et Pro comprennent un numéro dédié et des volumes mensuels.",
     "featureHeader": "Fonctionnalité",
     "billingInterval": {
       "label": "Intervalle de facturation",
       "monthly": "Mensuel",
       "annual": "Annuel",
-      "save": "Économisez 20 %"
+      "save": "Économisez {{percent}} %"
     },
     "tiers": {
       "free_cloud": {
         "name": "Gratuit",
-        "price": "0 $",
         "period": "",
         "description": "Essayez {{appName}} avec assez d'utilisation pour le voir en action.",
         "cta": "Commencer gratuitement",
         "highlights": {
-          "voiceMinutes": "30 minutes vocales dans le navigateur",
+          "voiceMinutes_one": "{{count}} minute vocale dans le navigateur",
+          "voiceMinutes_many": "{{count}} minutes vocales dans le navigateur",
+          "voiceMinutes_other": "{{count}} minutes vocales dans le navigateur",
           "bookingContacts": "Aucun numéro de téléphone",
           "support": "Support communautaire"
         }
       },
       "starter": {
         "name": "Starter",
-        "price": {
-          "monthly": "30 $",
-          "annual": "24 $"
-        },
         "period": "/mois",
         "description": {
-          "monthly": "Facturé mensuellement. Inclut 150 minutes vocales réinitialisées chaque mois.",
-          "annual": "Facturé annuellement. Inclut 150 minutes vocales réinitialisées chaque mois."
+          "monthly": "Facturé mensuellement. Inclut {{minutes}} minutes vocales réinitialisées chaque mois.",
+          "annual": "Facturé annuellement. Inclut {{minutes}} minutes vocales réinitialisées chaque mois."
         },
         "cta": {
           "monthly": "Starter mensuel",
           "annual": "Starter annuel"
         },
         "highlights": {
-          "voiceMinutes": "150 minutes vocales incluses\nPuis 0,20 $/min",
-          "dedicatedNumber": "1 numéro d'entreprise dédié",
-          "alertSms": "50 segments SMS d'alerte",
+          "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
+          "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
+          "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
+          "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
+          "alertSms_one": "{{count}} segment SMS d'alerte",
+          "alertSms_many": "{{count}} segments SMS d'alerte",
+          "alertSms_other": "{{count}} segments SMS d'alerte",
           "support": "Support par email"
         }
       },
       "pro": {
         "name": "Pro",
-        "price": {
-          "monthly": "100 $",
-          "annual": "80 $"
-        },
         "period": "/mois",
         "description": {
           "monthly": "Facturé mensuellement. Plus d'utilisation incluse pour un volume d'appels croissant.",
@@ -255,9 +254,15 @@
           "annual": "Pro annuel"
         },
         "highlights": {
-          "voiceMinutes": "500 minutes vocales incluses\nPuis 0,18 $/min",
-          "dedicatedNumber": "1 numéro d'entreprise dédié",
-          "alertSms": "200 segments SMS d'alerte",
+          "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
+          "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
+          "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
+          "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
+          "alertSms_one": "{{count}} segment SMS d'alerte",
+          "alertSms_many": "{{count}} segments SMS d'alerte",
+          "alertSms_other": "{{count}} segments SMS d'alerte",
           "support": "Support prioritaire par email"
         }
       },
@@ -328,31 +333,31 @@
         "usage": {
           "voiceMinutes": {
             "freeIncluded": "{{minutes}} minutes dans le navigateur",
-            "starterIncluded": "150 incluses",
-            "starterThen": "puis 0,20 $/min",
-            "proIncluded": "500 incluses",
-            "proThen": "puis 0,18 $/min"
+            "included_one": "{{count}} incluse",
+            "included_many": "{{count}} incluses",
+            "included_other": "{{count}} incluses",
+            "then": "puis {{rate}}/min"
           },
           "outboundCalls": {
-            "starterIncluded": "20 incluses",
-            "starterThen": "puis 0,02 $/tentative",
-            "proIncluded": "100 incluses",
-            "proThen": "puis 0,02 $/tentative"
+            "included_one": "{{count}} incluse",
+            "included_many": "{{count}} incluses",
+            "included_other": "{{count}} incluses",
+            "then": "puis {{rate}}/tentative"
           },
           "alertSms": {
-            "starterIncluded": "50 inclus",
-            "starterThen": "puis 0,02 $/segment",
-            "proIncluded": "200 inclus",
-            "proThen": "puis 0,02 $/segment"
+            "included_one": "{{count}} inclus",
+            "included_many": "{{count}} inclus",
+            "included_other": "{{count}} inclus",
+            "then": "puis {{rate}}/segment"
           },
           "knowledgeStorage": {
-            "free": "1 Mo",
-            "starter": "5 Mo",
-            "pro": "20 Mo"
+            "megabytes": "{{amount}} Mo",
+            "gigabytes": "{{amount}} Go"
           },
           "phoneNumbers": {
-            "starter": "1 dédié",
-            "pro": "1 dédié"
+            "dedicated_one": "{{count}} dédié",
+            "dedicated_many": "{{count}} dédiés",
+            "dedicated_other": "{{count}} dédiés"
           }
         },
         "data": {
@@ -378,6 +383,8 @@
     "continue": "Continuer",
     "continuing": "Continuer...",
     "continueFailed": "Impossible de continuer maintenant. Réessayez.",
+    "loadFailed": "Impossible de charger les forfaits. Réessayez.",
+    "retry": "Réessayer",
     "current": {
       "title": "Cette entreprise a déjà le forfait {{plan}}.",
       "description": "Son forfait est déjà en place, vous pouvez donc passer à son numéro de téléphone."

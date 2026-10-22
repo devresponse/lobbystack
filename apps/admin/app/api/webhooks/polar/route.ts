@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { polarWebhookSchema } from "@lobbystack/contracts";
 import { businesses, enqueueOutbox, providerEvents, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
+import { polarProductLinks, readBillingCatalogSnapshot } from "@lobbystack/domain";
 import { verifyPolarWebhookSignature } from "@lobbystack/providers";
 import { getDispatcherDatabase, getWorkerDatabase } from "@/lib/api-helpers";
 import { normalizePolarEvent } from "@/lib/polar-event";
@@ -54,7 +55,9 @@ export async function POST(request: Request) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
     const event = polarWebhookSchema.safeParse({ ...raw, id: request.headers.get("webhook-id") ?? raw.id });
     if (!event.success) return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
-    const normalized = normalizePolarEvent(event.data.type, event.data.data);
+    // The catalog names the plan of a product it links; a retired price's product still counts.
+    const links = await withBusinessTransaction(getWorkerDatabase().db, { actorType: "worker" }, (tx) => readBillingCatalogSnapshot(tx), { accessMode: "read only" });
+    const normalized = normalizePolarEvent(event.data.type, event.data.data, polarProductLinks(links, process.env));
     // The live Polar organization also serves staging. UUID references are safe
     // everywhere; legacy Convex references are resolved only during production
     // cutover when the environment explicitly enables compatibility routing.

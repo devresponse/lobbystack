@@ -53,6 +53,8 @@ const domain = vi.hoisted(() => ({
   linkBillingCatalogForApi: vi.fn(),
   billingDeploymentPolar: vi.fn(() => ({ env: "sandbox", org: "org_test", secretSha256: null, productVars: {} })),
   listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
+  listBillingPlansForApi: vi.fn(),
+  readPolarProductLinks: vi.fn(),
   listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
   createRuleForApi: vi.fn(),
   updateRuleForApi: vi.fn(),
@@ -121,10 +123,11 @@ vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/platformKeys")),
   bearerToken: (await import("../../../../../packages/domain/src/server/publicApi/apiKeys")).bearerToken,
+  ...(await import("../../../../../packages/domain/src/server/billingPlans")),
   ...domain,
 }));
 
-import { PublicApiError, generatePlatformKey } from "@lobbystack/domain";
+import { PublicApiError, generatePlatformKey, polarProductLinks } from "@lobbystack/domain";
 
 import { verifyCalendarConnectLinkToken } from "../google-calendar-oauth";
 import { v1 } from "./routes";
@@ -552,10 +555,20 @@ describe("billing", () => {
     expect(domain.updateBillingForApi).toHaveBeenCalledTimes(1);
   });
 
+  it("lists the plans the deployment offers", async () => {
+    const plans = { currency: "cad", source: "catalog", plans: [] };
+    domain.listBillingPlansForApi.mockResolvedValue(plans);
+    const response = await v1.listBillingPlans(call("/billing/plans"));
+    expect(await response.json()).toEqual({ data: plans });
+    expect(domain.listBillingPlansForApi).toHaveBeenCalledTimes(1);
+  });
+
   it("starts a checkout only for a plan and interval this deployment sells", async () => {
     vi.stubEnv("POLAR_ACCESS_TOKEN", "polar-token");
     vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
     vi.stubEnv("POLAR_PRO_MONTHLY_PRODUCT_ID", "prod_pro_monthly");
+    // No catalog rows: the product variables decide.
+    domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
     try {
       domain.createCheckoutForApi.mockResolvedValue({ id: checkoutId, plan: "pro", interval: "monthly", status: "pending", checkout_url: null, error: null, paid: false, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }))).status).toBe(202);
@@ -566,6 +579,21 @@ describe("billing", () => {
       domain.getCheckoutForApi.mockResolvedValue({ id: checkoutId });
       expect((await v1.getCheckout(call(`/billing/checkout/${checkoutId}`), { params: Promise.resolve({ checkout_id: checkoutId }) })).status).toBe(200);
       expect((await v1.getCheckout(call("/billing/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
+
+      // Once a link makes Pro active, its linked products decide, whatever the variables say.
+      const pro = { code: "pro" as const, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 20 };
+      domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [pro], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, polar_id: "prod_pro_annual", retired: false }] }, process.env));
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: true });
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }));
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: false });
+
+      // Without Polar's token nothing sells, and the catalog isn't read.
+      vi.stubEnv("POLAR_ACCESS_TOKEN", "");
+      domain.readPolarProductLinks.mockClear();
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false });
+      expect(domain.readPolarProductLinks).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
     }

@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanList, type BillingPlanList } from "@lobbystack/shared";
 import { LivePlanSurface } from "./live-plan-surface";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 const route = vi.hoisted(() => ({ router: { replace: vi.fn() }, search: new URLSearchParams() }));
@@ -12,10 +13,10 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { route.search = new URLSearchParams(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup({ synced = false, checkoutFails = false, billingFails = false, plan = "pro", admin = true, configured = false, transactions = false, accountMissing = false } = {}) {
+function setup({ synced = false, checkoutFails = false, billingFails = false, plan = "pro", admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  const billing = { permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, account: accountMissing ? null : { plan, billingInterval: "monthly", subscriptionState: "active", overageSpendingCapCents: null }, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
+  const billing = { permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
   if (!billingFails) client.setQueryData(["billing", "business"], billing);
   const fetchMock = vi.fn(async (url: string) => url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
@@ -29,6 +30,20 @@ describe("original billing overview behavior", () => {
     expect(screen.getByText("billing.currentPlan.includedVoiceCustom")).toBeTruthy();
     expect(screen.getByText("billing.currentPlan.includedSmsCustom")).toBeTruthy();
     expect(screen.queryByText(/Unlimited/)).toBeNull();
+  });
+  it("shows what the plan costs and includes from the deployment's plan list, in its currency", () => {
+    const plans = builtInBillingPlanList();
+    plans.currency = "cad";
+    const pro = plans.plans.find(entry => entry.slug === "pro")!;
+    pro.included = { ...pro.included, voiceSeconds: 36_000, alertSmsSegments: 1, knowledgeStorageBytes: 2 * 1024 ** 3 };
+    pro.prices = [{ interval: "monthly", currency: "cad", amountCents: 12_000, monthlyAmountCents: 12_000, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 115_200, monthlyAmountCents: 9_600, checkoutAvailable: true }];
+    setup({ plan: "pro", interval: "annual", plans });
+    expect(screen.getByText("CA$96")).toBeTruthy();
+    expect(screen.getByText("billing.currentPlan.annualEffectiveSuffix")).toBeTruthy();
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedVoice", { count: 600 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedSms", { count: 1 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedOutbound", { count: 100 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedStorage", { amount: "2", unit: "GB" });
   });
   it("offers a retry after billing fails and recovers the plan", async () => {
     setup({ billingFails: true });

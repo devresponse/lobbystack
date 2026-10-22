@@ -7,7 +7,7 @@ import { vi } from "vitest";
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarRequestError, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import { planChangeRefusals } from "@lobbystack/shared";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, polarProductLinks, readPolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
@@ -36,6 +36,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     loadBillingUsageEvent: vi.fn(),
     loadPendingProductEvents: vi.fn(),
     loadPlanChangeProration: vi.fn(),
+    // No catalog rows: checkout sells through the product variables each test sets.
+    readPolarProductLinks: vi.fn(async () => actual.polarProductLinks({ plans: [], prices: [] }, process.env)),
     markBillingPlanChanged: vi.fn(),
     markBillingUsageSynced: vi.fn(),
     markBillingCheckoutCreated: vi.fn(),
@@ -655,6 +657,26 @@ describe("worker handlers", () => {
       await expect(run).resolves.toMatchObject({ status: "completed" });
       expect(changeSubscriptionProduct).not.toHaveBeenCalled();
       expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "product-pro-monthly" }));
+    });
+
+    it("sells through the catalog's linked products once a link made the plan active, and reads Polar's product through them", async () => {
+      const linked = (code: "starter" | "pro") => ({ code, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 0 });
+      const price = (plan: "starter" | "pro", period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier: plan, status: "active", period, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired });
+      const catalog = { plans: [linked("starter"), linked("pro")], prices: [price("starter", "monthly", "catalog-starter-monthly"), price("starter", "annual", "catalog-starter-annual"), price("pro", "annual", "catalog-pro-annual"), price("pro", "annual", "old-pro-annual", true)] };
+      const links = async () => polarProductLinks(catalog, process.env);
+      vi.mocked(readPolarProductLinks).mockImplementationOnce(links).mockImplementationOnce(links);
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("old-pro-annual", { pendingProductId: "catalog-starter-annual" }));
+      // Polar's product is a retired Pro annual price, so the move to Starter annual waits for the
+      // next period, though the account still says Starter monthly.
+      const { run } = await changePlan({ target: "starter", billingInterval: "annual", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("old-pro-annual")), changeSubscriptionProduct } });
+
+      await expect(run).resolves.toMatchObject({ status: "completed" });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "catalog-starter-annual", prorationBehavior: "next_period" });
+
+      // Pro monthly has no linked product, so its variable no longer sells it.
+      const unlinked = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("catalog-starter-monthly")), changeSubscriptionProduct: vi.fn() } });
+      await expect(unlinked.run).rejects.toThrow("No Polar product sells pro monthly");
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(unlinked.domain, { businessId: unlinked.businessId, requestId: unlinked.requestId, error: "Polar plan change failed." });
     });
   });
 

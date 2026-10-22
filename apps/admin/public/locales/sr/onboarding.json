@@ -196,55 +196,54 @@
     "popular": "Popularno",
     "enterpriseSubject": "Enterprise paket",
     "compareTitle": "Detaljno poređenje paketa",
-    "compareDescription": "Na Free paketu isprobajte 30 minuta razgovora u pregledaču, bez broja telefona. Starter i Pro uključuju namenski broj i mesečnu količinu potrošnje.",
+    "compareDescription": "Na Free paketu isprobajte {{minutes}} minuta razgovora u pregledaču, bez broja telefona. Starter i Pro uključuju namenski broj i mesečnu količinu potrošnje.",
     "featureHeader": "Funkcija",
     "billingInterval": {
       "label": "Period naplate",
       "monthly": "Mesečno",
       "annual": "Godišnje",
-      "save": "Uštedite 20%"
+      "save": "Uštedite {{percent}}%"
     },
     "tiers": {
       "free_cloud": {
         "name": "Free",
-        "price": "0 $",
         "period": "",
         "description": "Isprobajte {{appName}} uz dovoljno potrošnje da vidite kako radi.",
         "cta": "Počnite besplatno",
         "highlights": {
-          "voiceMinutes": "30 minuta razgovora u pregledaču",
+          "voiceMinutes_one": "{{count}} minut razgovora u pregledaču",
+          "voiceMinutes_few": "{{count}} minuta razgovora u pregledaču",
+          "voiceMinutes_other": "{{count}} minuta razgovora u pregledaču",
           "bookingContacts": "Bez broja telefona",
           "support": "Podrška zajednice"
         }
       },
       "starter": {
         "name": "Starter",
-        "price": {
-          "monthly": "30 $",
-          "annual": "24 $"
-        },
         "period": "/mes.",
         "description": {
-          "monthly": "Naplaćuje se mesečno. Uključuje 150 minuta razgovora koji se obnavljaju svakog meseca.",
-          "annual": "Naplaćuje se godišnje. Uključuje 150 minuta razgovora koji se obnavljaju svakog meseca."
+          "monthly": "Naplaćuje se mesečno. Uključuje {{minutes}} minuta razgovora koji se obnavljaju svakog meseca.",
+          "annual": "Naplaćuje se godišnje. Uključuje {{minutes}} minuta razgovora koji se obnavljaju svakog meseca."
         },
         "cta": {
           "monthly": "Počnite mesečno",
           "annual": "Počnite godišnje"
         },
         "highlights": {
-          "voiceMinutes": "150 minuta razgovora uključeno\nZatim 0,20 $/min",
-          "dedicatedNumber": "1 namenski poslovni broj",
-          "alertSms": "50 SMS segmenata za obaveštenja",
+          "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
+          "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} namenski poslovni broj",
+          "dedicatedNumber_few": "{{count}} namenska poslovna broja",
+          "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
+          "alertSms_one": "{{count}} SMS segment za obaveštenja",
+          "alertSms_few": "{{count}} SMS segmenta za obaveštenja",
+          "alertSms_other": "{{count}} SMS segmenata za obaveštenja",
           "support": "Podrška putem imejla"
         }
       },
       "pro": {
         "name": "Pro",
-        "price": {
-          "monthly": "100 $",
-          "annual": "80 $"
-        },
         "period": "/mes.",
         "description": {
           "monthly": "Naplaćuje se mesečno. Više uključene potrošnje za rastući broj poziva.",
@@ -255,9 +254,15 @@
           "annual": "Pro godišnje"
         },
         "highlights": {
-          "voiceMinutes": "500 minuta razgovora uključeno\nZatim 0,18 $/min",
-          "dedicatedNumber": "1 namenski poslovni broj",
-          "alertSms": "200 SMS segmenata za obaveštenja",
+          "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
+          "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
+          "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+          "dedicatedNumber_one": "{{count}} namenski poslovni broj",
+          "dedicatedNumber_few": "{{count}} namenska poslovna broja",
+          "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
+          "alertSms_one": "{{count}} SMS segment za obaveštenja",
+          "alertSms_few": "{{count}} SMS segmenta za obaveštenja",
+          "alertSms_other": "{{count}} SMS segmenata za obaveštenja",
           "support": "Prioritetna podrška putem imejla"
         }
       },
@@ -328,31 +333,31 @@
         "usage": {
           "voiceMinutes": {
             "freeIncluded": "{{minutes}} minuta u pregledaču",
-            "starterIncluded": "150 uključeno",
-            "starterThen": "zatim 0,20 $/min",
-            "proIncluded": "500 uključeno",
-            "proThen": "zatim 0,18 $/min"
+            "included_one": "{{count}} uključen",
+            "included_few": "{{count}} uključena",
+            "included_other": "{{count}} uključeno",
+            "then": "zatim {{rate}}/min"
           },
           "outboundCalls": {
-            "starterIncluded": "20 uključeno",
-            "starterThen": "zatim 0,02 $/pokušaj",
-            "proIncluded": "100 uključeno",
-            "proThen": "zatim 0,02 $/pokušaj"
+            "included_one": "{{count}} uključen",
+            "included_few": "{{count}} uključena",
+            "included_other": "{{count}} uključeno",
+            "then": "zatim {{rate}}/pokušaj"
           },
           "alertSms": {
-            "starterIncluded": "50 uključeno",
-            "starterThen": "zatim 0,02 $/segment",
-            "proIncluded": "200 uključeno",
-            "proThen": "zatim 0,02 $/segment"
+            "included_one": "{{count}} uključen",
+            "included_few": "{{count}} uključena",
+            "included_other": "{{count}} uključeno",
+            "then": "zatim {{rate}}/segment"
           },
           "knowledgeStorage": {
-            "free": "1 MB",
-            "starter": "5 MB",
-            "pro": "20 MB"
+            "megabytes": "{{amount}} MB",
+            "gigabytes": "{{amount}} GB"
           },
           "phoneNumbers": {
-            "starter": "1 namenski",
-            "pro": "1 namenski"
+            "dedicated_one": "{{count}} namenski",
+            "dedicated_few": "{{count}} namenska",
+            "dedicated_other": "{{count}} namenskih"
           }
         },
         "data": {
@@ -378,6 +383,8 @@
     "continue": "Nastavi",
     "continuing": "Nastavljanje...",
     "continueFailed": "Trenutno ne možemo da nastavimo. Pokušajte ponovo.",
+    "loadFailed": "Ne možemo da učitamo pakete. Pokušajte ponovo.",
+    "retry": "Pokušaj ponovo",
     "current": {
       "title": "Ova firma već ima paket {{plan}}.",
       "description": "Paket je već podešen, pa možete da pređete na broj telefona."

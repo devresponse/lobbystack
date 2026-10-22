@@ -185,6 +185,28 @@ function priceText(price: Row): string {
   return `${(Number(price.cents) / 100).toFixed(2)} ${String(price.currency).toUpperCase()} ${price.period === "annual" ? "a year" : "a month"}`;
 }
 
+/** The standard plans with their allowances and prices, and whether checkout can sell each price here. */
+function planTable(data: Row): string {
+  const currency = String(data.currency).toUpperCase();
+  const amount = (cents: unknown) => cents === null || cents === undefined ? "custom" : (Number(cents) / 100).toFixed(2);
+  const count = (value: unknown) => value === null || value === undefined ? "custom" : String(value);
+  const plans = (data.plans as Row[]).map((plan) => {
+    const included = plan.included as Row;
+    const rates = plan.overage_rates as Row;
+    const prices = plan.prices as Row[];
+    return {
+      slug: plan.slug,
+      voice_minutes: included.voice_seconds === null ? "custom" : String(Math.floor(Number(included.voice_seconds) / 60)),
+      alert_sms: count(included.alert_sms_segments),
+      transfers: count(included.outbound_call_attempts),
+      numbers: count(included.business_numbers),
+      overage_per_minute: plan.overage_billable && rates.voice_minute_cents !== null ? amount(rates.voice_minute_cents) : "",
+      prices: plan.custom ? "custom" : prices.length ? prices.map((price) => `${amount(price.amount_cents)} ${price.interval === "annual" ? "a year" : "a month"}${price.checkout_available ? "" : " (not sold here)"}`).join(", ") : "free",
+    };
+  });
+  return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
+}
+
 /** Every plan the deployment holds with its live prices and how many Polar sells, whether the applied file is the deployed one, and the Polar organization it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
@@ -317,6 +339,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
   }),
   group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog.", {
     status: { operation: "getBilling" },
+    plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },

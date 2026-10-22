@@ -25,6 +25,8 @@ Copy your four recurring product IDs into the matching environment variables. Re
 
 Use `starter` or `pro` for checkout, with monthly or annual billing. The checkout worker ignores separate product IDs for AI-generated text messages.
 
+These variables sell a plan only until `pnpm billing apply` links the billing catalog to Polar. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included, and the plan screens show the catalog's prices in its currency. Before the first apply, the screens show this build's built-in plans in US dollars.
+
 ## Configure usage event ingestion
 
 The worker sends finalized paid-plan usage from `billing_usage_events` to Polar.

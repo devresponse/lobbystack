@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  annualSavingPercent,
   billableVoiceSeconds,
   billingPlanCatalog,
+  billingPlanPrice,
+  builtInBillingPlanList,
   billingMeterEventNames,
   billingUsageKinds,
   contentRetentionCategories,
@@ -157,5 +160,28 @@ describe("plan changes", () => {
     expect(planChangeRefusalOf(planChangeRefusals.payment_failed)).toBe("payment_failed");
     expect(planChangeRefusalOf("Polar checkout creation failed.")).toBeNull();
     expect(planChangeRefusalOf(null)).toBeNull();
+  });
+});
+
+describe("built-in plan list", () => {
+  it("lists the four cloud plans in US dollars with this build's numbers, Free and Enterprise unpriced", () => {
+    const list = builtInBillingPlanList((plan, interval) => plan === "pro" && interval === "annual");
+    expect(list).toMatchObject({ currency: "usd", source: "built_in" });
+    expect(list.plans.map((plan) => [plan.slug, plan.custom, plan.prices.length])).toEqual([["free_cloud", false, 0], ["starter", false, 2], ["pro", false, 2], ["enterprise", true, 0]]);
+    const starter = list.plans[1]!;
+    expect(starter.included).toEqual({ voiceSeconds: 9_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 5 * 1024 * 1024, businessNumbers: 1 });
+    expect(starter.overageRates).toEqual({ voiceMinuteCents: 20, alertSmsSegmentCents: 2, outboundCallAttemptCents: 2 });
+    expect(billingPlanPrice(starter, "annual")).toEqual({ interval: "annual", currency: "usd", amountCents: 28_800, monthlyAmountCents: 2_400, checkoutAvailable: false });
+    expect(billingPlanPrice(list.plans[2], "annual")?.checkoutAvailable).toBe(true);
+    expect(list.plans[3]!.included.voiceSeconds).toBeNull();
+    expect(list.plans.map((plan) => plan.sortOrder)).toEqual([0, 10, 20, 30]);
+  });
+
+  it("finds the saving every plan with both prices gets from paying yearly", () => {
+    expect(annualSavingPercent(builtInBillingPlanList())).toBe(20);
+    const price = (interval: "monthly" | "annual", amountCents: number) => ({ interval, currency: "cad", amountCents, monthlyAmountCents: amountCents, checkoutAvailable: true });
+    expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 30_000)] }, { prices: [price("monthly", 10_000), price("annual", 96_000)] }] as never })).toBe(16);
+    expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000), price("annual", 36_000)] }] as never })).toBeNull();
+    expect(annualSavingPercent({ plans: [{ prices: [price("monthly", 3000)] }] as never })).toBeNull();
   });
 });

@@ -324,9 +324,15 @@
       "paygMonthlySuffix": "+ uso de pago por consumo",
       "includedTitle": "Qué incluye:",
       "includedStorageLabel": "almacenamiento",
-      "includedVoiceLabel": "minutos de voz",
-      "includedSmsLabel": "alertas por SMS",
-      "includedOutboundLabel": "intentos de transferencia",
+      "includedVoice_one": "{{count}} minuto de voz",
+      "includedVoice_many": "{{count}} minutos de voz",
+      "includedVoice_other": "{{count}} minutos de voz",
+      "includedSms_one": "{{count}} alerta por SMS",
+      "includedSms_many": "{{count}} alertas por SMS",
+      "includedSms_other": "{{count}} alertas por SMS",
+      "includedOutbound_one": "{{count}} intento de transferencia",
+      "includedOutbound_many": "{{count}} intentos de transferencia",
+      "includedOutbound_other": "{{count}} intentos de transferencia",
       "includedStorageCustom": "Almacenamiento personalizado",
       "includedVoiceCustom": "Minutos de voz personalizados",
       "includedSmsCustom": "SMS personalizados",
@@ -339,7 +345,9 @@
       "changesSubscription": "Ya tiene una suscripción, así que se modificará en lugar de abrir un pago. Cualquier diferencia se cobra a su método de pago guardado.",
       "enterpriseSubject": "Plan Enterprise",
       "billingIntervalLabel": "Periodicidad de facturación",
-      "annualDiscount": "Ahorre un 20 %",
+      "annualDiscount": "Ahorre un {{percent}} %",
+      "customPrice": "A medida",
+      "perMonth": "/mes",
       "billingIntervals": {
         "monthly": "Mensual",
         "annual": "Anual"
@@ -358,7 +366,9 @@
             "annual": "Pruebe la voz en su navegador"
           },
           "highlights": {
-            "voiceMinutes": "30 minutos de voz en el navegador incluidos",
+            "voiceMinutes_one": "{{count}} minuto de voz en el navegador incluido",
+            "voiceMinutes_many": "{{count}} minutos de voz en el navegador incluidos",
+            "voiceMinutes_other": "{{count}} minutos de voz en el navegador incluidos",
             "allFeatures": "Sin número de teléfono",
             "support": "Soporte de la comunidad"
           }
@@ -370,10 +380,15 @@
             "annual": "Por mes, facturado anualmente"
           },
           "highlights": {
-            "voiceMinutes": "150 minutos de voz incluidos\nLuego $0.20/min",
-            "dedicatedNumber": "1 número del negocio dedicado",
-            "phoneNumber": "50 segmentos de SMS de alerta",
-            "overages": "Excedentes de voz a $0.20/min",
+            "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
+            "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} número del negocio dedicado",
+            "dedicatedNumber_many": "{{count}} números del negocio dedicados",
+            "dedicatedNumber_other": "{{count}} números del negocio dedicados",
+            "phoneNumber_one": "{{count}} segmento de SMS de alerta",
+            "phoneNumber_many": "{{count}} segmentos de SMS de alerta",
+            "phoneNumber_other": "{{count}} segmentos de SMS de alerta",
             "support": "Soporte por correo electrónico"
           }
         },
@@ -384,9 +399,15 @@
             "annual": "Por mes, facturado anualmente"
           },
           "highlights": {
-            "voiceMinutes": "500 minutos de voz incluidos\nLuego $0.18/min",
-            "dedicatedNumber": "1 número del negocio dedicado",
-            "alertSms": "200 segmentos de SMS de alerta",
+            "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
+            "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "dedicatedNumber_one": "{{count}} número del negocio dedicado",
+            "dedicatedNumber_many": "{{count}} números del negocio dedicados",
+            "dedicatedNumber_other": "{{count}} números del negocio dedicados",
+            "alertSms_one": "{{count}} segmento de SMS de alerta",
+            "alertSms_many": "{{count}} segmentos de SMS de alerta",
+            "alertSms_other": "{{count}} segmentos de SMS de alerta",
             "support": "Soporte prioritario por correo electrónico"
           }
         },
@@ -445,7 +466,7 @@
     "spendingCap": {
       "title": "Límite de gasto mensual",
       "placeholder": "25.00",
-      "amountLabel": "Límite de excedentes (USD)",
+      "amountLabel": "Límite de excedentes ({{currency}})",
       "noCap": "No hay ningún límite de gasto definido",
       "currentSpend": "Gasto actual en excedentes",
       "spendOfCap": "{{spend}} de {{cap}}",
@@ -460,7 +481,7 @@
       "removing": "Quitando...",
       "saved": "Límite mensual de excedentes guardado.",
       "removed": "Límite mensual de excedentes eliminado.",
-      "invalidAmount": "Introduzca un importe en USD no negativo con dos decimales como máximo.",
+      "invalidAmount": "Introduzca un importe en {{currency}} no negativo con dos decimales como máximo.",
       "saveFailed": "No se pudo guardar el límite mensual de excedentes.",
       "removeFailed": "No se pudo quitar el límite mensual de excedentes."
     },

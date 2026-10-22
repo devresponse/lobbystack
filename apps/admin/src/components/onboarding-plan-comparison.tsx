@@ -1,9 +1,10 @@
 import { Fragment } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Minus } from "lucide-react";
-import { getCloudPlanFactSheet, FREE_CONTENT_RETENTION_MAX_DAYS, contentRetentionDaysForPlan } from "@lobbystack/shared/product-capabilities";
+import type { BillingPlanList } from "@lobbystack/shared";
+import { FREE_CONTENT_RETENTION_MAX_DAYS, contentRetentionDaysForPlan } from "@lobbystack/shared/product-capabilities";
 
-const freePlanFacts = getCloudPlanFactSheet("free_cloud");
+import { findPlan, planValues, storageSize } from "@/lib/billing-plans";
 
 type ComparisonValue =
   | boolean
@@ -14,6 +15,7 @@ type ComparisonValue =
       includedKey: string;
       thenKey?: string;
       params?: Record<string, string | number>;
+      thenParams?: Record<string, string | number>;
     };
 
 type ComparisonRow = {
@@ -29,47 +31,57 @@ type ComparisonGroup = {
   rows: ComparisonRow[];
 };
 
-const comparisonGroups: ComparisonGroup[] = [
-  {
-    key: "usage",
-    rows: [
-      {
-        key: "voiceMinutes",
-        free: { includedKey: "usage.voiceMinutes.freeIncluded", params: { minutes: freePlanFacts.voiceMinutesIncluded ?? 0 } },
-        starter: { includedKey: "usage.voiceMinutes.starterIncluded", thenKey: "usage.voiceMinutes.starterThen" },
-        pro: { includedKey: "usage.voiceMinutes.proIncluded", thenKey: "usage.voiceMinutes.proThen" },
-        enterprise: { key: "common.custom" },
-      },
-      {
-        key: "outboundCalls",
-        free: false,
-        starter: { includedKey: "usage.outboundCalls.starterIncluded", thenKey: "usage.outboundCalls.starterThen" },
-        pro: { includedKey: "usage.outboundCalls.proIncluded", thenKey: "usage.outboundCalls.proThen" },
-        enterprise: { key: "common.custom" },
-      },
-      {
-        key: "alertSms",
-        free: false,
-        starter: { includedKey: "usage.alertSms.starterIncluded", thenKey: "usage.alertSms.starterThen" },
-        pro: { includedKey: "usage.alertSms.proIncluded", thenKey: "usage.alertSms.proThen" },
-        enterprise: { key: "common.custom" },
-      },
-      {
-        key: "knowledgeStorage",
-        free: { key: "usage.knowledgeStorage.free" },
-        starter: { key: "usage.knowledgeStorage.starter" },
-        pro: { key: "usage.knowledgeStorage.pro" },
-        enterprise: { key: "common.custom" },
-      },
-      {
-        key: "phoneNumbers",
-        free: false,
-        starter: { key: "usage.phoneNumbers.starter" },
-        pro: { key: "usage.phoneNumbers.pro" },
-        enterprise: { key: "common.multiple" },
-      },
-    ],
-  },
+/**
+ * The usage rows come from the deployment's plan list, so a catalog change
+ * shows here in its currency. A custom allowance reads as custom.
+ */
+function usageRows(plans: BillingPlanList, locale: string): ComparisonRow[] {
+  const custom = { key: "common.custom" };
+  const storage = (bytes: number | null | undefined): ComparisonValue => {
+    if (bytes === null || bytes === undefined) return custom;
+    const size = storageSize(bytes, locale);
+    return { includedKey: size.unit === "GB" ? "usage.knowledgeStorage.gigabytes" : "usage.knowledgeStorage.megabytes", params: { amount: size.amount } };
+  };
+  const paid = (slug: "starter" | "pro") => {
+    const offer = findPlan(plans, slug);
+    const values = planValues(offer, plans.currency, locale);
+    const allowance = (
+      row: "voiceMinutes" | "outboundCalls" | "alertSms",
+      included: number | null | undefined,
+      count: number,
+      rate: string,
+    ): ComparisonValue => included === null || included === undefined
+      ? custom
+      : { includedKey: `usage.${row}.included`, params: { count }, ...(rate ? { thenKey: `usage.${row}.then`, thenParams: { rate } } : {}) };
+    return {
+      voiceMinutes: allowance("voiceMinutes", offer?.included.voiceSeconds, values.minutes, values.voiceRate),
+      outboundCalls: allowance("outboundCalls", offer?.included.outboundCallAttempts, values.outboundCallAttempts, values.outboundCallRate),
+      alertSms: allowance("alertSms", offer?.included.alertSmsSegments, values.alertSmsSegments, values.alertSmsRate),
+      knowledgeStorage: storage(offer?.included.knowledgeStorageBytes),
+      phoneNumbers: offer?.included.businessNumbers === null || offer?.included.businessNumbers === undefined
+        ? custom
+        : { includedKey: "usage.phoneNumbers.dedicated", params: { count: values.businessNumbers } },
+    };
+  };
+  const free = findPlan(plans, "free_cloud");
+  const starter = paid("starter");
+  const pro = paid("pro");
+  return [
+    {
+      key: "voiceMinutes",
+      free: { includedKey: "usage.voiceMinutes.freeIncluded", params: { minutes: planValues(free, plans.currency, locale).minutes } },
+      starter: starter.voiceMinutes,
+      pro: pro.voiceMinutes,
+      enterprise: custom,
+    },
+    { key: "outboundCalls", free: false, starter: starter.outboundCalls, pro: pro.outboundCalls, enterprise: custom },
+    { key: "alertSms", free: false, starter: starter.alertSms, pro: pro.alertSms, enterprise: custom },
+    { key: "knowledgeStorage", free: storage(free?.included.knowledgeStorageBytes), starter: starter.knowledgeStorage, pro: pro.knowledgeStorage, enterprise: custom },
+    { key: "phoneNumbers", free: false, starter: starter.phoneNumbers, pro: pro.phoneNumbers, enterprise: { key: "common.multiple" } },
+  ];
+}
+
+const otherGroups: ComparisonGroup[] = [
   {
     key: "core",
     rows: [
@@ -281,21 +293,23 @@ function ComparisonCell({ t, value }: { t: OnboardingT; value: ComparisonValue }
       </span>
       {value.thenKey ? (
         <span className="text-xs text-muted-foreground">
-          {t(`plan.comparison.values.${value.thenKey}`)}
+          {t(`plan.comparison.values.${value.thenKey}`, value.thenParams ?? {})}
         </span>
       ) : null}
     </span>
   );
 }
 
-export function OnboardingPlanComparison({ t }: { t: OnboardingT }) {
+export function OnboardingPlanComparison({ locale, plans, t }: { locale: string; plans: BillingPlanList; t: OnboardingT }) {
+  const comparisonGroups: ComparisonGroup[] = [{ key: "usage", rows: usageRows(plans, locale) }, ...otherGroups];
+  const freeMinutes = planValues(findPlan(plans, "free_cloud"), plans.currency, locale).minutes;
   return (
     <section id="compare">
       <h2 className="mb-4 text-center font-heading text-2xl font-semibold tracking-tighter md:text-3xl">
         {t("plan.compareTitle")}
       </h2>
       <p className="mx-auto mb-12 max-w-lg text-center text-sm leading-relaxed text-muted-foreground">
-        {t("plan.compareDescription")}
+        {t("plan.compareDescription", { minutes: freeMinutes })}
       </p>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-sm">

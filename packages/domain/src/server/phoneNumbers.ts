@@ -1,14 +1,14 @@
-import { isPaidSubscription } from "@lobbystack/shared";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 import { and, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
 
-import { billingAccounts, businesses, enqueueOutbox, onboardingNumberClaimEvents, phoneNumbers, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { businesses, enqueueOutbox, onboardingNumberClaimEvents, phoneNumbers, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { normalizeOnboardingStage } from "./onboarding";
 import { resolveBusinessNumberMarket, type BusinessNumberMarket } from "./phoneNumberMarket";
+import { loadBusinessPlanLimits } from "./usage";
 
 export type NumberSelection = { countryCode: "US" | "CA" | "GB" | "AU"; kind: "local" | "toll_free"; areaCode?: string; city?: string; regionCode?: string; postalCode?: string };
 export type NumberInventoryProvider = { listAvailablePhoneNumbers(input: NumberSelection & { limit: number }): Promise<Array<{ phoneE164: string; locality?: string; region?: string; countryCode: string; capabilities: { sms: boolean; voice: boolean } }>> };
@@ -105,8 +105,7 @@ export function readNumberOffer(token: string, secret: string): NumberOffer {
  * the API ignores it, so it passes enforceStage false.
  */
 export async function numberMarketInTransaction(tx: DatabaseTransaction, input: { businessId: string; purpose: NumberClaimPurpose; selection?: Partial<NumberSelection> | undefined; enforceStage: boolean }): Promise<BusinessNumberMarket> {
-  const business = (await tx.select({ stage: businesses.onboardingStage, timezone: businesses.timezone, deploymentMode: businesses.deploymentMode, replacementUsedAt: businesses.phoneNumberReplacementUsedAt }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
-  const billing = (await tx.select({ plan: billingAccounts.plan, state: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
+  const business = (await tx.select({ stage: businesses.onboardingStage, timezone: businesses.timezone, replacementUsedAt: businesses.phoneNumberReplacementUsedAt }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
   if (!business) throw new Error("Workspace not found.");
   const onboardingStage = normalizeOnboardingStage(business.stage);
   if (input.enforceStage && input.purpose === "onboarding" && !["plan", "phone_number", "attribution", "complete"].includes(onboardingStage)) throw new NumberSelectionError("Business number selection is not available at this onboarding stage.", "stage");
@@ -115,7 +114,8 @@ export async function numberMarketInTransaction(tx: DatabaseTransaction, input: 
     const active = await tx.select({ id: phoneNumbers.id }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"), isNull(phoneNumbers.reclaimScheduledAt))).limit(1);
     if (!active.length) throw new NumberSelectionError("An active phone number is required before choosing a replacement.", "active_number_required");
   }
-  if (business.deploymentMode === "cloud" && (!billing || !isPaidSubscription(billing.plan, billing.state))) throw new NumberSelectionError("A paid plan is required for a dedicated business number.", "paid_plan_required");
+  // A plan that includes no number, such as Free, can't pick one.
+  if ((await loadBusinessPlanLimits(tx, input.businessId)).limits.includedBusinessNumbers === 0) throw new NumberSelectionError("A paid plan is required for a dedicated business number.", "paid_plan_required");
   const requestedCountry = input.selection?.countryCode?.trim().toUpperCase();
   if (requestedCountry && !["US", "CA", "GB", "AU"].includes(requestedCountry)) throw new NumberSelectionError("Unsupported country.", "unsupported_country");
   return resolveBusinessNumberMarket({ selection: input.selection, timezone: business.timezone });

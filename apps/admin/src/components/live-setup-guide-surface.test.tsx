@@ -21,12 +21,13 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, opti
 const order = ["fullScan", "sources", "testCall", "phoneNumber"];
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup(completed: string[] = [], skipped: string[] = [], plan: { plan: string; subscriptionState: string | null } = { plan: "starter", subscriptionState: "active" }) {
+// numbers is how many numbers the effective plan includes, as the server sends it: null for no limit.
+function setup(completed: string[] = [], skipped: string[] = [], numbers: number | null = 1) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
   const steps = order.map(id => ({ id, documentId: id === "fullScan" ? "doc_1" : null, status: completed.includes(id) ? "complete" : skipped.includes(id) ? "skipped" : "needs setup" }));
   client.setQueryData(["setup", "business"], { steps });
-  client.setQueryData(["billing", "business"], { account: plan });
+  client.setQueryData(["billing", "business"], { limits: { includedBusinessNumbers: numbers } });
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.method === "PATCH") { const { stepId } = JSON.parse(String(init.body)); steps.find(step => step.id === stepId)!.status = "skipped"; }
     return Response.json({ steps });
@@ -74,14 +75,17 @@ describe("original setup guide interactions", () => {
     expect(router.push).toHaveBeenCalledWith(target);
     expect(openUpgradePlanDialog).not.toHaveBeenCalled();
   });
-  it.each([
-    ["the free plan", { plan: "free_cloud", subscriptionState: null }],
-    ["a cancelled paid plan", { plan: "starter", subscriptionState: "canceled" }],
-  ])("opens the plan picker for a number on %s", async (_label, plan) => {
-    setup(order.slice(0, order.indexOf("phoneNumber")), [], plan);
+  it("opens the plan picker for a number on a plan that includes none, such as Free or a cancelled paid plan", async () => {
+    setup(order.slice(0, order.indexOf("phoneNumber")), [], 0);
     await userEvent.click(screen.getByRole("button", { name: "sidebar.setupGuide.stepActions.phoneNumber" }));
     expect(openUpgradePlanDialog).toHaveBeenCalledTimes(1);
     expect(router.push).not.toHaveBeenCalled();
+  });
+  it("opens the number page on a custom plan, whose numbers have no limit", async () => {
+    setup(order.slice(0, order.indexOf("phoneNumber")), [], null);
+    await userEvent.click(screen.getByRole("button", { name: "sidebar.setupGuide.stepActions.phoneNumber" }));
+    expect(router.push).toHaveBeenCalledWith("/settings/phone-number");
+    expect(openUpgradePlanDialog).not.toHaveBeenCalled();
   });
   it("asks for the deeper read in place rather than navigating away", async () => {
     const fetchMock = setup();

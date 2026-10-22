@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { billingPlanCatalog, hostedCheckoutPlanSlugs } from "./billing";
+import { hostedCheckoutPlanSlugs } from "./billing";
 import { billingProfileSchema, canonicalBillingProfileJson, normalizeBillingProfile, planTermsJson, resolveBillingPlans, type BillingProfile, type ResolvedBillingPlan } from "./billingProfile";
 
 const fileText = readFileSync(new URL("../../../brands/alloplace/billing.json", import.meta.url), "utf8");
@@ -68,44 +68,27 @@ const name = (text: string) => ({ en: text, fr: text, es: text, sr: text });
 const extra = (overrides: Record<string, unknown> = {}) => ({ tier: "pro", access: "code", names: name("Extra"), sold: true, prices: { monthlyCents: 5000 }, ...overrides });
 
 describe("the AlloPlace billing.json", () => {
-  it("resolves to today's billingPlanCatalog, field by field", () => {
+  // Limits read the catalog, so its numbers may change; the shape of each tier may not.
+  it("resolves to the four standard plans, sold, custom and billed past their allowances as their tiers are", () => {
     const rows = resolveBillingPlans(parse(alloplace()));
     expect(rows.map((row) => row.code)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
     for (const row of rows) {
-      const today = billingPlanCatalog[row.tier];
-      const monthly = row.prices.find((price) => price.period === "monthly");
-      const annual = row.prices.find((price) => price.period === "annual");
+      const sold = (hostedCheckoutPlanSlugs as readonly string[]).includes(row.code);
+      const allowances = [row.voice_sec, row.sms_seg, row.calls_out, row.chat_units, row.kb_bytes, row.numbers];
       expect({
-        voice_sec: row.voice_sec,
-        sms_seg: row.sms_seg,
-        calls_out: row.calls_out,
-        chat_units: row.chat_units,
-        kb_bytes: row.kb_bytes,
-        numbers: row.numbers,
-        overage: row.overage,
-        voice_rate: row.voice_rate,
-        sms_rate: row.sms_rate,
-        call_rate: row.call_rate,
         sold: row.sold,
-        monthly: monthly?.cents ?? null,
-        annual: annual?.cents ?? null,
-        annualPerMonth: annual ? Math.floor(annual.cents / 12) : null,
+        custom: row.custom,
+        overage: row.overage,
+        allowancesSet: allowances.every((value) => value !== null),
+        ratesSet: [row.voice_rate, row.sms_rate, row.call_rate].every((value) => value !== null),
+        periods: row.prices.map((price) => price.period).sort(),
       }, row.code).toEqual({
-        voice_sec: today.voiceSecondsIncluded,
-        sms_seg: today.alertSmsSegmentsIncluded,
-        calls_out: today.outboundCallAttemptsIncluded,
-        chat_units: today.chatAiTokensIncluded,
-        kb_bytes: today.knowledgeStorageBytes,
-        numbers: today.includedBusinessNumbers,
-        overage: today.overagesBillable,
-        voice_rate: today.voiceOverageRatePerMinuteCents,
-        sms_rate: today.alertSmsOverageRatePerSegmentCents,
-        call_rate: today.outboundCallAttemptOverageRateCents,
-        sold: (hostedCheckoutPlanSlugs as readonly string[]).includes(row.code),
-        // The free plan costs nothing and has no price row; enterprise is priced by hand.
-        monthly: today.monthlyChargeCents || null,
-        annual: today.annualChargeCents,
-        annualPerMonth: today.annualEffectiveMonthlyChargeCents,
+        sold,
+        custom: row.tier === "enterprise",
+        overage: row.tier !== "free_cloud",
+        allowancesSet: row.tier !== "enterprise",
+        ratesSet: sold,
+        periods: sold ? ["annual", "monthly"] : [],
       });
     }
     expect(rows.every((row) => row.prices.every((price) => price.currency === "cad"))).toBe(true);

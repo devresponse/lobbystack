@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { builtInBillingPlanLimits } from "@lobbystack/shared";
 
 import { canVisitOnboardingStage, isOnboardingStage, isValidOnboardingTransition, normalizeOnboardingStage, resolveOnboardingRoute, resolveOnboardingStageForPlan, selectPreferredMembership } from "./onboarding";
 
@@ -48,12 +49,16 @@ describe("onboarding stages", () => {
 
 describe("original legacy plan-stage navigation", () => {
   it.each(["phone_number", "phone_number_claiming"] as const)("returns free-plan %s stages to plan selection", stage => {
-    expect(resolveOnboardingStageForPlan(stage, "free_cloud")).toBe("plan");
-    expect(resolveOnboardingStageForPlan(stage, "starter")).toBe(stage);
-    expect(resolveOnboardingStageForPlan(stage, "self_host")).toBe(stage);
+    expect(resolveOnboardingStageForPlan(stage, "free_cloud", builtInBillingPlanLimits)).toBe("plan");
+    expect(resolveOnboardingStageForPlan(stage, "starter", builtInBillingPlanLimits)).toBe(stage);
+    expect(resolveOnboardingStageForPlan(stage, "self_host", builtInBillingPlanLimits)).toBe(stage);
   });
   it("preserves completed onboarding on the free plan", () => {
-    expect(resolveOnboardingStageForPlan("complete", "free_cloud")).toBe("complete");
+    expect(resolveOnboardingStageForPlan("complete", "free_cloud", builtInBillingPlanLimits)).toBe("complete");
+  });
+  it("lets a free plan whose catalog includes a number stay on the number steps", () => {
+    const limits = { ...builtInBillingPlanLimits, free_cloud: { ...builtInBillingPlanLimits.free_cloud, includedBusinessNumbers: 1 } };
+    expect(resolveOnboardingStageForPlan("phone_number", "free_cloud", limits)).toBe("phone_number");
   });
 });
 

@@ -40,7 +40,7 @@ function stubFetch(initial: Hours, profile: Record<string, unknown> = {}) {
       return Response.json(state);
     }
     if (url.startsWith("/api/setup")) return Response.json({ steps: [] });
-    if (url.startsWith("/api/billing")) return Response.json({ account: null });
+    if (url.startsWith("/api/billing")) return Response.json({ account: null, limits: { includedBusinessNumbers: 1 } });
     return Response.json({ business: { defaultLocale: "en" }, profile: { greeting: "Hi", summary: "", summarySource: "placeholder", transferNumber: null, transferMode: "none", appointmentChangePolicy: null, bookingMode: state.bookingMode, ...profile } });
   });
   vi.stubGlobal("fetch", fetchMock);

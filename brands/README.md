@@ -34,6 +34,8 @@ pnpm lobbystack billing catalog-apply alloplace --billing-file @brands/alloplace
 
 The preview changes nothing and lists every change, flagging any that lowers an allowance or raises a price. The first apply leaves out `--replaces-hash`, or passes `null` to stop if someone applied first.
 
+Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses the ones its build ships with. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once.
+
 ### Setting Polar up from it
 
 `pnpm billing` does all of the above and Polar in one command: it applies the file to the tables, makes Polar's organization sell what the file says (settings, meters, Credits, products, discounts and the webhook, each tagged with `lobbystack_*` metadata), records which Polar product sells each price, and checks the three against each other.

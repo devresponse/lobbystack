@@ -100,6 +100,7 @@ import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, u
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
+import { readBillingPlanLimits } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -645,8 +646,8 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     // From the command line there is no browser test call, so the first answered call to the number counts.
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
-  // The step the dashboard shows: a business on the free plan goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null);
+  // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
+  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null, await readBillingPlanLimits(tx));
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

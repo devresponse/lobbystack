@@ -2,7 +2,6 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { billingPlanCatalog } from "@lobbystack/shared";
 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import type { BillingUsageViewModel } from "@/lib/page-view-models";
@@ -18,7 +17,9 @@ export function LiveUsageSurface() {
   const { businesses, business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingUsageViewModel>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId) });
   const plan = billing.data?.effectivePlan ?? "free_cloud";
-  const catalog = billingPlanCatalog[plan];
+  // The effective plan's allowances, from the billing catalog once one is applied. Null means custom.
+  const limits = billing.data?.limits;
+  const included = (value: number | null | undefined, per = 1) => (value === null || value === undefined ? null : value / per);
   const status = billing.data?.usageStatus ?? {
     voiceSecondsUsed: 0,
     alertSmsSegmentsUsed: 0,
@@ -39,10 +40,10 @@ export function LiveUsageSurface() {
 
   const description = resetAt ? t("billing.usage.description", { resetAt: new Intl.DateTimeFormat(intlLocale(i18n.language), { month: "long", day: "numeric" }).format(new Date(resetAt)) }) : undefined;
   return <div className="flex w-full flex-col gap-10"><SectionBlock description={description} title={t("billing.usage.title")}><Surface className="p-0"><>
-    <UsageMeter blocked={status.voiceBlocked} included={catalog.voiceSecondsIncluded === null ? null : catalog.voiceSecondsIncluded / 60} label={t("billing.usage.voiceTitle")} unit={t("billing.usage.units.voice")} used={Math.round((status.voiceSecondsUsed / 60) * 10) / 10} />
-    <UsageMeter blocked={status.outboundCallAttemptsBlocked} included={catalog.outboundCallAttemptsIncluded} label={t("billing.usage.outboundAttemptsTitle")} unit={t("billing.usage.units.outboundAttempts")} used={status.outboundCallAttemptsUsed} />
-    <UsageMeter blocked={status.alertSmsBlocked} included={catalog.alertSmsSegmentsIncluded} label={t("billing.usage.alertSmsTitle")} unit={t("billing.usage.units.segments")} used={status.alertSmsSegmentsUsed} />
-    <UsageMeter blocked={false} included={catalog.knowledgeStorageBytes === null ? null : catalog.knowledgeStorageBytes / (1024 * 1024)} label={t("billing.usage.knowledgeTitle")} unit={t("billing.usage.units.storage")} showUsedUnit used={Math.round(((billing.data?.knowledgeStorageBytesUsed ?? 0) / (1024 * 1024)) * 100) / 100} />
+    <UsageMeter blocked={status.voiceBlocked} included={included(limits?.voiceSecondsIncluded, 60)} label={t("billing.usage.voiceTitle")} unit={t("billing.usage.units.voice")} used={Math.round((status.voiceSecondsUsed / 60) * 10) / 10} />
+    <UsageMeter blocked={status.outboundCallAttemptsBlocked} included={included(limits?.outboundCallAttemptsIncluded)} label={t("billing.usage.outboundAttemptsTitle")} unit={t("billing.usage.units.outboundAttempts")} used={status.outboundCallAttemptsUsed} />
+    <UsageMeter blocked={status.alertSmsBlocked} included={included(limits?.alertSmsSegmentsIncluded)} label={t("billing.usage.alertSmsTitle")} unit={t("billing.usage.units.segments")} used={status.alertSmsSegmentsUsed} />
+    <UsageMeter blocked={false} included={included(limits?.knowledgeStorageBytes, 1024 * 1024)} label={t("billing.usage.knowledgeTitle")} unit={t("billing.usage.units.storage")} showUsedUnit used={Math.round(((billing.data?.knowledgeStorageBytesUsed ?? 0) / (1024 * 1024)) * 100) / 100} />
   </></Surface></SectionBlock></div>;
 }
 

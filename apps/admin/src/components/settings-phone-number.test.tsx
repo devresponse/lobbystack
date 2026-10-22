@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanLimits, type BillingPlanSlug } from "@lobbystack/shared";
 import { LivePhoneNumberSettingsSurface } from "./live-phone-number-settings-surface";
 
 const actions = vi.hoisted(() => ({ upgrade: vi.fn(), navigate: vi.fn() }));
@@ -17,7 +18,7 @@ function setup(plan: string, role = "business_owner", usedAt: string | null = nu
   clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role }] });
   client.setQueryData(["phone-numbers", "business"], { phoneNumbers: primary ? [{ id: "phone", e164: "+14165550100", status: "active", reclaimScheduledAt }] : [], replacement: { usedAt, activeClaim: pending ? { id: "claim", status: "provisioning" } : null } });
-  client.setQueryData(["billing", "business"], { effectivePlan: plan, account: { plan } });
+  client.setQueryData(["billing", "business"], { effectivePlan: plan, account: { plan }, limits: builtInBillingPlanLimits[plan as BillingPlanSlug] });
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input.includes("/claim/claim?")) return Response.json({ claim: { status: "claimed", phoneNumberId: "claimed-phone", requestedE164: "+14165550200" } });
     if (input.includes("/claim?")) return Response.json({ claimId: "claim" });
@@ -42,6 +43,11 @@ describe("phone-number replacement permissions", () => {
   it("matches main by disabling replacement without an included dedicated number", () => {
     setup("free_cloud");
     expect(screen.getByRole("button", { name: "phoneNumber.actions.requestChange" }).hasAttribute("disabled")).toBe(true);
+  });
+  it("goes by the number allowance the server sends, so a free plan whose catalog includes a number may request one", async () => {
+    const { client } = setup("free_cloud");
+    client.setQueryData(["billing", "business"], { effectivePlan: "free_cloud", account: { plan: "free_cloud" }, limits: { ...builtInBillingPlanLimits.free_cloud, includedBusinessNumbers: 1 } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "phoneNumber.actions.requestChange" }).hasAttribute("disabled")).toBe(false));
   });
   it("allows an administrator with an eligible plan to request replacement", () => {
     setup("starter");

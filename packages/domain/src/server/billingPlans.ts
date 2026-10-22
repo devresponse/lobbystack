@@ -3,11 +3,14 @@ import { sql } from "drizzle-orm";
 import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   billingIntervals,
+  builtInBillingPlanLimits,
   builtInBillingPlanList,
   cloudBillingPlanSlugs,
   hostedCheckoutPlanSlugs,
   type ApiBillingPlans,
   type BillingInterval,
+  type BillingPlanLimits,
+  type BillingPlanLimitTable,
   type BillingPlanList,
   type BillingPlanOffer,
   type CloudBillingPlanSlug,
@@ -16,12 +19,12 @@ import {
 
 import type { DomainContext } from "./context";
 
-// The billing catalog as checkout, plan changes, Polar's webhook and the plan
-// screens read it at run time. Standard plans are the rows whose code is their
-// tier. A deployment that hasn't applied a billing.json has no rows, so it
-// shows the plans this build ships with and sells through the four
-// POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables, as before the catalog. Limits
-// still read billingPlanCatalog, which a test keeps equal to billing.json.
+// The billing catalog as checkout, plan changes, Polar's webhook, the plan
+// screens and usage limits read it at run time. Standard plans are the rows
+// whose code is their tier. A deployment that hasn't applied a billing.json has
+// no rows, so it shows and enforces the plans this build ships with and sells
+// through the four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables, as before the
+// catalog.
 
 type Row = Record<string, unknown>;
 
@@ -61,32 +64,38 @@ export type BillingCatalogSnapshot = { plans: CatalogStandardPlan[]; prices: Cat
 
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
 
+/** The standard plans as the role running the transaction may read them. */
+async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStandardPlan[]> {
+  const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
+  return rows.map((row) => ({
+    code: row.code as CloudBillingPlanSlug,
+    status: row.status as CatalogStandardPlan["status"],
+    sold: Boolean(row.sold),
+    custom: Boolean(row.custom),
+    overage: Boolean(row.overage),
+    voice_sec: numberOrNull(row.voice_sec),
+    sms_seg: numberOrNull(row.sms_seg),
+    calls_out: numberOrNull(row.calls_out),
+    chat_units: numberOrNull(row.chat_units),
+    // bigint arrives as text.
+    kb_bytes: numberOrNull(row.kb_bytes),
+    numbers: numberOrNull(row.numbers),
+    voice_rate: numberOrNull(row.voice_rate),
+    sms_rate: numberOrNull(row.sms_rate),
+    call_rate: numberOrNull(row.call_rate),
+    sort: Number(row.sort),
+  }));
+}
+
 /**
  * The standard plans and every price, as the role running the transaction may
  * read them: the app reads public plans only, the worker every plan.
  */
 export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promise<BillingCatalogSnapshot> {
-  const plans = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
+  const plans = await readStandardPlans(tx);
   const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.polar_id, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
   return {
-    plans: plans.map((row) => ({
-      code: row.code as CloudBillingPlanSlug,
-      status: row.status as CatalogStandardPlan["status"],
-      sold: Boolean(row.sold),
-      custom: Boolean(row.custom),
-      overage: Boolean(row.overage),
-      voice_sec: numberOrNull(row.voice_sec),
-      sms_seg: numberOrNull(row.sms_seg),
-      calls_out: numberOrNull(row.calls_out),
-      chat_units: numberOrNull(row.chat_units),
-      // bigint arrives as text.
-      kb_bytes: numberOrNull(row.kb_bytes),
-      numbers: numberOrNull(row.numbers),
-      voice_rate: numberOrNull(row.voice_rate),
-      sms_rate: numberOrNull(row.sms_rate),
-      call_rate: numberOrNull(row.call_rate),
-      sort: Number(row.sort),
-    })),
+    plans,
     prices: prices.map((row) => ({
       plan: String(row.plan),
       tier: String(row.tier),
@@ -112,6 +121,10 @@ function productVariable(env: Record<string, string | undefined>, plan: HostedCh
 }
 
 const isCheckoutPlan = (value: string): value is HostedCheckoutPlanSlug => (hostedCheckoutPlanSlugs as readonly string[]).includes(value);
+
+// The catalog takes over once the caller can read a Starter or Pro row; an
+// apply writes every tier at once.
+const catalogApplies = (plans: CatalogStandardPlan[]) => plans.some((plan) => isCheckoutPlan(plan.code));
 
 /**
  * The catalog's Polar links, with the product variables behind them. A
@@ -152,7 +165,7 @@ export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<s
 export function billingPlanList(catalog: BillingCatalogSnapshot, options: { checkout: boolean; links: PolarProductLinks }): BillingPlanList {
   const available = (plan: HostedCheckoutPlanSlug, interval: BillingInterval) => options.checkout && options.links.productFor(plan, interval) !== null;
   const builtIn = builtInBillingPlanList(available);
-  if (!catalog.plans.some((plan) => isCheckoutPlan(plan.code))) return builtIn;
+  if (!catalogApplies(catalog.plans)) return builtIn;
   const live = catalog.prices.filter((price) => !price.retired && price.plan === price.tier);
   const currency = live[0]?.currency ?? builtIn.currency;
   const plans = cloudBillingPlanSlugs.map((slug): BillingPlanOffer => {
@@ -173,6 +186,41 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
     };
   });
   return { currency, source: "catalog", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
+}
+
+/** A standard plan row's terms, as limits enforce them. */
+function planLimits(row: CatalogStandardPlan): BillingPlanLimits {
+  return {
+    knowledgeStorageBytes: row.kb_bytes,
+    voiceSecondsIncluded: row.voice_sec,
+    alertSmsSegmentsIncluded: row.sms_seg,
+    outboundCallAttemptsIncluded: row.calls_out,
+    chatAiTokensIncluded: row.chat_units,
+    includedBusinessNumbers: row.numbers,
+    overagesBillable: row.overage,
+    voiceOverageRatePerMinuteCents: row.voice_rate,
+    alertSmsOverageRatePerSegmentCents: row.sms_rate,
+    outboundCallAttemptOverageRateCents: row.call_rate,
+  };
+}
+
+/**
+ * The limits each plan enforces, by the same rule as the plan list: the
+ * catalog's terms once it holds a Starter or Pro row, else this build's. A
+ * tier the caller can't read, such as hidden Enterprise for the app, keeps
+ * this build's terms, which a custom plan's row matches. Self-hosting has no
+ * row and no limits.
+ */
+export function billingPlanLimits(plans: CatalogStandardPlan[]): BillingPlanLimitTable {
+  if (!catalogApplies(plans)) return builtInBillingPlanLimits;
+  const table = { ...builtInBillingPlanLimits };
+  for (const row of plans) table[row.code] = planLimits(row);
+  return table;
+}
+
+/** The limits each plan enforces, read in the caller's transaction. */
+export async function readBillingPlanLimits(tx: DatabaseTransaction): Promise<BillingPlanLimitTable> {
+  return billingPlanLimits(await readStandardPlans(tx));
 }
 
 /** Whether this deployment has Polar's token and organization, which every checkout needs. */

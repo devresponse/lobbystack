@@ -3,16 +3,19 @@ import { readFileSync } from "node:fs";
 
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
+import { billingUsageEvents, businesses, createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, builtInBillingPlanLimits, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
+import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
 import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
-import { billingPlanList, listBillingPlansForApi, loadBillingCatalog, readPolarProductLinks } from "./billingPlans";
+import { billingPlanList, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { runDailyBillingVerify } from "./billingVerify";
+import { NumberSelectionError, numberMarketInTransaction } from "./phoneNumbers";
 import { PublicApiError } from "./publicApi/errors";
+import { loadBusinessPlanLimits, periodKeyFor } from "./usage";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -492,6 +495,56 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       expect(list).toMatchObject({ currency: "cad", source: "catalog" });
       expect(list.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [], sortOrder: 30 });
       expect(list.plans.find((plan) => plan.slug === "starter")!.prices.every((price) => price.checkoutAvailable)).toBe(true);
+    });
+  });
+});
+
+describe.skipIf(!testUrl)("billing catalog limits", () => {
+  // The business's limits and number gate, read as the worker in the business's scope.
+  const inBusiness = <T>(tx: DatabaseTransaction, businessId: string, run: (scoped: DatabaseTransaction) => Promise<T>) => withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, run);
+  const numberRefusal = async (tx: DatabaseTransaction, businessId: string) => {
+    try {
+      await inBusiness(tx, businessId, (scoped) => numberMarketInTransaction(scoped, { businessId, purpose: "onboarding", selection: { countryCode: "CA" }, enforceStage: false }));
+      return null;
+    } catch (error) {
+      if (error instanceof NumberSelectionError) return error.reason;
+      throw error;
+    }
+  };
+
+  it("enforces an applied file's allowances, rates, storage limit and numbers, as the worker and as the app", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await as(tx, "owner");
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Catalog limits test", timezone: "UTC", businessType: "test" });
+      // Twenty of the free plan's thirty minutes are used.
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:${randomUUID()}`, usageKind: "voice_seconds", quantity: 1_200, planAtRecordTime: "free_cloud", syncStatus: "skipped" });
+      await as(tx, "lobbystack_worker");
+
+      // Before an apply, this build's limits.
+      expect(await readBillingPlanLimits(tx)).toBe(builtInBillingPlanLimits);
+      expect(await getWebVoiceBillingAllowance(context(tx), { businessId })).toMatchObject({ allowed: true, maxDurationMs: 600_000 });
+      expect(await numberRefusal(tx, businessId)).toBe("paid_plan_required");
+
+      await apply(tx, file((value) => {
+        value.plans.free_cloud.included.voiceMinutes = 20;
+        value.plans.free_cloud.limits = { knowledgeStorageMb: 2, businessNumbers: 1 };
+        value.plans.starter.overageCents.voiceMinute = 30;
+      }));
+      const worker = await readBillingPlanLimits(tx);
+      expect(worker.free_cloud).toMatchObject({ voiceSecondsIncluded: 1_200, knowledgeStorageBytes: 2 * 1_048_576, includedBusinessNumbers: 1, overagesBillable: false });
+      expect(worker.starter).toMatchObject({ voiceSecondsIncluded: 9_000, voiceOverageRatePerMinuteCents: 30 });
+      // Enterprise's custom row means what this build's Enterprise does, which the app keeps.
+      expect(worker.enterprise).toEqual(builtInBillingPlanLimits.enterprise);
+      // The free plan's twenty minutes are used up, so the website call is refused.
+      expect(await getWebVoiceBillingAllowance(context(tx), { businessId })).toEqual({ allowed: false, errorCode: "voice_limit_reached", maxDurationMs: 0, plan: "free_cloud" });
+      expect(await getBillingUsageStatus(context(tx), { businessId })).toMatchObject({ voiceSecondsIncluded: 1_200, voiceBlocked: true, overagesBillable: false });
+      // The free plan now includes a number and twice the storage.
+      expect(await numberRefusal(tx, businessId)).toBeNull();
+      expect((await inBusiness(tx, businessId, (scoped) => loadBusinessPlanLimits(scoped, businessId))).limits.knowledgeStorageBytes).toBe(2 * 1_048_576);
+
+      await as(tx, "lobbystack_app");
+      expect(await readBillingPlanLimits(tx)).toEqual(worker);
     });
   });
 });

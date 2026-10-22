@@ -227,6 +227,39 @@ export const billingPlanCatalog = {
   }
 >;
 
+/** What a plan includes each month and what usage past that costs: the terms usage limits enforce. Null means no limit. */
+export type BillingPlanLimits = {
+  knowledgeStorageBytes: number | null;
+  voiceSecondsIncluded: number | null;
+  alertSmsSegmentsIncluded: number | null;
+  outboundCallAttemptsIncluded: number | null;
+  chatAiTokensIncluded: number | null;
+  includedBusinessNumbers: number | null;
+  /** Usage past the allowance is billed rather than blocked. */
+  overagesBillable: boolean;
+  voiceOverageRatePerMinuteCents: number | null;
+  alertSmsOverageRatePerSegmentCents: number | null;
+  outboundCallAttemptOverageRateCents: number | null;
+};
+
+export type BillingPlanLimitTable = Record<BillingPlanSlug, BillingPlanLimits>;
+
+const limitsOf = (plan: BillingPlanLimits): BillingPlanLimits => ({
+  knowledgeStorageBytes: plan.knowledgeStorageBytes,
+  voiceSecondsIncluded: plan.voiceSecondsIncluded,
+  alertSmsSegmentsIncluded: plan.alertSmsSegmentsIncluded,
+  outboundCallAttemptsIncluded: plan.outboundCallAttemptsIncluded,
+  chatAiTokensIncluded: plan.chatAiTokensIncluded,
+  includedBusinessNumbers: plan.includedBusinessNumbers,
+  overagesBillable: plan.overagesBillable,
+  voiceOverageRatePerMinuteCents: plan.voiceOverageRatePerMinuteCents,
+  alertSmsOverageRatePerSegmentCents: plan.alertSmsOverageRatePerSegmentCents,
+  outboundCallAttemptOverageRateCents: plan.outboundCallAttemptOverageRateCents,
+});
+
+/** The limits this build ships with, which a deployment enforces until its first catalog apply. */
+export const builtInBillingPlanLimits = Object.fromEntries(billingPlanSlugs.map((slug) => [slug, limitsOf(billingPlanCatalog[slug])])) as BillingPlanLimitTable;
+
 export function getKnowledgeStorageLimitBytes(
   plan: BillingPlanSlug,
 ): number | null {

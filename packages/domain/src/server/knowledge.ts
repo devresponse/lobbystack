@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, ilike, lt, ne, sql } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { FULL_CRAWL_PAGE_LIMIT, getKnowledgeStorageLimitBytes, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { FULL_CRAWL_PAGE_LIMIT, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { buildBusinessContextSnapshot } from "../snapshot";
 import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
 
@@ -15,7 +15,7 @@ import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { moveOnboardingStageInTransaction } from "./onboarding";
 import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
-import { resolveBusinessBillingPlan } from "./contentRetentionPolicy";
+import { loadBusinessPlanLimits } from "./usage";
 import { resolveSmsSender } from "./smsSender";
 
 const ragMeter = getMeter("lobbystack-rag");
@@ -342,7 +342,7 @@ async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: In
       await markKnowledgeDocumentFailedInTransaction(tx, input, document.revision, "Knowledge embeddings are unavailable or incomplete.");
       throw new Error("Knowledge embeddings are unavailable or incomplete.");
     }
-    const limit = getKnowledgeStorageLimitBytes(await resolveBusinessBillingPlan(tx, input.businessId));
+    const limit = (await loadBusinessPlanLimits(tx, input.businessId)).limits.knowledgeStorageBytes;
     if (limit !== null) {
       const newBytes = chunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, "utf8"), 0);
       if (await getKnowledgeStorageUsageBytes(tx, input.businessId, { excludeDocumentId: input.documentId }) + newBytes > limit) {

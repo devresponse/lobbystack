@@ -3,13 +3,14 @@ import { randomUUID } from "node:crypto";
 import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, type SQL } from "drizzle-orm";
 
 import { businesses, calls, enqueueOutbox, knowledgeDocuments, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { getKnowledgeStorageLimitBytes, KNOWLEDGE_UPLOAD_MAX_BYTES } from "@lobbystack/shared";
+import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "@lobbystack/shared";
 import { getKnowledgeStorageUsageBytes, KnowledgeStorageLimitError } from "./knowledge";
 import { isAllowedUploadContentType } from "@lobbystack/contracts";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
+import { loadBusinessPlanLimits } from "./usage";
 
 export type StorageProvider = {
   createUpload(input: { key: string; contentType: string; length: number; checksum?: string }): Promise<{ url: string; headers?: Record<string, string>; expiresAt?: Date }>;
@@ -93,7 +94,7 @@ export async function completeUploadInTransaction(
   if (input.purpose === "knowledge") {
     // Locks the business so concurrent uploads check the limit one at a time.
     await tx.select({ id: businesses.id }).from(businesses).where(eq(businesses.id, input.businessId)).for("update");
-    const limit = getKnowledgeStorageLimitBytes(await resolveBusinessBillingPlan(tx, input.businessId));
+    const limit = (await loadBusinessPlanLimits(tx, input.businessId)).limits.knowledgeStorageBytes;
     // The limit counts indexed text, which indexing checks once it's extracted.
     // Refuse here only when the plan is already full.
     if (limit !== null && await getKnowledgeStorageUsageBytes(tx, input.businessId) >= limit) throw new KnowledgeStorageLimitError(limit);

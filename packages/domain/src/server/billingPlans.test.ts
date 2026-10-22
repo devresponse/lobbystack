@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
+import { builtInBillingPlanLimits } from "@lobbystack/shared";
 
-import { billingPlanList, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
+import { billingPlanLimits, billingPlanList, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
 
 const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["status"], extra: Partial<CatalogStandardPlan> = {}): CatalogStandardPlan => ({
   code, status, sold: code === "starter" || code === "pro", custom: code === "enterprise", overage: code !== "free_cloud",
@@ -100,5 +101,26 @@ describe("plan list", () => {
     expect(starter!.prices.map((entry) => [entry.interval, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, 3500, true], ["annual", 33_600, 2800, true]]);
     // Enterprise is hidden from the app's role, so it keeps its built-in custom terms, unpriced.
     expect(enterprise).toMatchObject({ custom: true, prices: [], included: { voiceSeconds: null }, sortOrder: 30 });
+  });
+});
+
+describe("plan limits", () => {
+  it("enforces the built-in limits before an apply, and while only Free's row is visible", () => {
+    expect(billingPlanLimits([])).toBe(builtInBillingPlanLimits);
+    expect(billingPlanLimits([plan("free_cloud", "active")])).toBe(builtInBillingPlanLimits);
+  });
+
+  it("enforces each readable tier's row once the catalog applies, keeping the built-in terms for the rest", () => {
+    const limits = billingPlanLimits([
+      plan("free_cloud", "active", { overage: false, voice_sec: 600, sms_seg: 5, calls_out: 1, chat_units: 3, kb_bytes: 524_288, numbers: 1, voice_rate: null, sms_rate: null, call_rate: null }),
+      plan("starter", "draft", { voice_sec: 12_000, voice_rate: 25 }),
+      plan("pro", "active"),
+    ]);
+    expect(limits.free_cloud).toEqual({ knowledgeStorageBytes: 524_288, voiceSecondsIncluded: 600, alertSmsSegmentsIncluded: 5, outboundCallAttemptsIncluded: 1, chatAiTokensIncluded: 3, includedBusinessNumbers: 1, overagesBillable: false, voiceOverageRatePerMinuteCents: null, alertSmsOverageRatePerSegmentCents: null, outboundCallAttemptOverageRateCents: null });
+    // A draft plan's terms apply, as the plan screens already show them.
+    expect(limits.starter).toMatchObject({ voiceSecondsIncluded: 12_000, voiceOverageRatePerMinuteCents: 25, overagesBillable: true });
+    // Hidden Enterprise, which the app can't read, and self-hosting keep this build's terms.
+    expect(limits.enterprise).toBe(builtInBillingPlanLimits.enterprise);
+    expect(limits.self_host).toBe(builtInBillingPlanLimits.self_host);
   });
 });

@@ -2,6 +2,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { builtInBillingPlanLimits } from "@lobbystack/shared";
 import { LiveUsageSurface } from "./live-usage-surface";
 
 const language = vi.hoisted(() => ({ value: "en" }));
@@ -15,6 +16,7 @@ function setup(locale: string, blocked = false) {
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
   client.setQueryData(["billing", "business"], {
     effectivePlan: "pro",
+    limits: { ...builtInBillingPlanLimits.pro, outboundCallAttemptsIncluded: 120 },
     account: { plan: "pro", currentPeriodEnd: "2026-10-01T12:00:00Z" },
     usageStatus: { voiceSecondsUsed: 750, outboundCallAttemptsUsed: 4, alertSmsSegmentsUsed: 2, voiceBlocked: blocked },
     knowledgeStorageBytesUsed: 1024 * 1024,
@@ -28,6 +30,10 @@ describe("original dedicated billing usage page", () => {
     expect(screen.getByText(text => text.startsWith(`${minutes} /`))).toBeTruthy();
     expect(screen.queryByText("billing.usage.paygTitle")).toBeNull();
     expect(screen.queryByText("billing.currentPlan.title")).toBeNull();
+  });
+  it("shows the allowances the server sends, which follow the billing catalog", () => {
+    setup("en");
+    expect(screen.getByText(text => text.startsWith("4 /") && text.includes("120"))).toBeTruthy();
   });
   it("explains a blocked voice allowance alongside its meter", () => {
     setup("en", true);

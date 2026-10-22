@@ -1,14 +1,14 @@
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 
 import { billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, billingPlanCatalog, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
 import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
 import { requireBusinessAdmin } from "../authz";
-import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
+import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
 export type BillingCheckoutTarget = "starter" | "pro";
 export type BillingInterval = "monthly" | "annual";
@@ -27,14 +27,13 @@ export function normalizeWebCallMaxDurationMs(value: number | undefined): number
 
 function webVoiceBillingAllowance(status: UsageStatus, maxDurationMs: number | undefined): WebVoiceBillingAllowance {
   const requested = normalizeWebCallMaxDurationMs(maxDurationMs);
-  const entitlement = billingPlanCatalog[status.plan];
   const includedRemaining = status.voiceSecondsIncluded === null
     ? Number.POSITIVE_INFINITY
     : Math.max(0, status.voiceSecondsIncluded - status.voiceSecondsUsed);
-  const overageRemaining = !entitlement.overagesBillable || status.overageSpendingCapCents === null
-    ? entitlement.overagesBillable ? Number.POSITIVE_INFINITY : 0
+  const overageRemaining = !status.overagesBillable || status.overageSpendingCapCents === null
+    ? status.overagesBillable ? Number.POSITIVE_INFINITY : 0
     : (() => {
-      const ratePerSecond = (entitlement.voiceOverageRatePerMinuteCents ?? 0) / 60;
+      const ratePerSecond = (status.voiceOverageRatePerMinuteCents ?? 0) / 60;
       return ratePerSecond > 0
         ? Math.floor((Math.max(0, status.overageSpendingCapCents - status.overageSpendCents) + 1e-9) / ratePerSecond)
         : 0;
@@ -93,11 +92,10 @@ export async function getWidgetChatAllowance(
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     // Decides whether to offer the chat without writing; each chat's reservation counts again.
     const status = await readUsageStatusInTransaction(tx, { businessId: input.businessId });
-    const entitlement = billingPlanCatalog[status.plan];
-    if (entitlement.chatAiTokensIncluded === null || entitlement.overagesBillable) {
+    if (status.chatAiTokensIncluded === null || status.overagesBillable) {
       return { allowed: true, errorCode: null, plan: status.plan };
     }
-    if (status.chatAiBlocked || Math.max(0, entitlement.chatAiTokensIncluded - status.chatAiTokensUsed) < 1) {
+    if (status.chatAiBlocked || Math.max(0, status.chatAiTokensIncluded - status.chatAiTokensUsed) < 1) {
       return { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan: status.plan };
     }
     return { allowed: true, errorCode: null, plan: status.plan };
@@ -108,8 +106,8 @@ export async function reserveWidgetChatUsageInTransaction(
   tx: DatabaseTransaction,
   input: { businessId: string; conversationId: string },
 ): Promise<WidgetChatBillingAllowance> {
-  const { plan } = await loadBillingContext(tx, input.businessId);
-  if (billingPlanCatalog[plan].chatAiTokensIncluded !== null) {
+  const { plan, limits } = await loadBusinessPlanLimits(tx, input.businessId);
+  if (limits.chatAiTokensIncluded !== null) {
     const reservation = await reserveUsageInTransaction(tx, { businessId: input.businessId, usageKind: "chat_ai_tokens", sourceKey: `chat:${input.conversationId}`, quantity: 1 });
     if (!reservation.allowed) return { allowed: false, errorCode: billingErrorCodes.chatAiLimitReached, plan };
   }

@@ -14,18 +14,11 @@ Use this guide to connect your Polar organization to hosted Starter and Pro bill
 
 ## Create the hosted products
 
-Copy your four recurring product IDs into the matching environment variables. Reuse existing products during a migration. Confirm their live prices in Polar before accepting payments.
+Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.md`](../../brands/README.md)). It creates or adopts the Polar products, meters, benefits and webhook the file describes, then links them in the billing catalog. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included, and the plan screens show the catalog's prices in its currency. Confirm the live prices in Polar before accepting payments.
 
-| Product | Price | Environment variable |
-| --- | --- | --- |
-| Starter monthly | $30 each month | `POLAR_STARTER_MONTHLY_PRODUCT_ID` |
-| Starter annual | $288 each year | `POLAR_STARTER_ANNUAL_PRODUCT_ID` |
-| Pro monthly | $100 each month | `POLAR_PRO_MONTHLY_PRODUCT_ID` |
-| Pro annual | $960 each year | `POLAR_PRO_ANNUAL_PRODUCT_ID` |
+Use `starter` or `pro` for checkout, with monthly or annual billing.
 
-Use `starter` or `pro` for checkout, with monthly or annual billing. The checkout worker ignores separate product IDs for AI-generated text messages.
-
-These variables sell a plan only until `pnpm billing apply` links the billing catalog to Polar. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included, and the plan screens show the catalog's prices in its currency. Before the first apply, the screens show this build's built-in plans in US dollars.
+The four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables (such as `POLAR_STARTER_MONTHLY_PRODUCT_ID`) are optional. A deployment that hasn't applied a `billing.json` yet sells a plan through its variable if it has one, and shows this build's built-in plans in US dollars. After the link, checkout ignores them, and `pnpm billing verify` notes any that are still set so you can remove them.
 
 ## Configure usage event ingestion
 
@@ -64,14 +57,9 @@ POLAR_ACCESS_TOKEN=your_polar_access_token
 POLAR_WEBHOOK_SECRET=your_polar_webhook_secret
 POLAR_ORGANIZATION_ID=your_polar_organization_id
 POLAR_API_BASE_URL=https://sandbox-api.polar.sh
-
-POLAR_STARTER_MONTHLY_PRODUCT_ID=your_starter_monthly_product_id
-POLAR_STARTER_ANNUAL_PRODUCT_ID=your_starter_annual_product_id
-POLAR_PRO_MONTHLY_PRODUCT_ID=your_pro_monthly_product_id
-POLAR_PRO_ANNUAL_PRODUCT_ID=your_pro_annual_product_id
 ```
 
-Match `POLAR_API_BASE_URL` to the environment that issued the token, webhook secret, and product IDs.
+Match `POLAR_API_BASE_URL` to the environment that issued the token and webhook secret.
 
 ## Route billing requests
 
@@ -94,7 +82,7 @@ Set `POLAR_ACCEPT_LEGACY_BUSINESS_IDS=true` only in production. It lets signed w
 Use this sequence to check where a checkout stops:
 
 1. The admin API writes a checkout request and enqueues `billing.createCheckout`.
-2. The worker creates the Polar checkout with the configured product ID. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
+2. The worker creates the Polar checkout with the product the catalog links to the plan and interval. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
 3. The browser opens the checkout URL after the request becomes ready, or for a plan change waits until the webhook moves the business onto the plan.
 4. Polar sends subscription and order events to the Next.js webhook route.
 5. The route stores each provider event once and enqueues `billing.reconcile`.

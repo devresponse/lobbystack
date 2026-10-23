@@ -1519,6 +1519,6 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
 /** The Polar product that sells a plan and interval: the catalog's link, or before one the plan's variable. */
 function polarCheckoutProductId(links: PolarProductLinks, target: "starter" | "pro", billingInterval: "monthly" | "annual"): string {
   const productId = links.productFor(target, billingInterval);
-  if (!productId) throw new Error(`No Polar product sells ${target} ${billingInterval}. Link the catalog with pnpm billing apply, or before the first link set POLAR_${target.toUpperCase()}_${billingInterval.toUpperCase()}_PRODUCT_ID.`);
+  if (!productId) throw new Error(`No Polar product sells ${target} ${billingInterval}. Link the catalog with pnpm billing apply.`);
   return productId;
 }

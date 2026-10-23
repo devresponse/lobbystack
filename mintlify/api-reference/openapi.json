@@ -16321,7 +16321,7 @@
                     "null"
                   ]
                 },
-                "description": "The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly, which checkout reads until a link makes the plan active. Null when unset."
+                "description": "The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only while its plan isn't active, before the first link; after that they aren't needed. Null when unset."
               },
               "last_link": {
                 "anyOf": [

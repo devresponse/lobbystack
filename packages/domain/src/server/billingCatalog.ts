@@ -386,7 +386,7 @@ export type BillingDeploymentPolar = {
   org: string | null;
   /** SHA-256 of POLAR_WEBHOOK_SECRET; null where it isn't set, as on the worker. */
   secretSha256: string | null;
-  /** The four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values checkout reads until a link makes the plan active, by plan/period. */
+  /** The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period: checkout reads one only before a link makes its plan active. */
   productVars: Record<string, string | null>;
 };
 

@@ -12,7 +12,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash into the code. The admin never serves it.
 
-It is public like the rest of this folder, so it never holds a key, a token, a webhook secret or a Polar product id. Those stay in environment variables, and the deployment's tables keep the product ids.
+It is public like the rest of this folder, so it never holds a key, a token, a webhook secret or a Polar product id. Keys, tokens and the webhook secret stay in environment variables, and the deployment's tables keep the product ids, so no product id variable is needed.
 
 Every plan other than the four standard ones is one more key under `plans`. Its key is its permanent code: 3 to 48 lowercase letters, digits, `_` and `-`. It names the `tier` it behaves like (`starter` or `pro`), its `names` in every language, and its `prices`; any allowance, limit or overage rate it leaves out comes from its tier. Then:
 
@@ -80,6 +80,6 @@ It reaches the instance with an operator's platform key, from a `lobbystack logi
 - The first run on an organization `polar-setup.mjs` set up takes `--adopt`, which tags its meters, Credits and products and keeps their ids. Without it, a lookalike stops the run, so a forgotten flag can't make duplicates.
 - A file the instance's code wasn't built with needs `--allow-undeployed`, for trying it on a sandbox.
 - Fewer included minutes or texts need `--allow-less`, archiving a product or discount the file no longer has needs `--allow-archive`, and anything Polar can't change in place, such as a product's billing cycle, needs `--allow-replace`. Current subscribers keep their old price; edits made in Polar's dashboard are put back to the file.
-- `--railway-file` saves the Polar variables to a new file, readable only by you, for `railway-vars.mjs`; it holds the webhook secret only when this run made the webhook, so delete it once Railway has the values.
+- `--railway-file` saves `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` to a new file, readable only by you, for `railway-vars.mjs`. When this run made the webhook, the file also holds `POLAR_WEBHOOK_SECRET`, so delete it once Railway has the values.
 
 A run that stops part-way is finished by running it again: everything is found by its tags. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs the six read scopes for that. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`, which ending a promo plan uses too.

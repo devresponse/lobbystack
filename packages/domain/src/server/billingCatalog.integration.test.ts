@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingUsageEvents, businesses, createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingUsageEvents, businesses, createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, builtInBillingPlanLimits, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
@@ -360,11 +360,6 @@ async function link(tx: DatabaseTransaction, body: Record<string, unknown>, opti
   return await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: options.key === undefined ? randomUUID() : options.key, body: parsed, deployment: options.deployment ?? polarDeployment() });
 }
 
-/** The product variables a deployment would set after a link, by name. */
-function productVariables(plans: Array<{ code: string; prices: Array<{ period: string; polar_id: string }> }>): Record<string, string> {
-  return Object.fromEntries(plans.filter((plan) => plan.code === "starter" || plan.code === "pro").flatMap((plan) => plan.prices.map((price) => [`POLAR_${plan.code.toUpperCase()}_${price.period.toUpperCase()}_PRODUCT_ID`, price.polar_id])));
-}
-
 describe.skipIf(!testUrl)("billing catalog Polar links", () => {
   it("refuses a link before an apply, for another brand, file or organization, or without POLAR_ORGANIZATION_ID, listing every reason and writing nothing", async () => {
     await rollbackTest(async (tx) => {
@@ -547,6 +542,57 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
       expect(await readBillingPlanLimits(tx)).toEqual(worker);
     });
   });
+  it("lets the number claims count the numbers a plan includes, as the limits do, instead of its name", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await as(tx, "owner");
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Number allowance test", timezone: "UTC", businessType: "test" });
+      // What the claim functions ask, beside what the dashboard's limits say.
+      const included = async () => {
+        await as(tx, "owner");
+        const [row] = await rows(tx, sql`select app.business_included_numbers(${businessId}::uuid) as n`);
+        await as(tx, "lobbystack_worker");
+        const limits = (await inBusiness(tx, businessId, (scoped) => loadBusinessPlanLimits(scoped, businessId))).limits.includedBusinessNumbers;
+        expect(row!.n).toBe(limits);
+        return row!.n;
+      };
+      const account = async (values: Partial<typeof billingAccounts.$inferInsert>) => {
+        await as(tx, "owner");
+        await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "free_cloud", ...values }).onConflictDoUpdate({ target: billingAccounts.businessId, set: values });
+        await as(tx, "lobbystack_worker");
+      };
+
+      // Before an apply, this build's plans: none on Free, one on a live Starter, no limit on Enterprise.
+      expect(await included()).toBe(0);
+      await account({ plan: "starter", subscriptionState: "active" });
+      expect(await included()).toBe(1);
+      await account({ subscriptionState: "canceled" });
+      expect(await included()).toBe(0);
+      await account({ plan: "enterprise", subscriptionState: "active" });
+      expect(await included()).toBeNull();
+
+      await apply(tx, file((value) => {
+        withExamples("salons-half-off")(value);
+        value.plans.free_cloud.limits = { knowledgeStorageMb: 1, businessNumbers: 1 };
+        value.plans["salons-half-off"].limits = { businessNumbers: 0 };
+      }));
+      // The catalog's numbers, whatever the plan is called.
+      await account({ plan: "free_cloud", subscriptionState: null });
+      expect(await included()).toBe(1);
+      await account({ plan: "starter", subscriptionState: "active" });
+      expect(await included()).toBe(1);
+      // A promo plan's own row while its subscription is live; a lapsed one is Free.
+      await account({ planCode: "salons-half-off" });
+      expect(await included()).toBe(0);
+      await account({ subscriptionState: "canceled" });
+      expect(await included()).toBe(1);
+
+      // The three claim functions all ask it.
+      await as(tx, "owner");
+      const callers = await rows(tx, sql`select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'app' and p.prosrc like '%business_included_numbers%' order by p.proname`);
+      expect(callers.map((row) => row.proname)).toEqual(["reserve_api_number_claim", "reserve_onboarding_number_claim", "reserve_replacement_number_claim"]);
+    });
+  });
 });
 
 describe.skipIf(!testUrl)("billing catalog daily check", () => {
@@ -559,7 +605,8 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
 
       const { fake, plans } = await seededPolar(file());
       await link(tx, { hash: deployedHash, plans });
-      const env = { ...polarEnv, ...productVariables(plans) };
+      // No product ID variables: a linked deployment doesn't need them.
+      const env = polarEnv;
       const readPolar = () => polarClient(fake).readSnapshot();
       const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
       expect(passed).toMatchObject({ status: "passed", previousStatus: null, problems: [], polarEnv: "sandbox" });

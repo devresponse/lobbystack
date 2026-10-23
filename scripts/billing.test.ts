@@ -215,7 +215,7 @@ describe("pnpm billing", () => {
     const railway = await readFile(railwayFile, "utf8");
     expect((await stat(railwayFile)).mode & 0o777).toBe(0o600);
     expect(railway).toContain("[lobbystack-admin, worker]\nPOLAR_API_BASE_URL=https://sandbox-api.polar.sh\nPOLAR_ORGANIZATION_ID=org_test\n");
-    expect(railway).toContain(`POLAR_PRO_MONTHLY_PRODUCT_ID=${context.instance.polar.productVars["pro/monthly"]}`);
+    expect(railway).not.toContain("PRODUCT_ID");
     expect(railway).not.toContain("POLAR_WEBHOOK_SECRET");
 
     // Again: nothing to do anywhere.
@@ -235,7 +235,7 @@ describe("pnpm billing", () => {
     expect(applied.out).toContain("done create Webhook https://demo.alloplace.com/api/webhooks/polar: Raw, 15 events");
     expect(applied.code).toBe(1);
     expect(applied.out).toContain("DRIFT  webhook_secret");
-    expect(applied.out).toContain("DRIFT  product_vars: POLAR_STARTER_MONTHLY_PRODUCT_ID is unset");
+    expect(applied.out).toContain("ok     checkout sells the linked products; no product ID variable is needed");
     const secret = context.fake.state.webhooks[0]!.secret!;
     const railway = await readFile(railwayFile, "utf8");
     expect(railway).toContain(`[lobbystack-admin]\nPOLAR_WEBHOOK_SECRET=${secret}\n`);
@@ -245,10 +245,6 @@ describe("pnpm billing", () => {
 
     // Once Railway has the values, verify passes.
     context.instance.polar.secret = secret;
-    for (const line of railway.split("\n")) {
-      const match = /^POLAR_(STARTER|PRO)_(MONTHLY|ANNUAL)_PRODUCT_ID=(.+)$/.exec(line);
-      if (match) context.instance.polar.productVars[`${match[1]!.toLowerCase()}/${match[2]!.toLowerCase()}`] = match[3]!;
-    }
     expect((await billing(["verify", ...sandbox], context, { env: { POLAR_READ_TOKEN: "polar_oat_read" } })).code).toBe(0);
   });
 

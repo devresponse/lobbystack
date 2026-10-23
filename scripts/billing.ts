@@ -196,9 +196,10 @@ function preflight(options: Options, file: BillingFile, catalog: ApiBillingCatal
   return reasons;
 }
 
-function railwayText(options: Options, organizationId: string, plans: ReadonlyArray<{ code: string; prices: ReadonlyArray<{ period: string; polar_id: string }> }>, webhookSecret: string | null, today: string): string {
+// No product IDs: checkout sells the products the links name, so the four
+// POLAR_*_PRODUCT_ID variables aren't needed.
+function railwayText(options: Options, organizationId: string, webhookSecret: string | null, today: string): string {
   const shown = /\s/.test(options.railwayFile!) ? `"${options.railwayFile}"` : options.railwayFile!;
-  const products = plans.filter((plan) => plan.code === "starter" || plan.code === "pro").flatMap((plan) => plan.prices.map((price) => `POLAR_${plan.code.toUpperCase()}_${price.period.toUpperCase()}_PRODUCT_ID=${price.polar_id}`));
   return [
     `# Railway variables from pnpm billing apply --brand ${options.brand} (Polar ${polarWord(options.polar)}), ${today}.`,
     `# Set them with: node railway-vars.mjs ${shown}`,
@@ -208,7 +209,6 @@ function railwayText(options: Options, organizationId: string, plans: ReadonlyAr
     "[lobbystack-admin, worker]",
     `POLAR_API_BASE_URL=${polarBaseUrls[options.polar]}`,
     `POLAR_ORGANIZATION_ID=${organizationId}`,
-    ...products,
     ...(webhookSecret ? ["", "[lobbystack-admin]", `POLAR_WEBHOOK_SECRET=${webhookSecret}`] : []),
     "",
   ].join("\n");
@@ -312,7 +312,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // The Railway values, before the report, so a drift there doesn't lose them.
   if (options.railwayFile) {
-    await writeFile(options.railwayFile, railwayText(options, after.organization.id, links.plans, webhookSecret, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
+    await writeFile(options.railwayFile, railwayText(options, after.organization.id, webhookSecret, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
     io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node railway-vars.mjs ${options.railwayFile}`);
   } else if (webhookSecret) {
     io.out("\nPolar made the webhook just now. Copy its secret from the webhook's page in Polar to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");

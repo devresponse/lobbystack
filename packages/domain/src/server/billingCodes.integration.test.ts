@@ -9,12 +9,13 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, apiBillingCo
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { createBillingCheckoutRequest, loadBillingCheckoutRequest, reconcileBillingProviderEvent } from "./billing";
 import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, linkBillingCatalogForApi } from "./billingCatalog";
-import { createBillingCodeForApi, findBillingCodeOffer, listBillingCodesForApi, loadBusinessPromoPlan, revokeBillingCodeForApi } from "./billingCodes";
-import { readPolarProductLinks } from "./billingPlans";
+import { billingCodeView, createBillingCodeForApi, findBillingCodeOffer, listBillingCodesForApi, loadBusinessPromoPlan, revokeBillingCodeForApi } from "./billingCodes";
+import { readBillingPlanLimitBook, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar } from "./billingPolar.testing";
-import { createCheckoutForApi } from "./publicApi/operations";
+import { createCheckoutForApi, getBillingForApi } from "./publicApi/operations";
 import { createBusiness } from "./tenancy";
+import { getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction } from "./usage";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -91,9 +92,15 @@ function promoFile(): Record<string, any> {
   return value;
 }
 
-/** Applies the promo file, sets a Polar stand-in up from it as pnpm billing apply does, and links the two. */
-async function promoCatalog(tx: DatabaseTransaction): Promise<void> {
+/** The promo file and a Starter plan with its own allowances: 300 minutes, 10 MB and 25 cents a minute over. */
+function allowanceFile(): Record<string, any> {
   const value = promoFile();
+  value.plans["salons-plus"] = { tier: "starter", access: "code", names: names("Salons Plus"), sold: true, prices: { monthlyCents: 3000 }, included: { voiceMinutes: 300 }, limits: { knowledgeStorageMb: 10 }, overageCents: { voiceMinute: 25 } };
+  return value;
+}
+
+/** Applies the promo file, sets a Polar stand-in up from it as pnpm billing apply does, and links the two. */
+async function promoCatalog(tx: DatabaseTransaction, value = promoFile()): Promise<void> {
   const applied = await applyBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body: apiBillingCatalogApplySchema.parse({ brand: "alloplace", billing_file: value, allow_undeployed: true }), deployment: { brand: "alloplace" } });
   const fake = createFakePolar();
   const polar = new PolarCatalogClient({ token: "polar_oat_test", baseUrl: polarEnv.POLAR_API_BASE_URL, fetch: fake.fetch, sleep: async () => undefined });
@@ -281,6 +288,69 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       await as(tx, "owner");
       const [audit] = await rows(tx, sql`select payload from public.audit_logs where business_id = ${businessId}::uuid and event_type = 'api.billing.checkout_started'`);
       expect(audit!.payload).toMatchObject({ plan: "starter", promoPlan: "salons-half-off", interval: "monthly" });
+    });
+  });
+  it("gives a business on a promo plan the plan's own allowances, and prices its usage by the plan it was used under", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx, allowanceFile());
+      const { userId, businessId } = await ownedBusiness(tx, "plus");
+      const other = await ownedBusiness(tx, "other");
+      // Polar's webhook puts the business on the plan.
+      await as(tx, "owner");
+      const [subscribed] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.active", businessId, payload: { billingKey: `business:${businessId}`, plan: "starter", planCode: "salons-plus", status: "active", billingInterval: "monthly", subscriptionId: "sub_plus", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z" } }).returning({ id: providerEvents.id });
+      await as(tx, "lobbystack_worker");
+      await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: subscribed!.id });
+      const period = "2026-11";
+      const at = new Date("2026-11-03T12:00:00.000Z");
+      const asWorker = (run: (scoped: DatabaseTransaction) => Promise<unknown>) => withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, run);
+      const asApp = <T>(id: string, user: string, run: (scoped: DatabaseTransaction) => Promise<T>) => withBusinessTransaction(tx as unknown as Database, { businessId: id, userId: user, actorType: "operator" }, run);
+
+      // The dashboard's role finds the plan's own limits, which the storage and number checks read.
+      await as(tx, "lobbystack_app");
+      const own = await asApp(businessId, userId, (scoped) => loadBusinessPlanLimits(scoped, businessId));
+      expect(own).toMatchObject({ plan: "starter", planCode: "salons-plus", limits: { voiceSecondsIncluded: 18_000, knowledgeStorageBytes: 10 * 1_048_576, includedBusinessNumbers: 1, voiceOverageRatePerMinuteCents: 25, alertSmsSegmentsIncluded: 50 } });
+
+      // 250 minutes are within the plan's 300, though over Starter's 150; 360 cost 60 minutes at its own rate.
+      await as(tx, "lobbystack_worker");
+      await asWorker((scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: "voice:plus-1", quantity: 15_000, recordedAt: at }));
+      await as(tx, "lobbystack_app");
+      expect(await asApp(businessId, userId, (scoped) => readUsageStatusInTransaction(scoped, { businessId, periodKey: period }))).toMatchObject({ plan: "starter", voiceSecondsUsed: 15_000, voiceSecondsIncluded: 18_000, overageSpendCents: 0, voiceOverageRatePerMinuteCents: 25 });
+      await as(tx, "lobbystack_worker");
+      await asWorker((scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: "voice:plus-2", quantity: 6_600, recordedAt: at }));
+      await as(tx, "owner");
+      expect(await rows(tx, sql`select source_key, plan_at_record_time, plan_code_at_record_time from public.billing_usage_events where business_id = ${businessId}::uuid order by source_key`)).toEqual([
+        { source_key: "voice:plus-1", plan_at_record_time: "starter", plan_code_at_record_time: "salons-plus" },
+        { source_key: "voice:plus-2", plan_at_record_time: "starter", plan_code_at_record_time: "salons-plus" },
+      ]);
+      await as(tx, "lobbystack_app");
+      expect(await asApp(businessId, userId, (scoped) => getUsageStatusInTransaction(scoped, { businessId, periodKey: period }))).toMatchObject({ voiceSecondsUsed: 21_600, overageSpendCents: 60 * 25 });
+
+      // The API names the plan.
+      await as(tx, "lobbystack_worker");
+      const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+      expect(await getBillingForApi(context(tx), apiCaller)).toMatchObject({ plan: "starter", promo_plan: "salons-plus", plan_ends: null });
+
+      // After moving to standard Starter, new usage counts at Starter's terms, and the month's earlier usage
+      // keeps the plan's, as the dashboard's role reads it too.
+      await as(tx, "owner");
+      await tx.execute(sql`update public.billing_accounts set plan_code = null where business_id = ${businessId}::uuid`);
+      await as(tx, "lobbystack_worker");
+      await asWorker((scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: "voice:starter-1", quantity: 600, recordedAt: at }));
+      expect((await asWorker((scoped) => readUsageStatusInTransaction(scoped, { businessId, periodKey: period })) as { overageSpendCents: number }).overageSpendCents).toBe(60 * 25 + 10 * 20);
+      expect(await getBillingForApi(context(tx), apiCaller)).toMatchObject({ promo_plan: null });
+      await as(tx, "lobbystack_app");
+      expect(await asApp(businessId, userId, (scoped) => readUsageStatusInTransaction(scoped, { businessId, periodKey: period }))).toMatchObject({ voiceSecondsUsed: 22_200, voiceSecondsIncluded: 9_000, overageSpendCents: 60 * 25 + 10 * 20 });
+      expect(await asApp(businessId, userId, async (scoped) => Object.keys((await readBillingPlanLimitBook(scoped)).plans))).toEqual(["salons-plus"]);
+      // Another business reads no promo plan, and a code for the plan shows what it includes.
+      expect(await asApp(other.businessId, other.userId, async (scoped) => Object.keys((await readBillingPlanLimitBook(scoped)).plans))).toEqual([]);
+      await as(tx, "lobbystack_worker");
+      await issue(tx, { plan: "salons-plus", code: "PLUS-2026", business_id: other.businessId });
+      await as(tx, "lobbystack_app");
+      const view = await asApp(other.businessId, other.userId, (scoped) => billingCodeView(scoped, { businessId: other.businessId, code: "plus-2026", checkout: true }));
+      expect(view).toMatchObject({ plan: "salons-plus", tier: "starter", included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1_048_576, businessNumbers: 1 }, moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"] });
+      // The worker reads every plan.
+      await as(tx, "lobbystack_worker");
+      expect(Object.keys((await readBillingPlanLimitBook(tx)).plans).sort()).toEqual(["pro-launch", "salons-half-off", "salons-plus"]);
     });
   });
 });

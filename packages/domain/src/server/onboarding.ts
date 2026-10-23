@@ -1,12 +1,12 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { isBillingPlanSlug, normalizeInterfaceLocale, type BillingPlanLimitTable, type InterfaceLocale } from "@lobbystack/shared";
+import { isBillingPlanSlug, normalizeInterfaceLocale, type InterfaceLocale } from "@lobbystack/shared";
 
 import { billingAccounts, businesses, enqueueOutbox, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
-import { readBillingPlanLimits } from "./billingPlans";
+import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 import { deploymentAppName } from "./branding";
 
 // French puts no "de" before the name and Serbian never declines it, because
@@ -88,8 +88,8 @@ export function resolveOnboardingRoute(stage: string | null | undefined): string
 // so the dashboard sends it back to its plan.
 const numberStages: ReadonlySet<OnboardingStage> = new Set(["phone_number", "phone_number_claiming"]);
 
-export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: string | null, limits: BillingPlanLimitTable): OnboardingStage {
-  return numberStages.has(stage) && isBillingPlanSlug(plan) && limits[plan].includedBusinessNumbers === 0 ? "plan" : stage;
+export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: string | null, limits: BillingPlanLimitBook, planCode: string | null = null): OnboardingStage {
+  return numberStages.has(stage) && isBillingPlanSlug(plan) && limitsFor(limits, plan, planCode).includedBusinessNumbers === 0 ? "plan" : stage;
 }
 
 // The step the dashboard shows for a business's stored stage. Only the number
@@ -99,8 +99,8 @@ export async function resolveOnboardingStageInTransaction(tx: DatabaseTransactio
   const stage = normalizeOnboardingStage(storedStage);
   if (!numberStages.has(stage)) return stage;
   await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
-  const billing = (await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
-  return resolveOnboardingStageForPlan(stage, billing?.plan ?? null, await readBillingPlanLimits(tx));
+  const billing = (await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
+  return resolveOnboardingStageForPlan(stage, billing?.plan ?? null, await readBillingPlanLimitBook(tx), billing?.planCode ?? null);
 }
 
 export function isValidOnboardingTransition(from: OnboardingStage, to: OnboardingStage): boolean {

@@ -1,5 +1,5 @@
 import type { ResolvedBillingDiscount } from "./billingProfile";
-import type { BillingInterval, HostedCheckoutPlanSlug } from "./billing";
+import type { BillingInterval, BillingPlanOffer, HostedCheckoutPlanSlug } from "./billing";
 
 // Promo codes, as operators issue them and businesses type them. A code is
 // stored in upper case and compared regardless of case and spaces, so
@@ -51,7 +51,20 @@ export type BillingCodeView = {
   /** The business already pays for this plan. */
   current: boolean;
   prices: Array<{ interval: BillingInterval; cents: number; discountedCents: number; checkoutAvailable: boolean }>;
+  /** What it includes each month: its own allowances, with its tier's for any billing.json leaves out. */
+  included: BillingPlanOffer["included"];
+  /** The allowances it includes more of than its tier. */
+  moreThanTier: Array<keyof BillingPlanOffer["included"]>;
 };
+
+/** The allowances a plan includes more of than its tier; no limit is more than any. */
+export function allowancesAboveTier(included: BillingPlanOffer["included"], tier: BillingPlanOffer["included"]): Array<keyof BillingPlanOffer["included"]> {
+  return (Object.keys(included) as Array<keyof BillingPlanOffer["included"]>).filter((key) => {
+    const own = included[key];
+    const base = tier[key];
+    return base !== null && (own === null || own > base);
+  });
+}
 
 /** The promo plan a business is on, for Settings > Plan: its name, discount, prices and when it ends. */
 export type BillingPromoPlanView = {

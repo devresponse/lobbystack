@@ -34,6 +34,26 @@ export function storageSize(bytes: number, locale = "en"): { amount: string; uni
   return { amount: (bytes / (unit === "GB" ? 1024 ** 3 : 1024 ** 2)).toLocaleString(intlLocale(locale)), unit };
 }
 
+/** The allowances "What's included" lists, in its order. */
+export const includedLineKeys = ["voiceSeconds", "outboundCallAttempts", "alertSmsSegments", "knowledgeStorageBytes"] as const;
+
+/**
+ * What a plan includes each month as "What's included" lists it: voice
+ * minutes, transfers, texts and storage. No limit reads as custom.
+ */
+export function includedLines(included: BillingPlanOffer["included"] | undefined, t: (key: string, options?: Record<string, unknown>) => string, locale = "en"): Array<{ key: typeof includedLineKeys[number]; text: string }> {
+  const count = (value: number | null | undefined, key: string) => value === null || value === undefined ? t(`billing.currentPlan.${key}Custom`) : t(`billing.currentPlan.${key}`, { count: value });
+  const voice = included?.voiceSeconds;
+  const storage = included?.knowledgeStorageBytes;
+  const text = {
+    voiceSeconds: count(voice === null || voice === undefined ? null : Math.floor(voice / 60), "includedVoice"),
+    outboundCallAttempts: count(included?.outboundCallAttempts, "includedOutbound"),
+    alertSmsSegments: count(included?.alertSmsSegments, "includedSms"),
+    knowledgeStorageBytes: storage === null || storage === undefined ? t("billing.currentPlan.includedStorageCustom") : t("billing.currentPlan.includedStorage", storageSize(storage, locale)),
+  };
+  return includedLineKeys.map((key) => ({ key, text: text[key] }));
+}
+
 /**
  * A plan's allowances and overage rates as the plan strings take them:
  * {{minutes}}, {{count}} and {{rate}}. A custom allowance reads as zero, so

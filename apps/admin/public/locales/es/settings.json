@@ -517,7 +517,8 @@
       "applying": "Comprobando...",
       "cancel": "Cancelar",
       "unlocks": "Este código desbloquea {{plan}}.",
-      "features": "Todo lo de {{tier}}.",
+      "features": "Las funciones de {{tier}}, con:",
+      "moreThanTier": "Más que {{tier}}",
       "ends": "Hasta el {{date}}",
       "unavailable": "No está a la venta ahora",
       "interval": {

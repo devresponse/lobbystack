@@ -507,7 +507,8 @@
       "applying": "Checking...",
       "cancel": "Cancel",
       "unlocks": "This code unlocks {{plan}}.",
-      "features": "Everything in {{tier}}.",
+      "features": "{{tier}} features, with:",
+      "moreThanTier": "More than {{tier}}",
       "ends": "Until {{date}}",
       "unavailable": "Not on sale right now",
       "interval": {

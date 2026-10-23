@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { billingPlanName, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
+import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
 import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
@@ -16,7 +16,7 @@ import { SectionBlock } from "./section-block";
 import { Button } from "./ui/button";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { SpendingCapSection } from "./billing-spending-cap";
-import { findPlan, formatMoney, monthlyPriceCents, storageSize } from "@/lib/billing-plans";
+import { findPlan, formatMoney, includedLines, monthlyPriceCents } from "@/lib/billing-plans";
 import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -30,6 +30,8 @@ type Billing = {
   promoPlan: BillingPromoPlanView | null;
   permissions: BillingPermissions;
   effectivePlan: BillingPlanSlug;
+  /** The limits the server enforces now: a promo plan's own, else its tier's. */
+  limits: BillingPlanLimits;
   account: { plan: string | null; billingKey: string; billingInterval: string | null; subscriptionState: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; overageSpendingCapCents: number | null } | null;
   usage: Array<{ periodKey: string; usageKind: string; quantity: number; syncStatus: string }>;
   transactions: Array<{ kind: string; sourceId: string; status: string; amountCents: number; refundedAmountCents: number; currency: string; description: string | null; invoiceUrl: string | null; occurredAt: string }>;
@@ -78,13 +80,11 @@ export function LivePlanSurface() {
   const money = (cents: number) => formatMoney(cents, promoPlan?.currency ?? currency, i18n.language);
   // The plan's row in the deployment's plan list; self-host has none and no allowances.
   const offer = plan === "self_host" ? undefined : findPlan(billing.data.plans, plan);
-  const allowance = offer?.included;
   const promoPrice = promoPlan?.prices.find((price) => price.interval === (account?.billingInterval === "annual" ? "annual" : "monthly"));
   // Free and self-host cost nothing, a custom plan has no fixed price, and a paid plan shows a month of its interval.
   const monthlyPrice = plan === "self_host" || plan === "free_cloud" ? 0 : promoPrice ? promoPrice.perMonth : offer?.custom ? null : monthlyPriceCents(offer, account?.billingInterval === "annual" ? "annual" : "monthly") ?? null;
-  const count = (value: number | null | undefined, key: string) => value === null || value === undefined ? t(`billing.currentPlan.${key}Custom`) : t(`billing.currentPlan.${key}`, { count: value });
-  const storage = allowance?.knowledgeStorageBytes;
-  const included = [count(allowance?.voiceSeconds === null || allowance?.voiceSeconds === undefined ? null : Math.floor(allowance.voiceSeconds / 60), "includedVoice"), count(allowance?.outboundCallAttempts, "includedOutbound"), count(allowance?.alertSmsSegments, "includedSms"), storage === null || storage === undefined ? t("billing.currentPlan.includedStorageCustom") : t("billing.currentPlan.includedStorage", storageSize(storage, i18n.language))];
+  // What the plan includes as the server enforces it, so a promo plan shows its own allowances.
+  const included = includedLines(billingPlanIncluded(billing.data.limits), (key, options) => options ? t(key, options) : t(key), i18n.language).map((line) => line.text);
   const permissions = billing.data?.permissions;
   const canUpgrade = permissions?.hasCheckoutAccess && billing.data?.availableCheckoutPlans.some(target =>
     (plan === "free_cloud" || (plan === "starter" && target === "pro")) && billing.data.availableCheckoutIntervals[target].length > 0);

@@ -101,7 +101,7 @@ import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
-import { readBillingPlanLimits } from "../billingPlans";
+import { readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -335,8 +335,8 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
-  const { plan, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const periodKey = new Date().toISOString().slice(0, 7);
   const [month] = await tx.select({ overageSpendCents: billingUsageMonths.overageSpendCents }).from(billingUsageMonths).where(and(eq(billingUsageMonths.businessId, businessId), eq(billingUsageMonths.periodKey, periodKey))).limit(1);
   const spend = month?.overageSpendCents ?? 0;
@@ -345,6 +345,8 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
   const cap = paid ? capCents : null;
   return {
     plan,
+    promo_plan: planCode,
+    plan_ends: planCode && account?.planEnds ? account.planEnds.toISOString() : null,
     managed: isManagedBillingAccount(account),
     subscription_state: account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
@@ -644,7 +646,7 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
   const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [account] = await tx.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
@@ -664,7 +666,7 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null, await readBillingPlanLimits(tx));
+  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null, await readBillingPlanLimitBook(tx), account?.planCode ?? null);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

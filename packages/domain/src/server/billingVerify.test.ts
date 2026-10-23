@@ -39,7 +39,7 @@ async function syncedInstance(file = profile()) {
   const fake = createFakePolar();
   const plans = desiredBillingPlans(file);
   const catalog = desiredPolarCatalog({ brand: "alloplace", profile: file, plans, webhookUrl });
-  const first = planPolarChanges({ catalog, snapshot: await client(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false, allowLess: false }, now });
+  const first = planPolarChanges({ catalog, snapshot: await client(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false }, now });
   const { webhookSecret } = await runPolarSteps(client(fake), first.steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await client(fake).readSnapshot(), now });
   const linkOf = (code: string, period: string) => links.plans.find((entry) => entry.code === code)?.prices.find((price) => price.period === period)?.polar_id ?? null;
@@ -143,16 +143,17 @@ describe("verifyBillingCatalog", () => {
     state.organization.subscription_settings = { ...state.organization.subscription_settings, allow_multiple_subscriptions: true };
     state.organization.customer_portal_settings = { usage: { show: true }, subscription: { update_seats: true, update_plan: false } };
     state.meters[0]!.name = "Minutes";
-    state.credits.find((credits) => credits.metadata.lobbystack_key === "alloplace/pro/voice_minutes")!.properties.units = 450;
     const proMonthly = state.products.find((product) => product.name === "Pro monthly")!;
     proMonthly.prices.find((price) => price.amount_type === "fixed")!.price_amount = 12000;
+    state.benefits.push({ id: "benefit_credits", type: "meter_credit", description: "450 voice minutes a month", properties: { units: 450, rollover: false, meter_id: state.meters[0]!.id }, metadata: {} });
+    proMonthly.benefitIds = ["benefit_credits"];
     state.webhooks[0]!.enabled = false;
     const result = await verify(instance);
     expect(notOk(result)).toEqual([
       "drift file_polar org_settings Test organization",
       'drift file_polar meter Meter "Voice minutes"',
-      'drift file_polar credits Credits "500 voice minutes a month" for pro',
       'drift file_polar product Product "Pro monthly"',
+      'drift file_polar credits Product "Pro monthly"',
       `drift file_polar webhook Webhook ${webhookUrl}`,
       // The link points at the product the rows sell, which no longer sells their price.
       "drift postgres_polar linked_id pro/monthly",

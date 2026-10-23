@@ -1,4 +1,4 @@
-import type { PolarCredits, PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
+import type { PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
 import { billingMeterEventNames, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPlan } from "./billingCatalog";
@@ -39,22 +39,20 @@ export const polarTags = {
   interval: "lobbystack_interval",
   terms: "lobbystack_terms",
   meter: "lobbystack_meter",
-  key: "lobbystack_key",
 } as const;
 
-type MeterSource = Pick<DesiredBillingPlan, "voice_sec" | "sms_seg" | "calls_out" | "voice_rate" | "sms_rate" | "call_rate">;
+type MeterSource = Pick<DesiredBillingPlan, "voice_rate" | "sms_rate" | "call_rate">;
 
-/** The usage Polar bills past a plan's allowance, with the names polar-setup.mjs gave its meters and Credits. */
+/** The usage Polar bills past a plan's allowance, with the names polar-setup.mjs gave its meters. */
 export const polarMeterSpecs = [
-  { key: "voice_minutes", name: "Voice minutes", event: billingMeterEventNames.voiceMinutes, noun: "voice minutes", units: (plan: MeterSource) => Math.floor((plan.voice_sec ?? 0) / 60), rate: (plan: MeterSource) => plan.voice_rate ?? 0 },
-  { key: "alert_sms_segments", name: "Alert SMS segments", event: billingMeterEventNames.alertSmsSegments, noun: "alert SMS segments", units: (plan: MeterSource) => plan.sms_seg ?? 0, rate: (plan: MeterSource) => plan.sms_rate ?? 0 },
-  { key: "outbound_call_attempts", name: "Call transfers", event: billingMeterEventNames.outboundCallAttempts, noun: "call transfers", units: (plan: MeterSource) => plan.calls_out ?? 0, rate: (plan: MeterSource) => plan.call_rate ?? 0 },
+  { key: "voice_minutes", name: "Voice minutes", event: billingMeterEventNames.voiceMinutes, rate: (plan: MeterSource) => plan.voice_rate ?? 0 },
+  { key: "alert_sms_segments", name: "Alert SMS segments", event: billingMeterEventNames.alertSmsSegments, rate: (plan: MeterSource) => plan.sms_rate ?? 0 },
+  { key: "outbound_call_attempts", name: "Call transfers", event: billingMeterEventNames.outboundCallAttempts, rate: (plan: MeterSource) => plan.call_rate ?? 0 },
 ] as const;
 
 export type PolarMeterKey = (typeof polarMeterSpecs)[number]["key"];
 
 export type DesiredPolarMeter = { key: PolarMeterKey; name: string; event: string };
-export type DesiredPolarCredits = { key: string; plan: string; meter: PolarMeterKey; units: number; description: string };
 export type DesiredPolarProduct = {
   plan: string;
   period: BillingInterval;
@@ -65,8 +63,6 @@ export type DesiredPolarProduct = {
   rates: Record<PolarMeterKey, number>;
   visibility: "public" | "private";
   terms: string;
-  /** The keys of the Credits it carries: a monthly product's, never an annual one's. */
-  credits: string[];
 };
 export type DesiredPolarDiscount = { plan: string; name: string; terms: string; currency: string; discount: ResolvedBillingDiscount; products: string[] };
 
@@ -76,7 +72,6 @@ export type DesiredPolarCatalog = {
   currency: string;
   settings: { allowMultipleSubscriptions: boolean; portalPlanChanges: boolean };
   meters: DesiredPolarMeter[];
-  credits: DesiredPolarCredits[];
   products: DesiredPolarProduct[];
   discounts: DesiredPolarDiscount[];
   /** Null when the instance's address isn't known, as on a worker without APP_BASE_URL: the webhook is then neither set up nor checked. */
@@ -96,26 +91,17 @@ function planLabel(plan: DesiredBillingPlan): string {
 
 /**
  * The Polar objects a checked file needs: a meter per usage kind, a product
- * per live price of every sold plan, Credits for each monthly product's
- * allowances, a discount per plan that has one, and the webhook. Annual
- * products get no Credits: the worker reports only each month's overage for
- * them, so Credits would take the allowance off twice. A plan sold only by
- * the year has none at all.
+ * per live price of every sold plan, a discount per plan that has one, and
+ * the webhook. No product carries Credits: the worker reports only the usage
+ * past each UTC month's allowance, on monthly and annual plans alike, so
+ * Polar bills every unit it hears of.
  */
 export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; webhookUrl: string | null }): DesiredPolarCatalog {
-  const credits: DesiredPolarCredits[] = [];
   const products: DesiredPolarProduct[] = [];
   const discounts: DesiredPolarDiscount[] = [];
   for (const plan of input.plans) {
     if (!plan.sold || !plan.prices.length) continue;
     const label = planLabel(plan);
-    const sellsMonthly = plan.prices.some((price) => price.period === "monthly");
-    const planCredits = !sellsMonthly ? [] : polarMeterSpecs.flatMap((meter) => {
-      const units = meter.units(plan);
-      // Polar refuses Credits of 0 units, so a plan that includes none of a meter gets none.
-      return units > 0 ? [{ key: `${input.brand}/${plan.code}/${meter.key}`, plan: plan.code, meter: meter.key, units, description: `${units} ${meter.noun} a month` }] : [];
-    });
-    credits.push(...planCredits);
     for (const price of plan.prices) {
       products.push({
         plan: plan.code,
@@ -127,7 +113,6 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
         rates: Object.fromEntries(polarMeterSpecs.map((meter) => [meter.key, meter.rate(plan)])) as Record<PolarMeterKey, number>,
         visibility: plan.access === "public" ? "public" : "private",
         terms: plan.terms_hash,
-        credits: price.period === "monthly" ? planCredits.map((entry) => entry.key) : [],
       });
     }
     if (plan.discount) discounts.push({ plan: plan.code, name: `${label} discount`, terms: plan.terms_hash, currency: input.profile.currency, discount: plan.discount, products: plan.prices.map((price) => productKey(plan.code, price.period)) });
@@ -137,7 +122,6 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
     currency: input.profile.currency,
     settings: { allowMultipleSubscriptions: input.profile.polar.allowMultipleSubscriptions, portalPlanChanges: input.profile.polar.portalPlanChanges },
     meters: polarMeterSpecs.map((meter) => ({ key: meter.key, name: meter.name, event: meter.event })),
-    credits,
     products,
     discounts,
     webhook: input.webhookUrl ? { url: input.webhookUrl, events: [...POLAR_WEBHOOK_EVENTS] } : null,
@@ -146,9 +130,9 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
 
 // The plan of Polar calls.
 
-export type PolarStepObject = "organization" | "meter" | "credits" | "product" | "discount" | "webhook";
-/** tag: an object polar-setup.mjs made, taken over by --adopt. attach: a product's Credits. end: a discount ended now. */
-export type PolarStepAction = "create" | "update" | "tag" | "attach" | "archive" | "end";
+export type PolarStepObject = "organization" | "meter" | "product" | "discount" | "webhook";
+/** tag: an object polar-setup.mjs made, taken over by --adopt. detach: a product's Credits taken off. end: a discount ended now. */
+export type PolarStepAction = "create" | "update" | "tag" | "detach" | "archive" | "end";
 
 /** An object made earlier in the same run, named until Polar gives it an id. */
 export type PolarRef = { $ref: string };
@@ -178,8 +162,6 @@ export type PolarPlanOptions = {
   allowReplace: boolean;
   /** Archive a product, or end a discount, that the file no longer sells. */
   allowArchive: boolean;
-  /** Lower Credits, which reach current subscribers at once. */
-  allowLess: boolean;
 };
 
 export type PolarPlan = { steps: PolarStep[]; refusals: PolarRefusal[] };
@@ -287,9 +269,10 @@ type ProductMatch = {
 
 /**
  * The calls that make an organization sell what the file says, in the order
- * they run: settings, meters, Credits, products, their Credits, discounts,
- * the webhook, then archiving, meters last. Anything the run must not decide
- * on its own is a refusal instead, and a run with refusals makes no call at all.
+ * they run: settings, meters, products, the Credits taken off them,
+ * discounts, the webhook, then archiving, meters last. Anything the run must
+ * not decide on its own is a refusal instead, and a run with refusals makes
+ * no call at all.
  */
 export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot: PolarSnapshot; options: PolarPlanOptions; now?: string }): PolarPlan {
   const { catalog, snapshot, options } = input;
@@ -387,7 +370,7 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     meterIds.set(meter.key, found.id);
   }
 
-  // Products, matched before Credits: adopting Credits needs the plan's monthly product.
+  // Products, each matched to the one that sells its row now.
   const matches: ProductMatch[] = [];
   for (const desired of catalog.products) {
     const subject = `Product "${desired.name}"`;
@@ -440,85 +423,32 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     }
     matches.push(match);
   }
-  const matchFor = (plan: string, period: string) => matches.find((match) => match.desired.plan === plan && match.desired.period === period);
 
-  // Credits: found by tag; one polar-setup.mjs made is adopted by meter and units on the plan's monthly product.
-  const creditIds = new Map<string, string | PolarRef>();
-  for (const credits of catalog.credits) {
-    const meterSpec = polarMeterSpecs.find((meter) => meter.key === credits.meter)!;
-    const subject = `Credits "${credits.description}" for ${credits.plan}`;
-    const meterId = meterIds.get(credits.meter);
-    if (meterId === undefined) continue;
-    const withTag = snapshot.credits.filter((benefit) => ours(benefit.metadata) && benefit.metadata[polarTags.key] === credits.key);
-    if (withTag.length > 1) {
-      refuse("credits", subject, `${withTag.length} Credits are tagged ${credits.key} (${quoted(withTag)}). Detach all but one in Polar.`);
-      continue;
-    }
-    let found: PolarCredits | undefined = withTag[0];
-    let adopting = false;
-    if (!found) {
-      const monthly = matchFor(credits.plan, "monthly")?.found;
-      const attached = new Set((monthly?.benefits ?? []).map((benefit) => benefit.id));
-      const lookalikes = snapshot.credits.filter((benefit) => !tagged(benefit.metadata) && attached.has(benefit.id) && benefit.properties.meter_id === meterId);
-      if (lookalikes.length && !options.adopt) {
-        refuse("credits", subject, `${quoted(lookalikes)} on "${monthly!.name}" has no LobbyStack tag. Run with --adopt to take it over, or detach it in Polar.`);
-        continue;
-      }
-      const same = lookalikes.filter((benefit) => benefit.properties.units === credits.units);
-      if (same.length > 1) {
-        refuse("credits", subject, `${same.length} Credits on "${monthly!.name}" give ${credits.units} ${meterSpec.noun} (${quoted(same)}). Detach all but one in Polar.`);
-        continue;
-      }
-      found = same[0];
-      adopting = found !== undefined;
-    }
-    const properties = { units: credits.units, rollover: false, meter_id: meterId };
-    if (!found) {
-      steps.push({ object: "credits", action: "create", subject, changes: [`${credits.units} ${meterSpec.noun} a month, no rollover`], method: "POST", path: "/v1/benefits/", body: { type: "meter_credit", description: credits.description, properties, metadata: { [polarTags.brand]: catalog.brand, [polarTags.key]: credits.key } }, produces: `credits:${credits.key}` });
-      creditIds.set(credits.key, ref(`credits:${credits.key}`));
-      continue;
-    }
-    creditIds.set(credits.key, found.id);
-    const changes: string[] = adopting ? ["tag it as LobbyStack's"] : [];
-    const body: Record<string, unknown> = { type: "meter_credit" };
-    if (found.properties.units !== credits.units) {
-      if (credits.units < found.properties.units && !options.allowLess) {
-        refuse("credits", subject, `Polar gives ${found.properties.units} ${meterSpec.noun} and the file says ${credits.units}. Fewer Credits reach current subscribers at once: run with --allow-less to lower them.`);
-        continue;
-      }
-      changes.push(`${found.properties.units} ${meterSpec.noun}, the file says ${credits.units}`);
-    }
-    if (found.properties.rollover) changes.push("rolls unused units over, the file says it doesn't");
-    if (found.properties.meter_id !== meterId) changes.push(`counts another meter, the file says "${meterSpec.name}"`);
-    if (found.properties.units !== credits.units || found.properties.rollover || found.properties.meter_id !== meterId) body.properties = properties;
-    if (found.description !== credits.description) {
-      body.description = credits.description;
-      changes.push(`described "${found.description}", the file says "${credits.description}"`);
-    }
-    const metadata = mergedTags(found.metadata, { [polarTags.brand]: catalog.brand, [polarTags.key]: credits.key });
-    if (metadata) {
-      body.metadata = metadata;
-      if (!adopting) changes.push("tag it as LobbyStack's");
-    }
-    if (Object.keys(body).length > 1) steps.push({ object: "credits", action: adopting ? "tag" : "update", subject, changes, method: "PATCH", path: `/v1/benefits/${found.id}`, body });
-  }
-
-  // Products, then the Credits each carries.
+  // Products, then the Credits taken off them. Usage reports only each
+  // month's overage, so Credits would take the allowance off twice: every live
+  // product of the brand loses them, one about to be archived too, as its
+  // subscribers keep it. Other kinds of benefit stay.
   const productIds = new Map<string, string | PolarRef>();
-  const attach: PolarStep[] = [];
+  const detach: PolarStep[] = [];
+  const detachCredits = (product: PolarProduct, subject: string) => {
+    const credits = product.benefits.filter((benefit) => benefit.type === "meter_credit");
+    if (!credits.length) return;
+    detach.push({ object: "product", action: "detach", subject, changes: [`detach ${quoted(credits)}: the worker reports only each month's overage`], method: "POST", path: `/v1/products/${product.id}/benefits`, body: { benefits: product.benefits.filter((benefit) => benefit.type !== "meter_credit").map((benefit) => benefit.id) } });
+  };
   for (const match of matches) {
     const { desired } = match;
     const key = productKey(desired.plan, desired.period);
     const subject = `Product "${desired.name}"`;
     const prices = desiredPrices(desired, meterIds);
     const tags = { [polarTags.brand]: catalog.brand, [polarTags.plan]: desired.plan, [polarTags.interval]: desired.period, [polarTags.terms]: desired.terms };
-    const wantedCredits = desired.credits.map((creditKey) => creditIds.get(creditKey)).filter((id): id is string | PolarRef => id !== undefined);
     const found = match.found;
     if (!found) {
       steps.push({ object: "product", action: "create", subject, changes: [prices.map((price) => price.describe).join(", "), ...(desired.visibility === "private" ? ["private: only an API checkout sells it"] : [])], method: "POST", path: "/v1/products/", body: { name: desired.name, recurring_interval: desired.interval, recurring_interval_count: 1, visibility: desired.visibility, prices: prices.map((price) => price.body), metadata: tags }, produces: `product:${key}` });
       productIds.set(key, ref(`product:${key}`));
-      if (match.replaced) late.push({ object: "product", action: "archive", subject: `Product "${match.replaced.name}"`, changes: ["replaced by a product with the file's billing cycle; its subscribers keep it"], method: "PATCH", path: `/v1/products/${match.replaced.id}`, body: { is_archived: true } });
-      if (wantedCredits.length) attach.push({ object: "product", action: "attach", subject, changes: [`attach ${wantedCredits.length} Credits`], method: "POST", path: `/v1/products/{{product:${key}}}/benefits`, body: { benefits: wantedCredits } });
+      if (match.replaced) {
+        detachCredits(match.replaced, `Product "${match.replaced.name}"`);
+        late.push({ object: "product", action: "archive", subject: `Product "${match.replaced.name}"`, changes: ["replaced by a product with the file's billing cycle; its subscribers keep it"], method: "PATCH", path: `/v1/products/${match.replaced.id}`, body: { is_archived: true } });
+      }
       continue;
     }
     productIds.set(key, found.id);
@@ -557,16 +487,8 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
       if (!match.adopting) changes.push(found.metadata[polarTags.terms] !== undefined && found.metadata[polarTags.terms] !== desired.terms ? `made from older terms (${String(found.metadata[polarTags.terms]).slice(0, 6)})` : "tag it as LobbyStack's");
     }
     if (Object.keys(body).length) steps.push({ object: "product", action: match.adopting ? "tag" : "update", subject, changes, method: "PATCH", path: `/v1/products/${found.id}`, body });
-    // Other kinds of benefit stay; Credits are exactly the file's, so no allowance comes off twice.
-    const attached = found.benefits;
-    const others = attached.filter((benefit) => benefit.type !== "meter_credit").map((benefit) => benefit.id);
-    const strays = attached.filter((benefit) => benefit.type === "meter_credit" && !wantedCredits.includes(benefit.id));
-    const missing = wantedCredits.filter((id) => isRef(id) || !attached.some((benefit) => benefit.id === id));
-    if (strays.length || missing.length) {
-      attach.push({ object: "product", action: "attach", subject, changes: [...(missing.length ? [`attach ${missing.length} Credits`] : []), ...strays.map((benefit) => `detach ${quoted([benefit])}${desired.period === "annual" ? ": annual plans report only the overage" : ""}`)], method: "POST", path: `/v1/products/${found.id}/benefits`, body: { benefits: [...others, ...wantedCredits] } });
-    }
+    detachCredits(found, subject);
   }
-  steps.push(...attach);
 
   // Products this brand no longer sells.
   const wantedProducts = new Set(catalog.products.map((product) => productKey(product.plan, product.period)));
@@ -574,8 +496,12 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     if (product.is_archived || !ours(product.metadata) || wantedProducts.has(productKey(String(product.metadata[polarTags.plan]), String(product.metadata[polarTags.interval])))) continue;
     const subject = `Product "${product.name}"`;
     if (!options.allowArchive) refuse("product", subject, `It sells ${String(product.metadata[polarTags.plan])} ${String(product.metadata[polarTags.interval])}, which the file no longer has. Run with --allow-archive to archive it; its subscribers keep their subscription.`);
-    else late.push({ object: "product", action: "archive", subject, changes: ["the file no longer sells it; its subscribers keep their subscription"], leftover: true, method: "PATCH", path: `/v1/products/${product.id}`, body: { is_archived: true } });
+    else {
+      detachCredits(product, subject);
+      late.push({ object: "product", action: "archive", subject, changes: ["the file no longer sells it; its subscribers keep their subscription"], leftover: true, method: "PATCH", path: `/v1/products/${product.id}`, body: { is_archived: true } });
+    }
   }
+  steps.push(...detach);
 
   // Discounts: code-less, so only an API checkout applies one.
   const liveDiscounts = snapshot.discounts.filter((discount) => ours(discount.metadata) && discountLive(discount, now));

@@ -1,6 +1,6 @@
-// What LobbyStack sells in Polar: the organization's settings, meters, Credits
-// benefits, products, discounts and webhook endpoints, read whole for a plan
-// or a check, and the single calls that change them. Polar has no
+// What LobbyStack sells in Polar: the organization's settings, meters,
+// products, discounts and webhook endpoints, read whole for a plan or a
+// check, and the single calls that change them. Polar has no
 // transactions and reads no idempotency key, so only reads are retried: a
 // write that timed out may have landed, and the caller finds it again by its
 // metadata tags instead of repeating it.
@@ -18,14 +18,6 @@ export type PolarOrganization = {
 };
 
 export type PolarMeter = { id: string; name: string; filter: unknown; aggregation: unknown; metadata: PolarMetadata; archived_at: string | null };
-
-export type PolarCredits = {
-  id: string;
-  type: "meter_credit";
-  description: string;
-  properties: { units: number; rollover: boolean; meter_id: string };
-  metadata: PolarMetadata;
-};
 
 export type PolarPrice = {
   id: string;
@@ -47,6 +39,7 @@ export type PolarProduct = {
   is_archived: boolean;
   metadata: PolarMetadata;
   prices: PolarPrice[];
+  /** Its benefits, of every kind: a run takes Credits (meter_credit) off LobbyStack's products. */
   benefits: Array<{ id: string; type: string; description?: string }>;
   created_at?: string;
   modified_at?: string | null;
@@ -73,7 +66,6 @@ export type PolarWebhookEndpoint = { id: string; url: string; format: string; ev
 export type PolarSnapshot = {
   organization: PolarOrganization;
   meters: PolarMeter[];
-  credits: PolarCredits[];
   products: PolarProduct[];
   discounts: PolarDiscount[];
   webhooks: PolarWebhookEndpoint[];
@@ -166,10 +158,9 @@ export class PolarCatalogClient {
     if (organizations.length !== 1) throw new Error(`The Polar token reaches ${organizations.length} organizations. Use an organization access token, which reaches exactly one.`);
     // One list at a time: a sandbox organization is small, and Polar limits the rate per token.
     const meters = await this.listAll<PolarMeter>("/v1/meters/");
-    const credits = await this.listAll<PolarCredits>("/v1/benefits/", { type: "meter_credit" });
     const products = await this.listAll<PolarProduct>("/v1/products/");
     const discounts = await this.listAll<PolarDiscount>("/v1/discounts/");
     const webhooks = await this.listAll<PolarWebhookEndpoint>("/v1/webhooks/endpoints");
-    return { organization: organizations[0]!, meters, credits, products, discounts, webhooks };
+    return { organization: organizations[0]!, meters, products, discounts, webhooks };
   }
 }

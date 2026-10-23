@@ -41,12 +41,12 @@ function storedRows(catalog: ApiBillingCatalog): { plans: StoredBillingPlan[]; p
   return { plans, prices };
 }
 
-const stepCodes: Record<PolarStepObject, BillingCheckCode> = { organization: "org_settings", meter: "meter", credits: "credits", product: "product", discount: "discount", webhook: "webhook" };
+const stepCodes: Record<PolarStepObject, BillingCheckCode> = { organization: "org_settings", meter: "meter", product: "product", discount: "discount", webhook: "webhook" };
 
 function stepCode(step: Pick<PolarStep, "object" | "action" | "leftover">): BillingCheckCode {
   if (step.leftover) return "leftover";
-  // A product's Credits are the Credits check's business.
-  if (step.object === "product" && step.action === "attach") return "credits";
+  // Credits on a product are the Credits check's business.
+  if (step.action === "detach") return "credits";
   return stepCodes[step.object];
 }
 
@@ -90,7 +90,7 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
 
   // File and Polar: everything an apply would still change.
   const desired = desiredPolarCatalog({ brand: file.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl });
-  const plan = planPolarChanges({ catalog: desired, snapshot, options: { adopt: false, allowReplace: true, allowArchive: true, allowLess: true }, ...(input.now ? { now: input.now } : {}) });
+  const plan = planPolarChanges({ catalog: desired, snapshot, options: { adopt: false, allowReplace: true, allowArchive: true }, ...(input.now ? { now: input.now } : {}) });
   const found = new Set<BillingCheckCode>();
   for (const step of plan.steps) {
     const code = stepCode(step);
@@ -104,7 +104,7 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
   const okLines: Array<[BillingCheckCode, string]> = [
     ["org_settings", `currency ${desired.currency.toUpperCase()}, ${desired.settings.allowMultipleSubscriptions ? "several subscriptions" : "one subscription"} per customer, plan changes ${desired.settings.portalPlanChanges ? "on" : "off"} in the portal`],
     ["meter", `${desired.meters.length} meters`],
-    ["credits", `${desired.credits.length} Credits on monthly products, none on annual ones`],
+    ["credits", "no Credits on the products: the worker reports only each month's overage"],
     ["product", `${desired.products.length} products, tagged and priced as the file says`],
     ["discount", desired.discounts.length ? `${desired.discounts.length} ${desired.discounts.length === 1 ? "discount" : "discounts"}` : "no discounts"],
     ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, Raw, on`] as [BillingCheckCode, string]] : []),

@@ -46,6 +46,9 @@ async function main(): Promise<void> {
     await setOverageSpendingCap({ db: app.db }, { userId, businessId, capCents: null });
     const afterRemoval = await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${businessId}:cap-removed`, estimatedSegments: (starter.alertSmsSegmentsIncluded ?? 0) + 1 });
     assert(afterRemoval.allowed, "Removing the cap did not restore paid overage usage.");
+    // A monthly plan reports only the overage to Polar too.
+    const monthlyEvent = (await migrator.db.select().from(billingUsageEvents).where(eq(billingUsageEvents.id, afterRemoval.usageEventId!)).limit(1))[0];
+    assert(monthlyEvent?.billingIntervalAtRecordTime === "monthly" && monthlyEvent.billableQuantity === 1, "Monthly-plan billable quantity was not isolated from included usage.");
 
     const planSource = `alert_sms:test:${businessId}:plan-snapshot`;
     await reserveAlertSmsUsage(context, { businessId, sourceKey: planSource, estimatedSegments: 1 });
@@ -72,7 +75,7 @@ async function main(): Promise<void> {
 
     const status = await getBillingUsageStatus(context, { businessId });
     assert(status.usageComplete === false && status.overageSpendingCapCents === null, "Billing status did not expose completeness or cap removal.");
-    console.log(JSON.stringify({ multiKindMetering: true, zeroDollarCap: true, annualAccounting: true, planSnapshotPreserved: true, concurrentReservationsSerialized: true, unauthorizedChangeDenied: true, retriesIdempotent: true, capRemovalRestoredOverages: true, completenessReported: true }));
+    console.log(JSON.stringify({ multiKindMetering: true, zeroDollarCap: true, annualAccounting: true, monthlyAccounting: true, planSnapshotPreserved: true, concurrentReservationsSerialized: true, unauthorizedChangeDenied: true, retriesIdempotent: true, capRemovalRestoredOverages: true, completenessReported: true }));
   } finally {
     for (const id of [businessId, annualBusinessId, concurrentBusinessId]) await migrator.db.delete(businesses).where(eq(businesses.id, id)).catch(() => undefined);
     await migrator.db.delete(users).where(eq(users.id, userId)).catch(() => undefined);

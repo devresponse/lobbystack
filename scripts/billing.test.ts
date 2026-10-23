@@ -202,7 +202,9 @@ describe("pnpm billing", () => {
     const applied = await billing(["apply", ...sandbox, "--adopt", "--yes", "--railway-file", railwayFile], context);
     expect(applied.err).toBe("");
     expect(applied.code).toBe(0);
-    expect(context.fake.writes.every((entry) => entry.method === "PATCH")).toBe(true);
+    // Tags, and the Credits taken off the monthly products: nothing new is made.
+    expect(context.fake.writes.every((entry) => entry.method === "PATCH" || entry.path.endsWith("/benefits"))).toBe(true);
+    expect(applied.out).toContain('detach Product "Starter monthly"');
     expect(context.fake.state.products.map((product) => product.id)).toEqual(ids);
     expect(applied.out).toContain("Links: recorded 6 changes in run");
     expect(applied.out).toContain("Result: in sync (exit 0).");
@@ -296,7 +298,7 @@ describe("pnpm billing", () => {
     expect(plan.code).toBe(0);
     const shown = JSON.parse(plan.out) as { catalog: Array<{ key: string; action: string }>; steps: Array<{ action: string; object: string }>; refusals: string[] };
     expect(shown.catalog.map((change) => `${change.action} ${change.key}`)).toEqual(["update pro", "update pro/monthly/cad"]);
-    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(["create", "create", "create", "create", "attach", "attach"]);
+    expect(shown.steps.filter((step) => step.object === "product").map((step) => step.action)).toEqual(["create", "create", "create", "create"]);
     expect(shown.refusals).toEqual([]);
 
     context.instance.requests.length = 0;
@@ -338,7 +340,8 @@ describe("pnpm billing", () => {
   it("verifies the three copies, exits 1 on a drift with --json listing every check, and 2 when Polar can't be read", async () => {
     const context = await setUp();
     expect((await billing(["apply", ...sandbox, "--adopt", "--yes"], context)).code).toBe(0);
-    context.fake.state.credits.find((credits) => credits.metadata.lobbystack_key === "alloplace/pro/voice_minutes")!.properties.units = 450;
+    // Credits put back on a product in Polar's dashboard.
+    context.fake.state.products.find((product) => product.name === "Pro monthly")!.benefitIds = [context.fake.state.benefits[0]!.id];
     const drift = await billing(["verify", ...sandbox], context);
     expect(drift.code).toBe(1);
     expect(drift.out.split("\n")[0]).toMatch(/^alloplace billing\.json v1 \([0-9a-f]{12}\) against Polar sandbox and https:\/\/demo\.alloplace\.com$/);

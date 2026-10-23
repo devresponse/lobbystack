@@ -1,4 +1,4 @@
-import type { PolarCredits, PolarDiscount, PolarMeter, PolarMetadata, PolarOrganization, PolarPrice, PolarProduct, PolarWebhookEndpoint } from "@lobbystack/providers";
+import type { PolarDiscount, PolarMeter, PolarMetadata, PolarOrganization, PolarPrice, PolarProduct, PolarWebhookEndpoint } from "@lobbystack/providers";
 
 // A stand-in for Polar's API in tests: the calls pnpm billing and the daily
 // check make, with the rules Polar's server enforces (section 10.4 of the
@@ -6,11 +6,13 @@ import type { PolarCredits, PolarDiscount, PolarMeter, PolarMetadata, PolarOrgan
 
 type StoredProduct = Omit<PolarProduct, "benefits"> & { benefitIds: string[] };
 type StoredMeter = PolarMeter & { counted?: boolean };
+/** A benefit: Credits (meter_credit), as polar-setup.mjs made, or another kind. */
+export type StoredBenefit = { id: string; type: string; description: string; properties?: { units: number; rollover: boolean; meter_id: string }; metadata: PolarMetadata };
 
 export type FakePolarState = {
   organization: PolarOrganization;
   meters: StoredMeter[];
-  credits: PolarCredits[];
+  benefits: StoredBenefit[];
   products: StoredProduct[];
   discounts: PolarDiscount[];
   webhooks: PolarWebhookEndpoint[];
@@ -36,7 +38,7 @@ export function createFakePolar(options: { currency?: string; organization?: Par
   const state: FakePolarState = {
     organization: { id: "org_test", name: "Test organization", default_presentment_currency: options.currency ?? "cad", subscription_settings: { allow_multiple_subscriptions: true, allow_customer_updates: true, proration_behavior: "prorate" }, customer_portal_settings: { usage: { show: true }, subscription: { update_seats: true, update_plan: false } }, ...options.organization },
     meters: [],
-    credits: [],
+    benefits: [],
     products: [],
     discounts: [],
     webhooks: [],
@@ -55,7 +57,7 @@ export function createFakePolar(options: { currency?: string; organization?: Par
   }));
   const productView = (product: StoredProduct): PolarProduct => {
     const { benefitIds, ...rest } = product;
-    return { ...rest, benefits: benefitIds.map((benefitId) => state.credits.find((credits) => credits.id === benefitId)).filter((credits): credits is PolarCredits => credits !== undefined).map((credits) => ({ id: credits.id, type: credits.type, description: credits.description })) };
+    return { ...rest, benefits: benefitIds.map((benefitId) => state.benefits.find((benefit) => benefit.id === benefitId)).filter((benefit): benefit is StoredBenefit => benefit !== undefined).map((benefit) => ({ id: benefit.id, type: benefit.type, description: benefit.description })) };
   };
 
   function route(method: string, path: string, body: Record<string, unknown>): Response {
@@ -63,7 +65,6 @@ export function createFakePolar(options: { currency?: string; organization?: Par
     if (method === "GET") {
       const items = resource === "organizations" ? [state.organization]
         : resource === "meters" ? state.meters.map(({ counted: _counted, ...meter }) => meter)
-        : resource === "benefits" ? state.credits
         : resource === "products" ? state.products.map(productView)
         : resource === "discounts" ? state.discounts
         : resource === "webhooks" ? state.webhooks
@@ -97,21 +98,14 @@ export function createFakePolar(options: { currency?: string; organization?: Par
       if (body.is_archived !== undefined) meter.archived_at = body.is_archived ? new Date().toISOString() : null;
       return json(200, meter);
     }
-    if (resource === "benefits") {
-      const properties = body.properties as PolarCredits["properties"] | undefined;
-      if (properties && !(properties.units > 0)) return refuse("Input should be greater than 0", "properties.units");
-      if (properties && !state.meters.some((meter) => meter.id === properties.meter_id)) return refuse("Meter not found.", "properties.meter_id");
-      if (method === "POST") {
-        const credits: PolarCredits = { id: id("benefit"), type: "meter_credit", description: String(body.description), properties: properties!, metadata: (body.metadata ?? {}) as PolarMetadata };
-        state.credits.push(credits);
-        return json(201, credits);
-      }
-      const credits = state.credits.find((entry) => entry.id === objectId);
-      if (!credits) return json(404, { detail: "Not found" });
-      if (body.description !== undefined) credits.description = String(body.description);
-      if (properties) credits.properties = properties;
-      if (body.metadata !== undefined) credits.metadata = body.metadata as PolarMetadata;
-      return json(200, credits);
+    if (resource === "benefits" && method === "POST") {
+      // Only polar-setup.mjs's Credits: LobbyStack makes no benefits.
+      const properties = body.properties as StoredBenefit["properties"];
+      if (!properties || !(properties.units > 0)) return refuse("Input should be greater than 0", "properties.units");
+      if (!state.meters.some((meter) => meter.id === properties.meter_id)) return refuse("Meter not found.", "properties.meter_id");
+      const benefit: StoredBenefit = { id: id("benefit"), type: String(body.type), description: String(body.description), properties, metadata: (body.metadata ?? {}) as PolarMetadata };
+      state.benefits.push(benefit);
+      return json(201, benefit);
     }
     if (resource === "products") {
       const currency = String(state.organization.default_presentment_currency);
@@ -125,6 +119,8 @@ export function createFakePolar(options: { currency?: string; organization?: Par
       const product = state.products.find((entry) => entry.id === objectId);
       if (!product) return json(404, { detail: "Not found" });
       if (sub === "benefits") {
+        // The whole list: a benefit left out is taken off the product.
+        if ((body.benefits as string[]).some((benefitId) => !state.benefits.some((benefit) => benefit.id === benefitId))) return refuse("Benefit not found.", "benefits");
         product.benefitIds = (body.benefits as string[]).slice();
         return json(200, productView(product));
       }
@@ -205,7 +201,7 @@ const setupMeters = [
   { name: "Call transfers", event: "billing.outbound_call_attempts", noun: "call transfers" },
 ];
 
-/** What polar-setup.mjs made in a CAD organization on 2026-10-19: three meters, six Credits, four products and the webhook, none of them tagged. */
+/** What polar-setup.mjs made in a CAD organization on 2026-10-19: three meters, four products, Credits on the two monthly ones, and the webhook, none of them tagged. */
 export async function seedPolarSetup(fake: FakePolar, webhookUrl = "https://demo.alloplace.com/api/webhooks/polar"): Promise<void> {
   const call = async (method: string, path: string, body: unknown) => (await (await fake.fetch(`https://sandbox-api.polar.sh${path}`, { method, body: JSON.stringify(body) })).json()) as { id: string };
   const meterIds: string[] = [];

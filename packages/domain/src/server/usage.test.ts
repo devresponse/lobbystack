@@ -8,7 +8,7 @@ const event = (sourceKey: string, usageKind: string, quantity: number, isFinal: 
 const starter = { plan: "starter" as const, planCode: null };
 const builtIn = { tiers: builtInBillingPlanLimits, plans: {} };
 
-describe("overage spend and annual billing", () => {
+describe("overage spend and overage billing", () => {
   it("never counts website chats as overage spend", () => {
     const chats = Array.from({ length: 60 }, (_, index) => event(`chat:${index}`, "chat_ai_tokens", 1, true, index, "monthly"));
     const replay = replayEvents(chats, starter, builtIn);
@@ -27,6 +27,12 @@ describe("overage spend and annual billing", () => {
     expect(billableQuantityForEvent([used, phone], widgetEnded, starter, builtIn)).toBe(30);
     // A repeat correction of the phone call keeps the 20 it already billed.
     expect(billableQuantityForEvent([used, widgetEnded], phone, starter, builtIn, { quantity: 120, billableQuantity: 20 })).toBe(20);
+  });
+
+  it("bills a monthly plan's overage the same way, so Polar's products need no Credits", () => {
+    const used = event("voice:used", "voice_seconds", 8_900, true, 0, "monthly");
+    expect(billableQuantityForEvent([used], event("voice:phone", "voice_seconds", 120, true, 1, "monthly"), starter, builtIn)).toBe(20);
+    expect(billableQuantityForEvent([], event("voice:first", "voice_seconds", 120, true, 1, "monthly"), starter, builtIn)).toBe(0);
   });
 });
 

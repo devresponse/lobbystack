@@ -14,7 +14,7 @@ Use this guide to connect your Polar organization to hosted Starter and Pro bill
 
 ## Create the hosted products
 
-Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.md`](../../brands/README.md)). It writes the file's plans to the billing catalog, creates or adopts the Polar products, meters, benefits and webhook the file describes, then links them in the catalog. The plan screens and usage limits follow the catalog as soon as it holds the Starter and Pro rows, in its currency. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included. An apply that changes a sold plan's terms, its prices included, stops that plan's checkout until the run links it again, so run `pnpm billing apply` again if one stops part-way. Confirm the live prices in Polar before accepting payments.
+Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.md`](../../brands/README.md)). It writes the file's plans to the billing catalog, creates or adopts the Polar meters, products, discounts and webhook the file describes, takes any Credits off the products, then links them in the catalog. The plan screens and usage limits follow the catalog as soon as it holds the Starter and Pro rows, in its currency. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included. An apply that changes a sold plan's terms, its prices included, stops that plan's checkout until the run links it again, so run `pnpm billing apply` again if one stops part-way. Confirm the live prices in Polar before accepting payments.
 
 Use `starter` or `pro` for checkout, with monthly or annual billing.
 
@@ -40,7 +40,7 @@ Grant your token `events:write` access for `POST /v1/events/ingest`. You don’t
 
 Keep your existing Polar meters and prices. Connecting this application leaves them unchanged. See [Polar event ingestion](https://polar.sh/docs/features/usage-based-billing/event-ingestion) for the request format.
 
-Starter and Pro include usage allowances that reset each month, including on annual subscriptions. The worker sends `billableQuantity` when present, including zero; otherwise, it sends the recorded quantity.
+Starter and Pro include usage allowances that reset on the first of each month (UTC), on monthly and annual subscriptions alike, whatever day the subscription renews. The worker sends only the usage past them, as `billableQuantity`, including zero, so the products carry no Credits and Polar bills every unit it receives. An event recorded without `billableQuantity` sends its whole quantity.
 
 The worker skips these events:
 
@@ -123,7 +123,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 - Confirm invalid webhook signatures receive an unauthorized response.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.
-- Confirm annual subscriptions send monthly overage quantities.
+- Confirm monthly and annual subscriptions send only each month's overage quantities, and that no product carries Credits.
 - Confirm worker logs identify usage-sync failures and that requeueing recovers them.
 
 Self-hosted workspaces remain outside hosted billing enforcement.

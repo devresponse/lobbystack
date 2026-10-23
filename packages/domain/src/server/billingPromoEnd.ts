@@ -11,7 +11,8 @@ import type { DomainContext } from "./context";
 // price. A week before it, the worker tells Polar what the renewal does (move
 // to the tier's standard product without the plan's discount, or cancel) and
 // emails the business's owners. Once the renewal happens, Polar's webhook
-// moves the account off the plan as for any other product change.
+// moves the account off the plan as for any other product change; a canceled
+// subscription is no longer live, so its plan stops counting without one.
 
 /** How long before a promo plan ends the owners hear about it and Polar is told. */
 export const PROMO_END_NOTICE_MS = 7 * 24 * 60 * 60_000;

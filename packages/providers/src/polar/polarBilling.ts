@@ -64,18 +64,21 @@ export class PolarBillingProvider {
    */
   async changeSubscriptionProduct(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior; discountId?: string | null; metadata?: Record<string, string> }): Promise<PolarSubscription> {
     // discount_id only when asked: sent, even as null, it changes the discount too (from the next billing cycle).
-    const body = { product_id: input.productId, proration_behavior: input.prorationBehavior, ...(input.discountId !== undefined ? { discount_id: input.discountId } : {}), ...(input.metadata ? { metadata: input.metadata } : {}) };
-    return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(input.subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
+    return await this.patchSubscription(input.subscriptionId, { product_id: input.productId, proration_behavior: input.prorationBehavior, ...(input.discountId !== undefined ? { discount_id: input.discountId } : {}), ...(input.metadata ? { metadata: input.metadata } : {}) });
   }
 
   /** Cancels a subscription when its period ends, as when a promo plan ends with it. Needs subscriptions:write. */
   async cancelSubscriptionAtPeriodEnd(subscriptionId: string): Promise<PolarSubscription> {
-    return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify({ cancel_at_period_end: true }) }));
+    return await this.patchSubscription(subscriptionId, { cancel_at_period_end: true });
   }
 
   /** Removes a subscription's discount from its next billing cycle on. Needs subscriptions:write. */
   async removeSubscriptionDiscount(subscriptionId: string): Promise<PolarSubscription> {
-    return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify({ discount_id: null }) }));
+    return await this.patchSubscription(subscriptionId, { discount_id: null });
+  }
+
+  private async patchSubscription(subscriptionId: string, body: Record<string, unknown>): Promise<PolarSubscription> {
+    return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
   }
 
   /**

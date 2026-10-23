@@ -130,8 +130,13 @@ export type PolarProductLinks = {
   planFor(productId: string | null | undefined): { plan: HostedCheckoutPlanSlug; interval: BillingInterval; code: string } | null;
 };
 
+/** The name of the optional variable that sells a plan's price before the catalog links a product, such as POLAR_STARTER_MONTHLY_PRODUCT_ID. */
+export function polarProductVariableName(plan: string, interval: string): string {
+  return `POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`;
+}
+
 function productVariable(env: Record<string, string | undefined>, plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null {
-  return env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]?.trim() || null;
+  return env[polarProductVariableName(plan, interval)]?.trim() || null;
 }
 
 const isCheckoutPlan = (value: string): value is HostedCheckoutPlanSlug => (hostedCheckoutPlanSlugs as readonly string[]).includes(value);

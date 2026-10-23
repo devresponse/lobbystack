@@ -37,6 +37,9 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
   try {
     await client!.db.transaction(async (tx) => {
       await tx.execute(sql`reset role`);
+      // The lock every catalog apply and link takes: the catalog test that commits its
+      // applies can't add or delete rows while this one reads the tables.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`);
       await tx.execute(sql`delete from public.billing_prices`);
       await tx.execute(sql`delete from public.billing_plans`);
       await tx.execute(sql`delete from public.billing_runs`);

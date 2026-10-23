@@ -84,6 +84,13 @@ function includedQuantity(config: BillingPlanLimits, kind: NonAiBillingUsageKind
   return config.outboundCallAttemptsIncluded;
 }
 
+function limitReachedCode(kind: NonAiBillingUsageKind): string {
+  if (kind === "voice_seconds") return billingErrorCodes.voiceLimitReached;
+  if (kind === "alert_sms_segments") return billingErrorCodes.alertSmsLimitReached;
+  if (kind === "chat_ai_tokens") return billingErrorCodes.chatAiLimitReached;
+  return billingErrorCodes.outboundCallAttemptLimitReached;
+}
+
 function rateCents(config: BillingPlanLimits, kind: NonAiBillingUsageKind): number {
   if (kind === "voice_seconds") return (config.voiceOverageRatePerMinuteCents ?? 0) / 60;
   if (kind === "alert_sms_segments") return config.alertSmsOverageRatePerSegmentCents ?? 0;
@@ -301,19 +308,17 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   quantity = Math.max(0, quantity ?? 0);
   if (quantity <= 0) {
     if (input.usageKind === "voice_seconds" && hasUnlimitedVoice(billing)) return { allowed: true, errorCode: null, syncNeeded: false, periodKey, plan: billing.plan };
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  const included = includedQuantity(currentLimits(billing), input.usageKind);
-  if (!currentLimits(billing).overagesBillable && included !== null && current.usage[input.usageKind] + quantity > included) {
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+  const limits = currentLimits(billing);
+  const included = includedQuantity(limits, input.usageKind);
+  if (!limits.overagesBillable && included !== null && current.usage[input.usageKind] + quantity > included) {
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const eventPayload = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: input.usageKind === "outbound_call_attempts" || input.usageKind === "chat_ai_tokens" };
   const simulated = replayEvents([...events, eventPayload], billing, billing.limits);
   if (billing.capCents !== null && simulated.rawSpendCents > billing.capCents) {
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const syncNeeded = billing.plan === "starter" || billing.plan === "pro";
   const others = events.filter((row) => row.sourceKey !== input.sourceKey);

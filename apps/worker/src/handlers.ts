@@ -777,7 +777,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "This promo plan isn't on sale right now." });
         return { status: "skipped", entityId: requestId };
       }
-      const promo = request.planCode && sale ? { plan: request.planCode, ...sale, metadata: { lobbystack_plan: request.planCode, lobbystack_checkout: requestId } } : null;
+      const promo = request.planCode && sale ? { ...sale, metadata: { lobbystack_plan: request.planCode, lobbystack_checkout: requestId } } : null;
       // A business that already pays moves its subscription: Polar refuses a second one.
       if (request.subscription) {
         const changed = await changeBillingPlan(dependencies, { businessId, requestId, target: request.target, billingInterval: request.billingInterval, subscription: request.subscription, promo, links });

@@ -5,6 +5,7 @@ import { billingProfileSchema, trimTrailingSlashes, type ApiBillingCatalog, type
 
 import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, POLAR_WEBHOOK_PATH, type PolarStep, type PolarStepObject } from "./billingPolar";
+import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
 
 // Verify compares the three copies of a brand's plans two at a time, so a
@@ -164,7 +165,7 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
     const row = catalog.plans.find((entry) => entry.code === code);
     if (row?.status !== "active") continue;
     const link = row.prices.find((price) => price.period === period && price.retired_at === null)?.polar_id ?? null;
-    const name = `POLAR_${code.toUpperCase()}_${period.toUpperCase()}_PRODUCT_ID`;
+    const name = polarProductVariableName(code, period);
     if (value === link) leftover.push(name);
     else add("product_vars", "postgres_polar", "warn", name, `${name} is ${value}, not the linked product ${link ?? "(none)"}. Checkout sells the linked product and ignores the variable, so remove it from the instance.`);
   }

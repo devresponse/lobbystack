@@ -666,7 +666,7 @@ export async function reconcileBillingProviderEvent(
     // (subscription.active beside order.paid). Without this lock both workers
     // read the same pre-paid account and each reports a subscription start, so
     // the event would count webhook races instead of subscriptions.
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`billing-reconcile:${input.businessId}`}, 0))`);
+    await lockBillingAccount(tx, input.businessId);
     const event = (await tx.select({ id: providerEvents.id, providerEventId: providerEvents.providerEventId, eventType: providerEvents.eventType, status: providerEvents.status, payload: providerEvents.payload, createdAt: providerEvents.createdAt })
       .from(providerEvents)
       .where(and(eq(providerEvents.id, input.providerEventId), eq(providerEvents.businessId, input.businessId)))
@@ -694,7 +694,7 @@ export async function reconcileBillingProviderEvent(
     if (billingKey) {
       const customerId = stringField(transactionPayload, "customerId", "externalCustomerId") ?? stringField(payload, "customerId", "externalCustomerId") ?? stringField(customer, "id", "externalId") ?? existing?.customerId;
       const subscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id") ?? existing?.subscriptionId;
-      // An unmapped product (a retired or legacy product id) keeps the stored plan rather than a display name.
+      // A product no catalog price or variable names keeps the stored plan rather than a display name; a retired price's product still maps.
       const plan = stringField(transactionPayload, "plan") ?? stringField(payload, "plan");
       // The exact plan the product sells, which differs from plan for a promo plan.
       const planCode = stringField(transactionPayload, "planCode") ?? stringField(payload, "planCode");

@@ -7,6 +7,7 @@ import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type
 import {
   billingProfileHash,
   canonicalBillingProfileJson,
+  canonicalJson,
   normalizeBillingProfile,
   planTermsJson,
   polarEnvForBaseUrl,
@@ -27,6 +28,7 @@ import {
   type ResolvedBillingPlan,
 } from "@lobbystack/shared";
 
+import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
 import { PublicApiError, invalidRequest } from "./publicApi/errors";
 import { idempotencyRequestHash } from "./publicApi/idempotency";
@@ -87,20 +89,14 @@ export type BillingCatalogWrite = {
 
 export type BillingCatalogDiff = { writes: BillingCatalogWrite[]; refusals: ApiBillingCatalogRefusal[] };
 
-// The plan columns an apply sets from the file. terms_hash covers all but the last four.
+// The plan columns an apply sets from the file. terms_hash covers those in billingPlanTermColumns: all but overage and the last five.
 const planValueColumns = ["tier", "sold", "custom", "overage", "voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "voice_rate", "sms_rate", "call_rate", "months", "ends", "discount", "terms_hash", "names", "access", "offer_end", "sort"] as const;
 const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers"] as const;
 const rateColumns = ["voice_rate", "sms_rate", "call_rate"] as const;
 const actionOrder: Record<ApiBillingCatalogChange["action"], number> = { retire: 0, update: 1, restore: 2, insert: 3 };
 
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.entries(value as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([key, entry]) => [key, stable(entry)]));
-}
-
 function same(a: unknown, b: unknown): boolean {
-  return JSON.stringify(stable(a ?? null)) === JSON.stringify(stable(b ?? null));
+  return canonicalJson(a ?? null) === canonicalJson(b ?? null);
 }
 
 function byKey(a: string, b: string): number {
@@ -201,7 +197,7 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
   const livePrices = input.current.prices.filter((price) => price.retired_at === null && filePlanCodes.has(price.plan));
   const lockedCurrencies = [...new Set(livePrices.filter((price) => price.currency !== input.currency && price.polar_id !== null).map((price) => price.currency))].sort();
   if (lockedCurrencies.length) {
-    refusals.push({ code: "currency_locked", message: `Polar already sells live prices in ${lockedCurrencies.join(", ")}, so the currency can't change to ${input.currency} until Polar has products in it.`, path: "billing_file.currency" });
+    refusals.push({ code: "currency_locked", message: `Polar already sells live prices in ${lockedCurrencies.join(", ")}, so the currency can't change to ${input.currency} while those prices are live.`, path: "billing_file.currency" });
   }
   const kept = new Set<string>();
   for (const plan of applied.values()) {
@@ -215,7 +211,7 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
         if (live.cents !== price.cents) write({ table: "billing_prices", key, action: "update", fields: { cents: { from: live.cents, to: price.cents } }, raises_price: price.cents > live.cents }, { cents: price.cents }, live.id);
         continue;
       }
-      // A period back in the file brings back its latest row, so the next PR can bring back the same product.
+      // A period back in the file brings back its latest row, and with it the Polar product its link names.
       const [latest] = rows.filter((row) => row.retired_at !== null && row.currency === price.currency).sort((a, b) => byKey(b.retired_at!, a.retired_at!) || byKey(b.updated_at, a.updated_at));
       if (latest) {
         const fields: ApiBillingCatalogChange["fields"] = { retired_at: { from: latest.retired_at, to: null } };
@@ -386,7 +382,7 @@ export type BillingDeploymentPolar = {
   org: string | null;
   /** SHA-256 of POLAR_WEBHOOK_SECRET; null where it isn't set, as on the worker. */
   secretSha256: string | null;
-  /** The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period: checkout reads one only before a link makes its plan active. */
+  /** The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period: checkout reads one only before its plan's first link. */
   productVars: Record<string, string | null>;
 };
 
@@ -411,7 +407,7 @@ export function billingDeploymentPolar(env: Record<string, string | undefined>, 
     secretSha256: secret ? sha256(secret) : null,
     productVars: Object.fromEntries(productVarKeys.map((key) => {
       const [plan, period] = key.split("/") as [string, string];
-      return [key, value(`POLAR_${plan.toUpperCase()}_${period.toUpperCase()}_PRODUCT_ID`)];
+      return [key, value(polarProductVariableName(plan, period))];
     })),
   };
 }

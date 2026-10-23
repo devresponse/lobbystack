@@ -144,8 +144,6 @@ export const billingProfileSchema = billingProfileShape.superRefine(checkBilling
 
 /** A billing.json as checked. */
 export type BillingProfile = z.output<typeof billingProfileSchema>;
-/** A billing.json as written, before its checks. */
-export type BillingProfileInput = z.input<typeof billingProfileSchema>;
 /** A checked file without its $schema, every object's keys in order. */
 export type NormalizedBillingProfile = Omit<BillingProfile, "$schema">;
 
@@ -156,7 +154,7 @@ function sortedKeys(value: unknown): unknown {
 }
 
 /** JSON with every object's keys sorted and no spaces, so equal values always give equal text and hashes. */
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortedKeys(value));
 }
 

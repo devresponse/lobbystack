@@ -180,7 +180,8 @@ const billingIntervals = ["monthly", "annual"] as const;
 export const apiBillingSchema = z.object({
   plan: z.enum(billingPlanSlugs).describe("The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."),
   promo_plan: z.string().nullable().describe("The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan."),
-  plan_ends: nullableTimestamp.describe("When a promo plan that lasts a set number of months ends. Null otherwise."),
+  plan_ends: nullableTimestamp.describe("When a promo plan that lasts a set number of months ends: it ends at the subscription's first renewal from then on. Null otherwise."),
+  plan_ends_with: z.enum(["tier", "cancel"]).nullable().describe("What that renewal does: tier moves the subscription to the plan's tier at its standard price, cancel ends it. Null when plan_ends is."),
   managed: z.boolean().describe("true when the deployment's operator runs the plan outside Polar and bills the business directly."),
   subscription_state: z.string().nullable().describe("The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription."),
   billing_interval: z.enum(billingIntervals).nullable().describe("Null unless the plan is Starter or Pro."),

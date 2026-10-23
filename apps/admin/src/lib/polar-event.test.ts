@@ -76,4 +76,11 @@ describe("Polar payload normalization", () => {
     expect(event("prod_promo")).toMatchObject({ plan: "starter", planCode: "salons-half-off", billingInterval: "monthly" });
     expect(event("prod_starter")).toMatchObject({ plan: "starter", planCode: "starter" });
   });
+
+  it("names the subscription's discount, from a subscription or an order's", () => {
+    const customer = { external_id: `business:${businessId}` };
+    expect(normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", discount_id: "disc_1", customer }).payload).toMatchObject({ discountId: "disc_1" });
+    expect(normalizePolarEvent("order.paid", { id: "ord_1", customer, subscription: { id: "sub_1", status: "active", discount_id: "disc_2" } }).payload).toMatchObject({ discountId: "disc_2" });
+    expect(normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", discount_id: null, customer }).payload).not.toHaveProperty("discountId");
+  });
 });

@@ -5,7 +5,7 @@ import { assertCertificationRecipient, type BrandImage } from "@lobbystack/share
 
 import { renderEmail, type TemplateName } from "./templates";
 
-export { invitationSubject, type TemplateName } from "./templates";
+export { invitationSubject, promoEndingSubject, type TemplateName } from "./templates";
 
 export type SmtpConfig = {
   host: string;

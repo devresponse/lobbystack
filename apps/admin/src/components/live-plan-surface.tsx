@@ -133,7 +133,7 @@ export function LivePlanSurface() {
                 ) : null}
                 {promoPlan?.ends ? (
                   <span className="text-sm text-muted-foreground">
-                    {t("billing.promo.ends", { date: formatBillingDate(promoPlan.ends, i18n.language) })}
+                    {t(promoPlan.endsWith === "cancel" ? "billing.promo.endsCancel" : "billing.promo.endsTier", { date: formatBillingDate(promoPlan.ends, i18n.language), tier: t(`billing.planLabels.${promoPlan.tier}`) })}
                   </span>
                 ) : null}
               </div>

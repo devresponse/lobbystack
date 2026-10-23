@@ -343,6 +343,7 @@
       "title": "Nadogradite paket",
       "description": "Izaberite paket koji najviše odgovara Vašem timu.",
       "changesSubscription": "Već imate pretplatu, pa će ona biti izmenjena umesto otvaranja plaćanja. Svaka razlika se naplaćuje sa sačuvanog načina plaćanja.",
+      "leavesPromo": "Promenom paketa prestaje paket {{plan}}, a sa njim i popust.",
       "enterpriseSubject": "Enterprise paket",
       "billingIntervalLabel": "Period naplate",
       "annualDiscount": "Uštedite {{percent}}%",
@@ -519,7 +520,8 @@
       "unlocks": "Ovaj kod otključava {{plan}}.",
       "features": "Funkcije paketa {{tier}}, uz:",
       "moreThanTier": "Više nego {{tier}}",
-      "ends": "Do {{date}}",
+      "endsTier": "Do {{date}}, zatim {{tier}}",
+      "endsCancel": "Do {{date}}, zatim pretplata ističe",
       "unavailable": "Trenutno nije u prodaji",
       "interval": {
         "monthly": "Mesečno",

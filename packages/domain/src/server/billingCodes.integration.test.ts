@@ -13,7 +13,8 @@ import { billingCodeView, createBillingCodeForApi, findBillingCodeOffer, listBil
 import { readBillingPlanLimitBook, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar } from "./billingPolar.testing";
-import { createCheckoutForApi, getBillingForApi } from "./publicApi/operations";
+import { loadPromoEndWork, recordPromoEnd } from "./billingPromoEnd";
+import { createCheckoutForApi, endPromoPlanForApi, getBillingForApi } from "./publicApi/operations";
 import { createBusiness } from "./tenancy";
 import { getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction } from "./usage";
 
@@ -255,7 +256,7 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       // The business reads the plan it is on, and no other promo plan.
       await as(tx, "lobbystack_app");
       const read = (run: (scoped: DatabaseTransaction) => Promise<unknown>) => withBusinessTransaction(tx as unknown as Database, { businessId, userId, actorType: "operator" }, run);
-      expect(await read((scoped) => loadBusinessPromoPlan(scoped, businessId))).toEqual({ plan: "pro-launch", tier: "pro", names: names("Pro launch offer"), discount: null, currency: "cad", ends: "2027-05-01T00:00:00.000Z", prices: [{ interval: "monthly", cents: 6000, perMonth: 6000 }] });
+      expect(await read((scoped) => loadBusinessPromoPlan(scoped, businessId))).toEqual({ plan: "pro-launch", tier: "pro", names: names("Pro launch offer"), discount: null, currency: "cad", ends: "2027-05-01T00:00:00.000Z", endsWith: "tier", prices: [{ interval: "monthly", cents: 6000, perMonth: 6000 }] });
       expect(await read(async (scoped) => (await scoped.execute<Row>(sql`select code from public.billing_plans where access = 'code'`)).rows)).toEqual([{ code: "pro-launch" }]);
       // The code is used up, and a code for the plan the business already pays for has nothing to sell.
       expect(await thrown(dashboard("LAUNCH50"))).toMatchObject({ code: "promo_invalid" });
@@ -351,6 +352,129 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       // The worker reads every plan.
       await as(tx, "lobbystack_worker");
       expect(Object.keys((await readBillingPlanLimitBook(tx)).plans).sort()).toEqual(["pro-launch", "salons-half-off", "salons-plus"]);
+    });
+  });
+
+  describe("promo endings", () => {
+    /** Polar's webhook for the business's subscription, reconciled by the worker. */
+    async function polarEvent(tx: DatabaseTransaction, businessId: string, eventType: string, payload: Record<string, unknown>) {
+      await as(tx, "owner");
+      const [event] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, status: "active", billingInterval: "monthly", subscriptionId: "sub_promo", ...payload } }).returning({ id: providerEvents.id });
+      await as(tx, "lobbystack_worker");
+      await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: event!.id });
+    }
+    const account = async (tx: DatabaseTransaction, businessId: string) => {
+      await as(tx, "owner");
+      const [row] = await rows(tx, sql`select plan, plan_code, plan_ends, end_with, end_notice_at, end_set_at from public.billing_accounts where business_id = ${businessId}::uuid`);
+      await as(tx, "lobbystack_worker");
+      return row!;
+    };
+    const outbox = async (tx: DatabaseTransaction, businessId: string, topic: string) => {
+      await as(tx, "owner");
+      const found = await rows(tx, sql`select payload from public.outbox_messages where business_id = ${businessId}::uuid and topic = ${topic} order by created_at`);
+      await as(tx, "lobbystack_worker");
+      return found.map((row) => row.payload as Record<string, unknown>);
+    };
+    const audits = async (tx: DatabaseTransaction, businessId: string, eventType: string) => {
+      await as(tx, "owner");
+      const found = await rows(tx, sql`select payload from public.audit_logs where business_id = ${businessId}::uuid and event_type = ${eventType}`);
+      await as(tx, "lobbystack_worker");
+      return found.map((row) => row.payload);
+    };
+    // The owners' email resolver trusts only the worker's login identity.
+    async function recordAsWorker(tx: DatabaseTransaction, input: Parameters<typeof recordPromoEnd>[1]) {
+      await tx.execute(sql`set local session authorization lobbystack_worker`);
+      try {
+        return await recordPromoEnd(context(tx), input);
+      } finally {
+        await tx.execute(sql`reset session authorization`);
+        await as(tx, "lobbystack_worker");
+      }
+    }
+
+    it("ends a plan at the renewal that reaches its end: a week ahead it tells Polar and emails the owners once", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "ending");
+        // Six months of Pro launch that run out in five days.
+        const start = new Date();
+        start.setUTCMonth(start.getUTCMonth() - 6);
+        start.setTime(start.getTime() + 5 * 86_400_000);
+        const firstEnd = new Date(start);
+        firstEnd.setUTCMonth(firstEnd.getUTCMonth() + 1);
+        await polarEvent(tx, businessId, "subscription.active", { plan: "pro", planCode: "pro-launch", currentPeriodStart: start.toISOString(), currentPeriodEnd: firstEnd.toISOString() });
+        const planEnds = new Date(String((await account(tx, businessId)).plan_ends));
+        expect(await account(tx, businessId)).toMatchObject({ plan_code: "pro-launch", end_with: null, end_notice_at: null, end_set_at: null });
+        // While the renewal that ends it isn't the current period's end, nothing is due.
+        expect(await loadPromoEndWork(context(tx), { businessId })).toBeNull();
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "pro", planCode: "pro-launch", currentPeriodStart: new Date(planEnds.getTime() - 30 * 86_400_000).toISOString(), currentPeriodEnd: planEnds.toISOString() });
+        expect(await loadPromoEndWork(context(tx), { businessId, now: new Date(planEnds.getTime() - 8 * 86_400_000) })).toBeNull();
+        const work = await loadPromoEndWork(context(tx), { businessId });
+        expect(work).toEqual({ planCode: "pro-launch", planEnds, tier: "pro", interval: "monthly", subscriptionId: "sub_promo", ending: "tier", endsAt: planEnds, set: true, notify: true, overdue: false });
+
+        const notice = { ending: work!.ending, endsAt: work!.endsAt, tier: work!.tier, interval: work!.interval };
+        expect(await recordAsWorker(tx, { businessId, planCode: "pro-launch", planEnds, set: true, notice, appUrl: "https://demo.alloplace.com/" })).toBe(1);
+        const [email] = await outbox(tx, businessId, "email.send");
+        expect(email).toMatchObject({ template: "promo_ending", to: expect.stringMatching(/^promo-ending-/), variables: { locale: "en", businessName: "Promo ending", planName: "Pro launch offer", tier: "Pro", ending: "tier", date: planEnds.toISOString(), timeZone: "UTC", interval: "monthly", priceCents: expect.stringMatching(/^\d+$/), currency: "cad", url: "https://demo.alloplace.com/settings/plan" } });
+        expect(await account(tx, businessId)).toMatchObject({ end_notice_at: expect.anything(), end_set_at: expect.anything() });
+        expect(await audits(tx, businessId, "billing.promo_end_set")).toEqual([{ plan: "pro-launch", ending: "tier" }]);
+        // The next day's check has nothing left to do, and a second email never goes.
+        expect(await loadPromoEndWork(context(tx), { businessId, now: new Date(Date.now() + 86_400_000) })).toMatchObject({ set: false, notify: false });
+        expect(await recordAsWorker(tx, { businessId, planCode: "pro-launch", planEnds, set: false, notice, appUrl: "https://demo.alloplace.com" })).toBe(0);
+        expect(await outbox(tx, businessId, "email.send")).toHaveLength(1);
+
+        // The renewal moves the subscription to standard Pro, which ends the plan.
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "pro", planCode: "pro", currentPeriodStart: planEnds.toISOString(), currentPeriodEnd: new Date(planEnds.getTime() + 30 * 86_400_000).toISOString() });
+        expect(await account(tx, businessId)).toEqual({ plan: "pro", plan_code: null, plan_ends: null, end_with: null, end_notice_at: null, end_set_at: null });
+        expect(await audits(tx, businessId, "billing.promo_ended")).toEqual([{ plan: "pro-launch", to: "pro", reason: "ended" }]);
+      });
+    });
+
+    it("lets an operator end a plan at its next renewal, moving one that would keep going to its tier", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "early");
+        const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+        expect(await thrown(endPromoPlanForApi(context(tx), apiCaller))).toMatchObject({ status: 404 });
+        const periodEnd = new Date(Date.now() + 20 * 86_400_000).toISOString();
+        await polarEvent(tx, businessId, "subscription.active", { plan: "starter", planCode: "salons-half-off", currentPeriodStart: new Date(Date.now() - 10 * 86_400_000).toISOString(), currentPeriodEnd: periodEnd });
+        // The plan has no months, so it never ends by itself.
+        expect(await getBillingForApi(context(tx), apiCaller)).toMatchObject({ promo_plan: "salons-half-off", plan_ends: null, plan_ends_with: null });
+        expect(await loadPromoEndWork(context(tx), { businessId })).toBeNull();
+
+        const ended = await endPromoPlanForApi(context(tx), apiCaller);
+        expect(ended).toMatchObject({ plan: "starter", promo_plan: "salons-half-off", plan_ends: expect.any(String), plan_ends_with: "tier" });
+        expect(await account(tx, businessId)).toMatchObject({ end_with: "tier", end_notice_at: null, end_set_at: null });
+        expect(await outbox(tx, businessId, "billing.endPromoPlan")).toEqual([{}]);
+        expect(await audits(tx, businessId, "api.billing.promo_plan_ended")).toEqual([expect.objectContaining({ plan: "salons-half-off", endsWith: "tier" })]);
+        // It is due at once, and ends at the renewal the business already paid up to.
+        expect(await loadPromoEndWork(context(tx), { businessId })).toMatchObject({ ending: "tier", endsAt: new Date(periodEnd), set: true, notify: true });
+        // Asking again changes nothing.
+        const before = await account(tx, businessId);
+        await endPromoPlanForApi(context(tx), apiCaller);
+        expect(await account(tx, businessId)).toEqual(before);
+        // Settings > Plan shows when, and what comes next.
+        expect(await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, (scoped) => loadBusinessPromoPlan(scoped, businessId))).toMatchObject({ plan: "salons-half-off", ends: periodEnd, endsWith: "tier" });
+      });
+    });
+
+    it("removes a promo plan's discount that a switch in Polar's billing portal left on a standard product", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "portal");
+        await polarEvent(tx, businessId, "subscription.active", { plan: "starter", planCode: "salons-half-off", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z" });
+        await as(tx, "owner");
+        const [plan] = await rows(tx, sql`select polar_disc from public.billing_plans where code = 'salons-half-off'`);
+        const discountId = String(plan!.polar_disc);
+        // A discount nobody's promo plan owns stays.
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "starter", planCode: "salons-half-off", discountId });
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "pro", planCode: "pro", discountId: "disc_dashboard" });
+        expect(await outbox(tx, businessId, "billing.endPromoPlan")).toEqual([]);
+        expect(await audits(tx, businessId, "billing.promo_ended")).toEqual([{ plan: "salons-half-off", to: "pro", reason: "switched" }]);
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "starter", planCode: "starter", discountId });
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "starter", planCode: "starter", discountId });
+        expect(await outbox(tx, businessId, "billing.endPromoPlan")).toEqual([{ dropDiscount: discountId, subscriptionId: "sub_promo" }]);
+      });
     });
   });
 });

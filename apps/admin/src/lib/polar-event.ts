@@ -37,6 +37,8 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
   const subscriptionId = text(subscription.id) ?? text(data.subscription_id);
   const customerId = text(customer.id) ?? text(data.customer_id);
   const subscriptionState = text(subscription.status);
+  // A promo plan's discount on a standard product, as a switch in Polar's billing portal leaves it, is removed.
+  const discountId = text(subscription.discount_id);
   // Reconcile orders subscription snapshots by this, so a late retry cannot roll state back.
   const modifiedAt = new Date(text(subscription.modified_at) ?? text(subscription.created_at) ?? Number.NaN);
   const subscriptionModifiedAt = Number.isNaN(modifiedAt.valueOf()) ? undefined : modifiedAt.toISOString();
@@ -50,6 +52,7 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
       ...(subscriptionId ? { subscriptionId } : {}),
       ...(match ? { plan: match.plan, planCode: match.code, billingInterval: match.interval } : {}),
       ...(subscriptionState ? { subscriptionState } : {}),
+      ...(discountId ? { discountId } : {}),
       ...(subscriptionModifiedAt ? { subscriptionModifiedAt } : {}),
     },
   };

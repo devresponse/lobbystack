@@ -1007,6 +1007,12 @@ export const billingAccounts = pgTable(
     planEnds: timestamp("plan_ends", { withTimezone: true }),
     /** The promo code the business subscribed with. */
     codeId: uuid("code_id").references(() => billingCodes.id),
+    /** What ends the plan when an operator chose it: tier or cancel; null for the plan's own ending. Migration 0111. */
+    endWith: varchar("end_with", { length: 8 }),
+    /** When the owners were emailed that the plan ends. */
+    endNoticeAt: timestamp("end_notice_at", { withTimezone: true }),
+    /** When Polar was told to change or cancel the subscription at the renewal that ends the plan. */
+    endSetAt: timestamp("end_set_at", { withTimezone: true }),
     ...legacyId,
     ...timestamps,
   },

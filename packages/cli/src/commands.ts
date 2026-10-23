@@ -345,6 +345,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "checkout-status": { operation: "getCheckout" },
     "managed-plan": { operation: "setManagedPlan", fixed: { plan: "enterprise" } },
     "end-managed-plan": { operation: "endManagedPlan" },
+    "end-promo-plan": { operation: "endPromoPlan" },
     catalog: { operation: "getBillingCatalog", show: catalogTables },
     "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, show: catalogChanges },
     "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, show: catalogChanges },

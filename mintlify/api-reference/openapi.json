@@ -2484,6 +2484,121 @@
         }
       }
     },
+    "/billing/promo-plan": {
+      "delete": {
+        "operationId": "endPromoPlan",
+        "summary": "End the promo plan",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Ends the business's promo plan at its subscription's next renewal, as the plan's months running out would: its owners get an email, and Polar moves the subscription to the plan's tier without its discount, or cancels it for a plan that ends that way. A plan that would keep going moves to its tier. Until the renewal the business keeps the plan it paid for; plan_ends and plan_ends_with say what happens. A business without a promo plan in force is a 404.",
+        "tags": [
+          "Billing"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Billing"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/billing/catalog": {
       "get": {
         "operationId": "getBillingCatalog",
@@ -15115,7 +15230,22 @@
                 "type": "null"
               }
             ],
-            "description": "When a promo plan that lasts a set number of months ends. Null otherwise."
+            "description": "When a promo plan that lasts a set number of months ends: it ends at the subscription's first renewal from then on. Null otherwise."
+          },
+          "plan_ends_with": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "tier",
+                  "cancel"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What that renewal does: tier moves the subscription to the plan's tier at its standard price, cancel ends it. Null when plan_ends is."
           },
           "managed": {
             "type": "boolean",
@@ -15184,6 +15314,7 @@
           "plan",
           "promo_plan",
           "plan_ends",
+          "plan_ends_with",
           "managed",
           "subscription_state",
           "billing_interval",

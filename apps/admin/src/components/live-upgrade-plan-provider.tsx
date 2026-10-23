@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanName, brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
@@ -19,6 +19,7 @@ type Billing = {
   availableCheckoutPlans: HostedUpgradePlan[];
   availableCheckoutIntervals: HostedCheckoutPlanIntervals;
   plans: BillingPlanList;
+  promoPlan?: BillingPromoPlanView | null;
 };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan };
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
@@ -45,6 +46,8 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const plan: BillingPlanSlug = rawPlan === "self_hosted_standard" || rawPlan === "self_host" ? "self_host" : isPaidSubscription(rawPlan, billing.data?.account?.subscriptionState) ? rawPlan as BillingPlanSlug : "free_cloud";
   // Starter or Pro already paid through Polar: picking another plan changes that subscription.
   const changesPlan = plan === "starter" || plan === "pro";
+  // Moving off a promo plan drops it, its discount and its allowances.
+  const promoPlan = changesPlan && billing.data?.promoPlan?.tier === plan ? billing.data.promoPlan : null;
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
     mutationFn: (input: { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval }) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
@@ -121,6 +124,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       billingInterval={interval}
       changesPlan={changesPlan}
       currentPlan={plan}
+      leavesPromoPlan={promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? promoPlan.plan : null}
       loading={pending ? "checkout" : null}
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
       locale={i18n.language}

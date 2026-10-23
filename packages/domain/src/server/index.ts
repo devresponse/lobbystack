@@ -8,6 +8,7 @@ export * from "./billingCatalog";
 export * from "./billingCodes";
 export * from "./billingPlans";
 export * from "./billingPolar";
+export * from "./billingPromoEnd";
 export * from "./billingVerify";
 export * from "./branding";
 export * from "./analytics";

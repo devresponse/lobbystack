@@ -343,6 +343,7 @@
       "title": "Cambiar de plan",
       "description": "Elija el plan que mejor se adapte a su equipo.",
       "changesSubscription": "Ya tiene una suscripción, así que se modificará en lugar de abrir un pago. Cualquier diferencia se cobra a su método de pago guardado.",
+      "leavesPromo": "Cambiar de plan pone fin a {{plan}} y a su descuento.",
       "enterpriseSubject": "Plan Enterprise",
       "billingIntervalLabel": "Periodicidad de facturación",
       "annualDiscount": "Ahorre un {{percent}} %",
@@ -519,7 +520,8 @@
       "unlocks": "Este código desbloquea {{plan}}.",
       "features": "Las funciones de {{tier}}, con:",
       "moreThanTier": "Más que {{tier}}",
-      "ends": "Hasta el {{date}}",
+      "endsTier": "Hasta el {{date}}, luego {{tier}}",
+      "endsCancel": "Hasta el {{date}}, luego la suscripción termina",
       "unavailable": "No está a la venta ahora",
       "interval": {
         "monthly": "Mensual",

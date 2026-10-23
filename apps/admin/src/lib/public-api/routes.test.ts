@@ -48,6 +48,7 @@ const domain = vi.hoisted(() => ({
   getCheckoutForApi: vi.fn(),
   setManagedPlanForApi: vi.fn(),
   endManagedPlanForApi: vi.fn(),
+  endPromoPlanForApi: vi.fn(),
   getBillingCatalogForApi: vi.fn(),
   applyBillingCatalogForApi: vi.fn(),
   linkBillingCatalogForApi: vi.fn(),
@@ -625,6 +626,24 @@ describe("billing", () => {
     }
     expect(domain.setManagedPlanForApi).toHaveBeenCalledTimes(1);
     expect(domain.endManagedPlanForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets only an operator's platform key end a promo plan", async () => {
+    expect((await v1.endPromoPlan(call("/billing/promo-plan", { method: "DELETE" }))).status).toBe(403);
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry]));
+    try {
+      const asKey = (key: string) => new Request("https://app.example.com/api/v1/billing/promo-plan", { method: "DELETE", headers: { authorization: `Bearer ${key}`, "LobbyStack-Business": "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" } });
+      expect((await v1.endPromoPlan(asKey(partner.key))).status).toBe(403);
+      domain.endPromoPlanForApi.mockResolvedValue({ ...billing, plan: "starter", promo_plan: "salons-half-off", plan_ends: "2026-10-23T12:00:00.000Z", plan_ends_with: "tier" });
+      const ended = await v1.endPromoPlan(asKey(operator.key));
+      expect(ended.status).toBe(200);
+      expect(await ended.json()).toMatchObject({ data: { promo_plan: "salons-half-off", plan_ends_with: "tier" } });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    expect(domain.endPromoPlanForApi).toHaveBeenCalledTimes(1);
   });
 
   it("counts each promo code a key tries against the business's hour, and sells promo plans only where Polar is set up", async () => {

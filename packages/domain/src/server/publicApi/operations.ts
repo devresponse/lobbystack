@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { and, asc, count, desc, eq, inArray, isNotNull, isNull, ne, notExists, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, billingPlans, billingUsageMonths, businessHours, businessInvitations, businessMemberships, businesses, calendarConnections, contactPasscodes, contacts, knowledgeDocuments, knowledgeSnippets, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, storageObjects, users, websiteIngestionJobs, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   CONTACT_PASSCODE_DEFAULT_LENGTH,
   CONTACT_PASSCODE_MAX_LENGTH,
@@ -93,6 +93,7 @@ import {
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
   type PublicProfileSettings,
+  promoPlanEnding,
 } from "@lobbystack/shared";
 
 import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } from "../../authz";
@@ -101,6 +102,7 @@ import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
+import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -336,7 +338,10 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
 /** The plan in force, as the server enforces it, and this month's overage spend against the cap. */
 async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise<ApiBilling> {
   const { plan, planCode, capCents } = await loadBillingContext(tx, businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, billingInterval: billingAccounts.billingInterval, currentPeriodEnd: billingAccounts.currentPeriodEnd, planEnds: billingAccounts.planEnds, endWith: billingAccounts.endWith }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // A promo plan's end, and what its renewal does; a plan that keeps going has neither.
+  const [promo] = planCode ? await tx.select({ ends: billingPlans.ends }).from(billingPlans).where(eq(billingPlans.code, planCode)).limit(1) : [];
+  const planEndsWith = planCode && account?.planEnds ? promoPlanEnding(account.endWith, promo?.ends) : null;
   const periodKey = new Date().toISOString().slice(0, 7);
   const [month] = await tx.select({ overageSpendCents: billingUsageMonths.overageSpendCents }).from(billingUsageMonths).where(and(eq(billingUsageMonths.businessId, businessId), eq(billingUsageMonths.periodKey, periodKey))).limit(1);
   const spend = month?.overageSpendCents ?? 0;
@@ -346,7 +351,8 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
   return {
     plan,
     promo_plan: planCode,
-    plan_ends: planCode && account?.planEnds ? account.planEnds.toISOString() : null,
+    plan_ends: planEndsWith && account?.planEnds ? account.planEnds.toISOString() : null,
+    plan_ends_with: planEndsWith,
     managed: isManagedBillingAccount(account),
     subscription_state: account?.subscriptionState ?? null,
     billing_interval: paid && (account?.billingInterval === "monthly" || account?.billingInterval === "annual") ? account.billingInterval : null,
@@ -465,6 +471,16 @@ export async function endManagedPlanForApi(context: DomainContext, caller: ApiCa
   return await inBusiness(context, caller, async (tx) => {
     if (!await endManagedPlanInTransaction(tx, { businessId: caller.businessId })) throw notFound("Managed plan");
     await audit(tx, caller, { eventType: "api.billing.managed_plan_ended", entityType: "billing_account", entityId: caller.businessId });
+    return await loadBilling(tx, caller.businessId);
+  });
+}
+
+/** Ends the business's promo plan at its next renewal. Callers check that an operator's platform key asked. */
+export async function endPromoPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
+  return await inBusiness(context, caller, async (tx) => {
+    const ended = await endPromoPlanInTransaction(tx, { businessId: caller.businessId });
+    if (!ended) throw notFound("Promo plan");
+    await audit(tx, caller, { eventType: "api.billing.promo_plan_ended", entityType: "billing_account", entityId: caller.businessId, payload: { plan: ended.plan, endsWith: ended.ending, planEnds: ended.planEnds.toISOString() } });
     return await loadBilling(tx, caller.businessId);
   });
 }

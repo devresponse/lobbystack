@@ -13,6 +13,8 @@ import {
   isUuid,
   liveSubscriptionStates,
   normalizeBillingCode,
+  promoPlanEndRenewal,
+  promoPlanEnding,
   type ApiBillingCode,
   type ApiBillingCodeCreate,
   type BillingCodeView,
@@ -146,7 +148,7 @@ export async function billingCodeView(tx: DatabaseTransaction, input: { business
  */
 export async function loadBusinessPromoPlan(tx: DatabaseTransaction, businessId: string): Promise<BillingPromoPlanView | null> {
   const rows = (await tx.execute<Row>(sql`
-    select p.code, p.tier, p.names, p.discount, a.plan_ends, r.period, r.currency, r.cents, r.per_month
+    select p.code, p.tier, p.names, p.discount, p.ends, a.plan_ends, a.end_with, a.current_period_end, r.period, r.currency, r.cents, r.per_month
     from public.billing_accounts a
     join public.billing_plans p on p.code = a.plan_code
     left join public.billing_prices r on r.plan = p.code and r.retired_at is null
@@ -154,13 +156,19 @@ export async function loadBusinessPromoPlan(tx: DatabaseTransaction, businessId:
     order by r.period`)).rows;
   const first = rows[0];
   if (!first || (first.tier !== "starter" && first.tier !== "pro")) return null;
+  // A plan that keeps going once its months are up has no end to show.
+  const planEnds = isoOrNull(first.plan_ends);
+  const endsWith = planEnds ? promoPlanEnding(textOrNull(first.end_with), textOrNull(first.ends)) : null;
+  const periodEnd = isoOrNull(first.current_period_end);
+  const endsAt = planEnds && endsWith ? promoPlanEndRenewal(new Date(planEnds), periodEnd ? new Date(periodEnd) : null) ?? new Date(planEnds) : null;
   return {
     plan: String(first.code),
     tier: first.tier,
     names: (first.names ?? {}) as Record<string, string>,
     discount: (first.discount ?? null) as ResolvedBillingDiscount | null,
     currency: textOrNull(first.currency),
-    ends: isoOrNull(first.plan_ends),
+    ends: endsAt?.toISOString() ?? null,
+    endsWith,
     prices: rows.filter((row) => row.period !== null).map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month) })),
   };
 }

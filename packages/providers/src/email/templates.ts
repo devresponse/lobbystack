@@ -1,6 +1,6 @@
 import { intlLocale, normalizeInterfaceLocale, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
-export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup";
+export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending";
 
 type Link = { label: string; url: string };
 
@@ -51,6 +51,8 @@ function emailContent(input: RenderEmailInput): EmailContent {
       return variables.code ? passwordResetCode(context, variables.code) : passwordResetLink(context, variables);
     case "invitation":
       return invitation(context, variables);
+    case "promo_ending":
+      return promoEnding(context, variables);
     default:
       return operatorAlert({ app: input.appName, heading: input.subject }, variables);
   }
@@ -414,6 +416,94 @@ function invitation({ app, email, locale }: Context, variables: Record<string, s
       { kind: "paragraph", text: copy.about },
       { kind: "button", label: copy.button, url: variables.url ?? "" },
       { kind: "paragraph", text: copy.howTo },
+    ],
+    reason: { text: copy.reason },
+  };
+}
+
+/** A date in the reader's language and the business's time zone. Serbian gets digits, since a month's name would need declining. */
+function formatDay(iso: string | undefined, locale: InterfaceLocale, timeZone: string | undefined): string {
+  const date = new Date(iso ?? "");
+  if (Number.isNaN(date.getTime())) return iso ?? "";
+  const options: Intl.DateTimeFormatOptions = { dateStyle: locale === "sr" ? "medium" : "long" };
+  try {
+    return new Intl.DateTimeFormat(intlLocale(locale), { ...options, timeZone: timeZone || "UTC" }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(intlLocale(locale), { ...options, timeZone: "UTC" }).format(date);
+  }
+}
+
+/** A price in the reader's language, with cents only when it has some. */
+function formatPrice(cents: string | undefined, currency: string | undefined, locale: InterfaceLocale): string | undefined {
+  const amount = Number(cents);
+  if (!cents || !Number.isSafeInteger(amount) || !currency || !/^[a-z]{3}$/i.test(currency)) return undefined;
+  const digits = amount % 100 === 0 ? 0 : 2;
+  return new Intl.NumberFormat(intlLocale(locale), { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: digits, maximumFractionDigits: digits }).format(amount / 100);
+}
+
+/** The subject of a promo ending email, which the worker sets as it sends it. */
+export function promoEndingSubject(variables: Record<string, string>): string {
+  const locale = normalizeInterfaceLocale(variables.locale) ?? "en";
+  const plan = variables.planName ?? "";
+  const date = formatDay(variables.date, locale, variables.timeZone);
+  return { en: `Your ${plan} plan ends on ${date}`, fr: `Votre forfait ${plan} se termine le ${date}`, es: `Su plan ${plan} termina el ${date}`, sr: `Paket ${plan} ističe ${date}` }[locale];
+}
+
+/**
+ * To a business's owners a week before its promo plan ends: when, and what
+ * the subscription becomes. It moves to the plan's tier at that tier's price,
+ * or it ends and the business goes back to the free plan.
+ */
+function promoEnding({ app, locale }: Context, variables: Record<string, string>): EmailContent {
+  const business = variables.businessName?.trim() ?? "";
+  const plan = variables.planName ?? "";
+  const tier = variables.tier ?? "";
+  const date = formatDay(variables.date, locale, variables.timeZone);
+  const price = formatPrice(variables.priceCents, variables.currency, locale);
+  const annual = variables.interval === "annual";
+  const cancel = variables.ending === "cancel";
+  const copy = {
+    en: {
+      intro: cancel
+        ? `On ${date}, ${plan} ends for ${business}, and so does your subscription. ${business} then moves to the free plan.`
+        : `On ${date}, ${business} moves from ${plan} to ${tier}. Your subscription continues on ${tier} ${price ? `at ${price} ${annual ? "a year" : "a month"}` : "at its standard price"}, charged to your saved payment method.`,
+      next: cancel ? "To keep a paid plan, choose one in Settings > Plan before then." : "You don't need to do anything. To choose another plan or cancel, go to Settings > Plan before then.",
+      button: "Open Settings > Plan",
+      reason: `You're receiving this email because you own ${business} on ${app}.`,
+    },
+    fr: {
+      intro: cancel
+        ? `Le ${date}, le forfait ${plan} de ${business} se termine, ainsi que votre abonnement. ${business} passe alors au forfait gratuit.`
+        : `Le ${date}, ${business} passe du forfait ${plan} au forfait ${tier}. Votre abonnement continue avec ${tier} ${price ? `à ${price} ${annual ? "par an" : "par mois"}` : "à son prix habituel"}, débité sur votre moyen de paiement enregistré.`,
+      next: cancel ? "Pour garder un forfait payant, choisissez-en un dans Réglages > Forfait d'ici là." : "Vous n'avez rien à faire. Pour choisir un autre forfait ou résilier, allez dans Réglages > Forfait d'ici là.",
+      button: "Ouvrir Réglages > Forfait",
+      reason: `Vous recevez ce courriel parce que vous êtes propriétaire de ${business} sur ${app}.`,
+    },
+    es: {
+      intro: cancel
+        ? `El ${date}, el plan ${plan} de ${business} termina, y también su suscripción. ${business} pasa entonces al plan gratuito.`
+        : `El ${date}, ${business} pasa del plan ${plan} al plan ${tier}. Su suscripción continúa con ${tier} ${price ? `por ${price} ${annual ? "al año" : "al mes"}` : "a su precio habitual"}, con cargo a su método de pago guardado.`,
+      next: cancel ? "Para mantener un plan de pago, elija uno en Configuración > Plan antes de esa fecha." : "No tiene que hacer nada. Para elegir otro plan o cancelar, vaya a Configuración > Plan antes de esa fecha.",
+      button: "Abrir Configuración > Plan",
+      reason: `Recibe este correo porque es propietario de ${business} en ${app}.`,
+    },
+    sr: {
+      intro: cancel
+        ? `Dana ${date} ističe paket ${plan} firme ${business}, a sa njim i pretplata. Firma ${business} tada prelazi na besplatni paket.`
+        : `Dana ${date} firma ${business} prelazi sa paketa ${plan} na paket ${tier}. Pretplata se nastavlja na paketu ${tier} ${price ? `po ceni od ${price} ${annual ? "godišnje" : "mesečno"}` : "po redovnoj ceni"}, a naplaćuje se sa sačuvanog načina plaćanja.`,
+      next: cancel ? "Da biste zadržali plaćeni paket, izaberite ga u odeljku Podešavanja > Paket pre tog datuma." : "Ne morate ništa da radite. Da biste izabrali drugi paket ili otkazali pretplatu, otvorite Podešavanja > Paket pre tog datuma.",
+      button: "Otvori Podešavanja > Paket",
+      reason: `Ovaj imejl ste dobili jer ste vlasnik firme ${business} na servisu ${app}.`,
+    },
+  }[locale];
+  return {
+    locale,
+    eyebrow: business || undefined,
+    heading: promoEndingSubject(variables),
+    blocks: [
+      { kind: "paragraph", text: copy.intro },
+      { kind: "paragraph", text: copy.next },
+      { kind: "button", label: copy.button, url: variables.url ?? "" },
     ],
     reason: { text: copy.reason },
   };

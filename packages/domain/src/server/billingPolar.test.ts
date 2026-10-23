@@ -159,7 +159,7 @@ describe("planPolarChanges", () => {
     expect(fake.state.products.filter((product) => product.metadata.lobbystack_plan === "pro")).toHaveLength(2);
   });
 
-  it("changes an allowance with no Polar call, as no product carries Credits", async () => {
+  it("changes an allowance by retagging its products only, as no product carries Credits", async () => {
     const fake = createFakePolar();
     await apply(fake, profile());
     const fewer = await apply(fake, profile((file) => {

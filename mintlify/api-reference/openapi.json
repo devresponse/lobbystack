@@ -16800,7 +16800,7 @@
                           "businessNumbers": {
                             "type": "integer",
                             "minimum": 0,
-                            "maximum": 20
+                            "maximum": 1
                           }
                         },
                         "required": [
@@ -16885,7 +16885,7 @@
                               "businessNumbers": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "maximum": 20
+                                "maximum": 1
                               }
                             },
                             "required": [
@@ -16980,7 +16980,7 @@
                               "businessNumbers": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "maximum": 20
+                                "maximum": 1
                               }
                             },
                             "required": [
@@ -17094,7 +17094,7 @@
                               "businessNumbers": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "maximum": 20
+                                "maximum": 1
                               }
                             },
                             "required": [
@@ -17189,7 +17189,7 @@
                               "businessNumbers": {
                                 "type": "integer",
                                 "minimum": 0,
-                                "maximum": 20
+                                "maximum": 1
                               }
                             },
                             "required": [
@@ -17367,7 +17367,7 @@
                         "businessNumbers": {
                           "type": "integer",
                           "minimum": 0,
-                          "maximum": 20
+                          "maximum": 1
                         }
                       },
                       "additionalProperties": false

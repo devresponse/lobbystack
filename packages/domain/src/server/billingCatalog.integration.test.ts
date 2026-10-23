@@ -237,7 +237,7 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       const runs = await count(tx, "billing_runs");
       const direct = await refusal(apply(tx, file((value) => { withExamples("pro-launch")(value); value.plans["pro-launch"].prices.monthlyCents = 6500; })));
       expect(direct).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.plans.pro-launch" }] });
-      const inherited = await refusal(apply(tx, file((value) => { withExamples("pro-launch")(value); value.plans.pro.limits.businessNumbers = 2; })));
+      const inherited = await refusal(apply(tx, file((value) => { withExamples("pro-launch")(value); value.plans.pro.limits.businessNumbers = 0; })));
       expect(inherited.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
       expect(await count(tx, "billing_runs")).toBe(runs);
       expect((await plan(tx, "pro")).numbers).toBe(1);

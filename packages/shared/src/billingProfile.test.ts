@@ -160,19 +160,22 @@ describe("billingProfileSchema", () => {
     refused(withPlans({}, (file) => { delete file.plans.free_cloud; }), /^plans\.free_cloud: /);
     refused(withPlans({ extra: extra({ offerEndsAt: "2027-03-31" }) }), /^plans\.extra\.offerEndsAt: /);
     refused(withPlans({}, (file) => { file.plans.free_cloud.included.voiceMinutes = 1.5; }), /^plans\.free_cloud\.included\.voiceMinutes: /);
+    // A business holds one number at most.
+    refused(withPlans({}, (file) => { file.plans.pro.limits.businessNumbers = 2; }), /^plans\.pro\.limits\.businessNumbers: /);
+    refused(withPlans({ extra: extra({ limits: { businessNumbers: 2 } }) }), /^plans\.extra\.limits\.businessNumbers: /);
   });
 });
 
 describe("resolveBillingPlans", () => {
   it("fills an additional plan's missing values from its tier, and keeps the ones it sets", () => {
-    const file = withPlans({ extra: extra({ included: { voiceMinutes: 700 }, limits: { businessNumbers: 3 }, overageCents: { voiceMinute: 15 } }) });
+    const file = withPlans({ extra: extra({ included: { voiceMinutes: 700 }, limits: { businessNumbers: 0 }, overageCents: { voiceMinute: 15 } }) });
     expect(plan(file, "extra")).toMatchObject({
       voice_sec: 42_000,
       sms_seg: 200,
       calls_out: 100,
       chat_units: 200,
       kb_bytes: 20 * 1_048_576,
-      numbers: 3,
+      numbers: 0,
       voice_rate: 15,
       sms_rate: 2,
       call_rate: 2,
@@ -241,7 +244,7 @@ describe("the terms hash", () => {
       extra({ included: { outboundCallAttempts: 1 } }),
       extra({ included: { chatAiUnits: 1 } }),
       extra({ limits: { knowledgeStorageMb: 1 } }),
-      extra({ limits: { businessNumbers: 2 } }),
+      extra({ limits: { businessNumbers: 0 } }),
       extra({ overageCents: { voiceMinute: 1 } }),
       extra({ overageCents: { alertSmsSegment: 1 } }),
       extra({ overageCents: { outboundCallAttempt: 1 } }),

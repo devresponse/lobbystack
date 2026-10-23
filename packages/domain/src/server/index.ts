@@ -5,6 +5,7 @@ export * from "./activation";
 export * from "./billing";
 export * from "./billingAccess";
 export * from "./billingCatalog";
+export * from "./billingCodes";
 export * from "./billingPlans";
 export * from "./billingPolar";
 export * from "./billingVerify";

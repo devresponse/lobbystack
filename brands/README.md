@@ -36,6 +36,19 @@ The preview changes nothing and lists every change, flagging any that lowers an 
 
 Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses the ones its build ships with. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once.
 
+### Promo codes
+
+A plan whose `access` is `code` is sold only to a business that enters one of its codes. Codes never go in this file: an operator's platform key issues them on the deployment, once the plan is applied and `pnpm billing apply` has made its Polar product and discount.
+
+```bash
+pnpm lobbystack billing code-create pro_launch --max-uses 50 --expires-at 2026-12-31T00:00:00Z   # anyone may enter it
+pnpm lobbystack billing code-create pro_launch --business-id <business id>                        # one business, once
+pnpm lobbystack billing codes --plan pro_launch
+pnpm lobbystack billing code-revoke <code id>
+```
+
+A code is made up as the brand's first letters and two groups of four, such as `ALLO-7K2Q-PX9M`, unless `--code` names one. A code anyone may enter needs a use limit and an end date. Each code comes with a link, `/signup?promo=CODE`: whoever opens it signs up, or signs in, and finds the code filled in on the plan screen, and **Have a promo code?** on onboarding and Settings > Plan takes one typed in. The checkout sells the plan's own Polar product with its discount, and a business that already pays has its subscription moved to it. A business can try 10 codes an hour, and a code that doesn't work, for any reason, only says it isn't valid. Revoking a code stops new checkouts; businesses already on its plan keep it. For now a business on a promo plan has its tier's allowances, not ones the plan sets itself.
+
 ### Setting Polar up from it
 
 `pnpm billing` does all of the above and Polar in one command: it applies the file to the tables, makes Polar's organization sell what the file says (settings, meters, Credits, products, discounts and the webhook, each tagged with `lobbystack_*` metadata), records which Polar product sells each price, and checks the three against each other.

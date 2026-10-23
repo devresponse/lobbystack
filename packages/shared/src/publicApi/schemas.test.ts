@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "../receptionist";
 import { CONTACT_PASSCODES_MAX_PER_REQUEST, KNOWLEDGE_UPLOAD_MAX_BYTES } from "./constants";
-import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
+import { apiAppointmentCreateSchema, apiAppointmentRescheduleSchema, apiBillingCodeCreateSchema, apiCheckoutCreateSchema, apiContactCreateSchema, apiContactPasscodesGenerateSchema, apiContactPasscodesUpdateSchema, apiKnowledgeEntryCreateSchema, apiKnowledgeUploadCreateSchema, apiPublicProfileUpdateSchema, apiReceptionistUpdateSchema, parseApiInput } from "./schemas";
 
 // API and MCP clients get these details back as error.details, so a zod upgrade must not reword them.
 describe("parseApiInput", () => {
@@ -95,6 +95,21 @@ describe("parseApiInput", () => {
     expect(parseApiInput(apiContactPasscodesUpdateSchema, { passcodes: Array.from({ length: CONTACT_PASSCODES_MAX_PER_REQUEST + 1 }, () => one("480613").passcodes[0]) }).ok).toBe(false);
     expect(parseApiInput(apiContactPasscodesGenerateSchema, {})).toEqual({ ok: true, data: {} });
     for (const bad of [{ length: 3 }, { length: 9 }, { length: 4.5 }, { contact_ids: [] }, { contact_ids: ["x"] }, { all: true }]) expect(parseApiInput(apiContactPasscodesGenerateSchema, bad).ok, JSON.stringify(bad)).toBe(false);
+  });
+
+  it("takes a promo code with plan promo, and only then", () => {
+    expect(parseApiInput(apiCheckoutCreateSchema, { plan: "promo", interval: "monthly", promo_code: "allo-7k2q-px9m" })).toEqual({ ok: true, data: { plan: "promo", interval: "monthly", promo_code: "allo-7k2q-px9m" } });
+    expect(parseApiInput(apiCheckoutCreateSchema, { plan: "promo", interval: "monthly" })).toEqual({ ok: false, details: [{ path: "promo_code", message: "Required when plan is promo." }] });
+    expect(parseApiInput(apiCheckoutCreateSchema, { plan: "pro", interval: "annual", promo_code: "SPRING25" })).toEqual({ ok: false, details: [{ path: "promo_code", message: "Only allowed when plan is promo." }] });
+  });
+
+  it("needs a use limit and an end for a code anyone may enter", () => {
+    const business = "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6";
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business }).ok).toBe(true);
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", max_uses: 50, expires_at: "2026-12-31T00:00:00Z" }).ok).toBe(true);
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch" })).toEqual({ ok: false, details: [{ path: "max_uses", message: "Required for a shared code." }, { path: "expires_at", message: "Required for a shared code." }] });
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business, code: "SPRING25", prefix: "ALLO" })).toEqual({ ok: false, details: [{ path: "prefix", message: "Send code or prefix, not both." }] });
+    expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business, max_uses: 0 }).ok).toBe(false);
   });
 
   it("accepts start times with or without seconds", () => {

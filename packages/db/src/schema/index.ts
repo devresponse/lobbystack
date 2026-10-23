@@ -1001,6 +1001,12 @@ export const billingAccounts = pgTable(
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     overageSpendingCapCents: integer("overage_spending_cap_cents"),
+    /** The exact plan when it isn't the standard plan of plan's tier, such as a promo plan; null otherwise. Migration 0109. */
+    planCode: varchar("plan_code", { length: 48 }).references(() => billingPlans.code),
+    /** When a time-limited plan ends. */
+    planEnds: timestamp("plan_ends", { withTimezone: true }),
+    /** The promo code the business subscribed with. */
+    codeId: uuid("code_id").references(() => billingCodes.id),
     ...legacyId,
     ...timestamps,
   },
@@ -1019,9 +1025,17 @@ export const billingCheckoutRequests = pgTable(
     checkoutId: text("checkout_id"),
     checkoutUrl: text("checkout_url"),
     error: text("error"),
+    /** The exact plan sold when it isn't the target's standard plan, such as a promo plan. Migration 0109. */
+    planCode: varchar("plan_code", { length: 48 }).references(() => billingPlans.code),
+    /** The promo code entered for it. */
+    codeId: uuid("code_id").references(() => billingCodes.id),
     ...timestamps,
   },
-  (table) => [uniqueIndex("billing_checkout_requests_id_unique").on(table.id), index("billing_checkout_requests_business_status_idx").on(table.businessId, table.status, table.createdAt)],
+  (table) => [
+    uniqueIndex("billing_checkout_requests_id_unique").on(table.id),
+    index("billing_checkout_requests_business_status_idx").on(table.businessId, table.status, table.createdAt),
+    index("billing_checkout_requests_plan_code_idx").on(table.businessId, table.planCode, table.createdAt).where(sql`${table.codeId} is not null`),
+  ],
 );
 
 export const billingTransactions = pgTable(
@@ -1230,6 +1244,52 @@ export const billingPrices = pgTable(
   (table) => [
     uniqueIndex("billing_prices_live_unique").on(table.plan, table.period).where(sql`${table.retiredAt} is null`),
     uniqueIndex("billing_prices_polar_unique").on(table.polarId).where(sql`${table.polarId} is not null`),
+  ],
+);
+
+/**
+ * Promo codes of migration 0109. An operator's platform key issues each for a
+ * plan whose access is code; only the worker reads or writes them, and they are
+ * revoked, never deleted. A business finds its code's offer through
+ * app.billing_code_offers, by the whole code.
+ */
+export const billingCodes = pgTable(
+  "billing_codes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    /** What people type, in upper case; compared regardless of case. */
+    code: varchar("code", { length: 32 }).notNull(),
+    /** The plan it unlocks. */
+    plan: varchar("plan", { length: 48 }).notNull().references(() => billingPlans.code),
+    /** The one business that may use it; null for a shared code. */
+    businessId: uuid("business_id").references(() => businesses.id, { onDelete: "cascade" }),
+    /** How many businesses may subscribe with it; null for no limit, which only a bound code may have. */
+    maxUses: integer("max_uses"),
+    /** Businesses that subscribed with it. */
+    uses: integer("uses").default(0).notNull(),
+    /** No new checkout after this moment; required for a shared code. */
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    /** active or revoked. */
+    status: varchar("status", { length: 8 }).default("active").notNull(),
+    /** The operator's note. */
+    note: varchar("note", { length: 200 }),
+    /** The operator platform key that issued it, and its partner. */
+    keyId: uuid("key_id").notNull(),
+    partner: varchar("partner", { length: 40 }).notNull(),
+    /** The request's Idempotency-Key and SHA-256, so a retry returns the same code. */
+    idemKey: varchar("idem_key", { length: 255 }),
+    reqHash: char("req_hash", { length: 64 }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    /** Kept to the millisecond so the codes cursor is one comparison. */
+    createdAt: timestamp("created_at", { withTimezone: true }).default(sql`date_trunc('milliseconds', now())`).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("billing_codes_code_unique").on(table.code),
+    uniqueIndex("billing_codes_idem_unique").on(table.keyId, table.idemKey).where(sql`${table.idemKey} is not null`),
+    index("billing_codes_created_idx").on(table.createdAt, table.id),
+    index("billing_codes_plan_idx").on(table.plan, table.createdAt, table.id),
+    index("billing_codes_business_idx").on(table.businessId).where(sql`${table.businessId} is not null`),
   ],
 );
 
@@ -2001,6 +2061,7 @@ export const schema = {
   billingRuns,
   billingPlans,
   billingPrices,
+  billingCodes,
   complianceRecords,
   feedbackSubmissions,
   affiliateProfiles,

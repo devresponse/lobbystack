@@ -13,6 +13,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
+import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
 import { findPlan, formatMoney, monthlyPriceCents, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
@@ -191,6 +192,8 @@ export function OnboardingPlanSurface() {
           {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-9 rounded-full px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualSaving !== null ? <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">{t("plan.billingInterval.save", { percent: annualSaving })}</span> : null}</Button>)}
         </div>
       </div>
+      {/* A promo link's code waits here from sign-up, filled in and checked. */}
+      {business && billing.data?.checkoutAvailable ? <div className="-mt-6 flex justify-center"><PromoCodeEntry businessId={business.businessId} /></div> : null}
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-4">
         {tiers.map((tier) => {
           const paid = tier.slug === "starter" || tier.slug === "pro";

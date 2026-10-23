@@ -53,6 +53,9 @@ const domain = vi.hoisted(() => ({
   linkBillingCatalogForApi: vi.fn(),
   billingDeploymentPolar: vi.fn(() => ({ env: "sandbox", org: "org_test", secretSha256: null, productVars: {} })),
   listBillingCatalogRunsForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
+  createBillingCodeForApi: vi.fn(),
+  listBillingCodesForApi: vi.fn(async () => ({ data: [], next_cursor: null, has_more: false })),
+  revokeBillingCodeForApi: vi.fn(),
   listBillingPlansForApi: vi.fn(),
   readPolarProductLinks: vi.fn(),
   listRulesForApi: vi.fn(async (): Promise<unknown[]> => []),
@@ -622,6 +625,82 @@ describe("billing", () => {
     }
     expect(domain.setManagedPlanForApi).toHaveBeenCalledTimes(1);
     expect(domain.endManagedPlanForApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts each promo code a key tries against the business's hour, and sells promo plans only where Polar is set up", async () => {
+    vi.stubEnv("POLAR_ACCESS_TOKEN", "polar-token");
+    vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
+    try {
+      const promo = { plan: "promo", interval: "monthly", promo_code: "SALON50" };
+      domain.createCheckoutForApi.mockResolvedValue({ id: checkoutId, plan: "starter", interval: "monthly", status: "pending", promo_plan: "salons-half-off", checkout_url: null, error: null, paid: false, created_at: "2026-10-22T12:00:00.000Z", updated_at: "2026-10-22T12:00:00.000Z" });
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }))).status).toBe(202);
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true });
+      expect(invites.limit).toHaveBeenLastCalledWith([["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"]]);
+      // A plan checkout tries no code.
+      invites.limit.mockClear();
+      domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }));
+      expect(invites.limit).not.toHaveBeenCalled();
+
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_business_hour" });
+      const limited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("Retry-After")).toMatch(/^\d+$/);
+      expect(await limited.json()).toMatchObject({ error: { code: "rate_limited" } });
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "promo", interval: "monthly" }) }))).status).toBe(400);
+
+      vi.stubEnv("POLAR_ACCESS_TOKEN", "");
+      await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("lets only an operator's platform key issue, list and revoke promo codes", async () => {
+    const codeId = "7b2c3d4e-5f60-4718-9a2b-3c4d5e6f7a8b";
+    const code = { id: codeId, code: "ALLO-7K2Q-PX9M", plan: "pro_launch", business_id: null, max_uses: 5, uses: 0, expires_at: "2026-12-31T00:00:00.000Z", status: "active", note: null, link: "https://demo.alloplace.com/signup?promo=ALLO-7K2Q-PX9M", key_id: "x", partner: "lobbystack", created_at: "2026-10-22T12:00:00.000Z", revoked_at: null };
+    const body = { plan: "pro_launch", max_uses: 5, expires_at: "2026-12-31T00:00:00Z" };
+    const revoke = (request: Request, id = codeId) => v1.revokeBillingCode(request, { params: Promise.resolve({ code_id: id }) });
+    // A per-business key, even with billing:manage, is refused: codes belong to no one business.
+    expect((await v1.createBillingCode(call("/billing/codes", { method: "POST", body: JSON.stringify(body) }))).status).toBe(403);
+    expect((await v1.listBillingCodes(call("/billing/codes"))).status).toBe(403);
+    expect((await revoke(call(`/billing/codes/${codeId}`, { method: "DELETE" }))).status).toBe(403);
+    const partner = generatePlatformKey({ name: "Partner", partner: "acme", ownerEmail: "ops@acme.example", access: "partner" });
+    const operator = platformKey();
+    vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([partner.entry, operator.entry]));
+    vi.stubEnv("APP_BASE_URL", "https://demo.alloplace.com");
+    try {
+      const as = (key: string, path: string, init: RequestInit = {}) => new Request(`https://app.example.com/api/v1${path}`, { ...init, headers: { authorization: `Bearer ${key}`, ...(init.headers ?? {}) } });
+      const partnerCreate = await v1.createBillingCode(as(partner.key, "/billing/codes", { method: "POST", body: JSON.stringify(body) }));
+      expect(partnerCreate.status).toBe(403);
+      expect(await partnerCreate.json()).toMatchObject({ error: { message: expect.stringContaining("manage promo codes") } });
+      expect(domain.createBillingCodeForApi).not.toHaveBeenCalled();
+
+      domain.createBillingCodeForApi.mockResolvedValueOnce({ code, replayed: false });
+      const created = await v1.createBillingCode(as(operator.key, "/billing/codes", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": "code-1" } }));
+      expect(created.status).toBe(201);
+      expect(await created.json()).toEqual({ data: code });
+      expect(domain.createBillingCodeForApi).toHaveBeenLastCalledWith(expect.anything(), { caller: { platformKeyId: operator.entry.id, partnerId: "lobbystack" }, idempotencyKey: "code-1", body, brandName: expect.any(String), baseUrl: "https://demo.alloplace.com" });
+      domain.createBillingCodeForApi.mockResolvedValueOnce({ code, replayed: true });
+      expect((await v1.createBillingCode(as(operator.key, "/billing/codes", { method: "POST", body: JSON.stringify(body), headers: { "Idempotency-Key": "code-1" } }))).headers.get("Idempotent-Replayed")).toBe("true");
+      // A code anyone may enter without a limit and an end never reaches the domain.
+      const calls = domain.createBillingCodeForApi.mock.calls.length;
+      expect((await v1.createBillingCode(as(operator.key, "/billing/codes", { method: "POST", body: JSON.stringify({ plan: "pro_launch" }) }))).status).toBe(400);
+      expect(domain.createBillingCodeForApi.mock.calls.length).toBe(calls);
+
+      expect((await v1.listBillingCodes(as(operator.key, "/billing/codes?plan=pro_launch&limit=5"))).status).toBe(200);
+      expect(domain.listBillingCodesForApi).toHaveBeenLastCalledWith(expect.anything(), { limit: 5, plan: "pro_launch", businessId: undefined, baseUrl: "https://demo.alloplace.com" });
+      expect((await v1.listBillingCodes(as(operator.key, "/billing/codes?business_id=nope"))).status).toBe(400);
+
+      domain.revokeBillingCodeForApi.mockResolvedValueOnce({ ...code, status: "revoked", revoked_at: "2026-10-22T13:00:00.000Z" });
+      const revoked = await revoke(as(operator.key, `/billing/codes/${codeId}`, { method: "DELETE" }));
+      expect(revoked.status).toBe(200);
+      expect(domain.revokeBillingCodeForApi).toHaveBeenLastCalledWith(expect.anything(), { codeId, baseUrl: "https://demo.alloplace.com" });
+      expect((await revoke(as(operator.key, "/billing/codes/x", { method: "DELETE" }), "x")).status).toBe(400);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("lets only an operator's platform key read and apply the billing catalog", async () => {

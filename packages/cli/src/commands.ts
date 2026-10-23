@@ -337,7 +337,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
   }),
-  group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog.", {
+  group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
     status: { operation: "getBilling" },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
@@ -350,6 +350,9 @@ export const groups: Record<string, Group> = Object.fromEntries([
     "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, show: catalogChanges },
     "catalog-link": { operation: "linkBillingCatalog", summary: "Record the Polar products and discounts that sell the catalog. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
     "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "polar_org", "started_at") },
+    codes: { operation: "listBillingCodes", columns: columns("id", "code", "plan", "business_id", "uses", "max_uses", "expires_at", "status") },
+    "code-create": { operation: "createBillingCode", args: ["plan"], show: (data) => `${showRecord(data)}\n\nSend this link, or the code ${String(data.code)} for Settings > Plan: ${String(data.link)}` },
+    "code-revoke": { operation: "revokeBillingCode" },
   }),
   group("numbers", "Find, claim, replace and release phone numbers.", {
     list: { operation: "listPhoneNumbers", columns: columns("id", "phone_number", "status", "release_scheduled_at") },

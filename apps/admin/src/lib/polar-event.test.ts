@@ -68,4 +68,12 @@ describe("Polar payload normalization", () => {
     expect(event("prod_free")).not.toHaveProperty("plan");
     expect(event("prod_unknown")).not.toHaveProperty("plan");
   });
+
+  it("names a promo plan's own code beside the tier it behaves as", () => {
+    const price = (plan: string, tier: string, polarId: string) => ({ plan, tier, status: "active", period: "monthly" as const, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired: false });
+    const links = polarProductLinks({ plans: [], prices: [price("salons-half-off", "starter", "prod_promo"), price("starter", "starter", "prod_starter")] }, {});
+    const event = (productId: string) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: productId, customer: { external_id: `business:${businessId}` } }, links).payload;
+    expect(event("prod_promo")).toMatchObject({ plan: "starter", planCode: "salons-half-off", billingInterval: "monthly" });
+    expect(event("prod_starter")).toMatchObject({ plan: "starter", planCode: "starter" });
+  });
 });

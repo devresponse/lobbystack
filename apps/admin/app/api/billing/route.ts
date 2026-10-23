@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq, sql } from "drizzle-orm";
 
 import { billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths } from "@lobbystack/db";
-import { billingAccess, billingPlanList, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, polarCheckoutConfigured, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -35,7 +35,9 @@ export async function GET(request: Request) {
         }
       }
       const availableCheckoutPlans = hostedCheckoutPlanSlugs.filter(plan => availableCheckoutIntervals[plan].length > 0);
-      return { availableCheckoutPlans, availableCheckoutIntervals, plans, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus: month ? { ...month, usageComplete: Number(incompleteUsage[0]?.count ?? 0) === 0, overageSpendingCapCents: cap, overageSpendingCapReached: cap !== null && month.overageSpendCents > 0 && month.overageSpendCents >= cap } : null, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      // A promo plan the business took with a code, shown by its own name and price.
+      const promoPlan = await loadBusinessPromoPlan(tx, businessId);
+      return { availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus: month ? { ...month, usageComplete: Number(incompleteUsage[0]?.count ?? 0) === 0, overageSpendingCapCents: cap, overageSpendingCapReached: cap !== null && month.overageSpendCents > 0 && month.overageSpendCents >= cap } : null, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

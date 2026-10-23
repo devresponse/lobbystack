@@ -38,6 +38,36 @@ describe("PolarBillingProvider", () => {
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({ product_id: "product-pro", proration_behavior: "invoice" });
   });
 
+  it("sells a promo plan with its discount and metadata, and no typed code on top", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "checkout-2", url: "https://polar.example/checkout-2" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const checkout = { productId: "product-promo", customerEmail: "owner@example.com", externalCustomerId: "business:1", successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan" };
+    const metadata = { lobbystack_plan: "salons-half-off", lobbystack_checkout: "request-2" };
+
+    await provider.createCheckout({ ...checkout, promo: { discountId: "discount-1", metadata } });
+    await provider.createCheckout({ ...checkout, promo: { discountId: null, metadata } });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ products: ["product-promo"], discount_id: "discount-1", allow_discount_codes: false, metadata });
+    const plain = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as Record<string, unknown>;
+    expect(plain).toMatchObject({ allow_discount_codes: false, metadata });
+    expect(plain).not.toHaveProperty("discount_id");
+  });
+
+  it("sends a discount with a product move only when asked, null removing it", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-promo", cancel_at_period_end: false, ended_at: null, pending_update: null }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const metadata = { lobbystack_plan: "salons-half-off", lobbystack_checkout: "request-2" };
+
+    await provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-promo", prorationBehavior: "invoice", discountId: "discount-1", metadata });
+    await provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "next_period", discountId: null });
+
+    const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
+    expect(body(0)).toEqual({ product_id: "product-promo", proration_behavior: "invoice", discount_id: "discount-1", metadata });
+    expect(body(1)).toEqual({ product_id: "product-pro", proration_behavior: "next_period", discount_id: null });
+  });
+
   it("reads a pending change's product, and a subscription Polar doesn't know as null", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: true, ended_at: null, pending_update: { product_id: "product-starter" } }) })

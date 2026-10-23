@@ -508,6 +508,50 @@
         "order": "Porudžbina",
         "refund": "Povraćaj novca"
       }
+    },
+    "promo": {
+      "link": "Imate promo kod?",
+      "label": "Promo kod",
+      "placeholder": "Unesite svoj kod",
+      "apply": "Primeni",
+      "applying": "Provera...",
+      "cancel": "Otkaži",
+      "unlocks": "Ovaj kod otključava {{plan}}.",
+      "features": "Sve iz paketa {{tier}}.",
+      "ends": "Do {{date}}",
+      "unavailable": "Trenutno nije u prodaji",
+      "interval": {
+        "monthly": "Mesečno",
+        "annual": "Godišnje"
+      },
+      "per": {
+        "monthly": "/ mesečno",
+        "annual": "/ godišnje"
+      },
+      "subscribe": {
+        "monthly": "Pretplati se mesečno",
+        "annual": "Pretplati se godišnje"
+      },
+      "change": {
+        "monthly": "Pređi na njega mesečno",
+        "annual": "Pređi na njega godišnje"
+      },
+      "discount": {
+        "percentage": "{{percent}}% popusta",
+        "fixed": "{{amount}} popusta",
+        "once": "{{discount}} na prvo plaćanje",
+        "forever": "{{discount}} na svako plaćanje",
+        "repeating_one": "{{discount}} tokom {{count}} meseca",
+        "repeating_few": "{{discount}} tokom {{count}} meseca",
+        "repeating_other": "{{discount}} tokom {{count}} meseci"
+      },
+      "errors": {
+        "invalid": "Ovaj kod nije važeći.",
+        "current": "Već imate ovaj paket.",
+        "interval": "Ovaj paket se ne prodaje uz taj period naplate.",
+        "rateLimited": "Previše pokušaja. Pokušajte ponovo kasnije.",
+        "failed": "Nije moguće proveriti ovaj kod. Pokušajte ponovo."
+      }
     }
   },
   "phoneNumber": {

@@ -66,9 +66,9 @@ export type WorkerDependencies = {
   twilioAlerts?: Pick<TwilioProvider, "sendSms"> & { from: string };
   polar?: {
     recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>;
-    createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }>;
+    createCheckout?(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string; promo?: { discountId: string | null; metadata: Record<string, string> } }): Promise<{ checkoutUrl: string; checkoutId: string }>;
     getSubscription?(subscriptionId: string): Promise<PolarSubscription | null>;
-    changeSubscriptionProduct?(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior }): Promise<PolarSubscription>;
+    changeSubscriptionProduct?(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior; discountId?: string | null; metadata?: Record<string, string> }): Promise<PolarSubscription>;
   };
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
   polarCatalog?: { readSnapshot(): Promise<PolarSnapshot> };
@@ -759,15 +759,30 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       }
       const request = await loadBillingCheckoutRequest(dependencies.domain, { businessId, requestId });
       if (!request) return { status: "skipped", entityId: requestId };
+      let links: PolarProductLinks;
+      try {
+        links = await readPolarProductLinks(dependencies.domain);
+      } catch (error) {
+        await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: request.subscription ? "Polar plan change failed." : "Polar checkout creation failed." });
+        throw error;
+      }
+      // A promo plan sells through its own product and discount, while it is on sale.
+      const sale = request.planCode ? links.saleFor(request.planCode, request.billingInterval) : null;
+      if (request.planCode && !sale) {
+        await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "This promo plan isn't on sale right now." });
+        return { status: "skipped", entityId: requestId };
+      }
+      const promo = request.planCode && sale ? { plan: request.planCode, ...sale, metadata: { lobbystack_plan: request.planCode, lobbystack_checkout: requestId } } : null;
       // A business that already pays moves its subscription: Polar refuses a second one.
       if (request.subscription) {
-        const changed = await changeBillingPlan(dependencies, { businessId, requestId, target: request.target, billingInterval: request.billingInterval, subscription: request.subscription });
+        const changed = await changeBillingPlan(dependencies, { businessId, requestId, target: request.target, billingInterval: request.billingInterval, subscription: request.subscription, promo, links });
         if (changed) return changed;
       }
       try {
         const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
         const checkout = await dependencies.polar.createCheckout({
-          productId: polarCheckoutProductId(await readPolarProductLinks(dependencies.domain), request.target, request.billingInterval),
+          productId: promo?.productId ?? polarCheckoutProductId(links, request.target, request.billingInterval),
+          ...(promo ? { promo: { discountId: promo.discountId, metadata: promo.metadata } } : {}),
           customerEmail: request.customerEmail,
           externalCustomerId: request.externalCustomerId,
           successUrl: `${planUrl}?checkout=success&requestId=${encodeURIComponent(requestId)}`,
@@ -1356,7 +1371,17 @@ function planChangeRefusalFor(error: unknown): PlanChangeRefusal | undefined {
  */
 async function changeBillingPlan(
   dependencies: WorkerDependencies,
-  input: { businessId: string; requestId: string; target: "starter" | "pro"; billingInterval: "monthly" | "annual"; subscription: { id: string; plan: "starter" | "pro"; billingInterval: "monthly" | "annual" | null } },
+  input: {
+    businessId: string;
+    requestId: string;
+    target: "starter" | "pro";
+    billingInterval: "monthly" | "annual";
+    subscription: { id: string; plan: "starter" | "pro"; billingInterval: "monthly" | "annual" | null; planCode: string | null };
+    /** A promo plan's product and discount, which replace the target's standard product. */
+    promo: { productId: string; discountId: string | null; metadata: Record<string, string> } | null;
+    /** The products the catalog sells, as the checkout read them. */
+    links: PolarProductLinks;
+  },
 ): Promise<JobResult | null> {
   const { businessId, requestId } = input;
   const polar = dependencies.polar;
@@ -1365,8 +1390,8 @@ async function changeBillingPlan(
     return { status: "skipped", entityId: requestId };
   }
   try {
-    const links = await readPolarProductLinks(dependencies.domain);
-    const productId = polarCheckoutProductId(links, input.target, input.billingInterval);
+    const { links } = input;
+    const productId = input.promo?.productId ?? polarCheckoutProductId(links, input.target, input.billingInterval);
     const subscription = await polar.getSubscription(input.subscription.id);
     if (!subscription || subscription.endedAt || !(liveSubscriptionStates as readonly string[]).includes(subscription.status)) return null;
     // A retry after Polar made the change, or a change already waiting for the next period.
@@ -1382,7 +1407,9 @@ async function changeBillingPlan(
     const current = links.planFor(subscription.productId) ?? { plan: input.subscription.plan, interval: input.subscription.billingInterval ?? input.billingInterval };
     const direction = planChangeDirection(current, { plan: input.target, interval: input.billingInterval });
     const proration = await loadPlanChangeProration(dependencies.domain);
-    await polar.changeSubscriptionProduct({ subscriptionId: subscription.id, productId, prorationBehavior: direction === "downgrade" ? proration.downgrade : proration.upgrade });
+    // A promo plan brings its discount. Leaving one for a standard plan drops its discount, which no standard product takes.
+    const discount = input.promo ? { discountId: input.promo.discountId, metadata: input.promo.metadata } : input.subscription.planCode ? { discountId: null } : {};
+    await polar.changeSubscriptionProduct({ subscriptionId: subscription.id, productId, prorationBehavior: direction === "downgrade" ? proration.downgrade : proration.upgrade, ...discount });
     await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
     return { status: "completed", entityId: requestId };
   } catch (error) {

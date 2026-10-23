@@ -69,7 +69,7 @@ Cada endpoint, salvo `GET /me`, requiere un permiso (scope). Una clave sin ese p
 | `messages:read` | `GET /messages` |
 | `knowledge:read` | `GET /knowledge`, `GET /knowledge/{entry_id}`, `GET /knowledge/sources`, `GET /knowledge/sources/{source_id}` |
 | `knowledge:write` | `POST /knowledge`, `PATCH` y `DELETE` en `/knowledge/{entry_id}`, `POST /knowledge/sources`, `PATCH` y `DELETE` en `/knowledge/sources/{source_id}`, `POST /knowledge/sources/{source_id}/expand`, `/retry` y `/cancel`, `POST /knowledge/uploads` y `POST /knowledge/uploads/{upload_id}/complete` |
-| `billing:manage` | `GET` y `PATCH /billing`, `GET /billing/plans`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` y, con la clave de plataforma de un operador, `POST` y `DELETE /billing/managed-plan`, `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, y `POST /billing/catalog/polar-links` |
+| `billing:manage` | `GET` y `PATCH /billing`, `GET /billing/plans`, `POST /billing/checkout`, `GET /billing/checkout/{checkout_id}` y, con la clave de plataforma de un operador, `POST` y `DELETE /billing/managed-plan`, `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, `POST /billing/catalog/polar-links`, `GET` y `POST /billing/codes`, y `DELETE /billing/codes/{code_id}` |
 | `phone_numbers:manage` | `GET /phone-numbers`, `POST /phone-numbers/search`, `POST /phone-numbers/claims`, `GET /phone-numbers/claims/{claim_id}`, `DELETE /phone-numbers/{phone_number_id}` y `POST /phone-numbers/{phone_number_id}/replace` |
 | `team:manage` | `GET /team`, `POST /team/invitations`, `DELETE /team/invitations/{invitation_id}`, `PATCH` y `DELETE` en `/team/members/{membership_id}`, `POST /team/claim-link` |
 | `webhooks:manage` | `GET`, `POST`, `PATCH` y `DELETE` en `/webhooks`, y `POST /webhooks/{webhook_id}/test` |
@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Sin ese encabezado, la solicitud devuelve `400` con el código `business_required`. Un negocio al que la clave no puede llegar devuelve `404`. `GET /me` funciona sin el encabezado y muestra el socio y el acceso de la clave. La clave de un operador también gestiona el catálogo de facturación del despliegue con `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, y `POST /billing/catalog/polar-links`, que no actúan sobre ningún negocio y no llevan el encabezado.
+Sin ese encabezado, la solicitud devuelve `400` con el código `business_required`. Un negocio al que la clave no puede llegar devuelve `404`. `GET /me` funciona sin el encabezado y muestra el socio y el acceso de la clave. La clave de un operador también gestiona el catálogo de facturación del despliegue con `GET /billing/catalog`, `GET` y `POST /billing/catalog/runs`, y `POST /billing/catalog/polar-links`, y sus códigos promocionales con `GET` y `POST /billing/codes` y `DELETE /billing/codes/{code_id}`, que no actúan sobre ningún negocio y no llevan el encabezado.
 
 `POST /team/claim-link` entrega un negocio a su propietario. Cuando lo acepta, la clave de un socio ya no llega al negocio, mientras que la de un operador sigue llegando. En ambos casos, `GET /businesses` deja de listarlo.
 

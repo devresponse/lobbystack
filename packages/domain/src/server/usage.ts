@@ -40,6 +40,8 @@ export type UsageStatus = {
   overageSpendCents: number;
   overageSpendingCapCents: number | null;
   overageSpendingCapReached: boolean;
+  /** The voice seconds phone and browser calls can still use this month; null when nothing limits them. */
+  voiceSecondsLeft: number | null;
   usageComplete: boolean;
 };
 
@@ -155,6 +157,15 @@ async function lockUsagePeriod(tx: DatabaseTransaction, businessId: string, peri
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`billing-usage:${businessId}:${periodKey}`}, 0))`);
 }
 
+// Usage that takes the month's spend from `before` to `after` pushes it past
+// the cap only when it adds spend and ends above it. Included usage and
+// website chats add none, so they still run once spend is over the cap, which
+// a text estimated at one segment and billed as two, a lowered cap or a higher
+// rate can each cause.
+function pushesPastCap(capCents: number | null, before: number, after: number): boolean {
+  return capCents !== null && after > capCents + 1e-9 && after > before + 1e-9;
+}
+
 // Self-host, and a paid plan with no overage cap, never run out of voice, so calls reserve nothing.
 function hasUnlimitedVoice(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits">): boolean {
   return billing.plan === "self_host" || (currentLimits(billing).overagesBillable && billing.capCents === null);
@@ -169,7 +180,7 @@ function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" 
   const remainingIncluded = included === null ? 0 : Math.max(0, included - current.usage.voice_seconds);
   const remainingCap = billing.capCents === null ? 0 : Math.max(0, billing.capCents - current.rawSpendCents);
   const rate = rateCents(config, "voice_seconds");
-  const capSeconds = rate > 0 ? Math.floor(remainingCap / rate) : Number.POSITIVE_INFINITY;
+  const capSeconds = rate > 0 ? Math.floor((remainingCap + 1e-9) / rate) : Number.POSITIVE_INFINITY;
   return config.overagesBillable ? (billing.capCents === null ? 0 : remainingIncluded + capSeconds) : remainingIncluded;
 }
 
@@ -227,6 +238,16 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
   const config = currentLimits(billing);
   const overageSpendCents = Math.max(0, Math.ceil(replay.rawSpendCents - 1e-9));
   const capReached = billing.capCents !== null && replay.rawSpendCents > 0 && overageSpendCents >= billing.capCents;
+  // A kind is blocked once its allowance is used up and it can't run past it:
+  // Free never can, and a capped plan can't once one more unit would push
+  // spend past the cap. A paid plan's chats cost nothing past their allowance,
+  // so the cap never blocks them.
+  const blocked = (kind: NonAiBillingUsageKind): boolean => {
+    const included = includedQuantity(config, kind);
+    if (included === null || replay.usage[kind] < included) return false;
+    return !config.overagesBillable || pushesPastCap(billing.capCents, replay.rawSpendCents, replay.rawSpendCents + rateCents(config, kind));
+  };
+  const voiceSecondsLeft = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, replay);
   return {
     periodKey: input.periodKey,
     plan: billing.plan,
@@ -240,13 +261,14 @@ function usageStatusFrom(input: { periodKey: string; billing: UsageContext; even
     chatAiTokensIncluded: config.chatAiTokensIncluded,
     overagesBillable: config.overagesBillable,
     voiceOverageRatePerMinuteCents: config.voiceOverageRatePerMinuteCents,
-    voiceBlocked: (!config.overagesBillable && config.voiceSecondsIncluded !== null && replay.usage.voice_seconds >= config.voiceSecondsIncluded) || capReached,
-    alertSmsBlocked: (!config.overagesBillable && config.alertSmsSegmentsIncluded !== null && replay.usage.alert_sms_segments >= config.alertSmsSegmentsIncluded) || capReached,
-    outboundCallAttemptsBlocked: (!config.overagesBillable && config.outboundCallAttemptsIncluded !== null && replay.usage.outbound_call_attempts >= config.outboundCallAttemptsIncluded) || capReached,
-    chatAiBlocked: (!config.overagesBillable && config.chatAiTokensIncluded !== null && replay.usage.chat_ai_tokens >= config.chatAiTokensIncluded) || capReached,
+    voiceBlocked: blocked("voice_seconds"),
+    alertSmsBlocked: blocked("alert_sms_segments"),
+    outboundCallAttemptsBlocked: blocked("outbound_call_attempts"),
+    chatAiBlocked: blocked("chat_ai_tokens"),
     overageSpendCents,
     overageSpendingCapCents: billing.capCents,
     overageSpendingCapReached: capReached,
+    voiceSecondsLeft: Number.isFinite(voiceSecondsLeft) ? voiceSecondsLeft : null,
     usageComplete: events.every((event) => event.isFinal),
   };
 }
@@ -317,7 +339,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   }
   const eventPayload = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: input.usageKind === "outbound_call_attempts" || input.usageKind === "chat_ai_tokens" };
   const simulated = replayEvents([...events, eventPayload], billing, billing.limits);
-  if (billing.capCents !== null && simulated.rawSpendCents > billing.capCents) {
+  if (pushesPastCap(billing.capCents, current.rawSpendCents, simulated.rawSpendCents)) {
     return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const syncNeeded = billing.plan === "starter" || billing.plan === "pro";
@@ -354,11 +376,12 @@ export async function extendPhoneReservationInTransaction(tx: DatabaseTransactio
   if (!event) return 0;
   // The replay already counts this call's reservation. A plan upgraded to
   // unlimited mid-call still grows it, up to the longest call.
-  const free = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, replayEvents(events, billing, billing.limits));
+  const current = replayEvents(events, billing, billing.limits);
+  const free = hasUnlimitedVoice(billing) ? Number.POSITIVE_INFINITY : reservableVoiceSeconds(billing, current);
   const granted = Math.min(PHONE_RESERVATION_SLICE_SECONDS, free, MAX_PHONE_CALL_MS / 1_000 - event.quantity);
   if (granted <= 0) return 0;
   const replayed = events.map((row) => (row === event ? { ...row, quantity: row.quantity + granted } : row));
-  if (billing.capCents !== null && replayEvents(replayed, billing, billing.limits).rawSpendCents > billing.capCents) return 0;
+  if (pushesPastCap(billing.capCents, current.rawSpendCents, replayEvents(replayed, billing, billing.limits).rawSpendCents)) return 0;
   const billableQuantity = billableQuantityForEvent(events.filter((row) => row !== event), { ...event, quantity: event.quantity + granted }, billing, billing.limits);
   await tx.update(billingUsageEvents).set({ quantity: event.quantity + granted, billableQuantity, updatedAt: new Date() }).where(eq(billingUsageEvents.id, reservation.id));
   await refreshUsageMonth(tx, { businessId: input.businessId, periodKey: reservation.periodKey, billing, events: replayed });

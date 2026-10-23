@@ -93,6 +93,14 @@ describe("desiredPolarCatalog", () => {
     expect(catalog.products.find((product) => product.plan === "pro-launch")).toMatchObject({ name: "Pro launch monthly", visibility: "private", cents: 6000 });
     expect(catalog.discounts).toEqual([expect.objectContaining({ plan: "pro-launch", name: "Pro launch discount", products: ["pro-launch/monthly"] })]);
   });
+
+  it("gives a plan sold only by the year no Credits, and names a plan by its own code's label", () => {
+    const catalog = catalogFor(profile((file) => {
+      file.plans.constructor = { ...proLaunch, names: { en: "Builders", fr: "Builders", es: "Builders", sr: "Builders" }, prices: { annualCents: 60_000 }, discount: undefined };
+    }));
+    expect(catalog.credits.filter((credits) => credits.plan === "constructor")).toEqual([]);
+    expect(catalog.products.filter((product) => product.plan === "constructor").map((product) => [product.name, product.credits])).toEqual([["Builders annual", []]]);
+  });
 });
 
 describe("planPolarChanges", () => {
@@ -232,6 +240,20 @@ describe("planPolarChanges", () => {
     const { first } = await apply(fake, profile(), { allowReplace: true });
     expect(summary(first.steps)).toEqual(["create product", "attach product", "archive product"]);
     expect(monthly.is_archived).toBe(true);
+  });
+
+  it("replaces a meter Polar locked only after the products that used it, so one --allow-replace run finishes", async () => {
+    const fake = createFakePolar();
+    await seedPolarSetup(fake);
+    const voice = fake.state.meters.find((meter) => meter.name === "Voice minutes")!;
+    voice.aggregation = { func: "count" };
+    voice.counted = true;
+    const annual = fake.state.products.find((product) => product.name === "Starter annual")!;
+    annual.recurring_interval = "month";
+    expect((await plan(fake, profile(), { adopt: true })).refusals.map((refusal) => refusal.object)).toEqual(["meter", "product"]);
+    const { first } = await apply(fake, profile(), { adopt: true, allowReplace: true });
+    expect(summary(first.steps).slice(-2)).toEqual(["archive product", "archive meter"]);
+    expect([annual.is_archived, voice.archived_at !== null]).toEqual([true, true]);
   });
 
   it("makes a discount without a code, updates it in place before anyone redeems it, and replaces it after only with --allow-replace", async () => {

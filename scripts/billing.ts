@@ -214,6 +214,16 @@ function railwayText(options: Options, organizationId: string, webhookSecret: st
   ].join("\n");
 }
 
+/** Writes the --railway-file, or says where the secret of a webhook this run made is. */
+async function saveRailwayValues(options: Options, io: BillingIo, organizationId: string, webhookSecret: string | null): Promise<void> {
+  if (options.railwayFile) {
+    await writeFile(options.railwayFile, railwayText(options, organizationId, webhookSecret, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
+    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node railway-vars.mjs ${options.railwayFile}`);
+  } else if (webhookSecret) {
+    io.out("\nPolar made the webhook just now. Copy its secret from the webhook's page in Polar to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");
+  }
+}
+
 const verifyExit = (result: BillingVerifyResult) => (result.status === "passed" ? exit.ok : result.status === "drift" ? exit.drift : exit.failed);
 
 async function verifyCommand(options: Options, io: BillingIo, input: { file: BillingFile; api: Client; polar: PolarCatalogClient; url: string; webhookUrl: string }): Promise<number> {
@@ -239,11 +249,12 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   const org = snapshot.organization;
   const reasons = preflight(options, file, catalog, snapshot);
   let catalogChanges: ApiBillingCatalogChange[] = [];
-  const catalogChanged = catalog.hash !== file.hash;
-  if (catalogChanged && catalog.brand === options.brand) {
-    // The undeployed check is the preflight's, so the dry run leaves it out.
+  let catalogChanged = catalog.hash !== file.hash;
+  if (catalog.brand === options.brand) {
+    // An applied file too: new code can resolve the same file to other rows. The undeployed check is the preflight's, so the dry run leaves it out.
     const preview = (await api.call("applyBillingCatalog", { body: { brand: options.brand, billing_file: file.profile, replaces_hash: catalog.hash, allow_undeployed: true, dry_run: true } })).data;
     catalogChanges = preview.changes;
+    catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
   }
   const desired = desiredPolarCatalog({ brand: options.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl });
@@ -297,7 +308,19 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // Step 8: Polar.
   if (polarPlan.steps.length) io.out("\nPolar:");
-  const { webhookSecret } = await runPolarSteps(polar, polarPlan.steps, (step) => io.out(`  done ${stepLine(step).trimStart()}`));
+  const made: { webhookSecret: string | null } = { webhookSecret: null };
+  try {
+    await runPolarSteps(polar, polarPlan.steps, (step, secret) => {
+      made.webhookSecret ??= secret;
+      io.out(`  done ${stepLine(step).trimStart()}`);
+    });
+  } catch (error) {
+    // A webhook made before the call that failed: the next run finds it and gets no secret, so this one is saved first.
+    if (made.webhookSecret) await saveRailwayValues(options, io, org.id, made.webhookSecret);
+    throw error;
+  }
+  // The Railway values as soon as Polar is set up, so a refusal or drift after this doesn't lose them.
+  await saveRailwayValues(options, io, org.id, made.webhookSecret);
 
   // Step 9: Polar against the file, before anything is linked.
   const after = await polar.readSnapshot();
@@ -309,14 +332,6 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   if (links.missing.length) throw new Refused(links.missing, "Polar has no single object for these, so nothing was linked:");
   const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, polar_env: options.polar, polar_org: after.organization.id, plans: links.plans, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
   io.out(`\nLinks: ${link.status === "unchanged" ? "already recorded" : `recorded ${link.changes.length} ${link.changes.length === 1 ? "change" : "changes"}`} in run ${String(link.id)}.`);
-
-  // The Railway values, before the report, so a drift there doesn't lose them.
-  if (options.railwayFile) {
-    await writeFile(options.railwayFile, railwayText(options, after.organization.id, webhookSecret, new Date().toISOString().slice(0, 10)), { flag: "wx", mode: 0o600 });
-    io.out(`\nSaved the Railway variables to ${options.railwayFile}. Set them with: node railway-vars.mjs ${options.railwayFile}`);
-  } else if (webhookSecret) {
-    io.out("\nPolar made the webhook just now. Copy its secret from the webhook's page in Polar to POLAR_WEBHOOK_SECRET on lobbystack-admin, or run again with --railway-file next time.");
-  }
 
   // Step 11: all three pairs.
   const result = verifyBillingCatalog({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans }, catalog: (await api.call("getBillingCatalog")).data, polar: { env: options.polar, snapshot: after }, webhookUrl: input.webhookUrl, checkWebhookSecret: true });

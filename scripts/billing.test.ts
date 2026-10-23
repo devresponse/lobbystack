@@ -206,8 +206,8 @@ describe("pnpm billing", () => {
     expect(context.fake.state.products.map((product) => product.id)).toEqual(ids);
     expect(applied.out).toContain("Links: recorded 6 changes in run");
     expect(applied.out).toContain("Result: in sync (exit 0).");
-    // Postgres wasn't asked to apply again: the file was applied in step 1.
-    expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs")).toEqual([]);
+    // Postgres wasn't asked to apply again, only for dry runs: the file was applied in step 1.
+    expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run)).toEqual([true, true, true]);
     expect(context.instance.plans.filter((entry) => entry.sold).map((entry) => entry.status)).toEqual(["active", "active"]);
     expect(context.instance.prices.map((price) => price.polar_id).sort()).toEqual([...ids].sort());
 
@@ -222,9 +222,24 @@ describe("pnpm billing", () => {
     context.fake.writes.length = 0;
     const again = await billing(["apply", ...sandbox, "--yes"], context);
     expect(again.code).toBe(0);
+    expect(again.out).toContain("Postgres: the file is applied");
     expect(again.out).toContain("Polar: sells what the file says");
     expect(again.out).toContain("Links: already recorded");
     expect(context.fake.writes).toEqual([]);
+  });
+
+  it("applies an applied file again when the running code resolves it to other rows", async () => {
+    const context = await setUp();
+    expect((await billing(["apply", ...sandbox, "--adopt", "--yes"], context)).code).toBe(0);
+    // As if older code had written another value for the same file.
+    context.instance.plans.find((plan) => plan.code === "pro")!.sort = 99;
+    context.instance.requests.length = 0;
+    const applied = await billing(["apply", ...sandbox, "--yes"], context);
+    expect(applied.code).toBe(0);
+    expect(applied.out).toContain("Postgres: 1 change");
+    expect(applied.out).toContain("Postgres: applied 1 change in run");
+    expect(context.instance.plans.find((plan) => plan.code === "pro")!.sort).not.toBe(99);
+    expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run === true)).toEqual([true, false]);
   });
 
   it("sets an empty organization up, saving the new webhook's secret to the Railway file, and reports what the instance still needs", async () => {
@@ -246,6 +261,28 @@ describe("pnpm billing", () => {
     // Once Railway has the values, verify passes.
     context.instance.polar.secret = secret;
     expect((await billing(["verify", ...sandbox], context, { env: { POLAR_READ_TOKEN: "polar_oat_read" } })).code).toBe(0);
+  });
+
+  it("keeps a new webhook's secret in the Railway file when a later Polar call fails", async () => {
+    const context = await setUp({ seeded: false });
+    await billing(["apply", ...sandbox, "--yes"], context);
+    // The webhook went missing, and a product the file doesn't sell waits to be archived after it's made again.
+    context.fake.state.webhooks.length = 0;
+    const annual = context.fake.state.products.find((product) => product.name === "Pro annual")!;
+    context.fake.state.products.push({ ...annual, id: "prod_gold", name: "Gold annual", metadata: { ...annual.metadata, lobbystack_plan: "gold" } });
+    const reachable = context.fake.fetch;
+    context.fake.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+      const response = await reachable(input, init);
+      if (init.method === "POST" && new URL(String(input)).pathname.startsWith("/v1/webhooks/endpoints")) context.fake.rejectToken = true;
+      return response;
+    }) as typeof fetch;
+    const railwayFile = join(root, "railway.txt");
+    const stopped = await billing(["apply", ...sandbox, "--yes", "--allow-archive", "--railway-file", railwayFile], context);
+    expect(stopped.out).toContain("done create Webhook");
+    expect(stopped.err).toContain("Polar answered 401 to PATCH /v1/products/prod_gold");
+    expect(stopped.code).toBe(2);
+    expect(await readFile(railwayFile, "utf8")).toContain(`[lobbystack-admin]\nPOLAR_WEBHOOK_SECRET=${context.fake.state.webhooks[0]!.secret}\n`);
+    expect(context.instance.linkRuns).toHaveLength(1);
   });
 
   it("applies a changed file only with --allow-undeployed, then the catalog, Polar and the links in that order", async () => {

@@ -18,8 +18,7 @@ Every plan other than the four standard ones is one more key under `plans`. Its 
 
 - For a promo unlocked by a code, set `"access": "code"`, and `months` with `endsWith` for one that lasts a while: `tier` moves the subscription to its tier at the standard price when the months run out, `cancel` ends it, and `keep` lets the plan go on.
 - For money off, add a `discount` (`percentage` in basis points or `fixed` in cents).
-- For a new plan anyone can take, set `"access": "public"`.
-- For a private deal sent to one client, set `"access": "hidden"`.
+- For a new plan anyone can take, set `"access": "public"`, and for a private deal sent to one client, `"access": "hidden"`. Polar gets a public or private product for each, but the plan screens and checkout don't offer them yet: a public one shows only in Polar's billing portal, where plan changes are allowed. Sell an extra plan through a code for now.
 - For a seasonal offer, set `offerEndsAt`; those who took it keep it.
 - To stop offering a plan, remove its entry. Its row is retired, not deleted, so its subscribers keep it.
 
@@ -32,7 +31,7 @@ pnpm lobbystack billing catalog-preview alloplace --billing-file @brands/allopla
 pnpm lobbystack billing catalog-apply alloplace --billing-file @brands/alloplace/billing.json --replaces-hash <hash from lobbystack billing catalog>
 ```
 
-The preview changes nothing and lists every change, flagging any that lowers an allowance or raises a price. The first apply leaves out `--replaces-hash`, or passes `null` to stop if someone applied first.
+The preview changes nothing and lists every change, flagging any that lowers an allowance or raises a price. The first apply leaves out `--replaces-hash`, or passes `null` to stop if someone applied first. A change to a sold plan's terms, its prices included, sends the plan back to draft, and checkout stops selling it until Polar sells the new terms and a link records them, so for anything Polar sells, use `pnpm billing apply` (below), which does both in one run.
 
 Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses the ones its build ships with. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once.
 
@@ -67,7 +66,7 @@ A plan with `months` ends at the subscription's first renewal once they have run
 
 ### Setting Polar up from it
 
-`pnpm billing` does all of the above and Polar in one command: it applies the file to the tables, makes Polar's organization sell what the file says (settings, meters, Credits, products, discounts and the webhook, each tagged with `lobbystack_*` metadata), records which Polar product sells each price, and checks the three against each other.
+`pnpm billing` does all of the above and Polar in one command: it applies the file to the tables, makes Polar's organization sell what the file says (settings, meters, Credits, products, discounts and the webhook; all but the settings and the webhook are tagged with `lobbystack_*` metadata), records which Polar product sells each price, and checks the three against each other.
 
 ```bash
 pnpm billing plan   --brand alloplace --polar sandbox            # shows what apply would change, changes nothing
@@ -75,11 +74,11 @@ pnpm billing apply  --brand alloplace --polar sandbox --railway-file railway.txt
 pnpm billing verify --brand alloplace --polar sandbox            # exit 0 in sync, 1 drift, 2 a side couldn't be read
 ```
 
-It reaches the instance with an operator's platform key, from a `lobbystack login` profile (`--profile`) or `LOBBYSTACK_URL` and `LOBBYSTACK_API_KEY`. `apply` needs a Polar setup token in `POLAR_SETUP_TOKEN` (organizations, meters, benefits, products and webhooks write, plus discounts write once a plan has a discount); `plan` and `verify` take a read token in `POLAR_READ_TOKEN` (the same six objects, read). Without one it asks, with typing hidden, and it never saves a token. Make the tokens in Polar under Settings > Developers, in the organization the instance's `POLAR_ORGANIZATION_ID` names: a deployment stays with the Polar organization it was first linked to, and live payments get a deployment of their own.
+It reaches the instance with an operator's platform key, from a `lobbystack login` profile (`--profile`) or `LOBBYSTACK_URL` and `LOBBYSTACK_API_KEY`. `apply` needs a Polar setup token in `POLAR_SETUP_TOKEN` (organizations, meters, benefits, products, discounts and webhooks write); `plan` and `verify` take a read token in `POLAR_READ_TOKEN` (the same six objects, read). Without one it asks, with typing hidden, and it never saves a token. Make the tokens in Polar under Settings > Developers, in the organization the instance's `POLAR_ORGANIZATION_ID` names: a deployment stays with the Polar organization it was first linked to, and live payments get a deployment of their own.
 
 - The first run on an organization `polar-setup.mjs` set up takes `--adopt`, which tags its meters, Credits and products and keeps their ids. Without it, a lookalike stops the run, so a forgotten flag can't make duplicates.
 - A file the instance's code wasn't built with needs `--allow-undeployed`, for trying it on a sandbox.
-- Fewer included minutes or texts need `--allow-less`, archiving a product or discount the file no longer has needs `--allow-archive`, and anything Polar can't change in place, such as a product's billing cycle, needs `--allow-replace`. Current subscribers keep their old price; edits made in Polar's dashboard are put back to the file.
-- `--railway-file` saves `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` to a new file, readable only by you, for `railway-vars.mjs`. When this run made the webhook, the file also holds `POLAR_WEBHOOK_SECRET`, so delete it once Railway has the values.
+- Fewer included minutes, texts or call transfers need `--allow-less`, archiving a product or discount the file no longer has needs `--allow-archive`, and anything Polar can't change in place, such as a product's billing cycle, needs `--allow-replace`. Current subscribers keep their old price; edits made in Polar's dashboard are put back to the file.
+- `--railway-file` saves `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` to a new file, readable only by you, for `railway-vars.mjs`, as soon as Polar is set up. When this run made the webhook, the file also holds `POLAR_WEBHOOK_SECRET`, even if a later step stops the run, so delete it once Railway has the values. Run again with a new file name, or none.
 
-A run that stops part-way is finished by running it again: everything is found by its tags. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs the six read scopes for that. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`, which ending a promo plan uses too.
+A run that stops part-way is finished by running it again: everything is found again by its tags, and the webhook by its address. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs the six read scopes for that. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`, which ending a promo plan uses too.

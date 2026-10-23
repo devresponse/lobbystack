@@ -602,6 +602,11 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
         fields.polar_disc = { from: plan.polar_disc, to: sent.polar_disc };
       }
     }
+    // A plan whose discount the file dropped no longer sells with the one Polar ended.
+    if (plan.discount === null && sent.polar_disc === null && plan.polar_disc !== null) {
+      set.polar_disc = null;
+      fields.polar_disc = { from: plan.polar_disc, to: null };
+    }
     if (plan.status === "draft") {
       set.status = "active";
       fields.status = { from: "draft", to: "active" };

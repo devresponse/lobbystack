@@ -79,6 +79,14 @@ describe("Have a promo code?", () => {
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
   });
 
+  it("forgets a promo link's code for the plan the business already has", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup(() => Response.json({ ...view, current: true }));
+    await screen.findByText("billing.promo.errors.current");
+    expect(screen.queryByRole("button", { name: "billing.promo.subscribe.monthly" })).toBeNull();
+    expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
+  });
+
   it("moves a paying business's subscription without a checkout page", async () => {
     store["lobbystack.billing.promoCode"] = "SALONS-2026";
     const { assign } = setup((url, init) => {

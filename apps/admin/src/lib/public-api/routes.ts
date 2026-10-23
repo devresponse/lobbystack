@@ -335,8 +335,8 @@ export const v1 = {
   createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
     const body = await readApiBody(request, apiCheckoutCreateSchema);
     if (body.plan === "promo") {
-      await requirePromoCodeAllowed(caller.businessId);
-      return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env) })) };
+      const checkPromoCode = () => requirePromoCodeAllowed(caller.businessId);
+      return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env), checkPromoCode })) };
     }
     return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval) })) };
   }),

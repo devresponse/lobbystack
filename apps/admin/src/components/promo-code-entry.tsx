@@ -64,7 +64,12 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
   const lookup = useMutation({
     mutationFn: (code: string) => requestJson<BillingCodeView>(`/api/billing/promo?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
     onMutate: () => { setError(null); setView(null); },
-    onSuccess: (result) => { setView(result); setValue(result.code); },
+    onSuccess: (result) => {
+      setView(result);
+      setValue(result.code);
+      // Nor should one for the plan the business already has: each check spends one of its tries.
+      if (result.current) clearStoredPromoCode();
+    },
     onError: (cause) => {
       setError(errorMessage(cause, t, t("billing.promo.errors.failed")));
       // A link's code that doesn't work shouldn't come back on every visit.

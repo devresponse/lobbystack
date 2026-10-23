@@ -651,9 +651,13 @@ describe("billing", () => {
     vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
     try {
       const promo = { plan: "promo", interval: "monthly", promo_code: "SALON50" };
-      domain.createCheckoutForApi.mockResolvedValue({ id: checkoutId, plan: "starter", interval: "monthly", status: "pending", promo_plan: "salons-half-off", checkout_url: null, error: null, paid: false, created_at: "2026-10-22T12:00:00.000Z", updated_at: "2026-10-22T12:00:00.000Z" });
+      // The domain counts the try once the key may pay for the business.
+      domain.createCheckoutForApi.mockImplementation(async (_context: unknown, _caller: unknown, _body: unknown, options: { checkPromoCode?: () => Promise<void> }) => {
+        await options.checkPromoCode?.();
+        return { id: checkoutId, plan: "starter", interval: "monthly", status: "pending", promo_plan: "salons-half-off", checkout_url: null, error: null, paid: false, created_at: "2026-10-22T12:00:00.000Z", updated_at: "2026-10-22T12:00:00.000Z" };
+      });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }))).status).toBe(202);
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true, checkPromoCode: expect.any(Function) });
       expect(invites.limit).toHaveBeenLastCalledWith([["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"]]);
       // A plan checkout tries no code.
       invites.limit.mockClear();
@@ -670,7 +674,7 @@ describe("billing", () => {
 
       vi.stubEnv("POLAR_ACCESS_TOKEN", "");
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: false });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: false, checkPromoCode: expect.any(Function) });
     } finally {
       vi.unstubAllEnvs();
     }

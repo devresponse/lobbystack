@@ -275,14 +275,88 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
     });
   });
 
+  it("starts a plan's months at the renewal after a move within a period, counts the code the paid request carried, and enters once across a lapse", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const { userId, businessId } = await ownedBusiness(tx, "mover");
+      const bound = await issue(tx, { plan: "pro-launch", code: "MOVER-BOUND", business_id: businessId });
+      const shared = await issue(tx, { plan: "pro-launch", code: "MOVER-SHARED", max_uses: 5, expires_at: inAWeek() });
+      const event = async (owner: string, eventType: string, payload: Record<string, unknown>) => {
+        await as(tx, "owner");
+        const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId: owner, payload: { billingKey: `business:${owner}`, ...payload } }).returning({ id: providerEvents.id });
+        await as(tx, "lobbystack_worker");
+        await reconcileBillingProviderEvent(context(tx), { businessId: owner, providerEventId: stored!.id });
+      };
+      const account = async (owner = businessId) => {
+        await as(tx, "owner");
+        const [row] = await rows(tx, sql`select plan_code, code_id, plan_ends, end_with, subscription_state from public.billing_accounts where business_id = ${owner}::uuid`);
+        return { ...row, plan_ends: row!.plan_ends === null ? null : new Date(String(row!.plan_ends)).toISOString() };
+      };
+      const uses = async () => {
+        await as(tx, "owner");
+        return await rows(tx, sql`select code, uses from public.billing_codes where id in (${bound.code.id}::uuid, ${shared.code.id}::uuid) order by code`);
+      };
+      const subscription = { plan: "pro", planCode: "pro-launch", billingInterval: "monthly", subscriptionId: "sub_mover", currentPeriodStart: "2026-10-01T00:00:00.000Z", currentPeriodEnd: "2026-11-01T00:00:00.000Z" };
+
+      await event(businessId, "subscription.active", { ...subscription, plan: "starter", planCode: "starter", status: "active" });
+      await as(tx, "lobbystack_app");
+      const checkPromoCode = async () => {};
+      const first = await createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "MOVER-BOUND", checkPromoCode });
+      await createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "MOVER-SHARED", checkPromoCode });
+      // Polar moves the paying subscription for the first request, keeping its period: the plan's discount starts at the November renewal.
+      await event(businessId, "subscription.updated", { ...subscription, status: "active", metadata: { lobbystack_plan: "pro-launch", lobbystack_checkout: first } });
+      expect(await account()).toEqual({ plan_code: "pro-launch", code_id: bound.code.id, plan_ends: "2027-05-01T00:00:00.000Z", end_with: null, subscription_state: "active" });
+      expect(await uses()).toEqual([{ code: "MOVER-BOUND", uses: 1 }, { code: "MOVER-SHARED", uses: 0 }]);
+
+      // An operator's end, then a payment that fails and goes through: the business never left the plan.
+      await tx.execute(sql`update public.billing_accounts set end_with = 'tier', end_set_at = now() where business_id = ${businessId}::uuid`);
+      await event(businessId, "subscription.updated", { ...subscription, status: "unpaid" });
+      await event(businessId, "subscription.updated", { ...subscription, status: "active" });
+      expect(await account()).toEqual({ plan_code: "pro-launch", code_id: bound.code.id, plan_ends: "2027-05-01T00:00:00.000Z", end_with: "tier", subscription_state: "active" });
+      expect(await uses()).toEqual([{ code: "MOVER-BOUND", uses: 1 }, { code: "MOVER-SHARED", uses: 0 }]);
+      expect(await rows(tx, sql`select count(*)::int as redeemed from public.audit_logs where business_id = ${businessId}::uuid and event_type = 'billing.promo_code_redeemed'`)).toEqual([{ redeemed: 1 }]);
+
+      // A checkout's months count from its first charge, to the same day or the month's last.
+      const late = await ownedBusiness(tx, "late");
+      await event(late.businessId, "subscription.active", { ...subscription, status: "active", subscriptionId: "sub_late", currentPeriodStart: "2026-08-31T00:00:00.000Z", currentPeriodEnd: "2026-09-30T00:00:00.000Z" });
+      expect((await account(late.businessId)).plan_ends).toBe("2027-02-28T00:00:00.000Z");
+    });
+  });
+
+  it("sells a paying business only Pro from Starter without a code, from the dashboard as through the API", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const { userId, businessId } = await ownedBusiness(tx, "payer");
+      const subscribe = async (plan: string) => {
+        await as(tx, "owner");
+        const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.updated", businessId, payload: { billingKey: `business:${businessId}`, plan, planCode: plan, status: "active", billingInterval: "monthly", subscriptionId: "sub_payer" } }).returning({ id: providerEvents.id });
+        await as(tx, "lobbystack_worker");
+        await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: stored!.id });
+        await as(tx, "lobbystack_app");
+      };
+      const dashboard = (target: "starter" | "pro", billingInterval: "monthly" | "annual" = "monthly") => createBillingCheckoutRequest(context(tx), { userId, businessId, target, billingInterval });
+      await subscribe("pro");
+      expect(await thrown(dashboard("starter"))).toMatchObject({ status: 409, message: "This business already pays for a plan. Change it in the billing portal." });
+      expect(await thrown(dashboard("pro", "annual"))).toMatchObject({ status: 409 });
+      await subscribe("starter");
+      expect(await dashboard("pro", "annual")).toEqual(expect.any(String));
+      expect(await thrown(dashboard("starter", "annual"))).toMatchObject({ status: 409 });
+    });
+  });
+
   it("sells a code's plan through the API to a claimed business, and answers a code that doesn't work on promo_code", async () => {
     await rollbackTest(async (tx) => {
       await promoCatalog(tx);
-      const { businessId } = await ownedBusiness(tx, "api");
+      const { userId, businessId } = await ownedBusiness(tx, "api");
       await issue(tx, { plan: "salons-half-off", code: "SALON50", max_uses: 5, expires_at: inAWeek() });
       const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
-      const checkout = await createCheckoutForApi(context(tx), apiCaller, { plan: "promo", interval: "monthly", promo_code: "salon50" }, { available: true });
+      const checkPromoCode = vi.fn(async () => {});
+      const checkout = await createCheckoutForApi(context(tx), apiCaller, { plan: "promo", interval: "monthly", promo_code: "salon50" }, { available: true, checkPromoCode });
       expect(checkout).toMatchObject({ plan: "starter", interval: "monthly", promo_plan: "salons-half-off", status: "pending", paid: false });
+      expect(checkPromoCode).toHaveBeenCalledTimes(1);
+      // A key with no owner to pay, as on a business nobody claimed, spends none of the business's tries.
+      expect(await thrown(createCheckoutForApi(context(tx), { ...apiCaller, actingUserId: userId }, { plan: "promo", interval: "monthly", promo_code: "SALON50" }, { available: true, checkPromoCode }))).toMatchObject({ status: 409 });
+      expect(checkPromoCode).toHaveBeenCalledTimes(1);
       expect(await thrown(createCheckoutForApi(context(tx), apiCaller, { plan: "promo", interval: "monthly", promo_code: "SALON51" }, { available: true }))).toMatchObject({ status: 400, details: [{ path: "promo_code" }] });
       expect(await thrown(createCheckoutForApi(context(tx), apiCaller, { plan: "promo", interval: "annual", promo_code: "SALON50" }, { available: true }))).toMatchObject({ status: 409 });
       expect(await thrown(createCheckoutForApi(context(tx), apiCaller, { plan: "promo", interval: "monthly", promo_code: "SALON50" }, { available: false }))).toMatchObject({ status: 409 });
@@ -455,6 +529,34 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
         expect(await account(tx, businessId)).toEqual(before);
         // Settings > Plan shows when, and what comes next.
         expect(await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, (scoped) => loadBusinessPromoPlan(scoped, businessId))).toMatchObject({ plan: "salons-half-off", ends: periodEnd, endsWith: "tier" });
+      });
+    });
+
+    it("sends no second email when an operator ends a plan in the week its owners heard it ends", async () => {
+      await rollbackTest(async (tx) => {
+        await promoCatalog(tx);
+        const { businessId } = await ownedBusiness(tx, "told");
+        const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+        // Pro launch's last month, which ends in five days.
+        const start = new Date();
+        start.setUTCMonth(start.getUTCMonth() - 6);
+        start.setTime(start.getTime() + 5 * 86_400_000);
+        const firstEnd = new Date(start);
+        firstEnd.setUTCMonth(firstEnd.getUTCMonth() + 1);
+        await polarEvent(tx, businessId, "subscription.active", { plan: "pro", planCode: "pro-launch", currentPeriodStart: start.toISOString(), currentPeriodEnd: firstEnd.toISOString() });
+        const planEnds = new Date(String((await account(tx, businessId)).plan_ends));
+        await polarEvent(tx, businessId, "subscription.updated", { plan: "pro", planCode: "pro-launch", currentPeriodStart: new Date(planEnds.getTime() - 30 * 86_400_000).toISOString(), currentPeriodEnd: planEnds.toISOString() });
+        const work = await loadPromoEndWork(context(tx), { businessId });
+        const notice = { ending: work!.ending, endsAt: work!.endsAt, tier: work!.tier, interval: work!.interval };
+        expect(await recordAsWorker(tx, { businessId, planCode: "pro-launch", planEnds, set: true, notice, appUrl: "https://demo.alloplace.com" })).toBe(1);
+
+        // The same renewal ends it the same way, so Polar and the owners already know.
+        const before = await account(tx, businessId);
+        expect(await endPromoPlanForApi(context(tx), apiCaller)).toMatchObject({ promo_plan: "pro-launch", plan_ends_with: "tier" });
+        expect(await account(tx, businessId)).toEqual({ ...before, end_with: "tier" });
+        expect(await loadPromoEndWork(context(tx), { businessId })).toMatchObject({ set: false, notify: false });
+        expect(await recordAsWorker(tx, { businessId, planCode: "pro-launch", planEnds, set: false, notice, appUrl: "https://demo.alloplace.com" })).toBe(0);
+        expect(await outbox(tx, businessId, "email.send")).toHaveLength(1);
       });
     });
 

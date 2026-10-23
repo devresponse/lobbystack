@@ -100,7 +100,7 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { readBillingPlanLimitBook } from "../billingPlans";
@@ -429,23 +429,25 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
  * by changing the Starter subscription rather than with a page; other changes
  * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
  * to a free, Starter or Pro business alike. Callers say whether this
- * deployment sells a standard plan and interval, and limit promo code tries.
+ * deployment sells a standard plan and interval, and limit promo code tries
+ * in checkPromoCode, which runs once the key may pay for the business, before
+ * the code is looked up, so a key that is refused spends none of its tries.
  */
-export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean }): Promise<ApiCheckout> {
+export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void> }): Promise<ApiCheckout> {
   if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
     if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, billed directly by the operator.");
     if (input.plan === "promo") {
+      await options.checkPromoCode?.();
       const sale = await billingCodeCheckout(tx, { businessId: caller.businessId, code: input.promo_code ?? "", billingInterval: input.interval });
       if ("refusal" in sale) throw promoRefusals[sale.refusal]();
       const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
       await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
       return await loadCheckout(tx, caller.businessId, checkoutId);
     }
-    const { plan: current } = await loadBillingContext(tx, caller.businessId);
-    if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
+    if (!standardCheckoutAllowed((await loadBillingContext(tx, caller.businessId)).plan, input.plan)) throw conflict(PAID_PLAN_CHECKOUT_REFUSAL);
     const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
     await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
     return await loadCheckout(tx, caller.businessId, checkoutId);

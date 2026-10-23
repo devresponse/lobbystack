@@ -326,6 +326,61 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
     });
   });
 
+  it("lets each business use a code once, however its plan ends, and keeps the uses from the app and other businesses", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const { userId, businessId } = await ownedBusiness(tx, "once");
+      const other = await ownedBusiness(tx, "other");
+      const shared = await issue(tx, { plan: "pro-launch", code: "ONCE-EACH", max_uses: 5, expires_at: inAWeek() });
+      const dashboard = () => createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "ONCE-EACH", checkPromoCode: async () => {} });
+      const view = () => withBusinessTransaction(tx as unknown as Database, { businessId, userId, actorType: "operator" }, (scoped) => billingCodeView(scoped, { businessId, code: "once-each", checkout: true }));
+      const event = async (eventType: string, payload: Record<string, unknown>) => {
+        await as(tx, "owner");
+        const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, plan: "pro", billingInterval: "monthly", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z", ...payload } }).returning({ id: providerEvents.id });
+        await as(tx, "lobbystack_worker");
+        await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: stored!.id });
+        await as(tx, "lobbystack_app");
+      };
+      const used = async () => {
+        await as(tx, "owner");
+        const [code] = await rows(tx, sql`select uses from public.billing_codes where id = ${shared.code.id}::uuid`);
+        const by = await rows(tx, sql`select business_id from public.billing_code_redemptions where code_id = ${shared.code.id}::uuid`);
+        const [audit] = await rows(tx, sql`select count(*)::int as redeemed from public.audit_logs where business_id = ${businessId}::uuid and event_type = 'billing.promo_code_redeemed'`);
+        await as(tx, "lobbystack_app");
+        return { uses: code!.uses, by: by.map((row) => row.business_id), redeemed: audit!.redeemed };
+      };
+
+      await as(tx, "lobbystack_app");
+      await dashboard();
+      await event("subscription.active", { planCode: "pro-launch", status: "active", subscriptionId: "sub_once" });
+      expect(await used()).toEqual({ uses: 1, by: [businessId], redeemed: 1 });
+      // On the plan, the code still finds it and says so.
+      expect(await view()).toMatchObject({ plan: "pro-launch", current: true });
+      expect(await thrown(dashboard())).toMatchObject({ status: 409, code: "promo_current" });
+
+      // Once the subscription has ended, the code no longer sells the plan.
+      await event("subscription.canceled", { planCode: "pro-launch", status: "canceled", subscriptionId: "sub_once" });
+      expect(await view()).toBeNull();
+      expect(await thrown(dashboard())).toMatchObject({ status: 400, code: "promo_invalid" });
+
+      // A new subscription onto the plan, with the older checkout's code, counts nothing.
+      await event("subscription.active", { planCode: "pro-launch", status: "active", subscriptionId: "sub_again" });
+      expect(await used()).toEqual({ uses: 1, by: [businessId], redeemed: 1 });
+      // Nor, once that plan ends on standard Pro, does the code sell it again.
+      await event("subscription.updated", { planCode: "pro", status: "active", subscriptionId: "sub_again" });
+      expect(await view()).toBeNull();
+      expect(await thrown(dashboard())).toMatchObject({ status: 400, code: "promo_invalid" });
+
+      // Another business can still use it. The app reads no uses, and the worker only its business's own.
+      expect(await offerFor(tx, other.businessId, "ONCE-EACH")).toMatchObject({ codeId: shared.code.id, plan: "pro-launch" });
+      expect(await failure(tx, sql`select * from public.billing_code_redemptions`)).toBe("42501");
+      await as(tx, "lobbystack_worker");
+      const asOther = <T>(run: (scoped: DatabaseTransaction) => Promise<T>) => withBusinessTransaction(tx as unknown as Database, { businessId: other.businessId, actorType: "worker" }, run);
+      expect(await asOther((scoped) => rows(scoped, sql`select count(*)::int as seen from public.billing_code_redemptions`))).toEqual([{ seen: 0 }]);
+      expect(await asOther((scoped) => failure(scoped, sql`insert into public.billing_code_redemptions (code_id, business_id) values (${shared.code.id}::uuid, ${businessId}::uuid)`))).toBe("42501");
+    });
+  });
+
   it("sells a paying business only Pro from Starter without a code, from the dashboard as through the API", async () => {
     await rollbackTest(async (tx) => {
       await promoCatalog(tx);

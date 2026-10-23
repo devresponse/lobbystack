@@ -3067,7 +3067,7 @@
       "post": {
         "operationId": "createBillingCode",
         "summary": "Issue a promo code",
-        "description": "Operator platform keys only. Makes a code that unlocks a plan whose access is code in billing.json; a business that enters it buys that plan through Polar with the plan's discount. A shared code needs max_uses and expires_at; a code bound to one business needs neither. With an Idempotency-Key, a retry returns the same code and a different body with that value is a 422. A code that is taken is a 409.",
+        "description": "Operator platform keys only. Makes a code that unlocks a plan whose access is code in billing.json; a business that enters it buys that plan through Polar with the plan's discount, once: a business that subscribed with a code can't use it again. A shared code needs max_uses and expires_at; a code bound to one business needs neither. With an Idempotency-Key, a retry returns the same code and a different body with that value is a 422. A code that is taken is a 409.",
         "tags": [
           "Platform"
         ],

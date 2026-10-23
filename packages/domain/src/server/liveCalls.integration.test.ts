@@ -113,14 +113,22 @@ describe.skipIf(!testUrl)("GPT-Live phone calls against PostgreSQL", () => {
       // The month counts what the calls hold, and the cap blocks more.
       const [month] = await tx.select({ voiceSecondsUsed: billingUsageMonths.voiceSecondsUsed, voiceBlocked: billingUsageMonths.voiceBlocked }).from(billingUsageMonths).where(eq(billingUsageMonths.businessId, businessId));
       expect(month).toEqual({ voiceSecondsUsed: 9_300, voiceBlocked: true });
-      // Billed as reserved on a monthly plan, and synced to Polar only once the calls finish.
-      const events = await tx.select({ quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(inArray(billingUsageEvents.sourceKey, [`voice:${firstId}`, `voice:${secondId}`]));
-      expect(events.every((row) => row.billableQuantity === row.quantity && row.syncStatus === "pending")).toBe(true);
+      // An open call bills nothing yet, and syncs to Polar only once it finishes.
+      const billable = async () => (await tx.select({ sourceKey: billingUsageEvents.sourceKey, billableQuantity: billingUsageEvents.billableQuantity, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(inArray(billingUsageEvents.sourceKey, [`voice:${firstId}`, `voice:${secondId}`])).orderBy(billingUsageEvents.sourceKey)).map((row) => [row.sourceKey === `voice:${firstId}` ? "first" : "second", row.billableQuantity, row.syncStatus]);
+      expect((await billable()).sort()).toEqual([["first", 0, "pending"], ["second", 0, "pending"]]);
       expect(await tx.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.syncUsage")))).toHaveLength(0);
 
       // A retried delivery attaches with what the call holds now.
       const retried = await asWorker(tx, async (context) => [await startLivePhoneCall(context, first), await startLivePhoneCall(context, second)]);
       expect(retried.map((row) => [row.duplicate, row.maxDurationMs])).toEqual([[true, 1_800_000], [true, 500_000]]);
+
+      // On a monthly plan too, each call bills only its share of the month's overage once it ends:
+      // the first fits in the 2,000 included seconds, and the second bills the 300 past them.
+      await asWorker(tx, async (context) => {
+        await finishLiveCall(context, { businessId, callId: firstId, seconds: 1_800, end: "caller_hung_up" });
+        await finishLiveCall(context, { businessId, callId: secondId, seconds: 500, end: "caller_hung_up" });
+      });
+      expect((await billable()).sort()).toEqual([["first", 0, "pending"], ["second", 300, "pending"]]);
     });
   });
 

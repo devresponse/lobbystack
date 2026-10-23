@@ -215,14 +215,16 @@ async function loadEvents(tx: DatabaseTransaction, businessId: string, periodKey
     .orderBy(asc(billingUsageEvents.createdAt));
 }
 
-// Annual plans send Polar each event's share of the month's overage once it is
-// final. Only the other final events have been billed, so open reservations
-// never count against this one. An event that was already final keeps what it
-// billed and moves only by its own change.
+// Starter and Pro send Polar each event's share of the month's overage once it
+// is final, on monthly and annual subscriptions alike, so the allowance resets
+// on the first of each UTC month whatever day the subscription renews, and
+// Polar's products need no Credits. Only the other final events have been
+// billed, so open reservations never count against this one. An event that
+// was already final keeps what it billed and moves only by its own change.
 export function billableQuantityForEvent(others: ReplayEvent[], event: ReplayEvent, current: PlanInForce, limits: BillingPlanLimitBook, billed?: { quantity: number; billableQuantity: number }): number {
   const plan = isBillingPlanSlug(event.planAtRecordTime) ? event.planAtRecordTime : current.plan;
   const included = includedQuantity(eventLimits(event, current, limits), event.usageKind as NonAiBillingUsageKind);
-  if (event.billingIntervalAtRecordTime !== "annual" || (plan !== "starter" && plan !== "pro") || included === null) return Math.max(0, event.quantity);
+  if ((plan !== "starter" && plan !== "pro") || included === null) return Math.max(0, event.quantity);
   const before = others.reduce((sum, row) => (row.isFinal && row.usageKind === event.usageKind ? sum + Math.max(0, row.quantity) : sum), 0);
   const overage = (quantity: number) => Math.max(0, before + Math.max(0, quantity) - included);
   return billed ? Math.max(0, billed.billableQuantity + overage(event.quantity) - overage(billed.quantity)) : overage(event.quantity) - overage(0);

@@ -111,7 +111,7 @@ async function promoCatalog(tx: DatabaseTransaction, value = promoFile()): Promi
   const profile = billingProfileSchema.parse(value);
   const plans = desiredBillingPlans(profile);
   const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
-  await runPolarSteps(polar, planPolarChanges({ catalog, snapshot: await polar.readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false, allowLess: false } }).steps);
+  await runPolarSteps(polar, planPolarChanges({ catalog, snapshot: await polar.readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false } }).steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await polar.readSnapshot() });
   const body = apiBillingCatalogLinkSchema.parse({ brand: "alloplace", polar_env: "sandbox", polar_org: "org_test", hash: applied.run.hash, plans: links.plans });
   await linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: randomUUID(), body, deployment: { brand: "alloplace", polar: billingDeploymentPolar(polarEnv) } });

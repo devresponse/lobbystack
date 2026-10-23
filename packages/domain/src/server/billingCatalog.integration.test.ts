@@ -347,7 +347,7 @@ async function seededPolar(billingFile: Record<string, any>) {
   const profile = billingProfileSchema.parse(billingFile);
   const plans = desiredBillingPlans(profile);
   const catalog = desiredPolarCatalog({ brand: "alloplace", profile, plans, webhookUrl: `${polarEnv.APP_BASE_URL}/api/webhooks/polar` });
-  const planned = planPolarChanges({ catalog, snapshot: await polarClient(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false, allowLess: false } });
+  const planned = planPolarChanges({ catalog, snapshot: await polarClient(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false } });
   await runPolarSteps(polarClient(fake), planned.steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await polarClient(fake).readSnapshot() });
   return { fake, plans: links.plans };

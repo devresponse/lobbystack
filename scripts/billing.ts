@@ -4,7 +4,7 @@
 //
 //   pnpm billing plan   --brand alloplace --polar sandbox [--profile <name>] [--json], and apply's other flags
 //   pnpm billing apply  --brand alloplace --polar sandbox [--profile <name>] [--adopt] [--yes]
-//                       [--allow-replace] [--allow-archive] [--allow-less] [--allow-undeployed]
+//                       [--allow-replace] [--allow-archive] [--allow-undeployed]
 //                       [--webhook-url <url>] [--railway-file <new file>]
 //   pnpm billing verify --brand alloplace --polar sandbox [--profile <name>] [--webhook-url <url>] [--json]
 //
@@ -47,7 +47,7 @@ const USAGE = [
   "Usage:",
   "  pnpm billing plan   --brand <brand> --polar sandbox|live [--profile <name>] [--json] and apply's flags but --yes and --railway-file",
   "  pnpm billing apply  --brand <brand> --polar sandbox|live [--profile <name>] [--adopt] [--yes]",
-  "                      [--allow-replace] [--allow-archive] [--allow-less] [--allow-undeployed]",
+  "                      [--allow-replace] [--allow-archive] [--allow-undeployed]",
   "                      [--webhook-url <url>] [--railway-file <new file>]",
   "  pnpm billing verify --brand <brand> --polar sandbox|live [--profile <name>] [--webhook-url <url>] [--json]",
 ].join("\n");
@@ -97,7 +97,6 @@ function parse(argv: string[]): Options {
         json: { type: "boolean" },
         "allow-replace": { type: "boolean" },
         "allow-archive": { type: "boolean" },
-        "allow-less": { type: "boolean" },
         "allow-undeployed": { type: "boolean" },
         "webhook-url": { type: "string" },
         "railway-file": { type: "string" },
@@ -115,7 +114,7 @@ function parse(argv: string[]): Options {
   // A plan takes apply's flags but --yes and --railway-file, so it shows what that apply would do.
   const misplaced = (names: ReadonlyArray<keyof typeof values>) => names.filter((name) => values[name] !== undefined).map((name) => `--${String(name)}`).join(", ");
   if (command !== "apply" && misplaced(["yes", "railway-file"])) throw new Usage(`${misplaced(["yes", "railway-file"])} only goes with apply.`);
-  if (command === "verify" && misplaced(["adopt", "allow-replace", "allow-archive", "allow-less", "allow-undeployed"])) throw new Usage(`${misplaced(["adopt", "allow-replace", "allow-archive", "allow-less", "allow-undeployed"])} only goes with plan and apply.`);
+  if (command === "verify" && misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed"])) throw new Usage(`${misplaced(["adopt", "allow-replace", "allow-archive", "allow-undeployed"])} only goes with plan and apply.`);
   if (command === "apply" && values.json) throw new Usage("--json only goes with plan and verify.");
   if (values["webhook-url"] !== undefined) {
     let url: URL;
@@ -136,7 +135,7 @@ function parse(argv: string[]): Options {
     allowUndeployed: values["allow-undeployed"] === true,
     webhookUrl: values["webhook-url"],
     railwayFile: values["railway-file"],
-    plan: { adopt: values.adopt === true, allowReplace: values["allow-replace"] === true, allowArchive: values["allow-archive"] === true, allowLess: values["allow-less"] === true },
+    plan: { adopt: values.adopt === true, allowReplace: values["allow-replace"] === true, allowArchive: values["allow-archive"] === true },
   };
 }
 
@@ -324,7 +323,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // Step 9: Polar against the file, before anything is linked.
   const after = await polar.readSnapshot();
-  const check = planPolarChanges({ catalog: desired, snapshot: after, options: { adopt: false, allowReplace: true, allowArchive: true, allowLess: true } });
+  const check = planPolarChanges({ catalog: desired, snapshot: after, options: { adopt: false, allowReplace: true, allowArchive: true } });
   if (check.steps.length || check.refusals.length) throw new Refused([...check.steps.map((step) => stepLine(step).trimStart()), ...check.refusals.map(refusalLine)], "Polar still differs from the file, so nothing was linked. Run again:");
 
   // Step 10: the links.

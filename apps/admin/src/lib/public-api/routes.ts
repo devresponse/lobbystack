@@ -1,6 +1,7 @@
 import {
   applyBillingCatalogForApi,
   billingDeploymentPolar,
+  callerPrincipalId,
   cancelAppointmentForApi,
   polarCheckoutConfigured,
   readPolarProductLinks,
@@ -208,14 +209,19 @@ function billingDeployment() {
   return { brand: currentBrand().id, polar: billingDeploymentPolar(process.env) };
 }
 
-/** Each promo code a key tries is a guess at a secret, so a business can try 10 codes an hour, as on the dashboard. */
-async function requirePromoCodeAllowed(businessId: string): Promise<void> {
-  const result = await checkPromoCodeLimit({ businessId });
+/**
+ * Each promo code a key tries is a guess at a secret, so a business can try 10
+ * codes an hour, as on the dashboard, and a key 20 across the businesses it
+ * reaches, as a person can.
+ */
+async function requirePromoCodeAllowed(caller: RestApiCaller): Promise<void> {
+  const result = await checkPromoCodeLimit({ businessId: caller.businessId, keyId: callerPrincipalId(caller) });
   if (result.allowed) return;
   if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Promo codes are unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
-  // The limit counts in fixed one-hour windows.
+  // The limits count in fixed one-hour windows.
   const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
-  throw new PublicApiError(429, "rate_limited", `Too many promo codes. A business can try 10 codes an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
+  const limit = result.reason === "rate_limit_key_hour" ? "A key can try 20 codes an hour across the businesses it reaches" : "A business can try 10 codes an hour";
+  throw new PublicApiError(429, "rate_limited", `Too many promo codes. ${limit}. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
 /** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
@@ -335,7 +341,7 @@ export const v1 = {
   createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
     const body = await readApiBody(request, apiCheckoutCreateSchema);
     if (body.plan === "promo") {
-      const checkPromoCode = () => requirePromoCodeAllowed(caller.businessId);
+      const checkPromoCode = () => requirePromoCodeAllowed(caller);
       return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env), checkPromoCode })) };
     }
     return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval) })) };

@@ -127,6 +127,7 @@ vi.mock("@lobbystack/domain", async () => ({
   ...(await import("../../../../../packages/domain/src/server/publicApi/idempotency")),
   ...(await import("../../../../../packages/domain/src/server/publicApi/platformKeys")),
   bearerToken: (await import("../../../../../packages/domain/src/server/publicApi/apiKeys")).bearerToken,
+  callerPrincipalId: (await import("../../../../../packages/domain/src/server/publicApi/operations")).callerPrincipalId,
   ...(await import("../../../../../packages/domain/src/server/billingPlans")),
   ...domain,
 }));
@@ -646,7 +647,7 @@ describe("billing", () => {
     expect(domain.endPromoPlanForApi).toHaveBeenCalledTimes(1);
   });
 
-  it("counts each promo code a key tries against the business's hour, and sells promo plans only where Polar is set up", async () => {
+  it("counts each promo code a key tries against the business's hour and the key's own, and sells promo plans only where Polar is set up", async () => {
     vi.stubEnv("POLAR_ACCESS_TOKEN", "polar-token");
     vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
     try {
@@ -658,7 +659,10 @@ describe("billing", () => {
       });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }))).status).toBe(202);
       expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true, checkPromoCode: expect.any(Function) });
-      expect(invites.limit).toHaveBeenLastCalledWith([["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"]]);
+      expect(invites.limit).toHaveBeenLastCalledWith([
+        ["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "key-hour", "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", 20, 3_600, "rate_limit_key_hour"],
+      ]);
       // A plan checkout tries no code.
       invites.limit.mockClear();
       domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
@@ -669,8 +673,29 @@ describe("billing", () => {
       const limited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
       expect(limited.status).toBe(429);
       expect(limited.headers.get("Retry-After")).toMatch(/^\d+$/);
-      expect(await limited.json()).toMatchObject({ error: { code: "rate_limited" } });
+      expect(await limited.json()).toMatchObject({ error: { code: "rate_limited", message: expect.stringContaining("A business can try 10 codes an hour") } });
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_key_hour" });
+      const keyLimited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
+      expect(keyLimited.status).toBe(429);
+      expect(await keyLimited.json()).toMatchObject({ error: { code: "rate_limited", message: expect.stringContaining("A key can try 20 codes an hour") } });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "promo", interval: "monthly" }) }))).status).toBe(400);
+
+      // A platform key's hour spans every business it reaches.
+      const operator = platformKey();
+      vi.stubEnv("PLATFORM_API_KEYS", JSON.stringify([operator.entry]));
+      const asOperator = (businessId: string) => new Request("https://app.example.com/api/v1/billing/checkout", { method: "POST", body: JSON.stringify(promo), headers: { authorization: `Bearer ${operator.key}`, "LobbyStack-Business": businessId } });
+      invites.limit.mockClear();
+      expect((await v1.createCheckout(asOperator("5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f"))).status).toBe(202);
+      expect((await v1.createCheckout(asOperator("7c2e4a1b-9d3f-4e5a-8b6c-1d2e3f4a5b6c"))).status).toBe(202);
+      expect(invites.limit).toHaveBeenCalledTimes(2);
+      expect(invites.limit).toHaveBeenNthCalledWith(1, [
+        ["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "key-hour", `platform:${operator.entry.id}`, 20, 3_600, "rate_limit_key_hour"],
+      ]);
+      expect(invites.limit).toHaveBeenNthCalledWith(2, [
+        ["promo-code", "business-hour", "7c2e4a1b-9d3f-4e5a-8b6c-1d2e3f4a5b6c", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "key-hour", `platform:${operator.entry.id}`, 20, 3_600, "rate_limit_key_hour"],
+      ]);
 
       vi.stubEnv("POLAR_ACCESS_TOKEN", "");
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));

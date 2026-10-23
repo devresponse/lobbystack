@@ -4,14 +4,15 @@ import { enforceFixedWindow, fixedWindowLimit, type FixedWindowResult } from "./
 
 /**
  * Each promo code someone tries is a guess at a secret. A business can try 10
- * codes an hour, from the dashboard and its API keys together; a person and an
- * address 20 each, across businesses.
+ * codes an hour, from the dashboard and its API keys together; a person, an
+ * address and an API key 20 each, across businesses.
  */
-export async function checkPromoCodeLimit(input: { businessId: string; userId?: string | undefined; ip?: string | undefined }): Promise<FixedWindowResult> {
+export async function checkPromoCodeLimit(input: { businessId: string; userId?: string | undefined; ip?: string | undefined; keyId?: string | undefined }): Promise<FixedWindowResult> {
   return await enforceFixedWindow([
     fixedWindowLimit("promo-code", "business-hour", input.businessId, 10, 60 * 60, "rate_limit_business_hour"),
     ...(input.userId ? [fixedWindowLimit("promo-code", "user-hour", input.userId, 20, 60 * 60, "rate_limit_user_hour")] : []),
     ...(input.ip ? [fixedWindowLimit("promo-code", "ip-hour", input.ip, 20, 60 * 60, "rate_limit_ip_hour")] : []),
+    ...(input.keyId ? [fixedWindowLimit("promo-code", "key-hour", input.keyId, 20, 60 * 60, "rate_limit_key_hour")] : []),
   ]);
 }
 

@@ -103,7 +103,7 @@ import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { readBillingPlanLimitBook } from "../billingPlans";
+import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -664,12 +664,14 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
   const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
-  const { plan } = await loadBillingContext(tx, businessId);
+  const { plan, planCode } = await loadBillingContext(tx, businessId);
+  const limits = await readBillingPlanLimitBook(tx);
   const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  // A hosted plan needs its number when it includes one: claims follow the plan's own count, which a promo plan can set to none.
+  const needsNumber = plan !== "self_host" && limitsFor(limits, plan, planCode).includedBusinessNumbers !== 0;
   const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
   const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
   const checklist = [
@@ -678,13 +680,13 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     // A business without a saved profile answers with the default greeting, as GET /receptionist shows.
     item("greeting", !profile || profile.greeting.trim().length > 0, false, false),
     item("plan", paid, !paid, false),
-    item("phone_number", steps.phoneNumber === "complete", steps.phoneNumber === "skipped", paid),
+    item("phone_number", steps.phoneNumber === "complete", steps.phoneNumber === "skipped", needsNumber),
     item("full_site_read", steps.fullScan === "complete", steps.fullScan === "skipped", false),
     // From the command line there is no browser test call, so the first answered call to the number counts.
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null, await readBillingPlanLimitBook(tx), account?.planCode ?? null);
+  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), plan, limits, planCode);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

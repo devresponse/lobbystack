@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { billingAccounts, billingUsageEvents, businesses, createDatabaseClient, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
-import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, builtInBillingPlanLimits, canonicalBillingProfileJson, type ApiBillingCatalogRun } from "@lobbystack/shared";
+import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfileHash, billingProfileSchema, builtInBillingPlanLimits, canonicalBillingProfileJson, DEFAULT_WEB_CALL_MAX_DURATION_MS, PHONE_RESERVATION_SLICE_SECONDS, type ApiBillingCatalogRun } from "@lobbystack/shared";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
@@ -15,7 +15,7 @@ import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { runDailyBillingVerify } from "./billingVerify";
 import { NumberSelectionError, numberMarketInTransaction } from "./phoneNumbers";
 import { PublicApiError } from "./publicApi/errors";
-import { loadBusinessPlanLimits, periodKeyFor } from "./usage";
+import { loadBusinessPlanLimits, periodKeyFor, reserveUsageInTransaction } from "./usage";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -540,6 +540,22 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
 
       await as(tx, "lobbystack_app");
       expect(await readBillingPlanLimits(tx)).toEqual(worker);
+    });
+  });
+  it("lets a capped call run past the allowance when extra minutes cost nothing", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await as(tx, "owner");
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Free minutes test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "active", overageSpendingCapCents: 500 });
+      // Starter's 150 minutes are used up.
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:${randomUUID()}`, usageKind: "voice_seconds", quantity: 9_000, planAtRecordTime: "starter", isFinal: true, syncStatus: "skipped" });
+      await as(tx, "lobbystack_worker");
+      await apply(tx, file((value) => {
+        value.plans.starter.overageCents.voiceMinute = 0;
+      }));
+      expect(await getWebVoiceBillingAllowance(context(tx), { businessId })).toMatchObject({ allowed: true, maxDurationMs: DEFAULT_WEB_CALL_MAX_DURATION_MS });
+      expect(await inBusiness(tx, businessId, (scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: `voice:${randomUUID()}` }))).toMatchObject({ allowed: true, quantity: PHONE_RESERVATION_SLICE_SECONDS });
     });
   });
   it("lets the number claims count the numbers a plan includes, as the limits do, instead of its name", async () => {

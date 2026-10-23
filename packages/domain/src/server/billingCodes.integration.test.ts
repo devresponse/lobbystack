@@ -14,7 +14,7 @@ import { readBillingPlanLimitBook, readPolarProductLinks } from "./billingPlans"
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar } from "./billingPolar.testing";
 import { loadPromoEndWork, recordPromoEnd } from "./billingPromoEnd";
-import { createCheckoutForApi, endPromoPlanForApi, getBillingForApi } from "./publicApi/operations";
+import { createCheckoutForApi, endPromoPlanForApi, getBillingForApi, getOnboardingForApi } from "./publicApi/operations";
 import { createBusiness } from "./tenancy";
 import { getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction } from "./usage";
 
@@ -365,6 +365,25 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       expect(audit!.payload).toMatchObject({ plan: "starter", promoPlan: "salons-half-off", interval: "monthly" });
     });
   });
+  it("leaves out the number step for a promo plan that includes no number", async () => {
+    await rollbackTest(async (tx) => {
+      const file = allowanceFile();
+      file.plans["salons-plus"].limits.businessNumbers = 0;
+      await promoCatalog(tx, file);
+      const { businessId } = await ownedBusiness(tx, "chat-only");
+      await as(tx, "owner");
+      await tx.execute(sql`update public.businesses set onboarding_stage = 'phone_number' where id = ${businessId}::uuid`);
+      const [subscribed] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.active", businessId, payload: { billingKey: `business:${businessId}`, plan: "starter", planCode: "salons-plus", status: "active", billingInterval: "monthly", subscriptionId: "sub_chat_only" } }).returning({ id: providerEvents.id });
+      await as(tx, "lobbystack_worker");
+      await reconcileBillingProviderEvent(context(tx), { businessId, providerEventId: subscribed!.id });
+      // Starter itself includes a number, but this plan's claims would all be refused, so the API asks for none and sends the business back to its plan.
+      const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+      const onboarding = await getOnboardingForApi(context(tx), apiCaller);
+      expect(onboarding.stage).toBe("plan");
+      expect(onboarding.checklist).toContainEqual({ id: "phone_number", status: "missing", required: false });
+    });
+  });
+
   it("gives a business on a promo plan the plan's own allowances, and prices its usage by the plan it was used under", async () => {
     await rollbackTest(async (tx) => {
       await promoCatalog(tx, allowanceFile());

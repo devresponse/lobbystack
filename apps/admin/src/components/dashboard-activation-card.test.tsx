@@ -31,7 +31,7 @@ afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.
 type Activation = {
   deploymentMode: string;
   plan: string;
-  paidPlanLive: boolean;
+  numberIncluded: boolean;
   hasDedicatedNumber: boolean;
   completedWebCalls: number;
   websiteImport: { status: string; websiteUrl: string; importedCount: number; indexedCount: number } | null;
@@ -41,7 +41,7 @@ function activationBody(activation: Partial<Activation>): Activation {
   return {
     deploymentMode: "cloud",
     plan: "free_cloud",
-    paidPlanLive: false,
+    numberIncluded: false,
     hasDedicatedNumber: false,
     completedWebCalls: 0,
     websiteImport: null,
@@ -147,7 +147,7 @@ describe("dashboard activation card", () => {
   });
 
   it("sends a paying operator without a number to claiming instead of checkout", async () => {
-    setup({ plan: "starter", paidPlanLive: true, completedWebCalls: 1 });
+    setup({ plan: "starter", numberIncluded: true, completedWebCalls: 1 });
     expect(await screen.findByText("activation.claimNumber.title")).toBeTruthy();
     expect(screen.getByText("activation.claimNumber.cta").closest("a")?.getAttribute("href")).toBe("/settings/phone-number");
     expect(screen.queryByText("activation.upgrade.title")).toBeNull();

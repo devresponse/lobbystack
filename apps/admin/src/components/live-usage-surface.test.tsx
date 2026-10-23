@@ -6,7 +6,7 @@ import { builtInBillingPlanLimits } from "@lobbystack/shared";
 import { LiveUsageSurface } from "./live-usage-surface";
 
 const language = vi.hoisted(() => ({ value: "en" }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: language.value }, t: (key: string) => key }) }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: language.value }, t: (key: string, options?: Record<string, unknown>) => key === "billing.usage.description" ? `${key} ${JSON.stringify(options)}` : key }) }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; });
 function setup(locale: string, blocked = false) {
@@ -34,6 +34,15 @@ describe("original dedicated billing usage page", () => {
   it("shows the allowances the server sends, which follow the billing catalog", () => {
     setup("en");
     expect(screen.getByText(text => text.startsWith("4 /") && text.includes("120"))).toBeTruthy();
+  });
+  it("says allowances reset on the first of the next UTC month, not on the renewal", () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-31T23:30:00Z") });
+    try {
+      setup("en");
+      expect(screen.getByText('billing.usage.description {"resetAt":"November 1"}')).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
   });
   it("explains a blocked voice allowance alongside its meter", () => {
     setup("en", true);

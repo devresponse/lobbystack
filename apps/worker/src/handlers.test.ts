@@ -206,9 +206,12 @@ describe("worker handlers", () => {
       const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: {} as never };
       vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
       vi.mocked(reserveAlertSmsUsage).mockResolvedValue({ allowed: true, usageEventId: "usage-1" } as never);
+      vi.mocked(correctAlertSmsUsage).mockResolvedValue("usage-1");
       const sendSms = vi.fn().mockResolvedValue({ providerMessageId: "SM1" });
       await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } })).resolves.toEqual({ status: "completed", entityId: attemptId });
       expect(reserveAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, estimatedSegments: 1 });
+      // No delivery report comes back for a code, so the estimate settles its usage before it syncs.
+      expect(correctAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, segments: 1 });
       expect(enqueueBillingUsageSync).toHaveBeenCalledWith(domain, { businessId, usageEventId: "usage-1" });
     });
 

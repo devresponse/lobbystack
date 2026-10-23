@@ -32,13 +32,15 @@ export function LiveUsageSurface() {
     overageSpendingCapReached: false,
     usageComplete: true,
   };
-  const resetAt = billing.data?.account?.currentPeriodEnd ?? new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString();
+  // Allowances count by UTC calendar month, whatever day the subscription renews.
+  const now = new Date();
+  const resetAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
 
   if (businesses.isLoading || billing.isLoading) return <UsageSkeleton />;
   if (businesses.isError || billing.isError) return <Surface className="flex flex-col items-start gap-4 p-6"><p role="alert">{t("billing.usage.unavailable")}</p><Button variant="outline" onClick={() => { if (businesses.isError || !business) void businesses.refetch(); else void billing.refetch(); }}>{t("billing.actions.retry")}</Button></Surface>;
   if (plan === "self_host") return <SectionBlock title={t("billing.usage.title")}><Surface className="p-6"><p className="text-[15px] leading-6 text-muted-foreground">{t("billing.currentPlan.selfHostNotice")}</p></Surface></SectionBlock>;
 
-  const description = resetAt ? t("billing.usage.description", { resetAt: new Intl.DateTimeFormat(intlLocale(i18n.language), { month: "long", day: "numeric" }).format(new Date(resetAt)) }) : undefined;
+  const description = t("billing.usage.description", { resetAt: new Intl.DateTimeFormat(intlLocale(i18n.language), { month: "long", day: "numeric", timeZone: "UTC" }).format(resetAt) });
   return <div className="flex w-full flex-col gap-10"><SectionBlock description={description} title={t("billing.usage.title")}><Surface className="p-0"><>
     <UsageMeter blocked={status.voiceBlocked} included={included(limits?.voiceSecondsIncluded, 60)} label={t("billing.usage.voiceTitle")} unit={t("billing.usage.units.voice")} used={Math.round((status.voiceSecondsUsed / 60) * 10) / 10} />
     <UsageMeter blocked={status.outboundCallAttemptsBlocked} included={included(limits?.outboundCallAttemptsIncluded)} label={t("billing.usage.outboundAttemptsTitle")} unit={t("billing.usage.units.outboundAttempts")} used={status.outboundCallAttemptsUsed} />

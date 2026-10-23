@@ -337,9 +337,10 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const body = verificationCodeSmsBody(target.code, await deploymentAppName(dependencies.domain.db), normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
       // The code goes out from the alert sender, so it counts against the alert SMS quota.
       const usageSourceKey = `alert_sms:phone_verification:${attemptId}`;
+      const segments = estimateSmsSegments(body);
       let usageEventId: string | undefined;
       if (dependencies.domain.db) {
-        const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, estimatedSegments: estimateSmsSegments(body) });
+        const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, estimatedSegments: segments });
         if (!reservation.allowed) {
           await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: reservation.errorCode ?? "Alert SMS quota reached." });
           return { status: "skipped", entityId: attemptId };
@@ -358,7 +359,8 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         throw error;
       }
       await markOperatorPhoneVerificationCodeSent(dependencies.domain, { businessId, attemptId });
-      if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+      // No delivery report comes back for a code, so its estimate settles the usage.
+      if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId: await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, segments }) });
       return { status: "completed", entityId: attemptId };
     }
     case "snapshot.refresh":
@@ -813,7 +815,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         }
         try {
           let providerMessageId: string;
-          let usageEventId: string | undefined;
           if (delivery.channel === "sms") {
             const sender = smsProviderFor(dependencies, delivery.sender);
             if (!sender || !delivery.sender) throw new Error("Operator SMS delivery is not configured.");
@@ -823,7 +824,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
                 await markOperatorNotificationSkipped(dependencies.domain, { businessId, deliveryId: delivery.id, error: reservation.errorCode ?? "Alert SMS quota reached." });
                 return { status: "skipped", entityId: delivery.id };
               }
-              usageEventId = reservation.usageEventId;
             }
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
           } else {
@@ -833,7 +833,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           }
           await markOperatorNotificationSent(dependencies.domain, { businessId, deliveryId: delivery.id, providerMessageId });
-          if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+          // Twilio's delivery report settles the segments the SMS used, and that queues its sync to Polar.
           return { status: "completed", entityId: delivery.id };
         } catch (error) {
           await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.eventKind });
@@ -867,7 +867,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const delivery = resolution.delivery;
       try {
         let providerMessageId: string;
-        let usageEventId: string | undefined;
         if (delivery.channel === "sms") {
           const sender = smsProviderFor(dependencies, delivery.from);
           if (!sender || !delivery.from) {
@@ -880,7 +879,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
               await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
               return { status: "skipped", entityId: delivery.notificationId };
             }
-            usageEventId = reservation.usageEventId;
           }
           const sent = await sender.sendSms({ to: delivery.to, from: delivery.from, body: delivery.body, ...twilioStatusCallbackOption({ notificationId: delivery.notificationId }) });
           providerMessageId = sent.providerMessageId;
@@ -893,7 +891,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           providerMessageId = sent.messageId;
         }
         await markNotificationSent(dependencies.domain, { businessId: delivery.businessId, notificationId: delivery.notificationId, providerMessageId });
-        if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+        // Twilio's delivery report settles the segments the SMS used, and that queues its sync to Polar.
         return { status: "completed", entityId: delivery.notificationId };
       } catch (error) {
         await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.kind, ...(delivery.relatedId ? { appointmentId: delivery.relatedId } : {}) });

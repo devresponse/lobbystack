@@ -35,9 +35,10 @@ function webVoiceBillingAllowance(status: UsageStatus, maxDurationMs: number | u
     ? status.overagesBillable ? Number.POSITIVE_INFINITY : 0
     : (() => {
       const ratePerSecond = (status.voiceOverageRatePerMinuteCents ?? 0) / 60;
+      // Extra minutes that cost nothing never reach the cap.
       return ratePerSecond > 0
         ? Math.floor((Math.max(0, status.overageSpendingCapCents - status.overageSpendCents) + 1e-9) / ratePerSecond)
-        : 0;
+        : Number.POSITIVE_INFINITY;
     })();
   const remaining = Math.min(requested / 1_000, includedRemaining + overageRemaining) * 1_000;
   return {

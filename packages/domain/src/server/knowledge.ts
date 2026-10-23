@@ -344,6 +344,8 @@ async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: In
     }
     const limit = (await loadBusinessPlanLimits(tx, input.businessId)).limits.knowledgeStorageBytes;
     if (limit !== null) {
+      // A business's documents check the limit one at a time, so each counts the text the others indexed.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`knowledge-storage:${input.businessId}`}, 0))`);
       const newBytes = chunks.reduce((total, chunk) => total + Buffer.byteLength(chunk, "utf8"), 0);
       if (await getKnowledgeStorageUsageBytes(tx, input.businessId, { excludeDocumentId: input.documentId }) + newBytes > limit) {
         // Retrying can't fit the text, so fail the document instead of throwing.

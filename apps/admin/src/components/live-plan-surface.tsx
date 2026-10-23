@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type { BillingPlanList, BillingPlanSlug } from "@lobbystack/shared";
+import { billingPlanName, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
 import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
@@ -21,11 +21,13 @@ import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { formatDateTime } from "@/lib/locale";
+import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 
 type Billing = {
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: { starter: string[]; pro: string[] };
   plans: BillingPlanList;
+  promoPlan: BillingPromoPlanView | null;
   permissions: BillingPermissions;
   effectivePlan: BillingPlanSlug;
   account: { plan: string | null; billingKey: string; billingInterval: string | null; subscriptionState: string | null; currentPeriodStart: string | null; currentPeriodEnd: string | null; overageSpendingCapCents: number | null } | null;
@@ -71,12 +73,15 @@ export function LivePlanSurface() {
   const account = billing.data?.account;
   const plan = billing.data.effectivePlan;
   const currency = billing.data.plans.currency;
-  const money = (cents: number) => formatMoney(cents, currency, i18n.language);
+  // A promo plan the business took with a code, shown by its own name and price while it has the plan's tier.
+  const promoPlan = billing.data.promoPlan?.tier === plan ? billing.data.promoPlan : null;
+  const money = (cents: number) => formatMoney(cents, promoPlan?.currency ?? currency, i18n.language);
   // The plan's row in the deployment's plan list; self-host has none and no allowances.
   const offer = plan === "self_host" ? undefined : findPlan(billing.data.plans, plan);
   const allowance = offer?.included;
+  const promoPrice = promoPlan?.prices.find((price) => price.interval === (account?.billingInterval === "annual" ? "annual" : "monthly"));
   // Free and self-host cost nothing, a custom plan has no fixed price, and a paid plan shows a month of its interval.
-  const monthlyPrice = plan === "self_host" || plan === "free_cloud" ? 0 : offer?.custom ? null : monthlyPriceCents(offer, account?.billingInterval === "annual" ? "annual" : "monthly") ?? null;
+  const monthlyPrice = plan === "self_host" || plan === "free_cloud" ? 0 : promoPrice ? promoPrice.perMonth : offer?.custom ? null : monthlyPriceCents(offer, account?.billingInterval === "annual" ? "annual" : "monthly") ?? null;
   const count = (value: number | null | undefined, key: string) => value === null || value === undefined ? t(`billing.currentPlan.${key}Custom`) : t(`billing.currentPlan.${key}`, { count: value });
   const storage = allowance?.knowledgeStorageBytes;
   const included = [count(allowance?.voiceSeconds === null || allowance?.voiceSeconds === undefined ? null : Math.floor(allowance.voiceSeconds / 60), "includedVoice"), count(allowance?.outboundCallAttempts, "includedOutbound"), count(allowance?.alertSmsSegments, "includedSms"), storage === null || storage === undefined ? t("billing.currentPlan.includedStorageCustom") : t("billing.currentPlan.includedStorage", storageSize(storage, i18n.language))];
@@ -84,6 +89,8 @@ export function LivePlanSurface() {
   const canUpgrade = permissions?.hasCheckoutAccess && billing.data?.availableCheckoutPlans.some(target =>
     (plan === "free_cloud" || (plan === "starter" && target === "pro")) && billing.data.availableCheckoutIntervals[target].length > 0);
   const canManage = permissions?.hasCustomerPortalAccess === true;
+  // Anyone who could buy a plan here can enter a code, except on a plan billed outside Polar.
+  const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "starter" || plan === "pro");
 
   return <PageSurface title={t("sections.billing")}>
     <div className="flex w-full flex-col gap-10">
@@ -93,7 +100,7 @@ export function LivePlanSurface() {
           <div className="grid gap-8 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
             <div className="flex flex-col gap-3">
               <span className="text-xl font-medium leading-7 text-foreground">
-                {t(`billing.planLabels.${plan === "free_cloud" ? "freeCloudCard" : plan === "self_host" ? "selfHost" : plan === "starter" ? "starterCard" : plan === "pro" ? "proCard" : "enterpriseCard"}`)}
+                {promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? t(`billing.planLabels.${promoPlan.tier}Card`) : t(`billing.planLabels.${plan === "free_cloud" ? "freeCloudCard" : plan === "self_host" ? "selfHost" : plan === "starter" ? "starterCard" : plan === "pro" ? "proCard" : "enterpriseCard"}`)}
               </span>
               <div className="flex flex-col items-start gap-0.5">
                 <div className="flex flex-wrap items-end gap-2">
@@ -119,6 +126,16 @@ export function LivePlanSurface() {
                     {t("billing.currentPlan.paygMonthlySuffix")}
                   </span>
                 )}
+                {promoPlan?.discount ? (
+                  <span className="text-sm text-emerald-700 dark:text-emerald-400">
+                    {promoDiscountText(promoPlan.discount, promoPlan.currency ?? currency, i18n.language, t)}
+                  </span>
+                ) : null}
+                {promoPlan?.ends ? (
+                  <span className="text-sm text-muted-foreground">
+                    {t("billing.promo.ends", { date: formatBillingDate(promoPlan.ends, i18n.language) })}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -136,6 +153,7 @@ export function LivePlanSurface() {
               </div>
             </div>
           </div>
+          {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} /> : null}
           {(canUpgrade || canManage) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {canUpgrade && (

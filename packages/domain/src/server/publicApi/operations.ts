@@ -100,6 +100,7 @@ import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, u
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
+import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { readBillingPlanLimits } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -374,7 +375,7 @@ export async function updateBillingForApi(context: DomainContext, caller: ApiCal
 async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiCheckout> {
   const [row] = await tx.select().from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.id, checkoutId))).limit(1);
   if (!row || (row.target !== "starter" && row.target !== "pro") || (row.billingInterval !== "monthly" && row.billingInterval !== "annual")) throw notFound("Checkout");
-  const [account] = await tx.select({ plan: billingAccounts.plan, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode, billingInterval: billingAccounts.billingInterval, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   // A checkout canceled because the business moved to a managed plan reads as failed.
   const status = row.status === "canceled" ? "error" : (["pending", "processing", "ready", "changed", "error"] as const).find((value) => value === row.status) ?? "pending";
   return {
@@ -382,10 +383,11 @@ async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkou
     plan: row.target,
     interval: row.billingInterval,
     status,
+    promo_plan: row.planCode,
     checkout_url: status === "ready" ? row.checkoutUrl : null,
     error: status === "error" ? row.error : null,
     // The dashboard counts a checkout as paid the same way, once Polar's webhook has moved the business onto the plan.
-    paid: (status === "ready" || status === "changed") && account?.plan === row.target && account.billingInterval === row.billingInterval && ["active", "trialing"].includes(account.subscriptionState ?? ""),
+    paid: (status === "ready" || status === "changed") && account?.plan === row.target && account.planCode === row.planCode && account.billingInterval === row.billingInterval && ["active", "trialing"].includes(account.subscriptionState ?? ""),
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
@@ -406,19 +408,34 @@ async function checkoutPayerId(context: DomainContext, caller: ApiCaller): Promi
   return owner.userId;
 }
 
+const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
+  // Every reason a code doesn't work reads the same, so the answer doesn't help anyone guess codes.
+  invalid: () => invalidRequest("This promo code isn't valid for this business.", [{ path: "promo_code", message: "Not valid." }]),
+  current: () => conflict("This business is already on the plan this code unlocks."),
+  interval: () => conflict("The plan this code unlocks isn't sold with this interval."),
+};
+
 /**
  * Asks Polar for a page where the customer pays. Like the dashboard, it sells
  * any plan to a free business and Pro to a Starter one, which the worker does
  * by changing the Starter subscription rather than with a page; other changes
- * to a paid plan happen in Polar's billing portal. Callers say whether this
- * deployment sells the plan and interval.
+ * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
+ * to a free, Starter or Pro business alike. Callers say whether this
+ * deployment sells a standard plan and interval, and limit promo code tries.
  */
 export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean }): Promise<ApiCheckout> {
-  if (!options.available) throw conflict("This deployment doesn't sell that plan and interval.");
+  if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
     if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, billed directly by the operator.");
+    if (input.plan === "promo") {
+      const sale = await billingCodeCheckout(tx, { businessId: caller.businessId, code: input.promo_code ?? "", billingInterval: input.interval });
+      if ("refusal" in sale) throw promoRefusals[sale.refusal]();
+      const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
+      await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
+      return await loadCheckout(tx, caller.businessId, checkoutId);
+    }
     const { plan: current } = await loadBillingContext(tx, caller.businessId);
     if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
     const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });

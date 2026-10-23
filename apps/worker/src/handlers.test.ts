@@ -548,7 +548,7 @@ describe("worker handlers", () => {
     vi.stubEnv("APP_BASE_URL", "https://app.example/");
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", subscription: null });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: null, subscription: null });
     vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
     const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
 
@@ -576,7 +576,7 @@ describe("worker handlers", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_STARTER_ANNUAL_PRODUCT_ID: "product-starter-annual", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly", POLAR_PRO_ANNUAL_PRODUCT_ID: "product-pro-annual" };
     const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, ...extra });
 
-    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
       const businessId = randomUUID();
       const requestId = randomUUID();
       const domain = { db: undefined as never };
@@ -585,7 +585,7 @@ describe("worker handlers", () => {
       vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
       vi.mocked(markBillingPlanChanged).mockResolvedValue(true);
       vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
-      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly" } });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: input.planCode ?? null, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: input.subscriptionPlanCode ?? null } });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
       const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
       return { businessId, requestId, domain, run };
@@ -677,6 +677,65 @@ describe("worker handlers", () => {
       const unlinked = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("catalog-starter-monthly")), changeSubscriptionProduct: vi.fn() } });
       await expect(unlinked.run).rejects.toThrow("No Polar product sells pro monthly");
       expect(markBillingCheckoutFailed).toHaveBeenCalledWith(unlinked.domain, { businessId: unlinked.businessId, requestId: unlinked.requestId, error: "Polar plan change failed." });
+    });
+  });
+
+  describe("a promo plan", () => {
+    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
+    const catalog = (status: "draft" | "active") => ({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status, polar_disc: "disc-half-off" }] });
+    const metadata = (requestId: string) => ({ lobbystack_plan: "salons-half-off", lobbystack_checkout: requestId });
+
+    function promoCheckout(input: { status?: "draft" | "active"; subscription?: { plan: "starter" | "pro"; planCode: string | null } | null; planCode?: string | null; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+      const businessId = randomUUID();
+      const requestId = randomUUID();
+      const domain = { db: undefined as never };
+      vi.stubEnv("APP_BASE_URL", "https://app.example");
+      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+      vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
+      vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
+      vi.mocked(markBillingPlanChanged).mockResolvedValue(true);
+      vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
+      const links = async () => polarProductLinks(catalog(input.status ?? "active"), process.env);
+      vi.mocked(readPolarProductLinks).mockImplementation(links);
+      const subscription = input.subscription ? { id: "sub-1", billingInterval: "monthly" as const, ...input.subscription } : null;
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
+      const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
+      return { businessId, requestId, domain, run };
+    }
+
+    afterEach(() => {
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
+      vi.unstubAllEnvs();
+    });
+
+    it("sells its own product with its discount and the checkout's metadata, and never lets a typed code stack on it", async () => {
+      const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
+      const { requestId, run } = promoCheckout({ polar: { createCheckout } });
+      await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "promo-starter-monthly", promo: { discountId: "disc-half-off", metadata: metadata(requestId) }, idempotencyKey: `billing-checkout:${requestId}` }));
+    });
+
+    it("fails the request when the plan isn't on sale, without asking Polar", async () => {
+      const createCheckout = vi.fn();
+      const { businessId, requestId, domain, run } = promoCheckout({ status: "draft", polar: { createCheckout } });
+      await expect(run).resolves.toEqual({ status: "skipped", entityId: requestId });
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "This promo plan isn't on sale right now." });
+      expect(createCheckout).not.toHaveBeenCalled();
+    });
+
+    it("moves a paying business's subscription onto it with its discount, and drops the discount when it leaves for a standard plan", async () => {
+      const liveSubscription = (productId: string): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null });
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("promo-starter-monthly"));
+      const onto = promoCheckout({ subscription: { plan: "pro", planCode: null }, polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly")), changeSubscriptionProduct } });
+      await expect(onto.run).resolves.toEqual({ status: "completed", entityId: onto.requestId });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "promo-starter-monthly", prorationBehavior: expect.any(String), discountId: "disc-half-off", metadata: metadata(onto.requestId) });
+
+      vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
+      changeSubscriptionProduct.mockClear();
+      const off = promoCheckout({ planCode: null, subscription: { plan: "starter", planCode: "salons-half-off" }, polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("promo-starter-monthly")), changeSubscriptionProduct } });
+      await expect(off.run).resolves.toEqual({ status: "completed", entityId: off.requestId });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "product-starter-monthly", prorationBehavior: expect.any(String), discountId: null });
     });
   });
 

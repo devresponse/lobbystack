@@ -458,7 +458,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       const before = await listBillingPlansForApi(context(tx), sells);
       expect(before).toMatchObject({ currency: "usd", source: "built_in" });
       expect(before.plans.find((plan) => plan.slug === "pro")!.prices.map((price) => [price.interval, price.amount_cents, price.checkout_available])).toEqual([["monthly", 10_000, true], ["annual", 96_000, false]]);
-      expect((await readPolarProductLinks(context(tx), sells)).planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly" });
+      expect((await readPolarProductLinks(context(tx), sells)).planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
 
       await apply(tx, file());
       // Applied, not linked: the file's numbers in CAD, still sold through the variables.
@@ -476,7 +476,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       const links = await readPolarProductLinks(context(tx), sells);
       expect(links.productFor("pro", "annual")).toBe(linked.get("pro/annual"));
       expect(links.productFor("pro", "monthly")).toBe(linked.get("pro/monthly"));
-      expect(links.planFor(linked.get("starter/annual"))).toEqual({ plan: "starter", interval: "annual" });
+      expect(links.planFor(linked.get("starter/annual"))).toEqual({ plan: "starter", interval: "annual", code: "starter" });
       expect((await listBillingPlansForApi(context(tx), sells)).plans.flatMap((plan) => plan.prices.map((price) => price.checkout_available))).toEqual([true, true, true, true]);
       // Without Polar's token nothing sells, linked or not.
       expect((await listBillingPlansForApi(context(tx), { POLAR_ORGANIZATION_ID: "org_test" })).plans.flatMap((plan) => plan.prices.map((price) => price.checkout_available))).toEqual([false, false, false, false]);

@@ -20,8 +20,8 @@ describe("Polar product links", () => {
     expect(links.productFor("starter", "monthly")).toBe("var_starter_month");
     expect(links.productFor("pro", "monthly")).toBe("var_pro_month");
     expect(links.productFor("pro", "annual")).toBeNull();
-    expect(links.planFor("var_starter_year")).toEqual({ plan: "starter", interval: "annual" });
-    expect(links.planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly" });
+    expect(links.planFor("var_starter_year")).toEqual({ plan: "starter", interval: "annual", code: "starter" });
+    expect(links.planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
     expect(links.planFor("someone_elses")).toBeNull();
     expect(links.planFor(undefined)).toBeNull();
   });
@@ -42,15 +42,15 @@ describe("Polar product links", () => {
     // A live price nobody linked sells nothing, though a retired one had a product and a variable may name one.
     expect(polarProductLinks(catalog, { POLAR_PRO_ANNUAL_PRODUCT_ID: "var_pro_year" }).productFor("pro", "annual")).toBeNull();
     // A subscriber on a retired price's product keeps its plan.
-    expect(links.planFor("cat_pro_year_old")).toEqual({ plan: "pro", interval: "annual" });
-    expect(links.planFor("cat_pro_month")).toEqual({ plan: "pro", interval: "monthly" });
-    expect(links.planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly" });
+    expect(links.planFor("cat_pro_year_old")).toEqual({ plan: "pro", interval: "annual", code: "pro" });
+    expect(links.planFor("cat_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
+    expect(links.planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
   });
 
   it("names an additional plan's product by its tier, and none for a tier Polar doesn't sell", () => {
     const catalog: BillingCatalogSnapshot = { plans: [], prices: [price("pro-launch", "monthly", 6000, "cat_launch", { tier: "pro" }), price("free_cloud", "monthly", 100, "cat_free")] };
     const links = polarProductLinks(catalog, { POLAR_STARTER_MONTHLY_PRODUCT_ID: "cat_free" });
-    expect(links.planFor("cat_launch")).toEqual({ plan: "pro", interval: "monthly" });
+    expect(links.planFor("cat_launch")).toEqual({ plan: "pro", interval: "monthly", code: "pro-launch" });
     expect(links.planFor("cat_free")).toBeNull();
   });
 

@@ -13,6 +13,7 @@ import {
   createUserForApi,
   enqueueAccountSetupEmail,
   createCalendarConnectLinkForApi,
+  createBillingCodeForApi,
   createCheckoutForApi,
   createClaimLinkForApi,
   createContactForApi,
@@ -28,6 +29,8 @@ import {
   deleteKnowledgeEntryForApi,
   deleteKnowledgeSourceForApi,
   deleteRuleForApi,
+  listBillingCodesForApi,
+  revokeBillingCodeForApi,
   deleteServiceForApi,
   deleteWebhookEndpoint,
   endManagedPlanForApi,
@@ -111,6 +114,7 @@ import {
   apiAppointmentRescheduleSchema,
   apiBillingCatalogApplySchema,
   apiBillingCatalogLinkSchema,
+  apiBillingCodeCreateSchema,
   apiBillingUpdateSchema,
   apiBusinessCreateSchema,
   apiUserCreateSchema,
@@ -161,6 +165,7 @@ import { enforceFixedWindow, fixedWindowLimit } from "../fixed-window-limit";
 import { calendarSigningConfigured, createCalendarConnectLink } from "../google-calendar-oauth";
 import { googleCalendarProvider } from "../google-calendar-provider";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
+import { checkPromoCodeLimit } from "../promo-code-limit";
 import { getStorageProvider } from "../storage";
 import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
 import { hasVerifiedPhone } from "../verified-phone";
@@ -200,6 +205,16 @@ function requireOperatorKey(credential: ApiCredential, action = "manage a plan o
 /** The brand this deployment shows and the Polar settings it runs with, for the billing catalog. */
 function billingDeployment() {
   return { brand: currentBrand().id, polar: billingDeploymentPolar(process.env) };
+}
+
+/** Each promo code a key tries is a guess at a secret, so a business can try 10 codes an hour, as on the dashboard. */
+async function requirePromoCodeAllowed(businessId: string): Promise<void> {
+  const result = await checkPromoCodeLimit({ businessId });
+  if (result.allowed) return;
+  if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Promo codes are unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
+  // The limit counts in fixed one-hour windows.
+  const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
+  throw new PublicApiError(429, "rate_limited", `Too many promo codes. A business can try 10 codes an hour. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
 /** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
@@ -318,6 +333,10 @@ export const v1 = {
   updateBilling: (request: Request) => handleApiRequest(request, "updateBilling", async ({ context, caller }) => ({ body: data(await updateBillingForApi(context, caller, await readApiBody(request, apiBillingUpdateSchema))) })),
   createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
     const body = await readApiBody(request, apiCheckoutCreateSchema);
+    if (body.plan === "promo") {
+      await requirePromoCodeAllowed(caller.businessId);
+      return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env) })) };
+    }
     return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval) })) };
   }),
   listBillingPlans: (request: Request) => handleApiRequest(request, "listBillingPlans", async ({ context }) => ({ body: data(await listBillingPlansForApi(context)) })),
@@ -350,6 +369,20 @@ export const v1 = {
   listBillingCatalogRuns: (request: Request) => handleApiRequest(request, "listBillingCatalogRuns", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage the billing catalog");
     return { body: await listBillingCatalogRunsForApi(context, { ...pageQuery(request), kind: queryParam(request, "kind") }) };
+  }),
+  createBillingCode: (request: Request) => handleApiRequest(request, "createBillingCode", async ({ context, credential, idempotencyKey }) => {
+    requireOperatorKey(credential, "manage promo codes");
+    const body = await readApiBody(request, apiBillingCodeCreateSchema);
+    const result = await createBillingCodeForApi(context, { caller: { platformKeyId: credential.platformKeyId, partnerId: credential.partnerId }, idempotencyKey, body, brandName: currentBrand().appName, baseUrl: appOrigin(request) });
+    return { status: 201, body: data(result.code), ...(result.replayed ? { headers: { "Idempotent-Replayed": "true" } } : {}) };
+  }),
+  listBillingCodes: (request: Request) => handleApiRequest(request, "listBillingCodes", async ({ context, credential }) => {
+    requireOperatorKey(credential, "manage promo codes");
+    return { body: await listBillingCodesForApi(context, { ...pageQuery(request), plan: textParam(request, "plan", 48), businessId: optionalUuidParam(request, "business_id"), baseUrl: appOrigin(request) }) };
+  }),
+  revokeBillingCode: (request: Request, { params }: Params<"code_id">) => handleApiRequest(request, "revokeBillingCode", async ({ context, credential }) => {
+    requireOperatorKey(credential, "manage promo codes");
+    return { body: data(await revokeBillingCodeForApi(context, { codeId: uuidParam((await params).code_id, "code_id"), baseUrl: appOrigin(request) })) };
   }),
   listPhoneNumbers: (request: Request) => handleApiRequest(request, "listPhoneNumbers", async ({ context, caller }) => ({ body: { data: await listPhoneNumbersForApi(context, caller), next_cursor: null, has_more: false } })),
   searchPhoneNumbers: (request: Request) => handleApiRequest(request, "searchPhoneNumbers", async ({ context, caller }) => {

@@ -508,6 +508,50 @@
         "order": "Commande",
         "refund": "Remboursement"
       }
+    },
+    "promo": {
+      "link": "Vous avez un code promo ?",
+      "label": "Code promo",
+      "placeholder": "Saisissez votre code",
+      "apply": "Appliquer",
+      "applying": "Vérification...",
+      "cancel": "Annuler",
+      "unlocks": "Ce code débloque {{plan}}.",
+      "features": "Tout ce qu'inclut {{tier}}.",
+      "ends": "Jusqu'au {{date}}",
+      "unavailable": "Pas en vente pour le moment",
+      "interval": {
+        "monthly": "Mensuel",
+        "annual": "Annuel"
+      },
+      "per": {
+        "monthly": "/mois",
+        "annual": "/an"
+      },
+      "subscribe": {
+        "monthly": "S'abonner au mois",
+        "annual": "S'abonner à l'année"
+      },
+      "change": {
+        "monthly": "Passer à ce forfait au mois",
+        "annual": "Passer à ce forfait à l'année"
+      },
+      "discount": {
+        "percentage": "{{percent}} % de réduction",
+        "fixed": "{{amount}} de réduction",
+        "once": "{{discount}} sur le premier paiement",
+        "forever": "{{discount}} sur chaque paiement",
+        "repeating_one": "{{discount}} pendant {{count}} mois",
+        "repeating_many": "{{discount}} pendant {{count}} mois",
+        "repeating_other": "{{discount}} pendant {{count}} mois"
+      },
+      "errors": {
+        "invalid": "Ce code n'est pas valide.",
+        "current": "Vous avez déjà ce forfait.",
+        "interval": "Ce forfait n'est pas vendu avec cette période de facturation.",
+        "rateLimited": "Trop de codes essayés. Réessayez plus tard.",
+        "failed": "Impossible de vérifier ce code. Réessayez."
+      }
     }
   },
   "phoneNumber": {

@@ -498,6 +498,49 @@
         "order": "Order",
         "refund": "Refund"
       }
+    },
+    "promo": {
+      "link": "Have a promo code?",
+      "label": "Promo code",
+      "placeholder": "Enter your code",
+      "apply": "Apply",
+      "applying": "Checking...",
+      "cancel": "Cancel",
+      "unlocks": "This code unlocks {{plan}}.",
+      "features": "Everything in {{tier}}.",
+      "ends": "Until {{date}}",
+      "unavailable": "Not on sale right now",
+      "interval": {
+        "monthly": "Monthly",
+        "annual": "Yearly"
+      },
+      "per": {
+        "monthly": "/month",
+        "annual": "/year"
+      },
+      "subscribe": {
+        "monthly": "Subscribe monthly",
+        "annual": "Subscribe yearly"
+      },
+      "change": {
+        "monthly": "Switch to it monthly",
+        "annual": "Switch to it yearly"
+      },
+      "discount": {
+        "percentage": "{{percent}}% off",
+        "fixed": "{{amount}} off",
+        "once": "{{discount}} the first payment",
+        "forever": "{{discount}} every payment",
+        "repeating_one": "{{discount}} for {{count}} month",
+        "repeating_other": "{{discount}} for {{count}} months"
+      },
+      "errors": {
+        "invalid": "This code isn't valid.",
+        "current": "You're already on this plan.",
+        "interval": "This plan isn't sold with that billing period.",
+        "rateLimited": "Too many codes tried. Try again later.",
+        "failed": "Unable to check this code. Try again."
+      }
     }
   },
   "phoneNumber": {

@@ -1887,7 +1887,7 @@
       "post": {
         "operationId": "createCheckout",
         "summary": "Start a checkout",
-        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
+        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code, and a business can try 10 codes an hour. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
         "tags": [
           "Billing"
         ],
@@ -2919,6 +2919,381 @@
           },
           "422": {
             "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/codes": {
+      "post": {
+        "operationId": "createBillingCode",
+        "summary": "Issue a promo code",
+        "description": "Operator platform keys only. Makes a code that unlocks a plan whose access is code in billing.json; a business that enters it buys that plan through Polar with the plan's discount. A shared code needs max_uses and expires_at; a code bound to one business needs neither. With an Idempotency-Key, a retry returns the same code and a different body with that value is a 422. A code that is taken is a 409.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingCodeCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCode"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listBillingCodes",
+        "summary": "List promo codes",
+        "description": "Operator platform keys only. Every code, newest first.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Items per page, 1 to 100. Defaults to 25.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The next_cursor value from the previous page.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "plan",
+            "in": "query",
+            "description": "Only the codes of this plan.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "business_id",
+            "in": "query",
+            "description": "Only the codes bound to this business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data",
+                    "next_cursor",
+                    "has_more"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/BillingCode"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Pass as cursor to get the next page. Null on the last page."
+                    },
+                    "has_more": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/codes/{code_id}": {
+      "delete": {
+        "operationId": "revokeBillingCode",
+        "summary": "Revoke a promo code",
+        "description": "Operator platform keys only. No new checkout can use it. Businesses already on its plan keep it. Revoking a revoked code returns it as it is.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "code_id",
+            "in": "path",
+            "required": true,
+            "description": "The promo code id.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCode"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found (not_found), including a business a platform key cannot act on.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
             "content": {
               "application/json": {
                 "schema": {
@@ -14853,6 +15228,13 @@
             ],
             "description": "pending or processing: Polar is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so Polar moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once Polar confirms it. error: Polar made no page or change; error says why, and another checkout can be started."
           },
+          "promo_plan": {
+            "description": "The plan a promo code unlocked, whose tier plan names. Null for a standard plan.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "checkout_url": {
             "description": "The Polar page where the customer pays. Send it to them. Null unless status is ready.",
             "type": [
@@ -14886,6 +15268,7 @@
           "plan",
           "interval",
           "status",
+          "promo_plan",
           "checkout_url",
           "error",
           "paid",
@@ -14902,8 +15285,10 @@
             "type": "string",
             "enum": [
               "starter",
-              "pro"
-            ]
+              "pro",
+              "promo"
+            ],
+            "description": "starter or pro, or promo for the plan promo_code unlocks."
           },
           "interval": {
             "type": "string",
@@ -14911,6 +15296,12 @@
               "monthly",
               "annual"
             ]
+          },
+          "promo_code": {
+            "description": "A promo code the deployment's operator issued, compared regardless of case and spaces. Required with plan promo, and only allowed with it.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
           }
         },
         "required": [
@@ -17436,6 +17827,180 @@
         ],
         "additionalProperties": false,
         "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+      },
+      "BillingCode": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identifier (UUID)."
+          },
+          "code": {
+            "type": "string",
+            "description": "What people type, in upper case. It is compared regardless of case and spaces."
+          },
+          "plan": {
+            "type": "string",
+            "description": "The plan it unlocks: a billing.json plan whose access is code."
+          },
+          "business_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid",
+                "description": "Stable identifier (UUID)."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The one business that may use it. Null for a shared code, which anyone may enter."
+          },
+          "max_uses": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many businesses may subscribe with it. Null for no limit, which only a bound code may have."
+          },
+          "uses": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Businesses that subscribed with it. Checkouts opened at the same time can take it past max_uses."
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "No new checkout after this. Null for no end, which only a bound code may have."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "expired",
+              "used_up",
+              "revoked"
+            ],
+            "description": "active: it works. expired, used_up or revoked: it doesn't, and whoever enters it reads only that it isn't valid. Businesses already on its plan keep it."
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "link": {
+            "type": "string",
+            "description": "The sign-up page with the code filled in, to send to whoever will use it. Someone already signed in goes on to Settings > Plan with it."
+          },
+          "key_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "The operator platform key that issued it."
+          },
+          "partner": {
+            "type": "string",
+            "description": "That key's partner."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO 8601 timestamp in UTC."
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "code",
+          "plan",
+          "business_id",
+          "max_uses",
+          "uses",
+          "expires_at",
+          "status",
+          "note",
+          "link",
+          "key_id",
+          "partner",
+          "created_at",
+          "revoked_at"
+        ],
+        "additionalProperties": false,
+        "description": "A promo code that unlocks a plan whose access is code."
+      },
+      "BillingCodeCreate": {
+        "type": "object",
+        "properties": {
+          "plan": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 48,
+            "description": "The plan it unlocks, by its billing.json code. Its access must be code, and it must not be retired. A plan that isn't on sale yet takes codes, which work once it is."
+          },
+          "code": {
+            "description": "The code itself, such as SPRING25: 4 to 32 letters and digits, groups joined by single hyphens, stored in upper case. Left out, one is made up, such as ALLO-7K2Q-PX9M.",
+            "type": "string",
+            "minLength": 4,
+            "maxLength": 64
+          },
+          "prefix": {
+            "description": "For a made-up code, its first group. Defaults to the first four letters of the brand's name. Not with code.",
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{2,8}$"
+          },
+          "business_id": {
+            "description": "Bind it to one business, which then is the only one that can use it.",
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_uses": {
+            "description": "How many businesses may subscribe with it. Required for a shared code. A bound code defaults to 1.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100000
+          },
+          "expires_at": {
+            "description": "No new checkout after this. Required for a shared code, and in the future.",
+            "type": "string",
+            "format": "date-time"
+          },
+          "note": {
+            "description": "Who it is for or why, for the operator's own records.",
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "plan"
+        ],
+        "additionalProperties": false
       },
       "BillingPlans": {
         "type": "object",

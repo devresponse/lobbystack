@@ -62,15 +62,21 @@ export class PolarBillingProvider {
    * plan without a second subscription. Polar charges it as prorationBehavior
    * says. Needs subscriptions:write.
    */
-  async changeSubscriptionProduct(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior }): Promise<PolarSubscription> {
-    // Only these two fields: a discount_id, even null, would change the discount too.
-    const body = { product_id: input.productId, proration_behavior: input.prorationBehavior };
+  async changeSubscriptionProduct(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior; discountId?: string | null; metadata?: Record<string, string> }): Promise<PolarSubscription> {
+    // discount_id only when asked: sent, even as null, it changes the discount too (from the next billing cycle).
+    const body = { product_id: input.productId, proration_behavior: input.prorationBehavior, ...(input.discountId !== undefined ? { discount_id: input.discountId } : {}), ...(input.metadata ? { metadata: input.metadata } : {}) };
     return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(input.subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
   }
 
-  async createCheckout(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
+  /**
+   * A checkout page for one product. A promo checkout names its discount and
+   * turns typed discount codes off, so the plan's own discount is the only
+   * one; its metadata is copied onto the subscription.
+   */
+  async createCheckout(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string; promo?: { discountId: string | null; metadata: Record<string, string> } }): Promise<{ checkoutUrl: string; checkoutId: string }> {
     assertCertificationRecipient("email", input.customerEmail);
-    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", ...(input.idempotencyKey ? { headers: { "idempotency-key": input.idempotencyKey } } : {}), body: JSON.stringify({ products: [input.productId], customer_email: input.customerEmail, external_customer_id: input.externalCustomerId, success_url: input.successUrl, return_url: input.returnUrl, customer_metadata: { externalCustomerId: input.externalCustomerId } }) });
+    const promo = input.promo ? { ...(input.promo.discountId ? { discount_id: input.promo.discountId } : {}), allow_discount_codes: false, metadata: input.promo.metadata } : {};
+    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", ...(input.idempotencyKey ? { headers: { "idempotency-key": input.idempotencyKey } } : {}), body: JSON.stringify({ products: [input.productId], customer_email: input.customerEmail, external_customer_id: input.externalCustomerId, success_url: input.successUrl, return_url: input.returnUrl, customer_metadata: { externalCustomerId: input.externalCustomerId }, ...promo }) });
     return { checkoutUrl: result.url, checkoutId: result.id };
   }
 

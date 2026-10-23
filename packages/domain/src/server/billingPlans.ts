@@ -60,7 +60,10 @@ export type CatalogPrice = {
   retired: boolean;
 };
 
-export type BillingCatalogSnapshot = { plans: CatalogStandardPlan[]; prices: CatalogPrice[] };
+/** A plan other than the four standard ones, such as a promo plan: what selling it needs. */
+export type CatalogOtherPlan = { code: string; tier: string; status: "draft" | "active" | "retired"; polar_disc: string | null };
+
+export type BillingCatalogSnapshot = { plans: CatalogStandardPlan[]; prices: CatalogPrice[]; others?: CatalogOtherPlan[] };
 
 const numberOrNull = (value: unknown): number | null => (value === null || value === undefined ? null : Number(value));
 
@@ -94,8 +97,10 @@ async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStanda
 export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promise<BillingCatalogSnapshot> {
   const plans = await readStandardPlans(tx);
   const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.polar_id, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
+  const others = (await tx.execute<Row>(sql`select code, tier, status, polar_disc from public.billing_plans where code <> tier order by code`)).rows;
   return {
     plans,
+    others: others.map((row) => ({ code: String(row.code), tier: String(row.tier), status: row.status as CatalogOtherPlan["status"], polar_disc: (row.polar_disc ?? null) as string | null })),
     prices: prices.map((row) => ({
       plan: String(row.plan),
       tier: String(row.tier),
@@ -113,7 +118,10 @@ export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promi
 /** Which Polar product sells a plan and interval, and which plan and interval a product sells. */
 export type PolarProductLinks = {
   productFor(plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null;
-  planFor(productId: string | null | undefined): { plan: HostedCheckoutPlanSlug; interval: BillingInterval } | null;
+  /** The product and discount that sell a plan other than the standard ones, such as a promo plan: null unless it is active and the price is linked. */
+  saleFor(plan: string, interval: BillingInterval): { productId: string; discountId: string | null } | null;
+  /** plan is the tier the product's plan behaves as; code is that plan's own code, the tier itself for a standard plan. */
+  planFor(productId: string | null | undefined): { plan: HostedCheckoutPlanSlug; interval: BillingInterval; code: string } | null;
 };
 
 function productVariable(env: Record<string, string | undefined>, plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null {
@@ -142,13 +150,19 @@ export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<s
       if (row?.status !== "active") return productVariable(env, plan, interval);
       return catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.polar_id ?? null;
     },
+    saleFor(plan, interval) {
+      const row = catalog.others?.find((entry) => entry.code === plan);
+      if (row?.status !== "active") return null;
+      const productId = catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.polar_id;
+      return productId ? { productId, discountId: row.polar_disc } : null;
+    },
     planFor(productId) {
       if (!productId) return null;
       const linked = catalog.prices.find((price) => price.polar_id === productId);
-      if (linked) return isCheckoutPlan(linked.tier) ? { plan: linked.tier, interval: linked.period } : null;
+      if (linked) return isCheckoutPlan(linked.tier) ? { plan: linked.tier, interval: linked.period, code: linked.plan } : null;
       for (const plan of hostedCheckoutPlanSlugs) {
         for (const interval of billingIntervals) {
-          if (productVariable(env, plan, interval) === productId) return { plan, interval };
+          if (productVariable(env, plan, interval) === productId) return { plan, interval, code: plan };
         }
       }
       return null;

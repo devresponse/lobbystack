@@ -346,3 +346,29 @@ describe("billing catalog", () => {
     expect(result.out).toContain(run.id);
   });
 });
+
+describe("billing promo codes", () => {
+  const code = { id: "6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5", code: "ALLO-7K2Q-PX9M", plan: "pro_launch", business_id: null, max_uses: 50, uses: 0, expires_at: "2026-12-31T00:00:00.000Z", status: "active", note: null, link: "https://app.example.com/signup?promo=ALLO-7K2Q-PX9M", key_id: "1b2c3d4e-5f60-4718-9a2b-3c4d5e6f7a8b", partner: "operator", created_at: "2026-10-22T09:00:00.000Z", revoked_at: null };
+
+  it("issues a code with an Idempotency-Key and prints the link to send", async () => {
+    const api = fakeApi({ "POST /api/v1/billing/codes": { status: 201, body: { data: code } } });
+    const result = await runCli(["billing", "code-create", "pro_launch", "--max-uses", "50", "--expires-at", "2026-12-31T00:00:00Z"], { fetch: api.fetch });
+    expect(result.code).toBe(exitCodes.ok);
+    expect(api.sent[0]!.body).toEqual({ plan: "pro_launch", max_uses: 50, expires_at: "2026-12-31T00:00:00Z" });
+    expect(api.sent[0]!.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(result.out.endsWith(`Send this link, or the code ALLO-7K2Q-PX9M for Settings > Plan: ${code.link}`)).toBe(true);
+  });
+
+  it("lists codes of one plan and revokes one", async () => {
+    const api = fakeApi({
+      "GET /api/v1/billing/codes": { body: { data: [code], next_cursor: null, has_more: false } },
+      [`DELETE /api/v1/billing/codes/${code.id}`]: { body: { data: { ...code, status: "revoked", revoked_at: "2026-10-22T10:00:00.000Z" } } },
+    });
+    const listed = await runCli(["billing", "codes", "--plan", "pro_launch"], { fetch: api.fetch });
+    expect(api.sent[0]!.query).toEqual({ plan: "pro_launch" });
+    expect(listed.out).toMatch(/ALLO-7K2Q-PX9M\s+pro_launch/);
+    const revoked = await runCli(["billing", "code-revoke", code.id], { fetch: api.fetch });
+    expect(revoked.code).toBe(exitCodes.ok);
+    expect(revoked.out).toContain("revoked");
+  });
+});

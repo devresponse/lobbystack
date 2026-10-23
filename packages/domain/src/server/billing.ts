@@ -1,6 +1,6 @@
 import { and, eq, inArray, lt, or, sql } from "drizzle-orm";
 
-import { billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -8,6 +8,7 @@ import type { DomainContext } from "./context";
 import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
 import { requireBusinessAdmin } from "../authz";
+import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
 export type BillingCheckoutTarget = "starter" | "pro";
@@ -114,25 +115,51 @@ export async function reserveWidgetChatUsageInTransaction(
   return { allowed: true, errorCode: null, plan };
 }
 
+/** What the dashboard tells someone whose promo code can't be used: every reason the code itself fails reads the same. */
+const billingCodeRefusalErrors: Record<BillingCodeRefusal, { status: number; code: string; message: string }> = {
+  invalid: { status: 400, code: "promo_invalid", message: "This code isn't valid." },
+  current: { status: 409, code: "promo_current", message: "This business is already on that plan." },
+  interval: { status: 409, code: "promo_interval", message: "That plan isn't sold with this billing interval." },
+};
+
+export function billingCodeRefusalError(refusal: BillingCodeRefusal): Error {
+  const { message, ...rest } = billingCodeRefusalErrors[refusal];
+  return Object.assign(new Error(message), rest);
+}
+
+/**
+ * Queues a checkout from the dashboard. With a promo code it sells the plan
+ * the code unlocks, at that plan's tier, instead of the target. checkPromoCode
+ * runs once the person is known to manage the business, before the code is
+ * looked up, so only its own admins spend the business's tries.
+ */
 export async function createBillingCheckoutRequest(
   context: DomainContext,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval },
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promoCode?: string | undefined; checkPromoCode?: (() => Promise<void>) | undefined },
 ): Promise<string> {
-  return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
-    await requireBusinessAdmin(tx, input);
-    return await createBillingCheckoutRequestInTransaction(tx, input);
+  const { checkPromoCode, ...request } = input;
+  return await withBusinessTransaction(context.db, { ...request, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, request);
+    if (request.promoCode === undefined) return await createBillingCheckoutRequestInTransaction(tx, request);
+    await checkPromoCode?.();
+    const sale = await billingCodeCheckout(tx, { businessId: request.businessId, code: request.promoCode, billingInterval: request.billingInterval });
+    if ("refusal" in sale) throw billingCodeRefusalError(sale.refusal);
+    return await createBillingCheckoutRequestInTransaction(tx, { ...request, target: sale.offer.tier, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
   });
 }
+
+/** The plan other than the target's standard one that a checkout sells, and the promo code that unlocked it. */
+export type BillingCheckoutPromo = { planCode: string; codeId: string };
 
 /**
  * Queues a Polar checkout for a plan in the name of the person asking, whose
  * email Polar fills in. A business on a managed plan is refused, because the
  * operator bills it and a Polar subscription would bill it twice. Callers
- * authorize first.
+ * authorize first, and check a promo code with billingCodeCheckout.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval },
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined },
 ): Promise<string> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
@@ -145,6 +172,7 @@ export async function createBillingCheckoutRequestInTransaction(
     target: input.target,
     billingInterval: input.billingInterval,
     status: "pending",
+    ...(input.promo ? { planCode: input.promo.planCode, codeId: input.promo.codeId } : {}),
   }).returning({ id: billingCheckoutRequests.id });
   if (!request) throw new Error("Billing checkout request could not be created.");
   await enqueueOutbox(tx, {
@@ -193,7 +221,8 @@ export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input
   if (isManagedBillingAccount(account) && account?.plan === "enterprise" && account.overageSpendingCapCents === null) return "unchanged";
   if (account && account.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account.subscriptionState)) return "paid_through_polar";
   const now = new Date();
-  const managed = { source: MANAGED_BILLING_SOURCE, plan: "enterprise", subscriptionState: "active", billingInterval: null, subscriptionId: null, currentPeriodStart: now, currentPeriodEnd: null, overageSpendingCapCents: null };
+  // A promo plan from an earlier subscription ends with it.
+  const managed = { source: MANAGED_BILLING_SOURCE, plan: "enterprise", planCode: null, planEnds: null, codeId: null, subscriptionState: "active", billingInterval: null, subscriptionId: null, currentPeriodStart: now, currentPeriodEnd: null, overageSpendingCapCents: null };
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, ...managed }).onConflictDoUpdate({ target: billingAccounts.businessId, set: { ...managed, updatedAt: now } });
   // Checkouts Polar hasn't made a page for yet would sell a plan the operator now bills, so they stop here.
   await tx.update(billingCheckoutRequests).set({ status: "canceled", error: "The business moved to a managed plan.", updatedAt: now }).where(and(eq(billingCheckoutRequests.businessId, input.businessId), inArray(billingCheckoutRequests.status, ["pending", "processing", "error"])));
@@ -234,8 +263,10 @@ export async function loadBillingCheckoutRequest(
   customerEmail: string;
   externalCustomerId: string;
   onboardingStage: string;
-  /** The live Polar subscription the business already pays with, which a plan change moves instead of starting a second one. */
-  subscription: { id: string; plan: "starter" | "pro"; billingInterval: BillingInterval | null } | null;
+  /** The plan other than the target's standard one it sells, such as a promo plan; null for the standard plan. */
+  planCode: string | null;
+  /** The live Polar subscription the business already pays with, which a plan change moves instead of starting a second one. planCode is the plan it is on when that isn't a standard one. */
+  subscription: { id: string; plan: "starter" | "pro"; billingInterval: BillingInterval | null; planCode: string | null } | null;
 } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const row = (await tx.select({
@@ -247,10 +278,12 @@ export async function loadBillingCheckoutRequest(
       checkoutId: billingCheckoutRequests.checkoutId,
       checkoutUrl: billingCheckoutRequests.checkoutUrl,
       error: billingCheckoutRequests.error,
+      planCode: billingCheckoutRequests.planCode,
       customerEmail: users.email,
       billingKey: billingAccounts.billingKey,
       subscriptionId: billingAccounts.subscriptionId,
       plan: billingAccounts.plan,
+      currentPlanCode: billingAccounts.planCode,
       currentInterval: billingAccounts.billingInterval,
       subscriptionState: billingAccounts.subscriptionState,
       source: billingAccounts.source,
@@ -262,14 +295,14 @@ export async function loadBillingCheckoutRequest(
       .where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId)))
       .limit(1))[0];
     if (!row || !isBillingCheckoutTarget(row.target) || !isBillingInterval(row.billingInterval)) return null;
-    const { billingKey, subscriptionId, plan, currentInterval, subscriptionState, source, ...request } = row;
+    const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, source, ...request } = row;
     const paying = subscriptionId && source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(subscriptionState) && (plan === "starter" || plan === "pro");
     return {
       ...request,
       target: row.target,
       billingInterval: row.billingInterval,
       externalCustomerId: billingKey ?? `business:${input.businessId}`,
-      subscription: paying ? { id: subscriptionId, plan, billingInterval: currentInterval && isBillingInterval(currentInterval) ? currentInterval : null } : null,
+      subscription: paying ? { id: subscriptionId, plan, billingInterval: currentInterval && isBillingInterval(currentInterval) ? currentInterval : null, planCode: currentPlanCode } : null,
     };
   });
 }
@@ -526,6 +559,45 @@ export function detectSubscriptionStart(
   return { plan: next.plan!, billingInterval: next.billingInterval, previousPlan: previous?.plan ?? null };
 }
 
+function addMonths(date: Date, months: number): Date {
+  const next = new Date(date);
+  next.setUTCMonth(next.getUTCMonth() + months);
+  return next;
+}
+
+/**
+ * The account's promo columns once Polar names the product a business pays
+ * for. A product of a plan other than its tier's standard one, such as a
+ * promo plan, names that plan once its subscription is live; the code is the
+ * one the business's newest checkout for that plan carried. Moving onto the
+ * plan counts the code's use, records it in the audit log, fixes the plan's
+ * terms and starts a time-limited plan's months. A live standard product
+ * clears all three.
+ */
+async function promoPlanFields(
+  tx: DatabaseTransaction,
+  input: { businessId: string; plan: string; planCode: string | undefined; existing: { planCode: string | null; subscriptionState: string | null } | undefined; live: boolean; periodStart: Date | undefined },
+): Promise<{ planCode?: string | null; codeId?: string | null; planEnds?: Date | null }> {
+  // Only a live subscription moves the account, so a late event about an older one changes nothing here.
+  if (!input.planCode || input.planCode === input.plan) return input.live ? { planCode: null, codeId: null, planEnds: null } : {};
+  const planCode = input.planCode;
+  // Retries and the several events of one checkout find the account on the plan already.
+  const entering = input.live && (input.existing?.planCode !== planCode || !isLiveSubscriptionState(input.existing?.subscriptionState));
+  if (!entering) return {};
+  const [request] = await tx.select({ codeId: billingCheckoutRequests.codeId }).from(billingCheckoutRequests)
+    .where(and(eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.planCode, planCode), sql`${billingCheckoutRequests.codeId} is not null`))
+    .orderBy(sql`${billingCheckoutRequests.createdAt} desc`).limit(1);
+  const codeId = request?.codeId ?? null;
+  if (codeId !== null) {
+    await tx.execute(sql`update public.billing_codes set uses = uses + 1, updated_at = now() where id = ${codeId}::uuid`);
+    await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_code_redeemed", entityType: "billing_code", entityId: codeId, payload: { plan: planCode } });
+  }
+  // Its first subscriber fixes a plan's terms, which the next apply then refuses to change.
+  const [row] = (await tx.execute<{ months: number | null }>(sql`update public.billing_plans set frozen_at = coalesce(frozen_at, now()), updated_at = now() where code = ${planCode} returning months`)).rows;
+  const months = row?.months === null || row?.months === undefined ? null : Number(row.months);
+  return { planCode, codeId, planEnds: months === null ? null : addMonths(input.periodStart ?? new Date(), months) };
+}
+
 export async function reconcileBillingProviderEvent(
   context: DomainContext,
   input: { businessId: string; providerEventId: string },
@@ -556,6 +628,7 @@ export async function reconcileBillingProviderEvent(
       subscriptionState: billingAccounts.subscriptionState,
       billingInterval: billingAccounts.billingInterval,
       source: billingAccounts.source,
+      planCode: billingAccounts.planCode,
     }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
     const billingKey = stringField(transactionPayload, "billingKey", "externalCustomerId", "customerId") ?? stringField(payload, "billingKey", "externalCustomerId", "customerId") ?? stringField(customer, "id", "externalId") ?? existing?.billingKey;
     if (billingKey) {
@@ -563,6 +636,8 @@ export async function reconcileBillingProviderEvent(
       const subscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id") ?? existing?.subscriptionId;
       // An unmapped product (a retired or legacy product id) keeps the stored plan rather than a display name.
       const plan = stringField(transactionPayload, "plan") ?? stringField(payload, "plan");
+      // The exact plan the product sells, which differs from plan for a promo plan.
+      const planCode = stringField(transactionPayload, "planCode") ?? stringField(payload, "planCode");
       const billingInterval = stringField(transactionPayload, "billingInterval", "billing_interval", "interval") ?? stringField(payload, "billingInterval", "billing_interval", "interval") ?? stringField(subscription, "billingInterval", "billing_interval", "interval");
       // Only a subscription's own status is a subscription state. An order's status
       // (paid, refunded) is not, and an order without a nested subscription has none.
@@ -583,7 +658,7 @@ export async function reconcileBillingProviderEvent(
       const managedSource = existing?.source === MANAGED_BILLING_SOURCE;
       const takesOver = managedSource && (plan === "starter" || plan === "pro") && isLiveSubscriptionState(subscriptionState);
       const keepsManagedPlan = managedSource && !takesOver;
-      const subscriptionFields = stale || keepsManagedPlan ? {} : {
+      const polarFields = stale || keepsManagedPlan ? {} : {
         ...(takesOver ? { source: "polar" } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
         ...(plan ? { plan } : {}),
@@ -591,6 +666,10 @@ export async function reconcileBillingProviderEvent(
         ...(subscriptionState ? { subscriptionState } : {}),
         ...(currentPeriodStart ? { currentPeriodStart } : {}),
         ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
+      };
+      const subscriptionFields = {
+        ...polarFields,
+        ...(plan && !stale && !keepsManagedPlan ? await promoPlanFields(tx, { businessId: input.businessId, plan, planCode, existing, live: isLiveSubscriptionState(subscriptionState ?? existing?.subscriptionState), periodStart: currentPeriodStart }) : {}),
       };
       // A takeover starts a Polar subscription even though the managed plan already counted as paid.
       startedSubscription = stale || keepsManagedPlan ? null : detectSubscriptionStart(takesOver ? { plan: existing?.plan ?? null, subscriptionState: null } : existing, {

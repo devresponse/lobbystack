@@ -193,8 +193,12 @@ export const apiBillingUpdateSchema = z.strictObject({
 });
 
 export const apiCheckoutCreateSchema = z.strictObject({
-  plan: z.enum(checkoutPlans),
+  plan: z.enum([...checkoutPlans, "promo"]).describe("starter or pro, or promo for the plan promo_code unlocks."),
   interval: z.enum(billingIntervals),
+  promo_code: z.string().min(1).max(64).optional().describe("A promo code the deployment's operator issued, compared regardless of case and spaces. Required with plan promo, and only allowed with it."),
+}).superRefine((value, context) => {
+  if ((value.plan === "promo") === (value.promo_code !== undefined)) return;
+  context.addIssue({ code: "custom", path: ["promo_code"], message: value.plan === "promo" ? "Required when plan is promo." : "Only allowed when plan is promo." });
 });
 
 export const apiCheckoutSchema = z.object({
@@ -202,6 +206,7 @@ export const apiCheckoutSchema = z.object({
   plan: z.enum(checkoutPlans),
   interval: z.enum(billingIntervals),
   status: z.enum(["pending", "processing", "ready", "changed", "error"]).describe("pending or processing: Polar is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so Polar moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once Polar confirms it. error: Polar made no page or change; error says why, and another checkout can be started."),
+  promo_plan: z.string().nullable().describe("The plan a promo code unlocked, whose tier plan names. Null for a standard plan."),
   checkout_url: z.string().nullable().describe("The Polar page where the customer pays. Send it to them. Null unless status is ready."),
   error: z.string().nullable(),
   paid: z.boolean().describe("true once the business is on the plan bought here."),
@@ -300,6 +305,41 @@ export const apiBillingCatalogRunSchema = z.object({
   started_at: timestamp,
   ended_at: nullableTimestamp,
 }).describe("One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link.");
+
+export const billingCodeStatuses = ["active", "expired", "used_up", "revoked"] as const;
+
+export const apiBillingCodeSchema = z.object({
+  id,
+  code: z.string().describe("What people type, in upper case. It is compared regardless of case and spaces."),
+  plan: z.string().describe("The plan it unlocks: a billing.json plan whose access is code."),
+  business_id: id.nullable().describe("The one business that may use it. Null for a shared code, which anyone may enter."),
+  max_uses: z.number().int().nullable().describe("How many businesses may subscribe with it. Null for no limit, which only a bound code may have."),
+  uses: z.number().int().describe("Businesses that subscribed with it. Checkouts opened at the same time can take it past max_uses."),
+  expires_at: nullableTimestamp.describe("No new checkout after this. Null for no end, which only a bound code may have."),
+  status: z.enum(billingCodeStatuses).describe("active: it works. expired, used_up or revoked: it doesn't, and whoever enters it reads only that it isn't valid. Businesses already on its plan keep it."),
+  note: z.string().nullable(),
+  link: z.string().describe("The sign-up page with the code filled in, to send to whoever will use it. Someone already signed in goes on to Settings > Plan with it."),
+  key_id: id.describe("The operator platform key that issued it."),
+  partner: z.string().describe("That key's partner."),
+  created_at: timestamp,
+  revoked_at: nullableTimestamp,
+}).describe("A promo code that unlocks a plan whose access is code.");
+
+export const apiBillingCodeCreateSchema = z.strictObject({
+  plan: z.string().min(3).max(48).describe("The plan it unlocks, by its billing.json code. Its access must be code, and it must not be retired. A plan that isn't on sale yet takes codes, which work once it is."),
+  code: z.string().min(4).max(64).optional().describe("The code itself, such as SPRING25: 4 to 32 letters and digits, groups joined by single hyphens, stored in upper case. Left out, one is made up, such as ALLO-7K2Q-PX9M."),
+  prefix: z.string().regex(/^[A-Za-z0-9]{2,8}$/).optional().describe("For a made-up code, its first group. Defaults to the first four letters of the brand's name. Not with code."),
+  business_id: id.optional().describe("Bind it to one business, which then is the only one that can use it."),
+  max_uses: z.number().int().min(1).max(100_000).optional().describe("How many businesses may subscribe with it. Required for a shared code. A bound code defaults to 1."),
+  expires_at: z.iso.datetime({ offset: true }).optional().describe("No new checkout after this. Required for a shared code, and in the future."),
+  note: z.string().trim().max(200).optional().describe("Who it is for or why, for the operator's own records."),
+}).superRefine((value, context) => {
+  if (value.code !== undefined && value.prefix !== undefined) context.addIssue({ code: "custom", path: ["prefix"], message: "Send code or prefix, not both." });
+  if (value.business_id !== undefined) return;
+  // A code anyone may enter needs a use limit and an end, so a leaked one can't run forever.
+  if (value.max_uses === undefined) context.addIssue({ code: "custom", path: ["max_uses"], message: "Required for a shared code." });
+  if (value.expires_at === undefined) context.addIssue({ code: "custom", path: ["expires_at"], message: "Required for a shared code." });
+});
 
 export const apiBillingCatalogPriceSchema = z.object({
   id,
@@ -1122,6 +1162,8 @@ export type ApiBillingCatalogRefusal = z.infer<typeof apiBillingCatalogRefusalSc
 export type ApiBillingCatalogRun = z.infer<typeof apiBillingCatalogRunSchema>;
 export type ApiBillingPlans = z.infer<typeof apiBillingPlansSchema>;
 export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
+export type ApiBillingCode = z.infer<typeof apiBillingCodeSchema>;
+export type ApiBillingCodeCreate = z.infer<typeof apiBillingCodeCreateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
 export type ApiWidgetConfig = z.infer<typeof apiWidgetConfigSchema>;

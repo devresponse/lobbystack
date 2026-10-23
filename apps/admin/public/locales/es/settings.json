@@ -508,6 +508,50 @@
         "order": "Pedido",
         "refund": "Reembolso"
       }
+    },
+    "promo": {
+      "link": "¿Tiene un código promocional?",
+      "label": "Código promocional",
+      "placeholder": "Introduzca su código",
+      "apply": "Aplicar",
+      "applying": "Comprobando...",
+      "cancel": "Cancelar",
+      "unlocks": "Este código desbloquea {{plan}}.",
+      "features": "Todo lo de {{tier}}.",
+      "ends": "Hasta el {{date}}",
+      "unavailable": "No está a la venta ahora",
+      "interval": {
+        "monthly": "Mensual",
+        "annual": "Anual"
+      },
+      "per": {
+        "monthly": "/ mes",
+        "annual": "/ año"
+      },
+      "subscribe": {
+        "monthly": "Suscribirse mensualmente",
+        "annual": "Suscribirse anualmente"
+      },
+      "change": {
+        "monthly": "Cambiar a este plan mensual",
+        "annual": "Cambiar a este plan anual"
+      },
+      "discount": {
+        "percentage": "{{percent}} % de descuento",
+        "fixed": "{{amount}} de descuento",
+        "once": "{{discount}} en el primer pago",
+        "forever": "{{discount}} en cada pago",
+        "repeating_one": "{{discount}} durante {{count}} mes",
+        "repeating_many": "{{discount}} durante {{count}} meses",
+        "repeating_other": "{{discount}} durante {{count}} meses"
+      },
+      "errors": {
+        "invalid": "Este código no es válido.",
+        "current": "Ya tiene este plan.",
+        "interval": "Este plan no se vende con ese periodo de facturación.",
+        "rateLimited": "Demasiados códigos probados. Inténtelo más tarde.",
+        "failed": "No se pudo comprobar este código. Inténtelo de nuevo."
+      }
     }
   },
   "phoneNumber": {

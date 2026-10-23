@@ -48,7 +48,7 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
       ...(externalId ? { billingKey: externalId } : {}),
       ...(customerId ? { customerId } : {}),
       ...(subscriptionId ? { subscriptionId } : {}),
-      ...(match ? { plan: match.plan, billingInterval: match.interval } : {}),
+      ...(match ? { plan: match.plan, planCode: match.code, billingInterval: match.interval } : {}),
       ...(subscriptionState ? { subscriptionState } : {}),
       ...(subscriptionModifiedAt ? { subscriptionModifiedAt } : {}),
     },

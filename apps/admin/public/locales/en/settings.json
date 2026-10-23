@@ -340,6 +340,7 @@
       "title": "Upgrade plan",
       "description": "Choose the plan that works best for your team.",
       "changesSubscription": "You already have a subscription, so this changes it instead of opening a checkout. Any difference is charged to your saved payment method.",
+      "leavesPromo": "Changing your plan ends {{plan}} and its discount.",
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
       "annualDiscount": "Save {{percent}}%",
@@ -509,7 +510,8 @@
       "unlocks": "This code unlocks {{plan}}.",
       "features": "{{tier}} features, with:",
       "moreThanTier": "More than {{tier}}",
-      "ends": "Until {{date}}",
+      "endsTier": "Until {{date}}, then {{tier}}",
+      "endsCancel": "Until {{date}}, then the subscription ends",
       "unavailable": "Not on sale right now",
       "interval": {
         "monthly": "Monthly",

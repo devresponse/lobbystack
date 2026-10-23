@@ -14,6 +14,7 @@ import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerifi
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import { runDailyBillingVerify } from "@lobbystack/domain";
+import { loadPromoEndWork, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file.
 const brand = vi.hoisted(() => ({ appBaseUrl: null as string | null }));
@@ -31,6 +32,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     expireProspectDemos: vi.fn(),
     generateAffiliatePayoutRun: vi.fn(),
     runDailyBillingVerify: vi.fn(),
+    loadPromoEndWork: vi.fn(),
+    recordPromoEnd: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),
     loadBillingCheckoutRequest: vi.fn(),
     loadBillingUsageEvent: vi.fn(),
@@ -574,7 +577,7 @@ describe("worker handlers", () => {
 
   describe("a business that already pays", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_STARTER_ANNUAL_PRODUCT_ID: "product-starter-annual", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly", POLAR_PRO_ANNUAL_PRODUCT_ID: "product-pro-annual" };
-    const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, ...extra });
+    const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null, ...extra });
 
     function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
       const businessId = randomUUID();
@@ -725,7 +728,7 @@ describe("worker handlers", () => {
     });
 
     it("moves a paying business's subscription onto it with its discount, and drops the discount when it leaves for a standard plan", async () => {
-      const liveSubscription = (productId: string): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null });
+      const liveSubscription = (productId: string): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null });
       const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("promo-starter-monthly"));
       const onto = promoCheckout({ subscription: { plan: "pro", planCode: null }, polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly")), changeSubscriptionProduct } });
       await expect(onto.run).resolves.toEqual({ status: "completed", entityId: onto.requestId });
@@ -736,6 +739,88 @@ describe("worker handlers", () => {
       const off = promoCheckout({ planCode: null, subscription: { plan: "starter", planCode: "salons-half-off" }, polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("promo-starter-monthly")), changeSubscriptionProduct } });
       await expect(off.run).resolves.toEqual({ status: "completed", entityId: off.requestId });
       expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "product-starter-monthly", prorationBehavior: expect.any(String), discountId: null });
+    });
+  });
+
+  describe("a promo plan's end", () => {
+    const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly" };
+    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
+    const planEnds = new Date(Date.now() + 5 * 86_400_000);
+    const periodEnd = new Date(Date.now() + 6 * 86_400_000).toISOString();
+    const subscription = (extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId: "promo-starter-monthly", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: "disc-half-off", currentPeriodEnd: periodEnd, ...extra });
+    const work = (extra: Partial<PromoEndWork> = {}): PromoEndWork => ({ planCode: "salons-half-off", planEnds, tier: "starter", interval: "monthly", subscriptionId: "sub-1", ending: "tier", endsAt: planEnds, set: true, notify: true, overdue: false, ...extra });
+
+    function endPromo(input: { work: PromoEndWork | null; polar: Partial<NonNullable<WorkerDependencies["polar"]>>; payload?: Record<string, unknown> }) {
+      const businessId = randomUUID();
+      const domain = { db: undefined as never };
+      for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
+      vi.stubEnv("APP_BASE_URL", "https://app.example");
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", polar_disc: "disc-half-off" }] } as never, process.env));
+      vi.mocked(loadPromoEndWork).mockResolvedValue(input.work);
+      vi.mocked(recordPromoEnd).mockResolvedValue(1);
+      const job: JobEnvelope = { jobId: randomUUID(), type: "billing.endPromoPlan", queue: "default", businessId, payload: input.payload ?? {}, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: true };
+      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), getSubscription: vi.fn(), changeSubscriptionProduct: vi.fn(), cancelSubscriptionAtPeriodEnd: vi.fn(), removeSubscriptionDiscount: vi.fn(), ...input.polar } });
+      return { businessId, domain, run };
+    }
+
+    afterEach(() => {
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
+    });
+
+    it("moves the subscription to its tier's standard product from the next period, without the discount, then emails the owners", async () => {
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(subscription());
+      const { businessId, domain, run } = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription()), changeSubscriptionProduct } });
+      await expect(run).resolves.toEqual({ status: "completed", entityId: `${businessId}:salons-half-off:1` });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "product-starter-monthly", prorationBehavior: "next_period", discountId: null });
+      // The email names Polar's renewal date.
+      expect(recordPromoEnd).toHaveBeenCalledWith(domain, { businessId, planCode: "salons-half-off", planEnds, set: true, notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "starter", interval: "monthly" }, appUrl: "https://app.example" });
+    });
+
+    it("cancels at the period's end for a plan that ends that way, and leaves a cancellation or a plan change the business chose", async () => {
+      const cancelSubscriptionAtPeriodEnd = vi.fn().mockResolvedValue(subscription({ cancelAtPeriodEnd: true }));
+      const cancel = endPromo({ work: work({ ending: "cancel" }), polar: { getSubscription: vi.fn().mockResolvedValue(subscription()), cancelSubscriptionAtPeriodEnd } });
+      await expect(cancel.run).resolves.toMatchObject({ status: "completed" });
+      expect(cancelSubscriptionAtPeriodEnd).toHaveBeenCalledWith("sub-1");
+
+      const changeSubscriptionProduct = vi.fn();
+      const canceling = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ cancelAtPeriodEnd: true })), changeSubscriptionProduct } });
+      await expect(canceling.run).resolves.toMatchObject({ status: "completed" });
+      expect(recordPromoEnd).toHaveBeenLastCalledWith(canceling.domain, expect.objectContaining({ notice: expect.objectContaining({ ending: "cancel" }) }));
+
+      const chosen = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ pendingProductId: "product-pro-monthly" })), changeSubscriptionProduct } });
+      await expect(chosen.run).resolves.toMatchObject({ status: "completed" });
+      expect(recordPromoEnd).toHaveBeenLastCalledWith(chosen.domain, expect.objectContaining({ notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "pro", interval: "monthly" } }));
+      expect(changeSubscriptionProduct).not.toHaveBeenCalled();
+    });
+
+    it("emails only once Polar is told, and leaves a refusal or an ended subscription for the next day's check", async () => {
+      const refused = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription()), changeSubscriptionProduct: vi.fn().mockRejectedValue(new PolarRequestError(403, "insufficient_scope")) } });
+      await expect(refused.run).resolves.toEqual({ status: "skipped", entityId: refused.businessId });
+      const ended = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ status: "canceled", endedAt: "2026-10-01T00:00:00Z" })) } });
+      await expect(ended.run).resolves.toEqual({ status: "skipped", entityId: ended.businessId });
+      expect(recordPromoEnd).not.toHaveBeenCalled();
+      // Polar fails some other way: the job's retries take it.
+      await expect(endPromo({ work: work(), polar: { getSubscription: vi.fn().mockRejectedValue(new PolarRequestError(500, null)) } }).run).rejects.toThrow("status 500");
+
+      const getSubscription = vi.fn();
+      const told = endPromo({ work: work({ set: false }), polar: { getSubscription } });
+      await expect(told.run).resolves.toMatchObject({ status: "completed" });
+      expect(getSubscription).not.toHaveBeenCalled();
+      expect(recordPromoEnd).toHaveBeenCalledWith(told.domain, expect.objectContaining({ set: false, notice: { ending: "tier", endsAt: planEnds, tier: "starter", interval: "monthly" } }));
+      await expect(endPromo({ work: null, polar: {} }).run).resolves.toMatchObject({ status: "skipped" });
+    });
+
+    it("removes a promo plan's discount from a standard product, and nowhere else", async () => {
+      const removeSubscriptionDiscount = vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly" }));
+      const payload = { dropDiscount: "disc-half-off", subscriptionId: "sub-1" };
+      const standard = endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly" })), removeSubscriptionDiscount } });
+      await expect(standard.run).resolves.toEqual({ status: "completed", entityId: `${standard.businessId}:disc-half-off` });
+      expect(removeSubscriptionDiscount).toHaveBeenCalledWith("sub-1");
+      removeSubscriptionDiscount.mockClear();
+      await expect(endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription()), removeSubscriptionDiscount } }).run).resolves.toMatchObject({ status: "skipped" });
+      await expect(endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly", discountId: null })), removeSubscriptionDiscount } }).run).resolves.toMatchObject({ status: "skipped" });
+      expect(removeSubscriptionDiscount).not.toHaveBeenCalled();
+      expect(loadPromoEndWork).not.toHaveBeenCalled();
     });
   });
 

@@ -25,14 +25,14 @@ describe("PolarBillingProvider", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/checkouts/", expect.objectContaining({ method: "POST" }));
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(request.headers).get("idempotency-key")).toBe("billing-checkout:request-1");
-    expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_email: "owner@example.com", external_customer_id: "business:1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", customer_metadata: { externalCustomerId: "business:1" } });
+    expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_email: "owner@example.com", external_customer_id: "business:1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", customer_metadata: { externalCustomerId: "business:1" }, allow_discount_codes: false });
   });
   it("moves a subscription to another product with only the product and proration in the body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: false, ended_at: null, pending_update: null }) });
     vi.stubGlobal("fetch", fetchMock);
     const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
 
-    await expect(provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" })).resolves.toEqual({ id: "sub-1", status: "active", productId: "product-pro", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null });
+    await expect(provider.changeSubscriptionProduct({ subscriptionId: "sub-1", productId: "product-pro", prorationBehavior: "invoice" })).resolves.toEqual({ id: "sub-1", status: "active", productId: "product-pro", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null });
 
     expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/subscriptions/sub-1", expect.objectContaining({ method: "PATCH" }));
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({ product_id: "product-pro", proration_behavior: "invoice" });
@@ -66,6 +66,20 @@ describe("PolarBillingProvider", () => {
     const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
     expect(body(0)).toEqual({ product_id: "product-promo", proration_behavior: "invoice", discount_id: "discount-1", metadata });
     expect(body(1)).toEqual({ product_id: "product-pro", proration_behavior: "next_period", discount_id: null });
+  });
+
+  it("cancels at the period's end and removes a discount, each with its own body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-starter", cancel_at_period_end: true, ended_at: null, pending_update: null, discount_id: "discount-1", current_period_end: "2026-11-01T00:00:00Z" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.cancelSubscriptionAtPeriodEnd("sub-1")).resolves.toMatchObject({ cancelAtPeriodEnd: true, discountId: "discount-1", currentPeriodEnd: "2026-11-01T00:00:00Z" });
+    await provider.removeSubscriptionDiscount("sub-1");
+
+    expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/subscriptions/sub-1", expect.objectContaining({ method: "PATCH" }));
+    const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
+    expect(body(0)).toEqual({ cancel_at_period_end: true });
+    expect(body(1)).toEqual({ discount_id: null });
   });
 
   it("reads a pending change's product, and a subscription Polar doesn't know as null", async () => {

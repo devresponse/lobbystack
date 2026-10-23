@@ -16,7 +16,7 @@ It is public like the rest of this folder, so it never holds a key, a token, a w
 
 Every plan other than the four standard ones is one more key under `plans`. Its key is its permanent code: 3 to 48 lowercase letters, digits, `_` and `-`. It names the `tier` it behaves like (`starter` or `pro`), its `names` in every language, and its `prices`; any allowance, limit or overage rate it leaves out comes from its tier. Then:
 
-- For a promo unlocked by a code, set `"access": "code"`, and `months` with `endsWith` for one that lasts a while.
+- For a promo unlocked by a code, set `"access": "code"`, and `months` with `endsWith` for one that lasts a while: `tier` moves the subscription to its tier at the standard price when the months run out, `cancel` ends it, and `keep` lets the plan go on.
 - For money off, add a `discount` (`percentage` in basis points or `fixed` in cents).
 - For a new plan anyone can take, set `"access": "public"`.
 - For a private deal sent to one client, set `"access": "hidden"`.
@@ -63,6 +63,8 @@ A promo plan can include more, or less, than its tier. Whatever it sets under `i
 }
 ```
 
+A plan with `months` ends at the subscription's first renewal once they have run out, since the period before it was paid at the plan's price; a yearly subscription keeps it to the end of its year. A week before that renewal the worker emails the business's owners, in their language, what happens and when, and tells Polar: with `tier` the subscription moves to its tier's standard product without the plan's discount from that renewal, and with `cancel` it ends then. A change or cancellation the business already chose in Polar's billing portal stands. Polar's webhook moves the business off the plan once the renewal happens, and Settings > Plan shows the date and what comes next until then. An operator can end a plan early, at the next renewal, with `pnpm lobbystack billing end-promo-plan` (`DELETE /v1/billing/promo-plan`); its owners hear about it and Polar is told straight away, and a `keep` plan ended that way moves to its tier. A business that switches its plan in Polar's billing portal leaves its promo plan, and the worker removes the plan's discount, which Polar would otherwise carry over. Checkouts never take discount codes typed into Polar's page, so a discount comes only with a promo plan.
+
 ### Setting Polar up from it
 
 `pnpm billing` does all of the above and Polar in one command: it applies the file to the tables, makes Polar's organization sell what the file says (settings, meters, Credits, products, discounts and the webhook, each tagged with `lobbystack_*` metadata), records which Polar product sells each price, and checks the three against each other.
@@ -80,4 +82,4 @@ It reaches the instance with an operator's platform key, from a `lobbystack logi
 - Fewer included minutes or texts need `--allow-less`, archiving a product or discount the file no longer has needs `--allow-archive`, and anything Polar can't change in place, such as a product's billing cycle, needs `--allow-replace`. Current subscribers keep their old price; edits made in Polar's dashboard are put back to the file.
 - `--railway-file` saves the Polar variables to a new file, readable only by you, for `railway-vars.mjs`; it holds the webhook secret only when this run made the webhook, so delete it once Railway has the values.
 
-A run that stops part-way is finished by running it again: everything is found by its tags. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs the six read scopes for that. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`.
+A run that stops part-way is finished by running it again: everything is found by its tags. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs the six read scopes for that. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`, which ending a promo plan uses too.

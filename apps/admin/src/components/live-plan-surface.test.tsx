@@ -45,13 +45,21 @@ describe("original billing overview behavior", () => {
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedStorage", { amount: "2", unit: "GB" });
   });
   it("shows a promo plan by its name and price with its own allowances", () => {
-    const promoPlan: BillingPromoPlanView = { plan: "salons-plus", tier: "starter", names: { en: "Salons Plus" }, discount: null, currency: "usd", ends: null, prices: [{ interval: "monthly", cents: 2_500, perMonth: 2_500 }] };
+    const promoPlan: BillingPromoPlanView = { plan: "salons-plus", tier: "starter", names: { en: "Salons Plus" }, discount: null, currency: "usd", ends: null, endsWith: null, prices: [{ interval: "monthly", cents: 2_500, perMonth: 2_500 }] };
     setup({ plan: "starter", promoPlan, limits: { ...builtInBillingPlanLimits.starter, voiceSecondsIncluded: 18_000, knowledgeStorageBytes: 10 * 1024 ** 2 } });
     expect(screen.getByText("Salons Plus")).toBeTruthy();
     expect(screen.getByText("$25")).toBeTruthy();
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedVoice", { count: 300 });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedStorage", { amount: "10", unit: "MB" });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedSms", { count: 50 });
+  });
+  it("says when a promo plan ends and what the subscription becomes", () => {
+    const promoPlan: BillingPromoPlanView = { plan: "salons-plus", tier: "starter", names: { en: "Salons Plus" }, discount: null, currency: "usd", ends: "2026-12-01T12:00:00.000Z", endsWith: "tier", prices: [{ interval: "monthly", cents: 2_500, perMonth: 2_500 }] };
+    setup({ plan: "starter", promoPlan });
+    expect(translate).toHaveBeenCalledWith("billing.promo.endsTier", { date: expect.stringContaining("2026"), tier: "billing.planLabels.starter" });
+    cleanup();
+    setup({ plan: "starter", promoPlan: { ...promoPlan, endsWith: "cancel" } });
+    expect(translate).toHaveBeenCalledWith("billing.promo.endsCancel", expect.objectContaining({ date: expect.stringContaining("2026") }));
   });
   it("offers a retry after billing fails and recovers the plan", async () => {
     setup({ billingFails: true });

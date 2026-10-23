@@ -343,6 +343,7 @@
       "title": "Changer de forfait",
       "description": "Choisissez le forfait qui convient le mieux à votre équipe.",
       "changesSubscription": "Vous avez déjà un abonnement : il sera modifié au lieu d'ouvrir un paiement. Toute différence est débitée sur votre moyen de paiement enregistré.",
+      "leavesPromo": "Changer de forfait met fin à {{plan}} et à sa réduction.",
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez {{percent}} %",
@@ -519,7 +520,8 @@
       "unlocks": "Ce code débloque {{plan}}.",
       "features": "Les fonctionnalités de {{tier}}, avec :",
       "moreThanTier": "Plus que {{tier}}",
-      "ends": "Jusqu'au {{date}}",
+      "endsTier": "Jusqu'au {{date}}, puis {{tier}}",
+      "endsCancel": "Jusqu'au {{date}}, puis l'abonnement prend fin",
       "unavailable": "Pas en vente pour le moment",
       "interval": {
         "monthly": "Mensuel",

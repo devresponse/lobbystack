@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { billingCodePrefix, billingPlanName, discountedCents, isBillingCode, normalizeBillingCode } from "./billingCodes";
+import { billingCodePrefix, billingPlanName, discountedCents, isBillingCode, normalizeBillingCode, promoPlanEndRenewal, promoPlanEnding } from "./billingCodes";
 
 describe("promo codes", () => {
   it("compares codes regardless of case and spaces", () => {
@@ -42,5 +42,23 @@ describe("promo codes", () => {
     expect(billingPlanName(names, "es")).toBe("Pro launch");
     expect(billingPlanName({ sr: "Pro start" }, "es")).toBe("Pro start");
     expect(billingPlanName({}, "en")).toBeNull();
+  });
+
+  it("ends a plan as the operator chose, else as it says, and never one that keeps going", () => {
+    expect(promoPlanEnding(null, "tier")).toBe("tier");
+    expect(promoPlanEnding(null, "cancel")).toBe("cancel");
+    expect(promoPlanEnding("tier", "cancel")).toBe("tier");
+    expect(promoPlanEnding(null, "keep")).toBeNull();
+    expect(promoPlanEnding("tier", "keep")).toBe("tier");
+    expect(promoPlanEnding(undefined, null)).toBeNull();
+  });
+
+  it("ends a plan at the renewal that reaches its end, within a day", () => {
+    const ends = new Date("2026-12-01T00:00:00.000Z");
+    expect(promoPlanEndRenewal(ends, null)).toEqual(ends);
+    expect(promoPlanEndRenewal(ends, new Date("2026-11-30T06:00:00.000Z"))).toEqual(new Date("2026-11-30T06:00:00.000Z"));
+    expect(promoPlanEndRenewal(ends, new Date("2027-06-01T00:00:00.000Z"))).toEqual(new Date("2027-06-01T00:00:00.000Z"));
+    // A period that ends sooner is followed by another at the plan's price.
+    expect(promoPlanEndRenewal(ends, new Date("2026-11-01T00:00:00.000Z"))).toBeNull();
   });
 });

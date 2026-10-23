@@ -57,6 +57,7 @@ export function UpgradePlanDialog({
   billingInterval,
   changesPlan = false,
   currentPlan,
+  leavesPromoPlan = null,
   loading,
   loadingPlan,
   locale,
@@ -74,6 +75,8 @@ export function UpgradePlanDialog({
   /** The business already pays, so a plan button changes its subscription instead of opening a checkout. */
   changesPlan?: boolean;
   currentPlan: BillingPlanSlug;
+  /** The name of the promo plan the business is on, which changing plan ends. */
+  leavesPromoPlan?: string | null;
   loading: "checkout" | "portal" | null;
   loadingPlan: HostedUpgradePlan | null;
   locale: string;
@@ -115,6 +118,11 @@ export function UpgradePlanDialog({
           {changesPlan ? (
             <p className="text-sm text-muted-foreground">
               {t("billing.upgradeDialog.changesSubscription")}
+            </p>
+          ) : null}
+          {changesPlan && leavesPromoPlan ? (
+            <p className="text-sm text-amber-700 dark:text-amber-400">
+              {t("billing.upgradeDialog.leavesPromo", { plan: leavesPromoPlan })}
             </p>
           ) : null}
         </DialogHeader>

@@ -209,6 +209,7 @@ export const queueForJobType = {
   "billing.reconcile": "default",
   "billing.refreshUnitEconomics": "maintenance",
   "billing.createCheckout": "critical",
+  "billing.endPromoPlan": "default",
   "calendar.syncAppointment": "default",
   "calendar.reconcileBusiness": "default",
   "knowledge.extractDocument": "bulk",

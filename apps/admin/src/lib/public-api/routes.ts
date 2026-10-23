@@ -34,6 +34,7 @@ import {
   deleteServiceForApi,
   deleteWebhookEndpoint,
   endManagedPlanForApi,
+  endPromoPlanForApi,
   expandKnowledgeSourceForApi,
   generateContactPasscodesForApi,
   getAppointmentForApi,
@@ -349,6 +350,10 @@ export const v1 = {
   endManagedPlan: (request: Request) => handleApiRequest(request, "endManagedPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential);
     return { body: data(await endManagedPlanForApi(context, caller)) };
+  }),
+  endPromoPlan: (request: Request) => handleApiRequest(request, "endPromoPlan", async ({ context, caller, credential }) => {
+    requireOperatorKey(credential, "end a promo plan");
+    return { body: data(await endPromoPlanForApi(context, caller)) };
   }),
   getBillingCatalog: (request: Request) => handleApiRequest(request, "getBillingCatalog", async ({ context, credential }) => {
     requireOperatorKey(credential, "manage the billing catalog");

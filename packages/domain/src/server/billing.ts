@@ -193,7 +193,7 @@ export async function createBillingCheckoutRequestInTransaction(
  */
 export const MANAGED_BILLING_SOURCE = "managed";
 
-function isLiveSubscriptionState(state: string | null | undefined): boolean {
+export function isLiveSubscriptionState(state: string | null | undefined): boolean {
   return (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }
 
@@ -203,7 +203,7 @@ export function isManagedBillingAccount(account: { source?: string | null; subsc
 }
 
 /** Billing account changes take this lock, the same one Polar reconciliation takes, so the two can't interleave. */
-async function lockBillingAccount(tx: DatabaseTransaction, businessId: string): Promise<void> {
+export async function lockBillingAccount(tx: DatabaseTransaction, businessId: string): Promise<void> {
   await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`billing-reconcile:${businessId}`}, 0))`);
 }
 
@@ -571,15 +571,25 @@ function addMonths(date: Date, months: number): Date {
  * promo plan, names that plan once its subscription is live; the code is the
  * one the business's newest checkout for that plan carried. Moving onto the
  * plan counts the code's use, records it in the audit log, fixes the plan's
- * terms and starts a time-limited plan's months. A live standard product
- * clears all three.
+ * terms and starts a time-limited plan's months; a plan whose ending is keep
+ * never ends. A live standard product clears the promo columns, and moving
+ * onto one from a promo plan records how the plan ended.
  */
 async function promoPlanFields(
   tx: DatabaseTransaction,
-  input: { businessId: string; plan: string; planCode: string | undefined; existing: { planCode: string | null; subscriptionState: string | null } | undefined; live: boolean; periodStart: Date | undefined },
-): Promise<{ planCode?: string | null; codeId?: string | null; planEnds?: Date | null }> {
+  input: { businessId: string; plan: string; planCode: string | undefined; existing: { planCode: string | null; subscriptionState: string | null; endSetAt: Date | null } | undefined; live: boolean; periodStart: Date | undefined },
+): Promise<{ planCode?: string | null; codeId?: string | null; planEnds?: Date | null; endWith?: string | null; endNoticeAt?: Date | null; endSetAt?: Date | null }> {
+  const noEnding = { endWith: null, endNoticeAt: null, endSetAt: null };
   // Only a live subscription moves the account, so a late event about an older one changes nothing here.
-  if (!input.planCode || input.planCode === input.plan) return input.live ? { planCode: null, codeId: null, planEnds: null } : {};
+  if (!input.planCode || input.planCode === input.plan) {
+    if (!input.live) return {};
+    const left = input.existing?.planCode;
+    if (left && isLiveSubscriptionState(input.existing?.subscriptionState)) {
+      // The renewal that ends the plan, or the business switching before it, such as in Polar's billing portal.
+      await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_ended", entityType: "billing_account", entityId: input.businessId, payload: { plan: left, to: input.plan, reason: input.existing?.endSetAt ? "ended" : "switched" } });
+    }
+    return { planCode: null, codeId: null, planEnds: null, ...noEnding };
+  }
   const planCode = input.planCode;
   // Retries and the several events of one checkout find the account on the plan already.
   const entering = input.live && (input.existing?.planCode !== planCode || !isLiveSubscriptionState(input.existing?.subscriptionState));
@@ -593,9 +603,19 @@ async function promoPlanFields(
     await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_code_redeemed", entityType: "billing_code", entityId: codeId, payload: { plan: planCode } });
   }
   // Its first subscriber fixes a plan's terms, which the next apply then refuses to change.
-  const [row] = (await tx.execute<{ months: number | null }>(sql`update public.billing_plans set frozen_at = coalesce(frozen_at, now()), updated_at = now() where code = ${planCode} returning months`)).rows;
-  const months = row?.months === null || row?.months === undefined ? null : Number(row.months);
-  return { planCode, codeId, planEnds: months === null ? null : addMonths(input.periodStart ?? new Date(), months) };
+  const [row] = (await tx.execute<{ months: number | null; ends: string | null }>(sql`update public.billing_plans set frozen_at = coalesce(frozen_at, now()), updated_at = now() where code = ${planCode} returning months, ends`)).rows;
+  const months = row?.months === null || row?.months === undefined || row.ends === "keep" ? null : Number(row.months);
+  return { planCode, codeId, planEnds: months === null ? null : addMonths(input.periodStart ?? new Date(), months), ...noEnding };
+}
+
+/**
+ * Whether a discount is a promo plan's own. Polar's billing portal keeps a
+ * subscription's discount when the customer switches it to another product,
+ * so a standard product can carry one, and the worker then removes it.
+ */
+async function isPromoPlanDiscount(tx: DatabaseTransaction, discountId: string): Promise<boolean> {
+  const rows = (await tx.execute(sql`select 1 from public.billing_plans where polar_disc = ${discountId} and code <> tier limit 1`)).rows;
+  return rows.length > 0;
 }
 
 export async function reconcileBillingProviderEvent(
@@ -629,6 +649,7 @@ export async function reconcileBillingProviderEvent(
       billingInterval: billingAccounts.billingInterval,
       source: billingAccounts.source,
       planCode: billingAccounts.planCode,
+      endSetAt: billingAccounts.endSetAt,
     }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
     const billingKey = stringField(transactionPayload, "billingKey", "externalCustomerId", "customerId") ?? stringField(payload, "billingKey", "externalCustomerId", "customerId") ?? stringField(customer, "id", "externalId") ?? existing?.billingKey;
     if (billingKey) {
@@ -667,10 +688,16 @@ export async function reconcileBillingProviderEvent(
         ...(currentPeriodStart ? { currentPeriodStart } : {}),
         ...(currentPeriodEnd ? { currentPeriodEnd } : {}),
       };
+      const live = isLiveSubscriptionState(subscriptionState ?? existing?.subscriptionState);
       const subscriptionFields = {
         ...polarFields,
-        ...(plan && !stale && !keepsManagedPlan ? await promoPlanFields(tx, { businessId: input.businessId, plan, planCode, existing, live: isLiveSubscriptionState(subscriptionState ?? existing?.subscriptionState), periodStart: currentPeriodStart }) : {}),
+        ...(plan && !stale && !keepsManagedPlan ? await promoPlanFields(tx, { businessId: input.businessId, plan, planCode, existing, live, periodStart: currentPeriodStart }) : {}),
       };
+      // A standard product that kept a promo plan's discount, as a switch in Polar's billing portal leaves it, loses it.
+      const discountId = stringField(payload, "discountId");
+      if (plan && (!planCode || planCode === plan) && !stale && !keepsManagedPlan && live && subscriptionId && discountId && await isPromoPlanDiscount(tx, discountId)) {
+        await enqueueOutbox(tx, { topic: "billing.endPromoPlan", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `promo-discount-drop:${subscriptionId}:${discountId}`, payload: { dropDiscount: discountId, subscriptionId } });
+      }
       // A takeover starts a Polar subscription even though the managed plan already counted as paid.
       startedSubscription = stale || keepsManagedPlan ? null : detectSubscriptionStart(takesOver ? { plan: existing?.plan ?? null, subscriptionState: null } : existing, {
         plan: plan ?? existing?.plan ?? null,

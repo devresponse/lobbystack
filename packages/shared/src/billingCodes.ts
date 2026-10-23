@@ -74,10 +74,34 @@ export type BillingPromoPlanView = {
   discount: ResolvedBillingDiscount | null;
   /** Its prices' currency; null when it has none. */
   currency: string | null;
-  /** ISO 8601, or null for a plan with no end. */
+  /** When it ends, ISO 8601: the renewal that ends it once that is the current period's end, else the date its months run out. Null for a plan with no end. */
   ends: string | null;
+  /** What happens when it ends: the subscription moves to the tier, or it ends. Null for a plan with no end. */
+  endsWith: PromoPlanEnding | null;
   prices: Array<{ interval: BillingInterval; cents: number; perMonth: number }>;
 };
+
+/** What ends a time-limited plan: a move to its tier's standard plan, or the end of the subscription. */
+export type PromoPlanEnding = "tier" | "cancel";
+
+/**
+ * The renewal that ends a time-limited plan: the current period's end once it
+ * reaches the plan's end, give or take a day for how Polar and the account
+ * count months. Null when a later renewal does, at the plan's price until
+ * then. Without a period, the plan's end itself.
+ */
+export function promoPlanEndRenewal(planEnds: Date, currentPeriodEnd: Date | null): Date | null {
+  if (!currentPeriodEnd) return planEnds;
+  return currentPeriodEnd.getTime() >= planEnds.getTime() - 24 * 60 * 60_000 ? currentPeriodEnd : null;
+}
+
+/** How a business's promo plan ends: as an operator chose, else as the plan says. A plan that keeps going (keep) has none. */
+export function promoPlanEnding(chosen: string | null | undefined, planEnds: string | null | undefined): PromoPlanEnding | null {
+  for (const value of [chosen, planEnds]) {
+    if (value === "tier" || value === "cancel") return value;
+  }
+  return null;
+}
 
 /** A plan's name in the language asked for, else in English, else in any language it has. */
 export function billingPlanName(names: Record<string, string>, language: string): string | null {

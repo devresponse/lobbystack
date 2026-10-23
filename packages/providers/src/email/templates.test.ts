@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { invitationSubject, renderEmail, type RenderEmailInput, type TemplateName } from "./templates";
+import { invitationSubject, promoEndingSubject, renderEmail, type RenderEmailInput, type TemplateName } from "./templates";
 
 const base = "https://app.example.test";
 const locales = ["en", "fr", "es", "sr"] as const;
@@ -161,6 +161,40 @@ describe("alerts", () => {
     const { text, html } = alert({ message: "Hi" }, "Test");
     expect(text).toBe("Test\n\nHi");
     expect(html).not.toContain("<a ");
+  });
+});
+
+describe("promo endings", () => {
+  const ending = (variables: Record<string, string>) => ({ locale: "en", businessName: "Maple Dental", planName: "Salons half off", tier: "Pro", ending: "tier", date: "2026-11-01T03:30:00.000Z", timeZone: "America/Toronto", interval: "monthly", priceCents: "4900", currency: "cad", url: `${base}/settings/plan`, ...variables });
+
+  it("say when the plan ends, in the business's time zone, and what the subscription becomes at what price", () => {
+    const { text } = render({ template: "promo_ending", variables: ending({}) });
+    expect(text).toBe([
+      "Maple Dental\nYour Salons half off plan ends on October 31, 2026",
+      "On October 31, 2026, Maple Dental moves from Salons half off to Pro. Your subscription continues on Pro at CA$49 a month, charged to your saved payment method.",
+      "You don't need to do anything. To choose another plan or cancel, go to Settings > Plan before then.",
+      `Open Settings > Plan:\n${base}/settings/plan`,
+      "You're receiving this email because you own Maple Dental on AlloPlace.",
+    ].join("\n\n"));
+    expect(promoEndingSubject(ending({}))).toBe("Your Salons half off plan ends on October 31, 2026");
+  });
+
+  it("say the subscription ends with a plan that cancels, and a yearly price per year", () => {
+    expect(render({ template: "promo_ending", variables: ending({ ending: "cancel" }) }).text).toContain("On October 31, 2026, Salons half off ends for Maple Dental, and so does your subscription. Maple Dental then moves to the free plan.");
+    expect(render({ template: "promo_ending", variables: ending({ interval: "annual", priceCents: "47040" }) }).text).toContain("at CA$470.40 a year");
+    expect(render({ template: "promo_ending", variables: ending({ priceCents: "" }) }).text).toContain("continues on Pro at its standard price,");
+  });
+
+  it.each(locales)("read as the owner's language, with why it was sent, in %s", (locale) => {
+    const { text, html } = render({ template: "promo_ending", variables: ending({ locale }) });
+    expect(text.split("\n\n").at(-1)?.startsWith(reasonOpeners[locale])).toBe(true);
+    expect(text.split("\n")).toContain(`${base}/settings/plan`);
+    expect(html).toContain(`<html lang="${htmlLang[locale]}">`);
+    if (locale === "sr") expect(text).toContain("31. 10. 2026.");
+  });
+
+  it("fall back to UTC for a time zone the runtime doesn't know", () => {
+    expect(promoEndingSubject(ending({ timeZone: "Mars/Olympus" }))).toBe("Your Salons half off plan ends on November 1, 2026");
   });
 });
 

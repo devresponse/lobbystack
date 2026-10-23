@@ -51,6 +51,14 @@ describe("main upgrade dialog", () => {
     expect(screen.getByText("billing.actions.changingPlan")).toBeTruthy();
     expect(props.onStartCheckout).not.toHaveBeenCalled();
   });
+  it("warns that changing plan ends the promo plan and its discount", () => {
+    setup({ changesPlan: true, currentPlan: "starter", leavesPromoPlan: "Salons half off" });
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.leavesPromo", { plan: "Salons half off" });
+    cleanup();
+    translate.mockClear();
+    setup({ changesPlan: true, currentPlan: "starter" });
+    expect(translate).not.toHaveBeenCalledWith("billing.upgradeDialog.leavesPromo", expect.anything());
+  });
   it("prices the cards and fills their allowances from the deployment's plans, in its currency", async () => {
     const plans: BillingPlanList = builtInBillingPlanList();
     plans.currency = "cad";

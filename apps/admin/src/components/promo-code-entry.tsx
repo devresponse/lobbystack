@@ -5,9 +5,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { billingPlanName, type BillingCodeView, type BillingInterval, type PlanChangeRefusal, type ResolvedBillingDiscount } from "@lobbystack/shared";
-import { LoaderCircle } from "lucide-react";
+import { Check, LoaderCircle } from "lucide-react";
 
-import { formatMoney } from "@/lib/billing-plans";
+import { formatMoney, includedLines } from "@/lib/billing-plans";
 import { requestJson } from "@/lib/request-json";
 import { capturePromoCodeFromUrl, clearStoredPromoCode, getStoredPromoCode } from "@/lib/promo-code";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
@@ -172,11 +172,20 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
 
 function PromoOffer({ view, locale, t, busy, changesPlan, pendingInterval, onChoose }: { view: BillingCodeView; locale: string; t: Translate; busy: boolean; changesPlan: boolean; pendingInterval: BillingInterval | null; onChoose: (interval: BillingInterval) => void }) {
   const name = billingPlanName(view.names, locale) ?? t(`billing.planLabels.${view.tier}`);
+  const tier = t(`billing.planLabels.${view.tier}`);
+  // The plan's own allowances, each one it has more of than its tier marked.
+  const included = includedLines(view.included, (key, options) => options ? t(key, options) : t(key), locale);
   return <section aria-label={name} className="flex flex-col gap-4 rounded-2xl border border-border/60 bg-background p-5">
     <div className="flex flex-col gap-1">
       <span className="text-base font-medium text-foreground">{t("billing.promo.unlocks", { plan: name })}</span>
       {view.discount ? <span className="text-sm text-emerald-700 dark:text-emerald-400">{promoDiscountText(view.discount, view.currency, locale, t)}</span> : null}
-      <span className="text-sm text-muted-foreground">{t("billing.promo.features", { tier: t(`billing.planLabels.${view.tier}`) })}</span>
+      <span className="text-sm text-muted-foreground">{t("billing.promo.features", { tier })}</span>
+      <ul className="mt-1 grid gap-x-6 gap-y-1.5 sm:grid-cols-2">
+        {included.map((line) => <li className="flex items-start gap-2 text-sm text-foreground" key={line.key}>
+          <Check aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-emerald-500" />
+          <span>{line.text}{view.moreThanTier.includes(line.key) ? <span className="ml-1.5 text-emerald-700 dark:text-emerald-400">{t("billing.promo.moreThanTier", { tier })}</span> : null}</span>
+        </li>)}
+      </ul>
     </div>
     {view.current ? <p className="text-sm text-muted-foreground">{t("billing.promo.errors.current")}</p> : <div className="flex flex-col gap-3 sm:flex-row">
       {view.prices.map((price) => {

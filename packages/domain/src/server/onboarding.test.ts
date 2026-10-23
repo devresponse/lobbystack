@@ -48,17 +48,23 @@ describe("onboarding stages", () => {
 });
 
 describe("original legacy plan-stage navigation", () => {
+  const builtIn = { tiers: builtInBillingPlanLimits, plans: {} };
   it.each(["phone_number", "phone_number_claiming"] as const)("returns free-plan %s stages to plan selection", stage => {
-    expect(resolveOnboardingStageForPlan(stage, "free_cloud", builtInBillingPlanLimits)).toBe("plan");
-    expect(resolveOnboardingStageForPlan(stage, "starter", builtInBillingPlanLimits)).toBe(stage);
-    expect(resolveOnboardingStageForPlan(stage, "self_host", builtInBillingPlanLimits)).toBe(stage);
+    expect(resolveOnboardingStageForPlan(stage, "free_cloud", builtIn)).toBe("plan");
+    expect(resolveOnboardingStageForPlan(stage, "starter", builtIn)).toBe(stage);
+    expect(resolveOnboardingStageForPlan(stage, "self_host", builtIn)).toBe(stage);
   });
   it("preserves completed onboarding on the free plan", () => {
-    expect(resolveOnboardingStageForPlan("complete", "free_cloud", builtInBillingPlanLimits)).toBe("complete");
+    expect(resolveOnboardingStageForPlan("complete", "free_cloud", builtIn)).toBe("complete");
   });
   it("lets a free plan whose catalog includes a number stay on the number steps", () => {
-    const limits = { ...builtInBillingPlanLimits, free_cloud: { ...builtInBillingPlanLimits.free_cloud, includedBusinessNumbers: 1 } };
-    expect(resolveOnboardingStageForPlan("phone_number", "free_cloud", limits)).toBe("phone_number");
+    const tiers = { ...builtInBillingPlanLimits, free_cloud: { ...builtInBillingPlanLimits.free_cloud, includedBusinessNumbers: 1 } };
+    expect(resolveOnboardingStageForPlan("phone_number", "free_cloud", { tiers, plans: {} })).toBe("phone_number");
+  });
+  it("sends a promo plan without a number back to its plan", () => {
+    const limits = { tiers: builtInBillingPlanLimits, plans: { "starter-chat": { tier: "starter", limits: { ...builtInBillingPlanLimits.starter, includedBusinessNumbers: 0 } } } };
+    expect(resolveOnboardingStageForPlan("phone_number", "starter", limits, "starter-chat")).toBe("plan");
+    expect(resolveOnboardingStageForPlan("phone_number", "starter", limits)).toBe("phone_number");
   });
 });
 

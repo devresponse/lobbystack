@@ -20,6 +20,8 @@ const view: BillingCodeView = {
   currency: "cad",
   current: false,
   prices: [{ interval: "monthly", cents: 2900, discountedCents: 1450, checkoutAvailable: true }, { interval: "annual", cents: 29000, discountedCents: 14500, checkoutAvailable: false }],
+  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1 },
+  moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"],
 };
 let store: Record<string, string> = {};
 const clients: QueryClient[] = [];
@@ -56,6 +58,11 @@ describe("Have a promo code?", () => {
     await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
     await screen.findByText("CA$14.50");
     expect(screen.getByText("CA$29").className).toContain("line-through");
+    // The plan's own allowances, those above Starter's marked.
+    const voice = screen.getByText('billing.currentPlan.includedVoice {"count":300}').closest("li")!;
+    expect(voice.textContent).toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedStorage {"amount":"10","unit":"MB"}').closest("li")!.textContent).toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedSms {"count":50}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
     expect(body(fetchMock.mock.calls[0]![1])).toEqual({ code: "salons-2026" });
     expect(screen.getByRole("button", { name: "billing.promo.unavailable" }).hasAttribute("disabled")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "billing.promo.subscribe.monthly" }));

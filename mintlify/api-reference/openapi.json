@@ -15097,6 +15097,26 @@
             ],
             "description": "The plan in force now. A Starter or Pro subscription that lapsed reads as free_cloud."
           },
+          "promo_plan": {
+            "description": "The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "plan_ends": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time",
+                "description": "ISO 8601 timestamp in UTC."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a promo plan that lasts a set number of months ends. Null otherwise."
+          },
           "managed": {
             "type": "boolean",
             "description": "true when the deployment's operator runs the plan outside Polar and bills the business directly."
@@ -15162,6 +15182,8 @@
         },
         "required": [
           "plan",
+          "promo_plan",
+          "plan_ends",
           "managed",
           "subscription_state",
           "billing_interval",

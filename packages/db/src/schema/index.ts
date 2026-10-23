@@ -1072,13 +1072,15 @@ export const billingUsageEvents = pgTable(
     quantity: doublePrecision("quantity").notNull(),
     billableQuantity: doublePrecision("billable_quantity"),
     planAtRecordTime: varchar("plan_at_record_time", { length: 32 }),
+    // The plan the usage counted under when it isn't its tier's standard plan.
+    planCodeAtRecordTime: varchar("plan_code_at_record_time", { length: 48 }).references(() => billingPlans.code),
     billingIntervalAtRecordTime: varchar("billing_interval_at_record_time", { length: 16 }),
     isFinal: boolean("is_final").default(true).notNull(),
     ...legacyId,
     syncStatus: varchar("sync_status", { length: 32 }).default("pending").notNull(),
     ...timestamps,
   },
-  (table) => [uniqueIndex("billing_usage_source_unique").on(table.businessId, table.sourceKey), index("billing_usage_status_idx").on(table.syncStatus, table.createdAt)],
+  (table) => [uniqueIndex("billing_usage_source_unique").on(table.businessId, table.sourceKey), index("billing_usage_status_idx").on(table.syncStatus, table.createdAt), index("billing_usage_events_plan_code_idx").on(table.businessId, table.planCodeAtRecordTime).where(sql`${table.planCodeAtRecordTime} is not null`)],
 );
 
 export const billingUsageMonths = pgTable(

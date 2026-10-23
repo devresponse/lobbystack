@@ -517,7 +517,8 @@
       "applying": "Provera...",
       "cancel": "Otkaži",
       "unlocks": "Ovaj kod otključava {{plan}}.",
-      "features": "Sve iz paketa {{tier}}.",
+      "features": "Funkcije paketa {{tier}}, uz:",
+      "moreThanTier": "Više nego {{tier}}",
       "ends": "Do {{date}}",
       "unavailable": "Trenutno nije u prodaji",
       "interval": {

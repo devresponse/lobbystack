@@ -517,7 +517,8 @@
       "applying": "Vérification...",
       "cancel": "Annuler",
       "unlocks": "Ce code débloque {{plan}}.",
-      "features": "Tout ce qu'inclut {{tier}}.",
+      "features": "Les fonctionnalités de {{tier}}, avec :",
+      "moreThanTier": "Plus que {{tier}}",
       "ends": "Jusqu'au {{date}}",
       "unavailable": "Pas en vente pour le moment",
       "interval": {

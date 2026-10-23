@@ -305,6 +305,18 @@ export type BillingPlanOffer = {
   prices: BillingPlanPrice[];
 };
 
+/** What a plan's limits include each month, as the plan screens list it. Null means no limit. */
+export function billingPlanIncluded(limits: BillingPlanLimits): BillingPlanOffer["included"] {
+  return {
+    voiceSeconds: limits.voiceSecondsIncluded,
+    alertSmsSegments: limits.alertSmsSegmentsIncluded,
+    outboundCallAttempts: limits.outboundCallAttemptsIncluded,
+    chatAiUnits: limits.chatAiTokensIncluded,
+    knowledgeStorageBytes: limits.knowledgeStorageBytes,
+    businessNumbers: limits.includedBusinessNumbers,
+  };
+}
+
 /**
  * The standard plans a deployment shows: from its billing catalog once a
  * billing.json is applied, else the ones this build ships with, in US dollars.

@@ -4,8 +4,10 @@ import { sql, type SQL } from "drizzle-orm";
 
 import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
+  allowancesAboveTier,
   BILLING_CODE_ALPHABET,
   billingCodePrefix,
+  billingPlanIncluded,
   discountedCents,
   isBillingCode,
   isUuid,
@@ -16,11 +18,13 @@ import {
   type BillingCodeView,
   type BillingPromoPlanView,
   type BillingInterval,
+  type BillingPlanOffer,
   type HostedCheckoutPlanSlug,
   type ResolvedBillingDiscount,
 } from "@lobbystack/shared";
 
 import type { BillingCatalogCaller } from "./billingCatalog";
+import { readBillingPlanLimits } from "./billingPlans";
 import type { DomainContext } from "./context";
 import { PublicApiError, conflict, invalidRequest, notFound } from "./publicApi/errors";
 import { idempotencyRequestHash } from "./publicApi/idempotency";
@@ -52,6 +56,8 @@ export type BillingCodeOffer = {
   polarDiscountId: string | null;
   currency: string;
   prices: Array<{ interval: BillingInterval; cents: number; perMonth: number; polarId: string | null }>;
+  /** What the plan includes each month. */
+  included: BillingPlanOffer["included"];
 };
 
 /**
@@ -77,6 +83,15 @@ export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string
     polarDiscountId: textOrNull(first.polar_disc),
     currency: String(first.currency),
     prices: rows.map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month), polarId: textOrNull(row.polar_id) })),
+    included: {
+      voiceSeconds: numberOrNull(first.voice_sec),
+      alertSmsSegments: numberOrNull(first.sms_seg),
+      outboundCallAttempts: numberOrNull(first.calls_out),
+      chatAiUnits: numberOrNull(first.chat_units),
+      // bigint arrives as text.
+      knowledgeStorageBytes: numberOrNull(first.kb_bytes),
+      businessNumbers: numberOrNull(first.numbers),
+    },
   };
 }
 
@@ -109,6 +124,7 @@ async function paysForPlan(tx: DatabaseTransaction, businessId: string, plan: st
 export async function billingCodeView(tx: DatabaseTransaction, input: { businessId: string; code: string; checkout: boolean }): Promise<BillingCodeView | null> {
   const offer = await findBillingCodeOffer(tx, input.code);
   if (!offer) return null;
+  const tier = billingPlanIncluded((await readBillingPlanLimits(tx))[offer.tier]);
   return {
     code: offer.code,
     plan: offer.plan,
@@ -118,6 +134,8 @@ export async function billingCodeView(tx: DatabaseTransaction, input: { business
     currency: offer.currency,
     current: await paysForPlan(tx, input.businessId, offer.plan),
     prices: offer.prices.map((price) => ({ interval: price.interval, cents: price.cents, discountedCents: discountedCents(price.cents, offer.discount), checkoutAvailable: input.checkout && price.polarId !== null })),
+    included: offer.included,
+    moreThanTier: allowancesAboveTier(offer.included, tier),
   };
 }
 

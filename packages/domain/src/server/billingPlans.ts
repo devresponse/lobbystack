@@ -13,6 +13,7 @@ import {
   type BillingPlanLimitTable,
   type BillingPlanList,
   type BillingPlanOffer,
+  type BillingPlanSlug,
   type CloudBillingPlanSlug,
   type HostedCheckoutPlanSlug,
 } from "@lobbystack/shared";
@@ -70,7 +71,11 @@ const numberOrNull = (value: unknown): number | null => (value === null || value
 /** The standard plans as the role running the transaction may read them. */
 async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStandardPlan[]> {
   const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
-  return rows.map((row) => ({
+  return rows.map(planRow);
+}
+
+function planRow(row: Row): CatalogStandardPlan {
+  return {
     code: row.code as CloudBillingPlanSlug,
     status: row.status as CatalogStandardPlan["status"],
     sold: Boolean(row.sold),
@@ -87,7 +92,7 @@ async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStanda
     sms_rate: numberOrNull(row.sms_rate),
     call_rate: numberOrNull(row.call_rate),
     sort: Number(row.sort),
-  }));
+  };
 }
 
 /**
@@ -202,8 +207,8 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
   return { currency, source: "catalog", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
 }
 
-/** A standard plan row's terms, as limits enforce them. */
-function planLimits(row: CatalogStandardPlan): BillingPlanLimits {
+/** A plan row's terms, as limits enforce them. */
+function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
   return {
     knowledgeStorageBytes: row.kb_bytes,
     voiceSecondsIncluded: row.voice_sec,
@@ -235,6 +240,43 @@ export function billingPlanLimits(plans: CatalogStandardPlan[]): BillingPlanLimi
 /** The limits each plan enforces, read in the caller's transaction. */
 export async function readBillingPlanLimits(tx: DatabaseTransaction): Promise<BillingPlanLimitTable> {
   return billingPlanLimits(await readStandardPlans(tx));
+}
+
+/**
+ * Every plan's limits: each tier's, and those of every other plan the caller
+ * can read, such as a promo plan, by code. A promo plan's row holds its own
+ * terms, its tier's filling whatever billing.json left out.
+ */
+export type BillingPlanLimitBook = {
+  tiers: BillingPlanLimitTable;
+  plans: Readonly<Record<string, { tier: string; limits: BillingPlanLimits }>>;
+};
+
+/**
+ * The limits of the plan a business uses: its plan's own, when that plan is
+ * of the tier it has, else the tier's. A plan nobody can read here, or one of
+ * another tier, keeps the tier's limits rather than block anything.
+ */
+export function limitsFor(book: BillingPlanLimitBook, tier: BillingPlanSlug, planCode: string | null | undefined): BillingPlanLimits {
+  const own = planCode && Object.hasOwn(book.plans, planCode) ? book.plans[planCode] : undefined;
+  return own?.tier === tier ? own.limits : book.tiers[tier];
+}
+
+/** The limit book from the standard rows and the others, by the same rule as the tier table. */
+export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Array<Omit<CatalogStandardPlan, "code"> & { code: string; tier: string }>): BillingPlanLimitBook {
+  const tiers = billingPlanLimits(standard);
+  if (tiers === builtInBillingPlanLimits) return { tiers, plans: {} };
+  return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row) }])) };
+}
+
+/**
+ * Every plan's limits as the role running the transaction may read them: the
+ * worker reads every plan; the app reads the public ones, the one its
+ * business is on and any its usage counted under.
+ */
+export async function readBillingPlanLimitBook(tx: DatabaseTransaction): Promise<BillingPlanLimitBook> {
+  const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
+  return billingPlanLimitBook(await readStandardPlans(tx), others.map((row) => ({ ...planRow(row), code: String(row.code), tier: String(row.tier) })));
 }
 
 /** Whether this deployment has Polar's token and organization, which every checkout needs. */

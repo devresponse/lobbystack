@@ -47,7 +47,21 @@ pnpm lobbystack billing codes --plan pro_launch
 pnpm lobbystack billing code-revoke <code id>
 ```
 
-A code is made up as the brand's first letters and two groups of four, such as `ALLO-7K2Q-PX9M`, unless `--code` names one. A code anyone may enter needs a use limit and an end date. Each code comes with a link, `/signup?promo=CODE`: whoever opens it signs up, or signs in, and finds the code filled in on the plan screen, and **Have a promo code?** on onboarding and Settings > Plan takes one typed in. The checkout sells the plan's own Polar product with its discount, and a business that already pays has its subscription moved to it. A business can try 10 codes an hour, and a code that doesn't work, for any reason, only says it isn't valid. Revoking a code stops new checkouts; businesses already on its plan keep it. For now a business on a promo plan has its tier's allowances, not ones the plan sets itself.
+A code is made up as the brand's first letters and two groups of four, such as `ALLO-7K2Q-PX9M`, unless `--code` names one. A code anyone may enter needs a use limit and an end date. Each code comes with a link, `/signup?promo=CODE`: whoever opens it signs up, or signs in, and finds the code filled in on the plan screen, and **Have a promo code?** on onboarding and Settings > Plan takes one typed in. The checkout sells the plan's own Polar product with its discount, and a business that already pays has its subscription moved to it. A business can try 10 codes an hour, and a code that doesn't work, for any reason, only says it isn't valid. Revoking a code stops new checkouts; businesses already on its plan keep it.
+
+A promo plan can include more, or less, than its tier. Whatever it sets under `included`, `limits` and `overageCents` is what a business on it gets: Polar's Credits and rates on its own product, and the usage limits, spending cap, knowledge storage and number check the deployment enforces, as the plan and Usage pages show. Anything it leaves out comes from its tier, and its features and data retention are always its tier's. Usage counts under the plan it was used on, so a business that moves onto or off a promo plan in the middle of a month keeps each part of the month on the terms it was used under. For example, a Starter plan with twice the minutes and storage, for one code:
+
+```json
+"salons-plus": {
+  "tier": "starter",
+  "access": "code",
+  "sold": true,
+  "names": { "en": "Salons Plus", "fr": "Salons Plus", "es": "Salons Plus", "sr": "Salons Plus" },
+  "prices": { "monthlyCents": 3000 },
+  "included": { "voiceMinutes": 300 },
+  "limits": { "knowledgeStorageMb": 10 }
+}
+```
 
 ### Setting Polar up from it
 

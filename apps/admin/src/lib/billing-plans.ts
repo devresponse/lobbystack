@@ -6,6 +6,12 @@ import { intlLocale } from "./locale";
 // the deployment's billing catalog, or the built-in plans before an apply.
 // Translations keep the words and take these values.
 
+/**
+ * How long a plan change waits for Polar's webhook before it stops checking.
+ * A webhook that lands later shows the next time the plan page loads billing.
+ */
+export const PLAN_CHANGE_SYNC_MS = 90_000;
+
 /** Formats cents as currency, dropping the decimals for whole amounts. */
 export function formatMoney(cents: number, currency = "usd", locale = "en"): string {
   return new Intl.NumberFormat(intlLocale(locale), { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: cents % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(cents / 100);
@@ -35,7 +41,7 @@ export function storageSize(bytes: number, locale = "en"): { amount: string; uni
 }
 
 /** The allowances "What's included" lists, in its order. */
-export const includedLineKeys = ["voiceSeconds", "outboundCallAttempts", "alertSmsSegments", "knowledgeStorageBytes"] as const;
+const includedLineKeys = ["voiceSeconds", "outboundCallAttempts", "alertSmsSegments", "knowledgeStorageBytes"] as const;
 
 /**
  * What a plan includes each month as "What's included" lists it: voice
@@ -70,4 +76,15 @@ export function planValues(plan: BillingPlanOffer | undefined, currency: string,
     alertSmsRate: rate(plan?.overageRates.alertSmsSegmentCents),
     outboundCallRate: rate(plan?.overageRates.outboundCallAttemptCents),
   };
+}
+
+/**
+ * What a plan string takes: voice minutes and their rate, or the count it
+ * names. The upgrade dialog calls Starter's text line "phoneNumber".
+ */
+export function planStringValues(key: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
+  if (key === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
+  if (key === "dedicatedNumber") return { count: values.businessNumbers };
+  if (key === "phoneNumber" || key === "alertSms") return { count: values.alertSmsSegments };
+  return {};
 }

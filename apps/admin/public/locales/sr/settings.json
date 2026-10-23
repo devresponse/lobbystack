@@ -466,7 +466,7 @@
     },
     "spendingCap": {
       "title": "Mesečni limit potrošnje",
-      "placeholder": "25.00",
+      "placeholder": "25,00",
       "amountLabel": "Limit prekoračenja ({{currency}})",
       "noCap": "Limit potrošnje nije podešen",
       "currentSpend": "Trenutni trošak prekoračenja",
@@ -503,7 +503,10 @@
         "paid": "Plaćeno",
         "pending": "Na čekanju",
         "refunded": "Vraćeno",
-        "partially_refunded": "Delimično vraćeno"
+        "partially_refunded": "Delimično vraćeno",
+        "succeeded": "Završeno",
+        "failed": "Neuspelo",
+        "canceled": "Otkazano"
       },
       "kindLabels": {
         "order": "Porudžbina",

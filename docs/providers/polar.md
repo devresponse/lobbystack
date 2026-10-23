@@ -63,15 +63,16 @@ Match `POLAR_API_BASE_URL` to the environment that issued the token and webhook 
 
 ## Route billing requests
 
-The Next.js app exposes three billing entry points.
+The Next.js app exposes four billing entry points.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/billing/checkout` | Queue a Starter or Pro checkout request. |
+| `POST /api/billing/checkout` | Queue a Starter or Pro checkout request, or one for the plan a promo code unlocks. |
+| `POST /api/billing/promo` | Look up the plan a promo code unlocks, with its discount and prices. |
 | `POST /api/billing/portal` | Create a customer portal session for an active paid subscription. |
 | `POST /api/webhooks/polar` | Verify and store Polar events for worker reconciliation. |
 
-Configure Polar to send subscription and order webhooks to `https://app.example.com/api/webhooks/polar`. Replace `app.example.com` with your admin application’s public host.
+`pnpm billing apply` makes Polar's webhook for subscription and order events at the instance's own `/api/webhooks/polar`, or at the address `--webhook-url` names, and finds it again by that address on later runs. When the run makes the webhook, `--railway-file` saves its secret as `POLAR_WEBHOOK_SECRET`; otherwise copy the secret from the webhook in Polar's settings.
 
 Set `POLAR_WEBHOOK_SECRET` in production. The route rejects missing secrets and invalid signatures with HTTP 401.
 
@@ -118,7 +119,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 
 - Confirm only business administrators can start checkout or open the portal.
 - Complete monthly and annual checkout for Starter and Pro.
-- Upgrade a paying Starter business to Pro from **Settings** > **Billing**, and confirm Polar invoices the difference and the page shows Pro.
+- Upgrade a paying Starter business to Pro from **Settings** > **Plan**, and confirm Polar invoices the difference and the page shows Pro.
 - Confirm invalid webhook signatures receive an unauthorized response.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.

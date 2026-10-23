@@ -15,7 +15,7 @@ import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
 import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
-import { findPlan, formatMoney, monthlyPriceCents, planValues } from "@/lib/billing-plans";
+import { findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
 
 type BillingInterval = "monthly" | "annual";
@@ -29,14 +29,6 @@ const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
   { slug: "pro", highlight: true, features: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"] },
   { slug: "enterprise", features: ["phoneNumbers", "selfHosted", "support"] },
 ];
-
-/** What a highlight's string takes: voice minutes and their rate, or the count it names. */
-function featureValues(feature: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
-  if (feature === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
-  if (feature === "dedicatedNumber") return { count: values.businessNumbers };
-  if (feature === "alertSms") return { count: values.alertSmsSegments };
-  return {};
-}
 
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";
 
@@ -122,7 +114,8 @@ export function OnboardingPlanSurface() {
   }, [business, returnRequestId, returnedCheckout.data?.synced, returnedCheckout.data?.target, router, telemetry]);
   useEffect(() => {
     if (checkout.data?.status === "error" || checkout.isError) {
-      setCheckoutError(checkout.data?.error ?? t("plan.continueFailed"));
+      // The worker's own error is for operators, in English; the screen says it in the person's language.
+      setCheckoutError(t("plan.continueFailed"));
       setCheckoutRequestId(null);
     }
   }, [checkout.data, checkout.isError, t]);
@@ -209,7 +202,7 @@ export function OnboardingPlanSurface() {
             {tier.highlight ? <div className="absolute -top-3 left-8 rounded-full bg-foreground px-3 py-0.5 text-xs font-medium text-background">{t("plan.popular")}</div> : null}
             <div className="mb-6"><h3 className="font-heading text-lg font-semibold tracking-tight">{t(`plan.tiers.${tier.slug}.name`)}</h3><div className="mt-3 flex items-baseline gap-1"><span className="font-heading text-4xl font-semibold tracking-tighter">{price}</span><span className="text-sm text-muted-foreground">{t(`plan.tiers.${tier.slug}.period`)}</span></div><p className="mt-3 text-sm leading-relaxed text-muted-foreground">{description}</p></div>
             <Button className="mb-6 w-full rounded-full" disabled={!business || Boolean(pendingPlan) || (paid && (!billing.data?.checkoutAvailable || (configuredIntervals && !configuredIntervals[tier.slug as "starter" | "pro"].includes(interval))))} onClick={() => act(tier.slug)} type="button" variant={tier.highlight ? "default" : "outline"}>{busy ? <LoaderCircle className="size-4 animate-spin" /> : <>{cta}<ArrowRight className="ml-1 size-4" /></>}</Button>
-            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{tier.features.map((feature) => <li className="flex items-start gap-2.5 text-sm" key={feature}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{t(`plan.tiers.${tier.slug}.highlights.${feature}`, featureValues(feature, values))}</span></li>)}</ul></div>
+            <div className="flex-1 border-t border-border/50 pt-5"><ul className="space-y-2.5">{tier.features.map((feature) => <li className="flex items-start gap-2.5 text-sm" key={feature}><Check className="mt-0.5 size-3.5 shrink-0 text-foreground/60" /><span className="whitespace-pre-line">{t(`plan.tiers.${tier.slug}.highlights.${feature}`, planStringValues(feature, values))}</span></li>)}</ul></div>
           </section>;
         })}
       </div>

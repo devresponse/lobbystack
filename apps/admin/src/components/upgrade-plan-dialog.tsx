@@ -11,7 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { findPlan, formatMoney, monthlyPriceCents, planValues } from "@/lib/billing-plans";
+import { findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
 import {
   annualSavingPercent,
@@ -38,14 +38,6 @@ const upgradePlanCards: UpgradePlanCard[] = [
   { slug: "pro", highlights: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"], highlighted: true },
   { slug: "enterprise", highlights: ["phoneNumbers", "selfHosted", "support"] },
 ];
-
-/** What a highlight's string takes: voice minutes and their rate, or the count it names. */
-function highlightValues(highlight: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
-  if (highlight === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
-  if (highlight === "dedicatedNumber") return { count: values.businessNumbers };
-  if (highlight === "phoneNumber" || highlight === "alertSms") return { count: values.alertSmsSegments };
-  return {};
-}
 
 function isHostedUpgradePlan(slug: UpgradePlanCard["slug"]): slug is HostedUpgradePlan {
   return slug === "starter" || slug === "pro";
@@ -77,7 +69,7 @@ export function UpgradePlanDialog({
   currentPlan: BillingPlanSlug;
   /** The name of the promo plan the business is on, which changing plan ends. */
   leavesPromoPlan?: string | null;
-  loading: "checkout" | "portal" | null;
+  loading: "checkout" | null;
   loadingPlan: HostedUpgradePlan | null;
   locale: string;
   onBillingIntervalChange: (billingInterval: BillingInterval) => void;
@@ -226,7 +218,7 @@ export function UpgradePlanDialog({
                         <span className="whitespace-pre-line">
                           {t(
                             `billing.upgradeDialog.plans.${card.slug}.highlights.${highlight}`,
-                            highlightValues(highlight, values),
+                            planStringValues(highlight, values),
                           )}
                         </span>
                       </li>

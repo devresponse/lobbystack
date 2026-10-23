@@ -155,17 +155,21 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
       else add("webhook_secret", "postgres_polar", "ok", "webhook", "webhook secrets match");
     }
   }
-  let varProblems = 0;
+  // The four product ID variables are optional: a plan the link made active
+  // sells only through its linked products, and checkout ignores them.
+  const leftover: string[] = [];
   for (const [key, value] of Object.entries(instance.product_vars)) {
+    if (value === null) continue;
     const [code, period] = key.split("/") as [string, string];
-    const live = catalog.plans.find((entry) => entry.code === code && entry.status !== "retired")?.prices.find((price) => price.period === period && price.retired_at === null);
-    const link = live?.polar_id ?? null;
-    if (value === link) continue;
-    varProblems += 1;
+    const row = catalog.plans.find((entry) => entry.code === code);
+    if (row?.status !== "active") continue;
+    const link = row.prices.find((price) => price.period === period && price.retired_at === null)?.polar_id ?? null;
     const name = `POLAR_${code.toUpperCase()}_${period.toUpperCase()}_PRODUCT_ID`;
-    add("product_vars", "postgres_polar", "drift", name, `${name} is ${value ?? "unset"} and the link is ${link ?? "none"}. Checkout still reads the variable: set it on Railway and redeploy.`);
+    if (value === link) leftover.push(name);
+    else add("product_vars", "postgres_polar", "warn", name, `${name} is ${value}, not the linked product ${link ?? "(none)"}. Checkout sells the linked product and ignores the variable, so remove it from the instance.`);
   }
-  if (!varProblems) add("product_vars", "postgres_polar", "ok", "variables", "the four product ID variables match the links");
+  if (leftover.length) add("product_vars", "postgres_polar", "info", "variables", `${leftover.join(", ")} ${leftover.length === 1 ? "matches its link and isn't" : "match their links and aren't"} needed any more; remove ${leftover.length === 1 ? "it" : "them"} from the instance when convenient.`);
+  if (!checks.some((check) => check.code === "product_vars")) add("product_vars", "postgres_polar", "ok", "variables", "checkout sells the linked products; no product ID variable is needed");
 
   return { status: checks.some((check) => check.level === "drift") ? "drift" : "passed", checks };
 }

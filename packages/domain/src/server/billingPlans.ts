@@ -23,9 +23,9 @@ import type { DomainContext } from "./context";
 // The billing catalog as checkout, plan changes, Polar's webhook, the plan
 // screens and usage limits read it at run time. Standard plans are the rows
 // whose code is their tier. A deployment that hasn't applied a billing.json has
-// no rows, so it shows and enforces the plans this build ships with and sells
-// through the four POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables, as before the
-// catalog.
+// no rows, so it shows and enforces the plans this build ships with, and sells
+// through the four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables if it
+// has them. Once a link makes a plan active, only its linked products sell it.
 
 type Row = Record<string, unknown>;
 

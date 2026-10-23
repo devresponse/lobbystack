@@ -79,7 +79,7 @@ export const planChangeRefusals = {
   subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
   change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
   subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
-  product_unavailable: "Polar refused the new plan's product. Check that the plan's POLAR_*_PRODUCT_ID names a live recurring product.",
+  product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
   token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
 } as const;
 export type PlanChangeRefusal = keyof typeof planChangeRefusals;
@@ -126,6 +126,15 @@ export const billingMeterEventNames = {
   chatAiTokens: "billing.chat_ai_tokens",
 } as const;
 
+/**
+ * The plans this build ships with. They are only the seed: a deployment shows
+ * and enforces them until its first billing.json apply, and after that the
+ * billing catalog's rows decide prices, allowances, limits and numbers. The
+ * app reads them only through builtInBillingPlanList and
+ * builtInBillingPlanLimits, which billingPlans.ts falls back to; the landing
+ * site's plan facts (product-capabilities.ts) and the number claims' fallback
+ * in app.business_included_numbers (migration 0112) repeat them.
+ */
 export const billingPlanCatalog = {
   self_host: {
     hostedBilling: false,
@@ -259,12 +268,6 @@ const limitsOf = (plan: BillingPlanLimits): BillingPlanLimits => ({
 
 /** The limits this build ships with, which a deployment enforces until its first catalog apply. */
 export const builtInBillingPlanLimits = Object.fromEntries(billingPlanSlugs.map((slug) => [slug, limitsOf(billingPlanCatalog[slug])])) as BillingPlanLimitTable;
-
-export function getKnowledgeStorageLimitBytes(
-  plan: BillingPlanSlug,
-): number | null {
-  return billingPlanCatalog[plan].knowledgeStorageBytes;
-}
 
 /** One price of a plan as the screens show it. */
 export type BillingPlanPrice = {

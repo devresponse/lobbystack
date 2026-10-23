@@ -55,7 +55,8 @@ async function syncedInstance(file = profile()) {
     discount: plan.discount as Record<string, unknown> | null,
     prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: price.period === "annual" ? Math.floor(price.cents / 12) : price.cents, polar_id: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
   }));
-  const productVars = Object.fromEntries(["starter/monthly", "starter/annual", "pro/monthly", "pro/annual"].map((key) => [key, linkOf(...(key.split("/") as [string, string]))]));
+  // The product ID variables are optional, and an instance set up since the catalog has none.
+  const productVars: Record<string, string | null> = { "starter/monthly": null, "starter/annual": null, "pro/monthly": null, "pro/annual": null };
   const instance: ApiBillingCatalog = {
     brand: "alloplace",
     code_hash: fileHash,
@@ -126,7 +127,6 @@ describe("verifyBillingCatalog", () => {
     const starter = instance.catalog.plans.find((plan) => plan.code === "starter")!;
     starter.status = "draft";
     starter.prices.find((price) => price.period === "annual")!.polar_id = null;
-    instance.catalog.polar.product_vars["starter/annual"] = null;
     const result = await verify(instance);
     expect(notOk(result)).toEqual([
       "drift file_postgres plan_rows pro",
@@ -172,13 +172,11 @@ describe("verifyBillingCatalog", () => {
     const { state } = instance.fake;
     const linked = (code: string, period: string) => instance.catalog.plans.find((plan) => plan.code === code)!.prices.find((price) => price.period === period)!;
     linked("starter", "monthly").polar_id = "product_gone";
-    instance.catalog.polar.product_vars["starter/monthly"] = "product_gone";
     const proAnnual = state.products.find((product) => product.id === linked("pro", "annual").polar_id)!;
     // A row pointing at the Pro annual product as Starter annual's.
     const starterAnnual = linked("starter", "annual");
     const starterAnnualId = starterAnnual.polar_id;
     starterAnnual.polar_id = proAnnual.id;
-    instance.catalog.polar.product_vars["starter/annual"] = proAnnual.id;
     const starterPlan = instance.catalog.plans.find((plan) => plan.code === "starter")!;
     starterPlan.prices.push({ ...starterAnnual, id: "starter-annual-old", polar_id: "product_retired", retired_at: earlier });
     const result = await verify(instance);
@@ -207,13 +205,10 @@ describe("verifyBillingCatalog", () => {
     expect((await verify(instance)).checks.find((check) => check.code === "polar_org")!.message).toBe("POLAR_ORGANIZATION_ID isn't set on the instance; the last link went to Polar sandbox org_old.");
   });
 
-  it("compares the webhook secret by its hash only when asked, and names the variables checkout still reads", async () => {
+  it("compares the webhook secret by its hash only when asked", async () => {
     const instance = await syncedInstance();
     instance.catalog.polar.secret_sha256 = sha256("polar_whs_other");
-    instance.catalog.polar.product_vars["pro/monthly"] = null;
-    const result = await verify(instance);
-    expect(notOk(result)).toEqual(["drift postgres_polar webhook_secret webhook", "drift postgres_polar product_vars POLAR_PRO_MONTHLY_PRODUCT_ID"]);
-    expect(result.checks.find((check) => check.code === "product_vars")!.message).toMatch(/^POLAR_PRO_MONTHLY_PRODUCT_ID is unset and the link is product_\d+\. Checkout still reads the variable/);
+    expect(notOk(await verify(instance))).toEqual(["drift postgres_polar webhook_secret webhook"]);
     instance.catalog.polar.secret_sha256 = null;
     expect((await verify(instance)).checks.find((check) => check.code === "webhook_secret")!.message).toContain("POLAR_WEBHOOK_SECRET isn't set");
     delete instance.fake.state.webhooks[0]!.secret;
@@ -222,6 +217,23 @@ describe("verifyBillingCatalog", () => {
     const worker = await verify(instance, { checkWebhookSecret: false });
     expect(worker.checks.some((check) => check.code === "webhook_secret")).toBe(false);
     expect((await verify(instance, { webhookUrl: null })).checks.some((check) => check.code === "webhook" || check.code === "webhook_secret")).toBe(false);
+  });
+
+  it("never needs the product ID variables, and notes the ones a linked plan no longer reads", async () => {
+    const instance = await syncedInstance();
+    const linkOf = (code: string, period: string) => instance.catalog.plans.find((plan) => plan.code === code)!.prices.find((price) => price.period === period)!.polar_id!;
+    instance.catalog.polar.product_vars["starter/monthly"] = linkOf("starter", "monthly");
+    instance.catalog.polar.product_vars["pro/annual"] = linkOf("pro", "annual");
+    instance.catalog.polar.product_vars["pro/monthly"] = "product_old";
+    const result = await verify(instance);
+    expect(result.status).toBe("passed");
+    expect(notOk(result)).toEqual(["warn postgres_polar product_vars POLAR_PRO_MONTHLY_PRODUCT_ID", "info postgres_polar product_vars variables"]);
+    const message = (subject: string) => result.checks.find((check) => check.code === "product_vars" && check.subject === subject)!.message;
+    expect(message("POLAR_PRO_MONTHLY_PRODUCT_ID")).toBe(`POLAR_PRO_MONTHLY_PRODUCT_ID is product_old, not the linked product ${linkOf("pro", "monthly")}. Checkout sells the linked product and ignores the variable, so remove it from the instance.`);
+    expect(message("variables")).toBe("POLAR_STARTER_MONTHLY_PRODUCT_ID, POLAR_PRO_ANNUAL_PRODUCT_ID match their links and aren't needed any more; remove them from the instance when convenient.");
+    // Before a link makes a plan active, its variable is what sells it.
+    instance.catalog.plans.find((plan) => plan.code === "pro")!.status = "draft";
+    expect(notOk(await verify(instance)).filter((line) => line.includes("product_vars"))).toEqual(["info postgres_polar product_vars variables"]);
   });
 
   it("fails when Polar can't be read, after the checks that need only the file and the rows", async () => {
@@ -242,9 +254,9 @@ describe("billingVerifyReport", () => {
     expect(passed).toContain("\nPostgres and Polar\n");
     expect(passed.endsWith("Result: in sync (exit 0).")).toBe(true);
 
-    instance.catalog.polar.product_vars["pro/annual"] = null;
+    instance.catalog.polar.secret_sha256 = sha256("polar_whs_other");
     const drift = billingVerifyReport(await verify(instance), "Verify");
-    expect(drift).toContain("  DRIFT  product_vars: POLAR_PRO_ANNUAL_PRODUCT_ID is unset");
+    expect(drift).toContain("  DRIFT  webhook_secret: ");
     expect(drift.endsWith("Result: drift (exit 1). Run pnpm billing apply, or change billing.json in a pull request.")).toBe(true);
 
     const failed = billingVerifyReport(await verify(instance, { polar: { env: "sandbox", error: "timeout" } }), "Verify");

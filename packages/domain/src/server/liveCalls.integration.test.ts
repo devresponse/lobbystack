@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, contacts, createDatabaseClient, enqueueOutbox, outboxMessages, transcripts, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, contacts, createDatabaseClient, enqueueOutbox, outboxMessages, transcripts, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
-import { blockLiveCaller, extendLiveCallReservation, finishLiveCall, lastLiveCallSequence, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, markLiveCallMediaStarted, retryLiveCallRecording, saveLiveCallTurn, startLivePhoneCall, startLiveWebCall } from "./liveCalls";
+import { getBillingUsageStatus, reserveAlertSmsUsage, reserveWidgetChatUsageInTransaction } from "./billing";
+import { blockLiveCaller, extendLiveCallReservation, finishLiveCall, lastLiveCallSequence, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, markLiveCallMediaStarted, prepareLiveCallTransfer, retryLiveCallRecording, saveLiveCallTurn, startLivePhoneCall, startLiveWebCall } from "./liveCalls";
 import { heldForCall } from "./notifications";
 import { periodKeyFor } from "./usage";
 import { loadLiveCallForPricing } from "./voice";
@@ -120,6 +121,47 @@ describe.skipIf(!testUrl)("GPT-Live phone calls against PostgreSQL", () => {
       // A retried delivery attaches with what the call holds now.
       const retried = await asWorker(tx, async (context) => [await startLivePhoneCall(context, first), await startLivePhoneCall(context, second)]);
       expect(retried.map((row) => [row.duplicate, row.maxDurationMs])).toEqual([[true, 1_800_000], [true, 500_000]]);
+    });
+  });
+
+  it("still runs included minutes, transfers and chats once texts push spend past the cap", async () => {
+    await rollbackTest(async (tx) => {
+      // Starter with a $5 cap: 2,000 included seconds left, and 251 texts past
+      // the 50 included at 2 cents, so spend is 502 cents, as when a text
+      // estimated at one segment bills two.
+      const businessId = await business(tx, { plan: "starter", capCents: 500, usedSeconds: 7_000 });
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `alert_sms:seed:${businessId}`, usageKind: "alert_sms_segments", quantity: 301, planAtRecordTime: "starter", isFinal: true, syncStatus: "skipped", createdAt: new Date(Date.now() - 60_000) });
+      const results = await asWorker(tx, async (context) => {
+        const phone = await startLivePhoneCall(context, call(businessId, "+14165550134"));
+        const browser = await startLiveWebCall(context, { businessId, sessionId: `live_${randomUUID()}`, widgetId: "dashboard", billable: true, maxDurationMs: 120_000 });
+        return {
+          phone: phone.maxDurationMs,
+          browser: browser.maxDurationMs,
+          grown: await extendLiveCallReservation(context, { businessId, callId: phone.callId }),
+          transfer: await prepareLiveCallTransfer(context, { businessId, callId: phone.callId }),
+          chat: await withBusinessTransaction(context.db, { businessId, actorType: "worker" }, (scoped) => reserveWidgetChatUsageInTransaction(scoped, { businessId, conversationId: randomUUID() })),
+          // A text past the allowance still costs, so it waits for next month or a higher cap.
+          text: await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${randomUUID()}`, estimatedSegments: 1 }),
+          status: await getBillingUsageStatus(context, { businessId }),
+        };
+      });
+      expect(results).toMatchObject({ phone: 300_000, browser: 120_000, grown: 300, transfer: true, chat: { allowed: true }, text: { allowed: false, errorCode: "alert_sms_limit_reached" } });
+      expect(results.status).toMatchObject({ overageSpendCents: 502, overageSpendingCapReached: true, voiceBlocked: false, outboundCallAttemptsBlocked: false, chatAiBlocked: false, alertSmsBlocked: true, voiceSecondsLeft: 1_280 });
+    });
+  });
+
+  it("gives phone and browser calls the same seconds at exactly the cap", async () => {
+    await rollbackTest(async (tx) => {
+      // Two Starter businesses whose 250 texts past the allowance cost exactly
+      // the $5 cap, with 100 included seconds left.
+      const [first, second] = [await business(tx, { plan: "starter", capCents: 500, usedSeconds: 8_900 }), await business(tx, { plan: "starter", capCents: 500, usedSeconds: 8_900 })];
+      await tx.insert(billingUsageEvents).values([first, second].map((businessId) => ({ businessId, periodKey: periodKeyFor(), sourceKey: `alert_sms:seed:${businessId}`, usageKind: "alert_sms_segments", quantity: 300, planAtRecordTime: "starter", isFinal: true, syncStatus: "skipped", createdAt: new Date(Date.now() - 60_000) })));
+      const browserCall = (businessId: string) => ({ businessId, sessionId: `live_${randomUUID()}`, widgetId: "dashboard", billable: true, maxDurationMs: 120_000 });
+      // Whichever call comes first gets the 100 seconds, and the other none.
+      await expect(asWorker(tx, (context) => startLiveWebCall(context, browserCall(first)))).resolves.toMatchObject({ maxDurationMs: 100_000 });
+      await expect(asWorker(tx, (context) => startLivePhoneCall(context, call(first, "+14165550134")))).rejects.toMatchObject({ code: "voice_limit_reached" });
+      await expect(asWorker(tx, (context) => startLivePhoneCall(context, call(second, "+14165550134")))).resolves.toMatchObject({ maxDurationMs: 100_000 });
+      await expect(asWorker(tx, (context) => startLiveWebCall(context, browserCall(second)))).rejects.toMatchObject({ code: "voice_limit_reached" });
     });
   });
 

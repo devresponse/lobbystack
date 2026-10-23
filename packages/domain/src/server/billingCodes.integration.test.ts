@@ -432,7 +432,8 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       await as(tx, "owner");
       await tx.execute(sql`update public.billing_accounts set plan_code = null where business_id = ${businessId}::uuid`);
       await as(tx, "lobbystack_worker");
-      await asWorker((scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: "voice:starter-1", quantity: 600, recordedAt: at }));
+      // Recorded after the plan's usage: events from the same moment replay in no fixed order.
+      await asWorker((scoped) => reserveUsageInTransaction(scoped, { businessId, usageKind: "voice_seconds", sourceKey: "voice:starter-1", quantity: 600, recordedAt: new Date("2026-11-10T12:00:00.000Z") }));
       expect((await asWorker((scoped) => readUsageStatusInTransaction(scoped, { businessId, periodKey: period })) as { overageSpendCents: number }).overageSpendCents).toBe(60 * 25 + 10 * 20);
       expect(await getBillingForApi(context(tx), apiCaller)).toMatchObject({ promo_plan: null });
       await as(tx, "lobbystack_app");

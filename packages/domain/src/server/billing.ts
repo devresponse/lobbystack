@@ -26,24 +26,14 @@ export function normalizeWebCallMaxDurationMs(value: number | undefined): number
   return Math.min(Math.floor(value), MAX_WEB_CALL_MAX_DURATION_MS);
 }
 
+// A browser call gets the seconds a phone call could still reserve, up to the
+// length asked for.
 function webVoiceBillingAllowance(status: UsageStatus, maxDurationMs: number | undefined): WebVoiceBillingAllowance {
   const requested = normalizeWebCallMaxDurationMs(maxDurationMs);
-  const includedRemaining = status.voiceSecondsIncluded === null
-    ? Number.POSITIVE_INFINITY
-    : Math.max(0, status.voiceSecondsIncluded - status.voiceSecondsUsed);
-  const overageRemaining = !status.overagesBillable || status.overageSpendingCapCents === null
-    ? status.overagesBillable ? Number.POSITIVE_INFINITY : 0
-    : (() => {
-      const ratePerSecond = (status.voiceOverageRatePerMinuteCents ?? 0) / 60;
-      // Extra minutes that cost nothing never reach the cap.
-      return ratePerSecond > 0
-        ? Math.floor((Math.max(0, status.overageSpendingCapCents - status.overageSpendCents) + 1e-9) / ratePerSecond)
-        : Number.POSITIVE_INFINITY;
-    })();
-  const remaining = Math.min(requested / 1_000, includedRemaining + overageRemaining) * 1_000;
+  const remaining = Math.min(requested / 1_000, status.voiceSecondsLeft ?? Number.POSITIVE_INFINITY) * 1_000;
   return {
-    allowed: !status.voiceBlocked && remaining >= 1,
-    errorCode: status.voiceBlocked || remaining < 1 ? billingErrorCodes.voiceLimitReached : null,
+    allowed: remaining >= 1,
+    errorCode: remaining < 1 ? billingErrorCodes.voiceLimitReached : null,
     maxDurationMs: Math.min(requested, Math.floor(remaining)),
     plan: status.plan,
   };

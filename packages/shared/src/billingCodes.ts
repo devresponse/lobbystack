@@ -86,13 +86,16 @@ export type PromoPlanEnding = "tier" | "cancel";
 
 /**
  * The renewal that ends a time-limited plan: the current period's end once it
- * reaches the plan's end, give or take a day for how Polar and the account
- * count months. Null when a later renewal does, at the plan's price until
- * then. Without a period, the plan's end itself.
+ * reaches the plan's end, give or take three days. Polar adds each month to
+ * the last renewal, so a cycle started on the 31st can renew on the 28th from
+ * February on, while the account counts the months from the start; a period
+ * is never shorter than 28 days, so no earlier renewal comes that close. Null
+ * when a later renewal does, at the plan's price until then. Without a
+ * period, the plan's end itself.
  */
 export function promoPlanEndRenewal(planEnds: Date, currentPeriodEnd: Date | null): Date | null {
   if (!currentPeriodEnd) return planEnds;
-  return currentPeriodEnd.getTime() >= planEnds.getTime() - 24 * 60 * 60_000 ? currentPeriodEnd : null;
+  return currentPeriodEnd.getTime() >= planEnds.getTime() - 3 * 24 * 60 * 60_000 ? currentPeriodEnd : null;
 }
 
 /** How a business's promo plan ends: as an operator chose, else as the plan says. A plan that keeps going (keep) has none. */

@@ -100,10 +100,10 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, setManagedPlanInTransaction, setOverageSpendingCapInTransaction } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { readBillingPlanLimitBook } from "../billingPlans";
+import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
 import { deleteServiceInTransaction, insertServiceInTransaction, replaceBusinessHoursInTransaction, replaceServiceStaffInTransaction, updateServiceInTransaction } from "../catalog";
@@ -429,23 +429,25 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
  * by changing the Starter subscription rather than with a page; other changes
  * to a paid plan happen in Polar's billing portal. A promo code's plan is sold
  * to a free, Starter or Pro business alike. Callers say whether this
- * deployment sells a standard plan and interval, and limit promo code tries.
+ * deployment sells a standard plan and interval, and limit promo code tries
+ * in checkPromoCode, which runs once the key may pay for the business, before
+ * the code is looked up, so a key that is refused spends none of its tries.
  */
-export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean }): Promise<ApiCheckout> {
+export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void> }): Promise<ApiCheckout> {
   if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
     if (isManagedBillingAccount(account)) throw conflict("This business is on a managed plan, billed directly by the operator.");
     if (input.plan === "promo") {
+      await options.checkPromoCode?.();
       const sale = await billingCodeCheckout(tx, { businessId: caller.businessId, code: input.promo_code ?? "", billingInterval: input.interval });
       if ("refusal" in sale) throw promoRefusals[sale.refusal]();
       const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
       await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
       return await loadCheckout(tx, caller.businessId, checkoutId);
     }
-    const { plan: current } = await loadBillingContext(tx, caller.businessId);
-    if (current !== "free_cloud" && !(current === "starter" && input.plan === "pro")) throw conflict("This business already pays for a plan. Change it in the billing portal.");
+    if (!standardCheckoutAllowed((await loadBillingContext(tx, caller.businessId)).plan, input.plan)) throw conflict(PAID_PLAN_CHECKOUT_REFUSAL);
     const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
     await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
     return await loadCheckout(tx, caller.businessId, checkoutId);
@@ -492,7 +494,7 @@ const numberSelectionRefusals: Record<NumberSelectionRefusal, (message: string) 
   stage: (message) => conflict(message),
   replacement_used: () => conflict("This business already used its one number replacement."),
   active_number_required: () => conflict("This business needs an active number before it can pick a replacement."),
-  paid_plan_required: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  paid_plan_required: () => conflict("The business's plan doesn't include a phone number. Start one that does with POST /billing/checkout."),
   unsupported_country: () => invalidRequest("Phone numbers are available in US, CA, GB and AU.", [{ path: "country", message: "Use US, CA, GB or AU." }]),
 };
 
@@ -500,7 +502,7 @@ const numberSelectionRefusals: Record<NumberSelectionRefusal, (message: string) 
 const numberClaimRefusals: Record<string, () => PublicApiError> = {
   number_claim_in_progress: () => conflict("Another number claim for this business is still in progress. Wait for it to finish, then try again."),
   business_number_exists: () => conflict("This business already has a phone number. Release it first, or replace it with POST /phone-numbers/{phone_number_id}/replace."),
-  dedicated_number_requires_paid_plan: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  dedicated_number_requires_paid_plan: () => conflict("The business's plan doesn't include a phone number. Start one that does with POST /billing/checkout."),
   // The database knows only that a window is full, so Retry-After is its length, at most a day.
   number_claim_rate_limited: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed in the last hour. Try again later.", undefined, { "Retry-After": "3600" }),
   daily_claim_quota_reached: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed today. Try again tomorrow.", undefined, { "Retry-After": "86400" }),
@@ -662,12 +664,14 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
   const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
-  const { plan } = await loadBillingContext(tx, businessId);
+  const { plan, planCode } = await loadBillingContext(tx, businessId);
+  const limits = await readBillingPlanLimitBook(tx);
   const paid = plan === "starter" || plan === "pro" || plan === "enterprise";
+  // A hosted plan needs its number when it includes one: claims follow the plan's own count, which a promo plan can set to none.
+  const needsNumber = plan !== "self_host" && limitsFor(limits, plan, planCode).includedBusinessNumbers !== 0;
   const answeredCall = await hasAnsweredPhoneCall(tx, businessId);
   const item = (id: ApiOnboardingItem, done: boolean, skipped: boolean, required: boolean) => ({ id, status: done ? "done" as const : skipped ? "skipped" as const : "missing" as const, required });
   const checklist = [
@@ -676,13 +680,13 @@ async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Prom
     // A business without a saved profile answers with the default greeting, as GET /receptionist shows.
     item("greeting", !profile || profile.greeting.trim().length > 0, false, false),
     item("plan", paid, !paid, false),
-    item("phone_number", steps.phoneNumber === "complete", steps.phoneNumber === "skipped", paid),
+    item("phone_number", steps.phoneNumber === "complete", steps.phoneNumber === "skipped", needsNumber),
     item("full_site_read", steps.fullScan === "complete", steps.fullScan === "skipped", false),
     // From the command line there is no browser test call, so the first answered call to the number counts.
     item("test_call", steps.testCall === "complete" || answeredCall, steps.testCall === "skipped", false),
   ];
   // The step the dashboard shows: a business on a plan without a number goes back from the number steps to its plan.
-  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), account?.plan ?? null, await readBillingPlanLimitBook(tx), account?.planCode ?? null);
+  const stage = resolveOnboardingStageForPlan(normalizeOnboardingStage(business.stage), plan, limits, planCode);
   const complete = stage === "complete";
   return { stage, complete, checklist, missing: complete ? [] : checklist.filter((entry) => entry.required && entry.status === "missing").map((entry) => entry.id) };
 }

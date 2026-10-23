@@ -80,9 +80,12 @@ export function LivePlanSurface() {
   const money = (cents: number) => formatMoney(cents, promoPlan?.currency ?? currency, i18n.language);
   // The plan's row in the deployment's plan list; self-host has none and no allowances.
   const offer = plan === "self_host" ? undefined : findPlan(billing.data.plans, plan);
-  const promoPrice = promoPlan?.prices.find((price) => price.interval === (account?.billingInterval === "annual" ? "annual" : "monthly"));
-  // Free and self-host cost nothing, a custom plan has no fixed price, and a paid plan shows a month of its interval.
-  const monthlyPrice = plan === "self_host" || plan === "free_cloud" ? 0 : promoPrice ? promoPrice.perMonth : offer?.custom ? null : monthlyPriceCents(offer, account?.billingInterval === "annual" ? "annual" : "monthly") ?? null;
+  // Only Starter and Pro are billed by interval: a lapsed annual plan keeps its interval on Free.
+  const annual = (plan === "starter" || plan === "pro") && account?.billingInterval === "annual";
+  const promoPrice = promoPlan?.prices.find((price) => price.interval === (annual ? "annual" : "monthly"));
+  // Free costs nothing, a custom plan has no fixed price (null), and a paid plan shows a month of its
+  // interval, or nothing once the plan list no longer sells that price (undefined).
+  const monthlyPrice = plan === "free_cloud" ? 0 : promoPrice ? promoPrice.perMonth : offer?.custom ? null : monthlyPriceCents(offer, annual ? "annual" : "monthly");
   // What the plan includes as the server enforces it, so a promo plan shows its own allowances.
   const included = includedLines(billingPlanIncluded(billing.data.limits), (key, options) => options ? t(key, options) : t(key), i18n.language).map((line) => line.text);
   const permissions = billing.data?.permissions;
@@ -103,24 +106,28 @@ export function LivePlanSurface() {
                 {promoPlan ? billingPlanName(promoPlan.names, i18n.language) ?? t(`billing.planLabels.${promoPlan.tier}Card`) : t(`billing.planLabels.${plan === "free_cloud" ? "freeCloudCard" : plan === "self_host" ? "selfHost" : plan === "starter" ? "starterCard" : plan === "pro" ? "proCard" : "enterpriseCard"}`)}
               </span>
               <div className="flex flex-col items-start gap-0.5">
-                <div className="flex flex-wrap items-end gap-2">
-                  {monthlyPrice !== null ? (
+                {plan === "self_host" ? (
+                  <span className="text-[15px] leading-6 text-muted-foreground">
+                    {t("billing.currentPlan.selfHostNotice")}
+                  </span>
+                ) : <div className="flex flex-wrap items-end gap-2">
+                  {typeof monthlyPrice === "number" ? (
                     <span className="text-4xl font-semibold tracking-tight text-foreground">
                       {money(monthlyPrice)}
                     </span>
-                  ) : (
+                  ) : monthlyPrice === null ? (
                     <span className="text-base text-muted-foreground">
                       {t("billing.currentPlan.customPricing")}
                     </span>
-                  )}
-                  {monthlyPrice !== null ? (
+                  ) : null}
+                  {typeof monthlyPrice === "number" ? (
                     <span className="pb-1 text-base text-muted-foreground">
-                      {account?.billingInterval === "annual"
+                      {annual
                         ? t("billing.currentPlan.annualEffectiveSuffix")
                         : t("billing.currentPlan.monthlySuffix")}
                     </span>
                   ) : null}
-                </div>
+                </div>}
                 {(plan === "starter" || plan === "pro") && (
                   <span className="text-base text-muted-foreground">
                     {t("billing.currentPlan.paygMonthlySuffix")}
@@ -139,7 +146,7 @@ export function LivePlanSurface() {
               </div>
             </div>
 
-            <div className="flex flex-col gap-4">
+            {plan === "self_host" ? null : <div className="flex flex-col gap-4">
               <span className="text-base font-medium leading-6 text-foreground">
                 {t("billing.currentPlan.includedTitle")}
               </span>
@@ -151,7 +158,7 @@ export function LivePlanSurface() {
                   </div>
                 ))}
               </div>
-            </div>
+            </div>}
           </div>
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} /> : null}
           {(canUpgrade || canManage) && (
@@ -241,8 +248,8 @@ function Transactions({ transactions, t, locale }: { transactions: Billing["tran
                     ) : null}
                   </TableCell>
                   <TableCell>
-                    <span className="text-sm text-muted-foreground capitalize">
-                      {tx.status}
+                    <span className="text-sm text-muted-foreground">
+                      {t(`billing.transactions.statusLabels.${tx.status}`, { defaultValue: tx.status })}
                     </span>
                   </TableCell>
                   <TableCell className="text-right">

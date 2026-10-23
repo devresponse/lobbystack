@@ -93,6 +93,32 @@ describe("original billing overview behavior", () => {
     expect(screen.getAllByText("billing.transactions.refundedAmount")).toHaveLength(1);
     expect(translate).toHaveBeenCalledWith("billing.transactions.refundedAmount", { amount: "$528" });
   });
+  it("names each transaction's status in the active language", () => {
+    setup({ transactions: true });
+    expect(translate).toHaveBeenCalledWith("billing.transactions.statusLabels.succeeded", { defaultValue: "succeeded" });
+    expect(translate).toHaveBeenCalledWith("billing.transactions.statusLabels.partially_refunded", { defaultValue: "partially_refunded" });
+    expect(screen.queryByText("partially_refunded")).toBeNull();
+  });
+  it("prices Free by the month after an annual plan lapses", () => {
+    setup({ plan: "free_cloud", interval: "annual" });
+    expect(screen.getByText("$0")).toBeTruthy();
+    expect(screen.getByText("billing.currentPlan.monthlySuffix")).toBeTruthy();
+    expect(screen.queryByText("billing.currentPlan.annualEffectiveSuffix")).toBeNull();
+  });
+  it("shows no price, rather than a custom one, once the plan list stops selling the subscription's price", () => {
+    const plans = builtInBillingPlanList();
+    plans.plans.find(entry => entry.slug === "starter")!.prices = [];
+    setup({ plan: "starter", plans });
+    expect(screen.getByText("billing.planLabels.starterCard")).toBeTruthy();
+    expect(screen.queryByText("billing.currentPlan.customPricing")).toBeNull();
+    expect(screen.queryByText("billing.currentPlan.monthlySuffix")).toBeNull();
+  });
+  it("says self-hosting has no limits or billing instead of a price and allowances", () => {
+    setup({ plan: "self_host" });
+    expect(screen.getByText("billing.currentPlan.selfHostNotice")).toBeTruthy();
+    expect(screen.queryByText("$0")).toBeNull();
+    expect(screen.queryByText("billing.currentPlan.includedTitle")).toBeNull();
+  });
   it("does not offer upgrades without a configured checkout interval", () => {
     setup({ plan: "starter" });
     expect(screen.queryByRole("button", { name: "billing.actions.upgradeToPro" })).toBeNull();

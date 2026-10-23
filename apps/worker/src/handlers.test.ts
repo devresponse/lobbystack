@@ -206,9 +206,12 @@ describe("worker handlers", () => {
       const businessId = randomUUID(); const attemptId = randomUUID(); const domain = { db: {} as never };
       vi.mocked(issueOperatorPhoneVerificationCode).mockResolvedValue({ to: "+14165550123", from: "+14165550100", code: "482913" });
       vi.mocked(reserveAlertSmsUsage).mockResolvedValue({ allowed: true, usageEventId: "usage-1" } as never);
+      vi.mocked(correctAlertSmsUsage).mockResolvedValue("usage-1");
       const sendSms = vi.fn().mockResolvedValue({ providerMessageId: "SM1" });
       await expect(handleJob(codeJob(businessId, attemptId), { domain, twilio: { sendSms } })).resolves.toEqual({ status: "completed", entityId: attemptId });
       expect(reserveAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, estimatedSegments: 1 });
+      // No delivery report comes back for a code, so the estimate settles its usage before it syncs.
+      expect(correctAlertSmsUsage).toHaveBeenCalledWith(domain, { businessId, sourceKey: `alert_sms:phone_verification:${attemptId}`, segments: 1 });
       expect(enqueueBillingUsageSync).toHaveBeenCalledWith(domain, { businessId, usageEventId: "usage-1" });
     });
 
@@ -745,6 +748,7 @@ describe("worker handlers", () => {
   describe("a promo plan's end", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly" };
     const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
+    const otherPromoPrice = { ...promoPrice, plan: "pro-launch", tier: "pro", polar_id: "promo-pro-monthly" };
     const planEnds = new Date(Date.now() + 5 * 86_400_000);
     const periodEnd = new Date(Date.now() + 6 * 86_400_000).toISOString();
     const subscription = (extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId: "promo-starter-monthly", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: "disc-half-off", currentPeriodEnd: periodEnd, ...extra });
@@ -755,7 +759,7 @@ describe("worker handlers", () => {
       const domain = { db: undefined as never };
       for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
       vi.stubEnv("APP_BASE_URL", "https://app.example");
-      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", polar_disc: "disc-half-off" }] } as never, process.env));
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice, otherPromoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", polar_disc: "disc-half-off" }, { code: "pro-launch", tier: "pro", status: "active", polar_disc: "disc-launch" }] } as never, process.env));
       vi.mocked(loadPromoEndWork).mockResolvedValue(input.work);
       vi.mocked(recordPromoEnd).mockResolvedValue(1);
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.endPromoPlan", queue: "default", businessId, payload: input.payload ?? {}, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: true };
@@ -773,7 +777,7 @@ describe("worker handlers", () => {
       await expect(run).resolves.toEqual({ status: "completed", entityId: `${businessId}:salons-half-off:1` });
       expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "product-starter-monthly", prorationBehavior: "next_period", discountId: null });
       // The email names Polar's renewal date.
-      expect(recordPromoEnd).toHaveBeenCalledWith(domain, { businessId, planCode: "salons-half-off", planEnds, set: true, notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "starter", interval: "monthly" }, appUrl: "https://app.example" });
+      expect(recordPromoEnd).toHaveBeenCalledWith(domain, { businessId, planCode: "salons-half-off", planEnds, set: true, notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "starter", interval: "monthly", quiet: false }, appUrl: "https://app.example" });
     });
 
     it("cancels at the period's end for a plan that ends that way, and leaves a cancellation or a plan change the business chose", async () => {
@@ -789,7 +793,11 @@ describe("worker handlers", () => {
 
       const chosen = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ pendingProductId: "product-pro-monthly" })), changeSubscriptionProduct } });
       await expect(chosen.run).resolves.toMatchObject({ status: "completed" });
-      expect(recordPromoEnd).toHaveBeenLastCalledWith(chosen.domain, expect.objectContaining({ notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "pro", interval: "monthly" } }));
+      expect(recordPromoEnd).toHaveBeenLastCalledWith(chosen.domain, expect.objectContaining({ notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "pro", interval: "monthly", quiet: false } }));
+      // Another promo plan the business chose for the renewal stands too, and its owners saw its terms when they chose it.
+      const promo = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ pendingProductId: "promo-pro-monthly" })), changeSubscriptionProduct } });
+      await expect(promo.run).resolves.toMatchObject({ status: "completed" });
+      expect(recordPromoEnd).toHaveBeenLastCalledWith(promo.domain, expect.objectContaining({ set: true, notice: { ending: "tier", endsAt: new Date(periodEnd), tier: "pro", interval: "monthly", quiet: true } }));
       expect(changeSubscriptionProduct).not.toHaveBeenCalled();
     });
 
@@ -806,7 +814,13 @@ describe("worker handlers", () => {
       const told = endPromo({ work: work({ set: false }), polar: { getSubscription } });
       await expect(told.run).resolves.toMatchObject({ status: "completed" });
       expect(getSubscription).not.toHaveBeenCalled();
-      expect(recordPromoEnd).toHaveBeenCalledWith(told.domain, expect.objectContaining({ set: false, notice: { ending: "tier", endsAt: planEnds, tier: "starter", interval: "monthly" } }));
+      expect(recordPromoEnd).toHaveBeenCalledWith(told.domain, expect.objectContaining({ set: false, notice: { ending: "tier", endsAt: planEnds, tier: "starter", interval: "monthly", quiet: false } }));
+      vi.mocked(recordPromoEnd).mockClear();
+      // The rest of the last week: Polar was told and the owners heard.
+      const done = endPromo({ work: work({ set: false, notify: false }), polar: { getSubscription } });
+      await expect(done.run).resolves.toEqual({ status: "completed", entityId: `${done.businessId}:salons-half-off:0` });
+      expect(recordPromoEnd).not.toHaveBeenCalled();
+      expect(getSubscription).not.toHaveBeenCalled();
       await expect(endPromo({ work: null, polar: {} }).run).resolves.toMatchObject({ status: "skipped" });
     });
 
@@ -819,8 +833,17 @@ describe("worker handlers", () => {
       removeSubscriptionDiscount.mockClear();
       await expect(endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription()), removeSubscriptionDiscount } }).run).resolves.toMatchObject({ status: "skipped" });
       await expect(endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly", discountId: null })), removeSubscriptionDiscount } }).run).resolves.toMatchObject({ status: "skipped" });
+      // A standard product waiting to move to a promo plan keeps the discount that plan's change brought.
+      await expect(endPromo({ work: null, payload, polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly", pendingProductId: "promo-starter-monthly" })), removeSubscriptionDiscount } }).run).resolves.toMatchObject({ status: "skipped" });
       expect(removeSubscriptionDiscount).not.toHaveBeenCalled();
       expect(loadPromoEndWork).not.toHaveBeenCalled();
+    });
+
+    it("tries a discount removal again while Polar holds an earlier change, as nothing queues it again", async () => {
+      const payload = { dropDiscount: "disc-half-off", subscriptionId: "sub-1" };
+      const getSubscription = vi.fn().mockResolvedValue(subscription({ productId: "product-starter-monthly" }));
+      await expect(endPromo({ work: null, payload, polar: { getSubscription, removeSubscriptionDiscount: vi.fn().mockRejectedValue(new PolarRequestError(409, null)) } }).run).rejects.toThrow("status 409");
+      await expect(endPromo({ work: null, payload, polar: { getSubscription, removeSubscriptionDiscount: vi.fn().mockRejectedValue(new PolarRequestError(403, "insufficient_scope")) } }).run).resolves.toMatchObject({ status: "skipped" });
     });
   });
 

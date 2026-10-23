@@ -17,7 +17,7 @@ import { isWebsiteImportRunning, websiteImportHost, WebsiteImportProgress, type 
 type Activation = {
   deploymentMode: string;
   plan: string;
-  paidPlanLive: boolean;
+  numberIncluded: boolean;
   hasDedicatedNumber: boolean;
   completedWebCalls: number;
   websiteImport: WebsiteImportSummary | null;
@@ -84,9 +84,9 @@ export function DashboardActivationCard({ businessId }: { businessId: string | u
   // render; otherwise they fire for a card nobody sees.
   const eligible = Boolean(data && !data.hasDedicatedNumber && data.deploymentMode === "cloud");
   const heardItWork = (data?.completedWebCalls ?? 0) > 0;
-  // Someone already paying who skipped the number step needs the claiming
-  // screen; the upgrade dialog disables their current plan and hands out no numbers.
-  const needsNumberClaim = Boolean(data?.paidPlanLive);
+  // Someone whose plan includes a number and who skipped the number step needs
+  // the claiming screen; the upgrade dialog disables their current plan and hands out no numbers.
+  const needsNumberClaim = Boolean(data?.numberIncluded);
   const showsUpgrade = eligible && heardItWork && !needsNumberClaim;
 
   useEffect(() => {

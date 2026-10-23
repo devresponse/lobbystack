@@ -90,7 +90,8 @@ describe("replacement non-AI usage policy", () => {
     expect(estimateSmsSegments("Appointment confirmed.")).toBe(1);
     expect(estimateSmsSegments("a".repeat(161))).toBe(2);
     expect(estimateSmsSegments("漢".repeat(71))).toBe(2);
-    expect(estimateSmsSegments("😀".repeat(36))).toBe(1);
+    expect(estimateSmsSegments("😀".repeat(35))).toBe(1);
+    expect(estimateSmsSegments("😀".repeat(36))).toBe(2);
   });
 
   it("uses UTC month keys for usage accounting", () => {

@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listSchedulerBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
-import { getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent } from "./billing";
+import { correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
 import { currentWebsiteIngestion } from "./activation";
@@ -283,6 +283,34 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
         expect(await workerTx.select({ id: knowledgeChunks.id }).from(knowledgeChunks).where(eq(knowledgeChunks.documentId, incoming[freeBusinessId]!))).toEqual([]);
       });
     });
+  });
+
+  it("checks one business's knowledge limit one document at a time", async () => {
+    // Two documents indexed at once each counted the text without the other's, so both could fit.
+    const businessId = randomUUID();
+    const other = await client!.pool.connect();
+    let blocked: unknown;
+    try {
+      await other.query("begin");
+      await other.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`knowledge-storage:${businessId}`]);
+      await rollbackTest(async (tx) => {
+        const documentId = randomUUID();
+        await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Knowledge lock test", timezone: "UTC", businessType: "test", deploymentMode: "cloud" });
+        await tx.insert(knowledgeDocuments).values({ id: documentId, businessId, sourceType: "text", title: "Incoming", status: "processing" });
+        await tx.execute(sql`set local role lobbystack_worker`);
+        // Waiting for the lock fails with lock_not_available instead of hanging the test.
+        await tx.execute(sql`set local lock_timeout = '250ms'`);
+        const text = "Parking is behind the building.";
+        const embeddings = chunkText(text).map(() => Array.from({ length: 1536 }, () => 0.01));
+        blocked = await indexDocumentText({ db: tx as unknown as Database }, { businessId, documentId, text, embeddings }).then(() => null, (error: unknown) => error);
+      });
+    } finally {
+      await other.query("rollback");
+      other.release();
+    }
+    const lockError = blocked as { code?: string; cause?: { code?: string } } | null;
+    // 55P03 is lock_not_available.
+    expect(lockError?.cause?.code ?? lockError?.code).toBe("55P03");
   });
 
   it("loads a business's knowledge for its summary and never replaces a summary a person wrote", async () => {
@@ -762,6 +790,31 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       await call.query("rollback");
       call.release();
     }
+  });
+
+  it("syncs an alert SMS to Polar once Twilio settles its segments, even when they match the estimate", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Alert SMS sync test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "active" });
+      const syncs = async () => {
+        await tx.execute(sql`reset role`);
+        const rows = await tx.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.syncUsage")));
+        await tx.execute(sql`set local role lobbystack_worker`);
+        return rows.map((row) => row.dedupeKey);
+      };
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const db = tx as unknown as Database;
+      const sourceKey = `alert_sms:notification:${randomUUID()}`;
+      const reservation = await reserveAlertSmsUsage({ db }, { businessId, sourceKey, estimatedSegments: 1 });
+      // Sent, but the segments aren't known yet: nothing goes to Polar.
+      await enqueueBillingUsageSync({ db }, { businessId, usageEventId: reservation.usageEventId! });
+      expect(await syncs()).toEqual([]);
+      // Twilio's delivery report says 1 segment, as estimated.
+      const settled = await correctAlertSmsUsage({ db }, { businessId, sourceKey, segments: 1 });
+      await enqueueBillingUsageSync({ db }, { businessId, usageEventId: settled });
+      expect(await syncs()).toEqual([`billing-usage:${settled}:sync:1`]);
+    });
   });
 
   it("counts only the operator's own test call, not a customer reaching the website widget", async () => {

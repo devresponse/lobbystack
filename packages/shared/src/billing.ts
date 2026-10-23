@@ -47,7 +47,7 @@ export type BillingUsageKind = (typeof billingUsageKinds)[number];
  */
 export const liveSubscriptionStates = ["active", "trialing", "past_due"] as const;
 
-/** A billable plan on a live subscription: the gate for numbers and paid prompts. */
+/** A billable plan on a live subscription: the gate for paid prompts. Numbers follow the plan's own count. */
 export function isPaidSubscription(plan: string | null | undefined, state: string | null | undefined): boolean {
   return ["starter", "pro", "enterprise"].includes(plan ?? "") && (liveSubscriptionStates as readonly string[]).includes(state ?? "");
 }

@@ -11,7 +11,8 @@ import type { DomainContext } from "./context";
 // price. A week before it, the worker tells Polar what the renewal does (move
 // to the tier's standard product without the plan's discount, or cancel) and
 // emails the business's owners. Once the renewal happens, Polar's webhook
-// moves the account off the plan as for any other product change.
+// moves the account off the plan as for any other product change; a canceled
+// subscription is no longer live, so its plan stops counting without one.
 
 /** How long before a promo plan ends the owners hear about it and Polar is told. */
 export const PROMO_END_NOTICE_MS = 7 * 24 * 60 * 60_000;
@@ -124,12 +125,14 @@ export async function loadPromoEndWork(context: DomainContext, input: { business
 /**
  * Records what the worker did for a due ending: that Polar was told, and the
  * owners' email, which goes once per ending and says what the renewal does:
- * the plan the subscription moves to, or that it ends. Nothing changes when the account
- * moved on meanwhile, such as onto another plan. Returns the emails queued.
+ * the plan the subscription moves to, or that it ends. A quiet notice sends
+ * nothing: the business chose another promo plan for that renewal and saw its
+ * terms then. Nothing changes when the account moved on meanwhile, such as
+ * onto another plan. Returns the emails queued.
  */
 export async function recordPromoEnd(
   context: DomainContext,
-  input: { businessId: string; planCode: string; planEnds: Date; set: boolean; notice: { ending: PromoPlanEnding; endsAt: Date; tier: HostedCheckoutPlanSlug; interval: BillingInterval } | null; appUrl: string },
+  input: { businessId: string; planCode: string; planEnds: Date; set: boolean; notice: { ending: PromoPlanEnding; endsAt: Date; tier: HostedCheckoutPlanSlug; interval: BillingInterval; quiet?: boolean } | null; appUrl: string },
 ): Promise<number> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     await lockBillingAccount(tx, input.businessId);
@@ -140,7 +143,8 @@ export async function recordPromoEnd(
       await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_end_set", entityType: "billing_account", entityId: input.businessId, payload: { plan: input.planCode, ending: input.notice?.ending ?? promoPlanEnding(row.end_with, row.plan_ending) } });
     }
     if (!input.notice || row.end_notice_at !== null) return 0;
-    const queued = await queuePromoEndNotice(tx, { businessId: input.businessId, planCode: input.planCode, planEnds: input.planEnds, ...input.notice, appUrl: input.appUrl });
+    const { quiet, ...notice } = input.notice;
+    const queued = quiet ? 0 : await queuePromoEndNotice(tx, { businessId: input.businessId, planCode: input.planCode, planEnds: input.planEnds, ...notice, appUrl: input.appUrl });
     await tx.execute(sql`update public.billing_accounts set end_notice_at = now(), updated_at = now() where business_id = ${input.businessId}::uuid`);
     return queued;
   });
@@ -209,12 +213,18 @@ export async function endPromoPlanInTransaction(tx: DatabaseTransaction, input: 
   const ending = promoPlanEnding(row.end_with, row.plan_ending) ?? "tier";
   const now = new Date();
   const current = dateOrNull(row.plan_ends);
-  const planEnds = current && current.getTime() <= now.getTime() ? current : now;
-  if (current?.getTime() !== planEnds.getTime() || row.end_with !== ending) {
-    // A new end date or ending needs a new email, and Polar telling again.
+  const periodEnd = dateOrNull(row.current_period_end);
+  // A plan that already ends at the next renewal, or whose end has passed, keeps its date.
+  const keepsDate = current !== null && (current.getTime() <= now.getTime() || (periodEnd !== null && promoPlanEndRenewal(current, periodEnd) !== null));
+  const planEnds = keepsDate ? current : now;
+  if (current?.getTime() !== planEnds.getTime()) {
+    // A new end date needs a new email, and Polar telling again.
     await tx.execute(sql`
       update public.billing_accounts set plan_ends = ${planEnds.toISOString()}::timestamptz, end_with = ${ending}, end_notice_at = null, end_set_at = null, updated_at = now()
       where business_id = ${input.businessId}::uuid`);
+  } else if (row.end_with !== ending) {
+    // The same renewal ends it the same way, so it is only due at once: owners who heard about it don't hear again.
+    await tx.execute(sql`update public.billing_accounts set end_with = ${ending}, updated_at = now() where business_id = ${input.businessId}::uuid`);
   }
   await enqueueOutbox(tx, { topic: "billing.endPromoPlan", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `promo-end:${input.businessId}:${planEnds.getTime()}:${ending}`, payload: {} });
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `billing:${input.businessId}:promo-ended:${now.getTime()}`, payload: { type: "billing.updated", entityId: input.businessId } });

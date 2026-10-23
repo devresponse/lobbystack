@@ -5,7 +5,7 @@ import { and, eq, inArray, isNull, lte, ne, or } from "drizzle-orm";
 
 import { hasSummarizableTranscript, type BusinessHoursExtractor, type BusinessSummarizer, type CallSummarizer } from "@lobbystack/agent-core";
 import { realtimeEventSchema, type JobEnvelope } from "@lobbystack/contracts";
-import { currentBrand, getPolarMeteredUsagePayload, liveSubscriptionStates, normalizeInterfaceLocale, permanentSmsErrorCode, planChangeDirection, planChangeRefusals, smsErrorCode, type BillingUsageKind, type PlanChangeRefusal } from "@lobbystack/shared";
+import { currentBrand, getPolarMeteredUsagePayload, normalizeInterfaceLocale, permanentSmsErrorCode, planChangeDirection, planChangeRefusals, smsErrorCode, type BillingUsageKind, type PlanChangeRefusal } from "@lobbystack/shared";
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, loadSmsDeliveryTarget, readPolarProductLinks, type PolarProductLinks, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
@@ -16,7 +16,7 @@ import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type Webh
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
 import { runDailyBillingVerify, type DailyBillingVerifyOutcome } from "@lobbystack/domain";
-import { loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
+import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import { invitationSubject, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
@@ -337,9 +337,10 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const body = verificationCodeSmsBody(target.code, await deploymentAppName(dependencies.domain.db), normalizeInterfaceLocale(String(job.payload.locale ?? "")) ?? "en");
       // The code goes out from the alert sender, so it counts against the alert SMS quota.
       const usageSourceKey = `alert_sms:phone_verification:${attemptId}`;
+      const segments = estimateSmsSegments(body);
       let usageEventId: string | undefined;
       if (dependencies.domain.db) {
-        const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, estimatedSegments: estimateSmsSegments(body) });
+        const reservation = await reserveAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, estimatedSegments: segments });
         if (!reservation.allowed) {
           await releaseOperatorPhoneVerificationCodeSend(dependencies.domain, { businessId, attemptId, retry: false, error: reservation.errorCode ?? "Alert SMS quota reached." });
           return { status: "skipped", entityId: attemptId };
@@ -358,7 +359,8 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         throw error;
       }
       await markOperatorPhoneVerificationCodeSent(dependencies.domain, { businessId, attemptId });
-      if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+      // No delivery report comes back for a code, so its estimate settles the usage.
+      if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId: await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, segments }) });
       return { status: "completed", entityId: attemptId };
     }
     case "snapshot.refresh":
@@ -775,7 +777,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "This promo plan isn't on sale right now." });
         return { status: "skipped", entityId: requestId };
       }
-      const promo = request.planCode && sale ? { plan: request.planCode, ...sale, metadata: { lobbystack_plan: request.planCode, lobbystack_checkout: requestId } } : null;
+      const promo = request.planCode && sale ? { ...sale, metadata: { lobbystack_plan: request.planCode, lobbystack_checkout: requestId } } : null;
       // A business that already pays moves its subscription: Polar refuses a second one.
       if (request.subscription) {
         const changed = await changeBillingPlan(dependencies, { businessId, requestId, target: request.target, billingInterval: request.billingInterval, subscription: request.subscription, promo, links });
@@ -813,7 +815,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         }
         try {
           let providerMessageId: string;
-          let usageEventId: string | undefined;
           if (delivery.channel === "sms") {
             const sender = smsProviderFor(dependencies, delivery.sender);
             if (!sender || !delivery.sender) throw new Error("Operator SMS delivery is not configured.");
@@ -823,7 +824,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
                 await markOperatorNotificationSkipped(dependencies.domain, { businessId, deliveryId: delivery.id, error: reservation.errorCode ?? "Alert SMS quota reached." });
                 return { status: "skipped", entityId: delivery.id };
               }
-              usageEventId = reservation.usageEventId;
             }
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
           } else {
@@ -833,7 +833,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
             providerMessageId = (await dependencies.email.sendTemplate({ template: "operator_alert", to: delivery.destination, subject: delivery.subject, variables, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           }
           await markOperatorNotificationSent(dependencies.domain, { businessId, deliveryId: delivery.id, providerMessageId });
-          if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+          // Twilio's delivery report settles the segments the SMS used, and that queues its sync to Polar.
           return { status: "completed", entityId: delivery.id };
         } catch (error) {
           await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.eventKind });
@@ -867,7 +867,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const delivery = resolution.delivery;
       try {
         let providerMessageId: string;
-        let usageEventId: string | undefined;
         if (delivery.channel === "sms") {
           const sender = smsProviderFor(dependencies, delivery.from);
           if (!sender || !delivery.from) {
@@ -880,7 +879,6 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
               await transitionProcessingNotification(dependencies.domain, { businessId, notificationId: delivery.notificationId }, "skipped");
               return { status: "skipped", entityId: delivery.notificationId };
             }
-            usageEventId = reservation.usageEventId;
           }
           const sent = await sender.sendSms({ to: delivery.to, from: delivery.from, body: delivery.body, ...twilioStatusCallbackOption({ notificationId: delivery.notificationId }) });
           providerMessageId = sent.providerMessageId;
@@ -893,7 +891,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           providerMessageId = sent.messageId;
         }
         await markNotificationSent(dependencies.domain, { businessId: delivery.businessId, notificationId: delivery.notificationId, providerMessageId });
-        if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId });
+        // Twilio's delivery report settles the segments the SMS used, and that queues its sync to Polar.
         return { status: "completed", entityId: delivery.notificationId };
       } catch (error) {
         await recordNotificationDeliveryFailed(dependencies, { businessId, kind: delivery.kind, ...(delivery.relatedId ? { appointmentId: delivery.relatedId } : {}) });
@@ -1374,10 +1372,11 @@ function planChangeRefusalFor(error: unknown): PlanChangeRefusal | undefined {
 }
 
 /**
- * Moves a paying business's Polar subscription to the plan it asked for. An
- * upgrade is charged as billing.json's polar.upgradeProration says, a
- * downgrade as downgradeProration. Null when Polar's subscription has already
- * ended, so the business needs a new checkout after all.
+ * Moves a paying business's Polar subscription to the plan it asked for. A
+ * downgrade is charged as billing.json's polar.downgradeProration says, and
+ * any other change, an upgrade or a move between a promo plan and its tier's
+ * standard plan, as upgradeProration. Null when Polar's subscription has
+ * ended or isn't live, so the business needs a new checkout after all.
  */
 async function changeBillingPlan(
   dependencies: WorkerDependencies,
@@ -1403,7 +1402,7 @@ async function changeBillingPlan(
     const { links } = input;
     const productId = input.promo?.productId ?? polarCheckoutProductId(links, input.target, input.billingInterval);
     const subscription = await polar.getSubscription(input.subscription.id);
-    if (!subscription || subscription.endedAt || !(liveSubscriptionStates as readonly string[]).includes(subscription.status)) return null;
+    if (!subscription || subscription.endedAt || !isLiveSubscriptionState(subscription.status)) return null;
     // A retry after Polar made the change, or a change already waiting for the next period.
     if (subscription.productId === productId || subscription.pendingProductId === productId) {
       await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
@@ -1440,8 +1439,10 @@ async function changeBillingPlan(
  * Tells Polar how a promo plan that is due to end ends, at the renewal that
  * ends it: the subscription moves to its tier's standard product without the
  * plan's discount, or cancels. A change the business already scheduled for
- * that renewal, or a cancellation, stands. Then the owners get their email.
- * Polar's webhook moves the account off the plan once the renewal happens.
+ * that renewal, or a cancellation, stands. Then the owners get their email,
+ * unless the business chose another promo plan for that renewal, whose own
+ * terms it saw then. Polar's webhook moves the account off the plan once the
+ * renewal happens.
  */
 async function endPromoPlan(dependencies: WorkerDependencies, input: { businessId: string }): Promise<JobResult> {
   const { businessId } = input;
@@ -1449,14 +1450,17 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
   if (!polar?.getSubscription || !polar.changeSubscriptionProduct || !polar.cancelSubscriptionAtPeriodEnd) return { status: "skipped", entityId: businessId };
   const work = await loadPromoEndWork(dependencies.domain, { businessId });
   if (!work) return { status: "skipped", entityId: businessId };
+  // Nothing to tell Polar and the owners heard: a day of the last week.
+  if (!work.set && !work.notify) return { status: "completed", entityId: `${businessId}:${work.planCode}:0` };
   // What the owners' email says the renewal does, once Polar's view of the subscription is known.
   let { ending, endsAt, tier, interval } = work;
+  let chosePromoPlan = false;
   if (work.set) {
     if (work.overdue) await reportWarning(new Error("A promo plan is still in force after the renewal that should have ended it, so Polar is told again."), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
     try {
       const subscription = await polar.getSubscription(work.subscriptionId);
       // An ended subscription takes the plan with it, and its webhook tells the account.
-      if (!subscription || subscription.endedAt || !(liveSubscriptionStates as readonly string[]).includes(subscription.status)) return { status: "skipped", entityId: businessId };
+      if (!subscription || subscription.endedAt || !isLiveSubscriptionState(subscription.status)) return { status: "skipped", entityId: businessId };
       const periodEnd = subscription.currentPeriodEnd ? new Date(subscription.currentPeriodEnd) : null;
       if (periodEnd && periodEnd.getTime() > Date.now()) endsAt = periodEnd;
       const links = await readPolarProductLinks(dependencies.domain);
@@ -1464,10 +1468,11 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
       interval = links.planFor(subscription.productId)?.interval ?? interval;
       if (subscription.cancelAtPeriodEnd) {
         ending = "cancel";
-      } else if (pending && pending.code === pending.plan) {
-        // The business already chose a standard plan for the next period.
+      } else if (pending) {
+        // The business already chose a plan for the next period: a standard one, or another promo plan.
         ({ plan: tier, interval } = pending);
         ending = "tier";
+        chosePromoPlan = pending.code !== pending.plan;
       } else if (ending === "cancel") {
         await polar.cancelSubscriptionAtPeriodEnd(subscription.id);
       } else {
@@ -1487,14 +1492,16 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
     }
   }
   const appUrl = process.env.APP_BASE_URL ?? "http://localhost:3000";
-  const emails = await recordPromoEnd(dependencies.domain, { businessId, planCode: work.planCode, planEnds: work.planEnds, set: work.set, notice: work.notify ? { ending, endsAt, tier, interval } : null, appUrl });
+  const emails = await recordPromoEnd(dependencies.domain, { businessId, planCode: work.planCode, planEnds: work.planEnds, set: work.set, notice: work.notify ? { ending, endsAt, tier, interval, quiet: chosePromoPlan } : null, appUrl });
   return { status: "completed", entityId: `${businessId}:${work.planCode}:${emails}` };
 }
 
 /**
  * Removes a promo plan's discount from a subscription on a standard product,
  * which a switch in Polar's billing portal leaves behind. Polar stops it from
- * the next billing cycle.
+ * the next billing cycle. A subscription waiting to move to a promo plan at
+ * its renewal keeps it: that plan's change brought it. Polar's 409 is tried
+ * again, as the outbox won't queue the same removal twice.
  */
 async function dropPromoDiscount(dependencies: WorkerDependencies, input: { businessId: string; subscriptionId: string; discountId: string }): Promise<JobResult> {
   const { businessId } = input;
@@ -1503,14 +1510,16 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
   try {
     const subscription = await polar.getSubscription(input.subscriptionId);
     if (!subscription || subscription.endedAt || subscription.discountId !== input.discountId) return { status: "skipped", entityId: businessId };
-    const product = (await readPolarProductLinks(dependencies.domain)).planFor(subscription.productId);
+    const links = await readPolarProductLinks(dependencies.domain);
+    const product = links.planFor(subscription.productId);
+    const pending = links.planFor(subscription.pendingProductId);
     // A promo product keeps its own discount, so only a standard product loses it.
-    if (!product || product.code !== product.plan) return { status: "skipped", entityId: businessId };
+    if (!product || product.code !== product.plan || (pending && pending.code !== pending.plan)) return { status: "skipped", entityId: businessId };
     await polar.removeSubscriptionDiscount(subscription.id);
     return { status: "completed", entityId: `${businessId}:${input.discountId}` };
   } catch (error) {
     const refusal = planChangeRefusalFor(error);
-    if (!refusal) throw error;
+    if (!refusal || refusal === "change_pending") throw error;
     if (refusal === "token_scope") await reportWarning(new Error(`Polar refused to remove a promo plan's discount: ${planChangeRefusals[refusal]}`), { operation: "job.billing.endPromoPlan", businessId });
     return { status: "skipped", entityId: businessId };
   }

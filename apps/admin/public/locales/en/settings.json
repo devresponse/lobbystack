@@ -493,7 +493,10 @@
         "paid": "Paid",
         "pending": "Pending",
         "refunded": "Refunded",
-        "partially_refunded": "Partial refund"
+        "partially_refunded": "Partial refund",
+        "succeeded": "Completed",
+        "failed": "Failed",
+        "canceled": "Canceled"
       },
       "kindLabels": {
         "order": "Order",

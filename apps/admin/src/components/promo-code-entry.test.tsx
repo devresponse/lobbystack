@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BillingCodeView } from "@lobbystack/shared";
+import { isUpgradeInProgress, setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry } from "./promo-code-entry";
 
 const translate = vi.hoisted(() => vi.fn((key: string, options?: Record<string, unknown>) => options ? `${key} ${JSON.stringify(options)}` : key));
@@ -79,6 +80,14 @@ describe("Have a promo code?", () => {
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
   });
 
+  it("forgets a promo link's code for the plan the business already has", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup(() => Response.json({ ...view, current: true }));
+    await screen.findByText("billing.promo.errors.current");
+    expect(screen.queryByRole("button", { name: "billing.promo.subscribe.monthly" })).toBeNull();
+    expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
+  });
+
   it("moves a paying business's subscription without a checkout page", async () => {
     store["lobbystack.billing.promoCode"] = "SALONS-2026";
     const { assign } = setup((url, init) => {
@@ -91,5 +100,23 @@ describe("Have a promo code?", () => {
     await screen.findByRole("button", { name: "billing.promo.link" });
     expect(assign).not.toHaveBeenCalled();
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
+  });
+
+  it("holds off the leaving survey while a code's plan change waits for Polar, without clearing the upgrade dialog's hold", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    setup((url, init) => {
+      if (url.startsWith("/api/billing/promo?")) return Response.json(view);
+      if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "promo-change" });
+      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: false, refusal: null });
+    }, { changesPlan: true });
+    const change = await screen.findByRole("button", { name: "billing.promo.change.monthly" });
+    expect(isUpgradeInProgress()).toBe(false);
+    setUpgradeInProgress(true);
+    await userEvent.click(change);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    setUpgradeInProgress(false);
+    expect(isUpgradeInProgress()).toBe(true);
+    cleanup();
+    expect(isUpgradeInProgress()).toBe(false);
   });
 });

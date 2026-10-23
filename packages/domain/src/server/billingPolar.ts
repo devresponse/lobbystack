@@ -90,7 +90,8 @@ const periodWords: Record<BillingInterval, string> = { monthly: "monthly", annua
 export const productKey = (plan: string, period: string) => `${plan}/${period}`;
 
 function planLabel(plan: DesiredBillingPlan): string {
-  return standardLabels[plan.code] ?? plan.names?.en ?? plan.code;
+  // Own keys only: a plan coded constructor isn't Object's.
+  return (Object.hasOwn(standardLabels, plan.code) ? standardLabels[plan.code] : undefined) ?? plan.names?.en ?? plan.code;
 }
 
 /**
@@ -98,7 +99,8 @@ function planLabel(plan: DesiredBillingPlan): string {
  * per live price of every sold plan, Credits for each monthly product's
  * allowances, a discount per plan that has one, and the webhook. Annual
  * products get no Credits: the worker reports only each month's overage for
- * them, so Credits would take the allowance off twice.
+ * them, so Credits would take the allowance off twice. A plan sold only by
+ * the year has none at all.
  */
 export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; webhookUrl: string | null }): DesiredPolarCatalog {
   const credits: DesiredPolarCredits[] = [];
@@ -107,7 +109,8 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
   for (const plan of input.plans) {
     if (!plan.sold || !plan.prices.length) continue;
     const label = planLabel(plan);
-    const planCredits = polarMeterSpecs.flatMap((meter) => {
+    const sellsMonthly = plan.prices.some((price) => price.period === "monthly");
+    const planCredits = !sellsMonthly ? [] : polarMeterSpecs.flatMap((meter) => {
       const units = meter.units(plan);
       // Polar refuses Credits of 0 units, so a plan that includes none of a meter gets none.
       return units > 0 ? [{ key: `${input.brand}/${plan.code}/${meter.key}`, plan: plan.code, meter: meter.key, units, description: `${units} ${meter.noun} a month` }] : [];
@@ -285,14 +288,16 @@ type ProductMatch = {
 /**
  * The calls that make an organization sell what the file says, in the order
  * they run: settings, meters, Credits, products, their Credits, discounts,
- * the webhook, then archiving. Anything the run must not decide on its own
- * is a refusal instead, and a run with refusals makes no call at all.
+ * the webhook, then archiving, meters last. Anything the run must not decide
+ * on its own is a refusal instead, and a run with refusals makes no call at all.
  */
 export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot: PolarSnapshot; options: PolarPlanOptions; now?: string }): PolarPlan {
   const { catalog, snapshot, options } = input;
   const now = input.now ?? new Date().toISOString();
   const steps: PolarStep[] = [];
   const late: PolarStep[] = [];
+  // Polar refuses to archive a meter that a live product's price still uses, so meters wait for the products.
+  const lateMeters: PolarStep[] = [];
   const refusals: PolarRefusal[] = [];
   const refuse = (object: PolarStepObject, subject: string, message: string) => refusals.push({ object, subject, message });
   const ours = (metadata: PolarMetadata) => metadata[polarTags.brand] === catalog.brand;
@@ -364,7 +369,7 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
         continue;
       }
       create([`replaces "${found.name}", which doesn't count Sum of quantity where Name equals ${meter.event}`]);
-      late.push({ object: "meter", action: "archive", subject: `Meter "${found.name}"`, changes: [`replaced by a new "${meter.name}"`], method: "PATCH", path: `/v1/meters/${found.id}`, body: { is_archived: true } });
+      lateMeters.push({ object: "meter", action: "archive", subject: `Meter "${found.name}"`, changes: [`replaced by a new "${meter.name}"`], method: "PATCH", path: `/v1/meters/${found.id}`, body: { is_archived: true } });
       continue;
     }
     const body: Record<string, unknown> = {};
@@ -665,7 +670,7 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     }
   }
 
-  return { steps: [...steps, ...late], refusals };
+  return { steps: [...steps, ...late, ...lateMeters], refusals };
 }
 
 // Running a plan.
@@ -686,9 +691,11 @@ function resolveRefs(value: unknown, ids: ReadonlyMap<string, string>): unknown 
 /**
  * Makes each call in order, putting the ids of objects made earlier into the
  * ones after. Stops at the first failure: what landed is found again by its
- * tags on the next run. Returns the new webhook's secret, when one was made.
+ * tags on the next run. Returns the new webhook's secret, when one was made;
+ * onStep hears it with the call that made the webhook, so a caller keeps it
+ * even when a later call fails.
  */
-export async function runPolarSteps(caller: PolarCaller, steps: readonly PolarStep[], onStep?: (step: PolarStep) => void): Promise<{ webhookSecret: string | null }> {
+export async function runPolarSteps(caller: PolarCaller, steps: readonly PolarStep[], onStep?: (step: PolarStep, webhookSecret: string | null) => void): Promise<{ webhookSecret: string | null }> {
   const ids = new Map<string, string>();
   let webhookSecret: string | null = null;
   for (const step of steps) {
@@ -698,8 +705,9 @@ export async function runPolarSteps(caller: PolarCaller, steps: readonly PolarSt
       if (typeof result?.id !== "string") throw new Error(`Polar made ${step.subject} but sent no id back. Run again: it is found by its tags.`);
       ids.set(step.produces, result.id);
     }
-    if (step.object === "webhook" && step.action === "create" && typeof result?.secret === "string") webhookSecret = result.secret;
-    onStep?.(step);
+    const secret = step.object === "webhook" && step.action === "create" && typeof result?.secret === "string" ? result.secret : null;
+    if (secret) webhookSecret = secret;
+    onStep?.(step, secret);
   }
   return { webhookSecret };
 }

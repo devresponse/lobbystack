@@ -503,7 +503,10 @@
         "paid": "Payé",
         "pending": "En attente",
         "refunded": "Remboursé",
-        "partially_refunded": "Remboursement partiel"
+        "partially_refunded": "Remboursement partiel",
+        "succeeded": "Effectué",
+        "failed": "Échoué",
+        "canceled": "Annulé"
       },
       "kindLabels": {
         "order": "Commande",

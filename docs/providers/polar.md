@@ -14,11 +14,11 @@ Use this guide to connect your Polar organization to hosted Starter and Pro bill
 
 ## Create the hosted products
 
-Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.md`](../../brands/README.md)). It creates or adopts the Polar products, meters, benefits and webhook the file describes, then links them in the billing catalog. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included, and the plan screens show the catalog's prices in its currency. Confirm the live prices in Polar before accepting payments.
+Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.md`](../../brands/README.md)). It writes the file's plans to the billing catalog, creates or adopts the Polar products, meters, benefits and webhook the file describes, then links them in the catalog. The plan screens and usage limits follow the catalog as soon as it holds the Starter and Pro rows, in its currency. Once a link makes a plan active, checkout, plan changes and the webhook use the catalog's linked products, a retired price's product included. An apply that changes a sold plan's terms, its prices included, stops that plan's checkout until the run links it again, so run `pnpm billing apply` again if one stops part-way. Confirm the live prices in Polar before accepting payments.
 
 Use `starter` or `pro` for checkout, with monthly or annual billing.
 
-The four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables (such as `POLAR_STARTER_MONTHLY_PRODUCT_ID`) are optional. A deployment that hasn't applied a `billing.json` yet sells a plan through its variable if it has one, and shows this build's built-in plans in US dollars. After the link, checkout ignores them, and `pnpm billing verify` notes any that are still set so you can remove them.
+The four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables (such as `POLAR_STARTER_MONTHLY_PRODUCT_ID`) are optional. A deployment that hasn't applied a `billing.json` yet sells a plan through its variable if it has one, and shows this build's built-in plans in US dollars. After a plan's first link, checkout ignores them, and `pnpm billing verify` notes any that are still set so you can remove them.
 
 ## Configure usage event ingestion
 
@@ -63,15 +63,16 @@ Match `POLAR_API_BASE_URL` to the environment that issued the token and webhook 
 
 ## Route billing requests
 
-The Next.js app exposes three billing entry points.
+The Next.js app exposes four billing entry points.
 
 | Route | Purpose |
 | --- | --- |
-| `POST /api/billing/checkout` | Queue a Starter or Pro checkout request. |
+| `POST /api/billing/checkout` | Queue a Starter or Pro checkout request, or one for the plan a promo code unlocks. |
+| `POST /api/billing/promo` | Look up the plan a promo code unlocks, with its discount and prices. |
 | `POST /api/billing/portal` | Create a customer portal session for an active paid subscription. |
 | `POST /api/webhooks/polar` | Verify and store Polar events for worker reconciliation. |
 
-Configure Polar to send subscription and order webhooks to `https://app.example.com/api/webhooks/polar`. Replace `app.example.com` with your admin application’s public host.
+`pnpm billing apply` makes Polar's webhook for subscription and order events at the instance's own `/api/webhooks/polar`, or at the address `--webhook-url` names, and finds it again by that address on later runs. When the run makes the webhook, `--railway-file` saves its secret as `POLAR_WEBHOOK_SECRET`; otherwise copy the secret from the webhook in Polar's settings.
 
 Set `POLAR_WEBHOOK_SECRET` in production. The route rejects missing secrets and invalid signatures with HTTP 401.
 
@@ -118,7 +119,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 
 - Confirm only business administrators can start checkout or open the portal.
 - Complete monthly and annual checkout for Starter and Pro.
-- Upgrade a paying Starter business to Pro from **Settings** > **Billing**, and confirm Polar invoices the difference and the page shows Pro.
+- Upgrade a paying Starter business to Pro from **Settings** > **Plan**, and confirm Polar invoices the difference and the page shows Pro.
 - Confirm invalid webhook signatures receive an unauthorized response.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.

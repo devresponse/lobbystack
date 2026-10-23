@@ -63,8 +63,8 @@ export function estimateSmsSegments(body: string): number {
     if (GSM_BASIC.has(character)) septets += 1;
     else if (GSM_EXTENDED.has(character)) septets += 2;
     else {
-      const codePointLength = Array.from(body).length;
-      return codePointLength <= 70 ? 1 : Math.max(1, Math.ceil(codePointLength / 67));
+      // UCS-2 counts UTF-16 units, so an emoji takes two of a segment's 70.
+      return body.length <= 70 ? 1 : Math.ceil(body.length / 67);
     }
   }
   return septets <= 160 ? 1 : Math.max(1, Math.ceil(septets / 153));
@@ -82,6 +82,13 @@ function includedQuantity(config: BillingPlanLimits, kind: NonAiBillingUsageKind
   if (kind === "alert_sms_segments") return config.alertSmsSegmentsIncluded;
   if (kind === "chat_ai_tokens") return config.chatAiTokensIncluded;
   return config.outboundCallAttemptsIncluded;
+}
+
+function limitReachedCode(kind: NonAiBillingUsageKind): string {
+  if (kind === "voice_seconds") return billingErrorCodes.voiceLimitReached;
+  if (kind === "alert_sms_segments") return billingErrorCodes.alertSmsLimitReached;
+  if (kind === "chat_ai_tokens") return billingErrorCodes.chatAiLimitReached;
+  return billingErrorCodes.outboundCallAttemptLimitReached;
 }
 
 function rateCents(config: BillingPlanLimits, kind: NonAiBillingUsageKind): number {
@@ -154,13 +161,15 @@ function hasUnlimitedVoice(billing: Pick<UsageContext, "plan" | "planCode" | "ca
 }
 
 // The voice seconds a limited plan can still reserve: its included seconds
-// left, plus what the overage cap still pays for. 0 on an unlimited plan.
+// left, plus what the overage cap still pays for, which is no limit when extra
+// minutes cost nothing. 0 on an unlimited plan.
 function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" | "capCents" | "limits">, current: { usage: UsageCounts; rawSpendCents: number }): number {
   const config = currentLimits(billing);
   const included = includedQuantity(config, "voice_seconds");
   const remainingIncluded = included === null ? 0 : Math.max(0, included - current.usage.voice_seconds);
   const remainingCap = billing.capCents === null ? 0 : Math.max(0, billing.capCents - current.rawSpendCents);
-  const capSeconds = rateCents(config, "voice_seconds") > 0 ? Math.floor(remainingCap / rateCents(config, "voice_seconds")) : 0;
+  const rate = rateCents(config, "voice_seconds");
+  const capSeconds = rate > 0 ? Math.floor(remainingCap / rate) : Number.POSITIVE_INFINITY;
   return config.overagesBillable ? (billing.capCents === null ? 0 : remainingIncluded + capSeconds) : remainingIncluded;
 }
 
@@ -299,19 +308,17 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   quantity = Math.max(0, quantity ?? 0);
   if (quantity <= 0) {
     if (input.usageKind === "voice_seconds" && hasUnlimitedVoice(billing)) return { allowed: true, errorCode: null, syncNeeded: false, periodKey, plan: billing.plan };
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
-  const included = includedQuantity(currentLimits(billing), input.usageKind);
-  if (!currentLimits(billing).overagesBillable && included !== null && current.usage[input.usageKind] + quantity > included) {
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+  const limits = currentLimits(billing);
+  const included = includedQuantity(limits, input.usageKind);
+  if (!limits.overagesBillable && included !== null && current.usage[input.usageKind] + quantity > included) {
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const eventPayload = { sourceKey: input.sourceKey, quantity, usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: input.usageKind === "outbound_call_attempts" || input.usageKind === "chat_ai_tokens" };
   const simulated = replayEvents([...events, eventPayload], billing, billing.limits);
   if (billing.capCents !== null && simulated.rawSpendCents > billing.capCents) {
-    const errorCode = input.usageKind === "voice_seconds" ? billingErrorCodes.voiceLimitReached : input.usageKind === "alert_sms_segments" ? billingErrorCodes.alertSmsLimitReached : input.usageKind === "chat_ai_tokens" ? billingErrorCodes.chatAiLimitReached : billingErrorCodes.outboundCallAttemptLimitReached;
-    return { allowed: false, errorCode, syncNeeded: false, periodKey, plan: billing.plan };
+    return { allowed: false, errorCode: limitReachedCode(input.usageKind), syncNeeded: false, periodKey, plan: billing.plan };
   }
   const syncNeeded = billing.plan === "starter" || billing.plan === "pro";
   const others = events.filter((row) => row.sourceKey !== input.sourceKey);
@@ -386,9 +393,15 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
   return eventId;
 }
 
+/**
+ * Queues a usage event's sync to Polar once it is final. A reservation's
+ * estimate waits for the correction that settles it, which queues it then: a
+ * sync queued earlier would be skipped, and its key would keep the settled
+ * quantity from being queued when it matches the estimate.
+ */
 export async function enqueueUsageSyncInTransaction(tx: DatabaseTransaction, input: { businessId: string; usageEventId: string }): Promise<void> {
-  const event = (await tx.select({ quantity: billingUsageEvents.quantity, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId))).limit(1))[0];
-  if (!event || event.syncStatus !== "pending") return;
+  const event = (await tx.select({ quantity: billingUsageEvents.quantity, syncStatus: billingUsageEvents.syncStatus, isFinal: billingUsageEvents.isFinal }).from(billingUsageEvents).where(and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId))).limit(1))[0];
+  if (!event || event.syncStatus !== "pending" || !event.isFinal) return;
   await enqueueOutbox(tx, {
     topic: "billing.syncUsage",
     businessId: input.businessId,

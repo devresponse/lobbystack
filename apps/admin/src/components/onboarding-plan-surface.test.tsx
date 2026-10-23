@@ -85,7 +85,7 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/billing/checkout", expect.objectContaining({ body: JSON.stringify({ businessId: "business", target: "pro", billingInterval: interval }) })));
     telemetryRef.current!.expectEvent("web.onboarding.plan_selected", { businessId: "business", plan: "pro" });
     telemetryRef.current!.expectEvent("web.onboarding.plan_checkout_started", { businessId: "business", plan: "pro" });
-    expect(await screen.findByText("Checkout failed")).toBeTruthy();
+    expect(await screen.findByText("plan.continueFailed")).toBeTruthy();
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
   });
   it("lets them pick again when the back button restores the page from cache", async () => {

@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { billingPlanName, type BillingCodeView, type BillingInterval, type PlanChangeRefusal, type ResolvedBillingDiscount } from "@lobbystack/shared";
 import { Check, LoaderCircle } from "lucide-react";
 
-import { formatMoney, includedLines } from "@/lib/billing-plans";
+import { formatMoney, includedLines, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { requestJson } from "@/lib/request-json";
 import { capturePromoCodeFromUrl, clearStoredPromoCode, getStoredPromoCode } from "@/lib/promo-code";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
@@ -19,9 +19,6 @@ import { Label } from "./ui/label";
 type Translate = ReturnType<typeof useTranslation>["t"];
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
 type Checkout = { requestId: string; interval: BillingInterval };
-
-// How long a plan change waits for Polar's webhook before it stops checking, as in the upgrade dialog.
-const PLAN_CHANGE_SYNC_MS = 90_000;
 
 const errorKeys: Record<string, string> = {
   promo_invalid: "billing.promo.errors.invalid",
@@ -50,7 +47,7 @@ export function promoDiscountText(discount: ResolvedBillingDiscount, currency: s
  * promo link (?promo=, kept through sign-up) is filled in and checked at once.
  * A business that already pays has its subscription moved instead of a checkout.
  */
-export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged }: { businessId: string; changesPlan?: boolean; onPlanChanged?: () => void }) {
+export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId: string; changesPlan?: boolean }) {
   const { i18n, t } = useTranslation("settings");
   const client = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -64,7 +61,12 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
   const lookup = useMutation({
     mutationFn: (code: string) => requestJson<BillingCodeView>(`/api/billing/promo?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
     onMutate: () => { setError(null); setView(null); },
-    onSuccess: (result) => { setView(result); setValue(result.code); },
+    onSuccess: (result) => {
+      setView(result);
+      setValue(result.code);
+      // Nor should one for the plan the business already has: each check spends one of its tries.
+      if (result.current) clearStoredPromoCode();
+    },
     onError: (cause) => {
       setError(errorMessage(cause, t, t("billing.promo.errors.failed")));
       // A link's code that doesn't work shouldn't come back on every visit.
@@ -100,7 +102,7 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
     if (result?.status === "ready" && result.checkoutUrl && redirected.current !== checkout.requestId) {
       redirected.current = checkout.requestId;
       clearStoredPromoCode();
-      setUpgradeInProgress(true);
+      setUpgradeInProgress(true, "promo");
       window.location.assign(result.checkoutUrl);
     }
     if (result?.status === "error" || status.isError) {
@@ -122,15 +124,14 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
       setView(null);
       setOpen(false);
       setValue("");
-      onPlanChanged?.();
     };
     if (status.data.synced) { finish(); return; }
     const timer = window.setTimeout(finish, PLAN_CHANGE_SYNC_MS);
     return () => window.clearTimeout(timer);
-  }, [businessId, checkout, client, onPlanChanged, status.data, t]);
+  }, [businessId, checkout, client, status.data, t]);
   useEffect(() => {
     // The back button from checkout can restore this page from the browser's cache, still waiting on it.
-    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) { setCheckout(null); setUpgradeInProgress(false); } };
+    const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) { setCheckout(null); setUpgradeInProgress(false, "promo"); } };
     window.addEventListener("pageshow", onPageShow);
     return () => window.removeEventListener("pageshow", onPageShow);
   }, []);
@@ -150,6 +151,12 @@ export function PromoCodeEntry({ businessId, changesPlan = false, onPlanChanged 
   }
 
   const busy = start.isPending || Boolean(checkout);
+  useEffect(() => {
+    // Buying the code's plan, or waiting for the change to it, is not leaving.
+    if (!busy) return;
+    setUpgradeInProgress(true, "promo");
+    return () => setUpgradeInProgress(false, "promo");
+  }, [busy]);
   const locale = i18n.language;
   if (!open) {
     return <button className="self-start text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" onClick={() => setOpen(true)} type="button">{t("billing.promo.link")}</button>;

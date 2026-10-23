@@ -8,6 +8,7 @@ import { billingPlanName, brandLinks, contactEmailFor, isPaidSubscription, type 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
+import { PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import type { WorkspaceViewModel } from "@/lib/page-view-models";
 import { UpgradePlanDialog, type HostedUpgradePlan } from "./upgrade-plan-dialog";
@@ -23,9 +24,6 @@ type Billing = {
 };
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan };
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
-
-// How long a plan change waits for Polar's webhook before it stops checking. The plan page shows it whenever it lands.
-const PLAN_CHANGE_SYNC_MS = 90_000;
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const { i18n, t } = useTranslation("settings");

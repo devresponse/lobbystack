@@ -248,11 +248,12 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
       // Oldest first. The list reads them newest first, so the free plan's number step comes after a paid one's.
       const cases = [
         // A verification step onboarding no longer has resumes at the plan.
-        { stored: "verify_phone", plan: null, shows: "plan" },
-        // The free plan goes back from the number steps to its plan.
-        { stored: "phone_number", plan: "free_cloud", shows: "plan" },
-        { stored: "phone_number_claiming", plan: "pro", shows: "phone_number_claiming" },
-        { stored: "knowledge", plan: "free_cloud", shows: "knowledge" },
+        { stored: "verify_phone", plan: null, state: null, shows: "plan" },
+        // The free plan goes back from the number steps to its plan, and so does a subscription that ended.
+        { stored: "phone_number", plan: "free_cloud", state: null, shows: "plan" },
+        { stored: "phone_number", plan: "starter", state: "canceled", shows: "plan" },
+        { stored: "phone_number_claiming", plan: "pro", state: "active", shows: "phone_number_claiming" },
+        { stored: "knowledge", plan: "free_cloud", state: null, shows: "knowledge" },
       ] as const;
       const expected: Record<string, string> = {};
       for (const entry of cases) {
@@ -261,7 +262,7 @@ describe.skipIf(!testUrl)("platform keys against PostgreSQL with RLS", () => {
         expected[id] = entry.shows;
         await admin!.db.insert(businesses).values({ id, slug: `platform-stage-${id}`, name: `Stage ${entry.stored}`, timezone: "UTC", businessType: "test", onboardingStage: entry.stored });
         await admin!.db.insert(platformPartnerBusinesses).values({ businessId: id, partnerId });
-        if (entry.plan) await admin!.db.insert(billingAccounts).values({ businessId: id, billingKey: `business:${id}`, plan: entry.plan });
+        if (entry.plan) await admin!.db.insert(billingAccounts).values({ businessId: id, billingKey: `business:${id}`, plan: entry.plan, subscriptionState: entry.state });
       }
       const page = await listBusinessesForApi({ db: worker!.db }, { partnerId, limit: 10 });
       expect(Object.fromEntries(page.data.map((business) => [business.id, business.onboarding_stage]))).toEqual(expected);

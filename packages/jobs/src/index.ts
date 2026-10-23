@@ -58,6 +58,8 @@ export function createQueue(
   });
 }
 
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "notification.dispatch", "billing.endPromoPlan"]);
+
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,
   input: EnqueueJobInput,
@@ -75,12 +77,13 @@ export async function enqueueJob(
     scheduled: (input.delayMs ?? 0) > 0,
   });
   // Attempts and backoff come from the queue's defaultJobOptions, which give up
-  // after about 15 seconds. Usage billing and customer notifications have no
-  // other retry, so they ride out a provider outage for about 3 hours.
+  // after about 15 seconds. Usage billing, customer notifications and a promo
+  // plan's ending or discount removal have no other retry, so they ride out a
+  // provider outage, or Polar's "a change is still pending", for about 3 hours.
   const options: JobsOptions = {
     jobId,
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),
-    ...(input.type === "billing.syncUsage" || input.type === "notification.dispatch" ? { attempts: 12, backoff: { type: "exponential", delay: 5_000 } } : {}),
+    ...(longRetryJobTypes.has(input.type) ? { attempts: 12, backoff: { type: "exponential", delay: 5_000 } } : {}),
   };
   await queue.add(input.type, envelope, options);
   return jobId;

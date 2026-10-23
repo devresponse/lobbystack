@@ -466,7 +466,7 @@
     },
     "spendingCap": {
       "title": "Límite de gasto mensual",
-      "placeholder": "25.00",
+      "placeholder": "25,00",
       "amountLabel": "Límite de excedentes ({{currency}})",
       "noCap": "No hay ningún límite de gasto definido",
       "currentSpend": "Gasto actual en excedentes",
@@ -503,7 +503,10 @@
         "paid": "Pagado",
         "pending": "Pendiente",
         "refunded": "Reembolsado",
-        "partially_refunded": "Reembolso parcial"
+        "partially_refunded": "Reembolso parcial",
+        "succeeded": "Completado",
+        "failed": "Fallido",
+        "canceled": "Cancelado"
       },
       "kindLabels": {
         "order": "Pedido",

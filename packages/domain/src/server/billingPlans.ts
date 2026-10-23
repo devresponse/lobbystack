@@ -25,7 +25,8 @@ import type { DomainContext } from "./context";
 // whose code is their tier. A deployment that hasn't applied a billing.json has
 // no rows, so it shows and enforces the plans this build ships with, and sells
 // through the four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables if it
-// has them. Once a link makes a plan active, only its linked products sell it.
+// has them. Once a link makes a plan active, only its linked products sell it,
+// and the variables never again.
 
 type Row = Record<string, unknown>;
 
@@ -129,8 +130,13 @@ export type PolarProductLinks = {
   planFor(productId: string | null | undefined): { plan: HostedCheckoutPlanSlug; interval: BillingInterval; code: string } | null;
 };
 
+/** The name of the optional variable that sells a plan's price before the catalog links a product, such as POLAR_STARTER_MONTHLY_PRODUCT_ID. */
+export function polarProductVariableName(plan: string, interval: string): string {
+  return `POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`;
+}
+
 function productVariable(env: Record<string, string | undefined>, plan: HostedCheckoutPlanSlug, interval: BillingInterval): string | null {
-  return env[`POLAR_${plan.toUpperCase()}_${interval.toUpperCase()}_PRODUCT_ID`]?.trim() || null;
+  return env[polarProductVariableName(plan, interval)]?.trim() || null;
 }
 
 const isCheckoutPlan = (value: string): value is HostedCheckoutPlanSlug => (hostedCheckoutPlanSlugs as readonly string[]).includes(value);
@@ -142,18 +148,20 @@ const catalogApplies = (plans: CatalogStandardPlan[]) => plans.some((plan) => is
 /**
  * The catalog's Polar links, with the product variables behind them. A
  * standard plan the link made active sells only through the products linked
- * to its live prices, so a price nobody linked yet sells nothing. Before that,
- * a plan sells through its variable. A product names the tier of the plan
- * whose price it sells, a retired price too, so a subscriber on an old
- * product keeps their plan; one the catalog doesn't know falls back to the
- * variables.
+ * to its live prices, so a price nobody linked yet sells nothing. Before its
+ * first link, a plan sells through its variable; a linked plan an apply sent
+ * back to draft sells nothing until the next link, rather than a product with
+ * other terms. A product names the tier of the plan whose price it sells, a
+ * retired price too, so a subscriber on an old product keeps their plan; one
+ * the catalog doesn't know falls back to the variables.
  */
 export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<string, string | undefined>): PolarProductLinks {
   return {
     productFor(plan, interval) {
       const row = catalog.plans.find((entry) => entry.code === plan);
-      if (row?.status !== "active") return productVariable(env, plan, interval);
-      return catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.polar_id ?? null;
+      const prices = catalog.prices.filter((price) => price.plan === plan);
+      if (row?.status === "active") return prices.find((price) => price.period === interval && !price.retired)?.polar_id ?? null;
+      return prices.some((price) => price.polar_id !== null) ? null : productVariable(env, plan, interval);
     },
     saleFor(plan, interval) {
       const row = catalog.others?.find((entry) => entry.code === plan);

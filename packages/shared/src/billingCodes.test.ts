@@ -53,12 +53,15 @@ describe("promo codes", () => {
     expect(promoPlanEnding(undefined, null)).toBeNull();
   });
 
-  it("ends a plan at the renewal that reaches its end, within a day", () => {
+  it("ends a plan at the renewal that reaches its end, within three days", () => {
     const ends = new Date("2026-12-01T00:00:00.000Z");
     expect(promoPlanEndRenewal(ends, null)).toEqual(ends);
     expect(promoPlanEndRenewal(ends, new Date("2026-11-30T06:00:00.000Z"))).toEqual(new Date("2026-11-30T06:00:00.000Z"));
     expect(promoPlanEndRenewal(ends, new Date("2027-06-01T00:00:00.000Z"))).toEqual(new Date("2027-06-01T00:00:00.000Z"));
     // A period that ends sooner is followed by another at the plan's price.
     expect(promoPlanEndRenewal(ends, new Date("2026-11-01T00:00:00.000Z"))).toBeNull();
+    // Three months from January 31 is April 30 here, and Polar renews on April 28 after renewing on February 28.
+    expect(promoPlanEndRenewal(new Date("2027-04-30T00:00:00.000Z"), new Date("2027-04-28T00:00:00.000Z"))).toEqual(new Date("2027-04-28T00:00:00.000Z"));
+    expect(promoPlanEndRenewal(new Date("2027-04-30T00:00:00.000Z"), new Date("2027-03-28T00:00:00.000Z"))).toBeNull();
   });
 });

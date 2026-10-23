@@ -50,6 +50,9 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
 const SHARED = "+18446562290";
 /** A North American number no other fixture uses, so a STOP finds only this test's contacts. */
 const phone = () => `+1647${String(randomInt(0, 10_000_000)).padStart(7, "0")}`;
+/** A business's own Toronto number. They count up from a random start, so two in one run never collide on the unique e164. */
+let nextLocalNumber = randomInt(0, 10_000);
+const localNumber = () => `+1416555${String(nextLocalNumber++ % 10_000).padStart(4, "0")}`;
 
 // The worker's resolvers trust its login identity, so worker steps switch the
 // session user. Operator steps run as the app role. Fixtures run as the owner.
@@ -67,7 +70,6 @@ async function seed(tx: DatabaseTransaction, options: { selfHosted: boolean; own
   await asOwner(tx);
   const businessId = randomUUID();
   const userId = randomUUID();
-  const localNumber = () => `+1416555${String(randomInt(0, 10_000)).padStart(4, "0")}`;
   const ownNumber = options.ownNumber === false ? undefined : localNumber();
   const ownerPhone = phone();
   await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Javor", timezone: "UTC", businessType: "test", telemetryEnabled: false, deploymentMode: options.selfHosted ? "self_hosted_standard" : "cloud" });

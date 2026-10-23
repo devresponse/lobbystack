@@ -393,7 +393,7 @@ export const apiBillingCatalogPolarSchema = z.object({
   env: z.enum(billingPolarEnvs).describe("The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."),
   org: z.string().nullable().describe("POLAR_ORGANIZATION_ID. Null when unset."),
   secret_sha256: sha256Hex.nullable().describe("SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."),
-  product_vars: z.record(z.string(), z.string().nullable()).describe("The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only while its plan isn't active, before the first link; after that they aren't needed. Null when unset."),
+  product_vars: z.record(z.string(), z.string().nullable()).describe("The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only before its plan's first link; after that they aren't needed. Null when unset."),
   last_link: apiBillingCatalogRunSchema.nullable().describe("The latest link. Null before the first."),
 }).describe("The Polar settings this deployment runs with.");
 
@@ -407,7 +407,7 @@ export const apiBillingCatalogSchema = z.object({
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
   polar: apiBillingCatalogPolarSchema,
-}).describe("The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook and the plan screens read them; limits don't yet.");
+}).describe("The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read them.");
 
 export const apiBillingPlanPriceSchema = z.object({
   interval: z.enum(billingIntervals),

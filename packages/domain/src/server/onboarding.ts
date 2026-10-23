@@ -1,13 +1,14 @@
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { isBillingPlanSlug, normalizeInterfaceLocale, type InterfaceLocale } from "@lobbystack/shared";
 
-import { billingAccounts, businesses, enqueueOutbox, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { businesses, enqueueOutbox, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { requireBusinessAdmin } from "../authz";
 import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 import { deploymentAppName } from "./branding";
+import { loadBillingContext } from "./usage";
 
 // French puts no "de" before the name and Serbian never declines it, because
 // the name is configured (see docs/branding.md).
@@ -93,14 +94,15 @@ export function resolveOnboardingStageForPlan(stage: OnboardingStage, plan: stri
 }
 
 // The step the dashboard shows for a business's stored stage. Only the number
-// steps depend on the plan, so only there does this read it, first scoping the
-// transaction to the business.
+// steps depend on the plan in force, so only there does this read it, first
+// scoping the transaction to the business. A lapsed subscription or an ended
+// managed plan is Free there, whatever plan the account keeps.
 export async function resolveOnboardingStageInTransaction(tx: DatabaseTransaction, businessId: string, storedStage: string): Promise<OnboardingStage> {
   const stage = normalizeOnboardingStage(storedStage);
   if (!numberStages.has(stage)) return stage;
   await tx.execute(sql`select set_config('app.business_id', ${businessId}, true)`);
-  const billing = (await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
-  return resolveOnboardingStageForPlan(stage, billing?.plan ?? null, await readBillingPlanLimitBook(tx), billing?.planCode ?? null);
+  const { plan, planCode } = await loadBillingContext(tx, businessId);
+  return resolveOnboardingStageForPlan(stage, plan, await readBillingPlanLimitBook(tx), planCode);
 }
 
 export function isValidOnboardingTransition(from: OnboardingStage, to: OnboardingStage): boolean {

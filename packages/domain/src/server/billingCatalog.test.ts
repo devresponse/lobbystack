@@ -364,4 +364,19 @@ describe("billing link diff", () => {
     ]);
     expect(replaced.writes[1]!.id).toBe("pro-monthly-cad");
   });
+
+  it("forgets the Polar discount of a plan whose discount the file dropped", () => {
+    const current = linked(stored(desiredBillingPlans(launchFile)));
+    const dropped = desiredBillingPlans(profile((file) => {
+      file.plans["pro-launch"] = proLaunch;
+    })).find((plan) => plan.code === "pro-launch")!;
+    // The apply wrote the plan's new terms and sent it back to draft.
+    Object.assign(current.plans.find((plan) => plan.code === "pro-launch")!, { discount: null, terms_hash: dropped.terms_hash, status: "draft" });
+    const { writes, refusals } = link(current, linkFor(current));
+    expect(refusals).toEqual([]);
+    expect(writes.map((write) => [write.change.action, write.change.key, write.set])).toEqual([
+      ["update", "pro-launch", { polar_disc: null, status: "active" }],
+    ]);
+    expect(writes[0]!.change.fields.polar_disc).toEqual({ from: "disc_pro-launch", to: null });
+  });
 });

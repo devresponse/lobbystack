@@ -26,7 +26,7 @@ describe("Polar product links", () => {
     expect(links.planFor(undefined)).toBeNull();
   });
 
-  it("keeps the variables for a plan no link made active, and only its linked live products once one did", () => {
+  it("keeps the variables for a plan no link reached, and only its linked live products once one did", () => {
     const catalog: BillingCatalogSnapshot = {
       plans: [plan("free_cloud", "active"), plan("starter", "draft"), plan("pro", "active")],
       prices: [
@@ -41,6 +41,10 @@ describe("Polar product links", () => {
     expect(links.productFor("pro", "monthly")).toBe("cat_pro_month");
     // A live price nobody linked sells nothing, though a retired one had a product and a variable may name one.
     expect(polarProductLinks(catalog, { POLAR_PRO_ANNUAL_PRODUCT_ID: "var_pro_year" }).productFor("pro", "annual")).toBeNull();
+    // A linked plan an apply sent back to draft, as a price change does, sells nothing until the next link.
+    const changed: BillingCatalogSnapshot = { ...catalog, plans: [plan("free_cloud", "active"), plan("starter", "draft"), plan("pro", "draft")] };
+    expect(polarProductLinks(changed, variables).productFor("pro", "monthly")).toBeNull();
+    expect(polarProductLinks(changed, variables).productFor("starter", "monthly")).toBe("var_starter_month");
     // A subscriber on a retired price's product keeps its plan.
     expect(links.planFor("cat_pro_year_old")).toEqual({ plan: "pro", interval: "annual", code: "pro" });
     expect(links.planFor("cat_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
@@ -84,7 +88,7 @@ describe("plan list", () => {
       prices: [
         price("starter", "monthly", 3500, null),
         price("starter", "annual", 33_600, null),
-        price("starter", "monthly", 3000, "old", { retired: true }),
+        price("starter", "monthly", 3000, null, { retired: true }),
         price("pro", "monthly", 11_000, "cat_pro_month"),
         price("pro-launch", "monthly", 6000, "cat_launch", { tier: "pro" }),
       ],
@@ -99,6 +103,10 @@ describe("plan list", () => {
     expect(pro!.prices).toEqual([{ interval: "monthly", currency: "cad", amountCents: 11_000, monthlyAmountCents: 11_000, checkoutAvailable: true }]);
     // Starter isn't linked yet, so the variables sell it, at the catalog's price.
     expect(starter!.prices.map((entry) => [entry.interval, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, 3500, true], ["annual", 33_600, 2800, true]]);
+    // Once a link reached it, as the retired price's product shows, a draft Starter waits for the next link.
+    const relinking: BillingCatalogSnapshot = { ...catalog, prices: catalog.prices.map((entry) => (entry.retired ? { ...entry, polar_id: "old" } : entry)) };
+    const waiting = billingPlanList(relinking, { checkout: true, links: polarProductLinks(relinking, variables) }).plans.find((entry) => entry.slug === "starter")!;
+    expect(waiting.prices.map((entry) => [entry.interval, entry.amountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, false], ["annual", 33_600, false]]);
     // Enterprise is hidden from the app's role, so it keeps its built-in custom terms, unpriced.
     expect(enterprise).toMatchObject({ custom: true, prices: [], included: { voiceSeconds: null }, sortOrder: 30 });
   });

@@ -2603,7 +2603,7 @@
       "get": {
         "operationId": "getBillingCatalog",
         "summary": "Get the billing catalog",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout, plan changes, Polar's webhook and the plan screens read it; limits don't yet.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read it.",
         "tags": [
           "Platform"
         ],
@@ -3562,7 +3562,7 @@
       "post": {
         "operationId": "searchPhoneNumbers",
         "summary": "Find numbers to claim",
-        "description": "Searches the carrier for numbers that take both calls and texts. Each offer expires after 5 minutes. A business needs a paid plan for a number, so a free plan is a 409. The account a key acts as can search 20 times in 10 minutes; searches refused before that don't count. Send replaces to find a replacement for an active number; a business can replace its number once.",
+        "description": "Searches the carrier for numbers that take both calls and texts. Each offer expires after 5 minutes. A business's plan must include a number, so a plan without one, like Free, is a 409. The account a key acts as can search 20 times in 10 minutes; searches refused before that don't count. Send replaces to find a replacement for an active number; a business can replace its number once.",
         "tags": [
           "Phone numbers"
         ],
@@ -4470,7 +4470,7 @@
       "post": {
         "operationId": "completeOnboarding",
         "summary": "Finish onboarding",
-        "description": "Finishes onboarding, so the dashboard opens on the business instead of its onboarding steps. On a paid plan, until the business has a phone number, a skipped phone_number step or skip_number, it's a 409 whose details list what's missing. Finishing a business that is already complete changes nothing. referral_code isn't accepted from a platform key, or for a business a partner onboarded.",
+        "description": "Finishes onboarding, so the dashboard opens on the business instead of its onboarding steps. On a plan that includes a number, until the business has a phone number, a skipped phone_number step or skip_number, it's a 409 whose details list what's missing. Finishing a business that is already complete changes nothing. referral_code isn't accepted from a platform key, or for a business a partner onboarded.",
         "tags": [
           "Onboarding"
         ],
@@ -16321,7 +16321,7 @@
                     "null"
                   ]
                 },
-                "description": "The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only while its plan isn't active, before the first link; after that they aren't needed. Null when unset."
+                "description": "The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only before its plan's first link; after that they aren't needed. Null when unset."
               },
               "last_link": {
                 "anyOf": [
@@ -16686,7 +16686,7 @@
           "polar"
         ],
         "additionalProperties": false,
-        "description": "The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook and the plan screens read them; limits don't yet."
+        "description": "The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read them."
       },
       "BillingCatalogApply": {
         "type": "object",

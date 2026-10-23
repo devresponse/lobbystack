@@ -494,7 +494,7 @@ const numberSelectionRefusals: Record<NumberSelectionRefusal, (message: string) 
   stage: (message) => conflict(message),
   replacement_used: () => conflict("This business already used its one number replacement."),
   active_number_required: () => conflict("This business needs an active number before it can pick a replacement."),
-  paid_plan_required: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  paid_plan_required: () => conflict("The business's plan doesn't include a phone number. Start one that does with POST /billing/checkout."),
   unsupported_country: () => invalidRequest("Phone numbers are available in US, CA, GB and AU.", [{ path: "country", message: "Use US, CA, GB or AU." }]),
 };
 
@@ -502,7 +502,7 @@ const numberSelectionRefusals: Record<NumberSelectionRefusal, (message: string) 
 const numberClaimRefusals: Record<string, () => PublicApiError> = {
   number_claim_in_progress: () => conflict("Another number claim for this business is still in progress. Wait for it to finish, then try again."),
   business_number_exists: () => conflict("This business already has a phone number. Release it first, or replace it with POST /phone-numbers/{phone_number_id}/replace."),
-  dedicated_number_requires_paid_plan: () => conflict("A phone number needs a paid plan. Start one with POST /billing/checkout."),
+  dedicated_number_requires_paid_plan: () => conflict("The business's plan doesn't include a phone number. Start one that does with POST /billing/checkout."),
   // The database knows only that a window is full, so Retry-After is its length, at most a day.
   number_claim_rate_limited: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed in the last hour. Try again later.", undefined, { "Retry-After": "3600" }),
   daily_claim_quota_reached: () => new PublicApiError(429, "rate_limited", "Too many numbers were claimed today. Try again tomorrow.", undefined, { "Retry-After": "86400" }),

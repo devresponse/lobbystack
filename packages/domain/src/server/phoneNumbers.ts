@@ -49,7 +49,7 @@ const numberClaimRefusals: Record<string, [status: number, code: string, message
   replacement_already_reserved: [409, "number_claim_in_progress", "A replacement for this workspace's number is still being set up. Wait for it to finish, then try again."],
   business_number_exists: [409, "business_number_exists", "This workspace already has a phone number."],
   invalid_onboarding_stage: [409, "invalid_onboarding_stage", "Business number selection is not available at this onboarding stage."],
-  dedicated_number_requires_paid_plan: [409, "paid_plan_required", "A paid plan is required for a dedicated business number."],
+  dedicated_number_requires_paid_plan: [409, "paid_plan_required", "This plan doesn't include a dedicated business number."],
   replacement_already_used: [409, "replacement_used", "This workspace has already used its number replacement."],
   active_number_required: [409, "active_number_required", "An active phone number is required before choosing a replacement."],
   replacement_number_must_differ: [400, "replacement_number_must_differ", "Pick a number other than the one being replaced."],
@@ -115,7 +115,7 @@ export async function numberMarketInTransaction(tx: DatabaseTransaction, input: 
     if (!active.length) throw new NumberSelectionError("An active phone number is required before choosing a replacement.", "active_number_required");
   }
   // A plan that includes no number, such as Free, can't pick one.
-  if ((await loadBusinessPlanLimits(tx, input.businessId)).limits.includedBusinessNumbers === 0) throw new NumberSelectionError("A paid plan is required for a dedicated business number.", "paid_plan_required");
+  if ((await loadBusinessPlanLimits(tx, input.businessId)).limits.includedBusinessNumbers === 0) throw new NumberSelectionError("This plan doesn't include a dedicated business number.", "paid_plan_required");
   const requestedCountry = input.selection?.countryCode?.trim().toUpperCase();
   if (requestedCountry && !["US", "CA", "GB", "AU"].includes(requestedCountry)) throw new NumberSelectionError("Unsupported country.", "unsupported_country");
   return resolveBusinessNumberMarket({ selection: input.selection, timezone: business.timezone });

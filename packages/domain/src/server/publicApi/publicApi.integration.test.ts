@@ -962,7 +962,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
     const queued = async (topic: string, aggregateId: string) => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, topic), eq(outboxMessages.aggregateId, aggregateId)))).length;
     try {
-      // A number needs a paid plan.
+      // Free includes no number.
       await expectApiError(search(), 409, "conflict");
       await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "pro", subscriptionState: "active", billingInterval: "monthly" });
       // The API ignores the onboarding stage order: this business hasn't finished its first step.

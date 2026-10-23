@@ -63,8 +63,8 @@ export function estimateSmsSegments(body: string): number {
     if (GSM_BASIC.has(character)) septets += 1;
     else if (GSM_EXTENDED.has(character)) septets += 2;
     else {
-      const codePointLength = Array.from(body).length;
-      return codePointLength <= 70 ? 1 : Math.max(1, Math.ceil(codePointLength / 67));
+      // UCS-2 counts UTF-16 units, so an emoji takes two of a segment's 70.
+      return body.length <= 70 ? 1 : Math.ceil(body.length / 67);
     }
   }
   return septets <= 160 ? 1 : Math.max(1, Math.ceil(septets / 153));

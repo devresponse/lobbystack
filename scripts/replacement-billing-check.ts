@@ -2,9 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq } from "drizzle-orm";
 
-import { billingAccounts, billingUsageEvents, businessMemberships, businesses, createDatabaseClient, users } from "@lobbystack/db";
-import { correctAlertSmsUsage, getBillingUsageStatus, reserveAlertSmsUsage, reserveOutboundCallAttempt, setOverageSpendingCap } from "@lobbystack/domain";
-import { billingPlanCatalog } from "@lobbystack/shared";
+import { billingAccounts, billingUsageEvents, businessMemberships, businesses, createDatabaseClient, users, withBusinessTransaction } from "@lobbystack/db";
+import { correctAlertSmsUsage, getBillingUsageStatus, loadBusinessPlanLimits, reserveAlertSmsUsage, reserveOutboundCallAttempt, setOverageSpendingCap } from "@lobbystack/domain";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -26,6 +25,8 @@ async function main(): Promise<void> {
     await migrator.db.insert(billingAccounts).values([{ businessId, billingKey: `business:${businessId}`, plan: "starter", billingInterval: "monthly", subscriptionState: "active" }, { businessId: annualBusinessId, billingKey: `business:${annualBusinessId}`, plan: "starter", billingInterval: "annual", subscriptionState: "active" }, { businessId: concurrentBusinessId, billingKey: `business:${concurrentBusinessId}`, plan: "starter", billingInterval: "monthly", subscriptionState: "active" }]);
 
     const context = { db: worker.db };
+    // The Starter terms the server enforces: an applied billing.json's, or this build's before an apply.
+    const { limits: starter } = await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async (tx) => await loadBusinessPlanLimits(tx, businessId));
     const sourceKey = `alert_sms:test:${businessId}:included`;
     const included = await reserveAlertSmsUsage(context, { businessId, sourceKey, estimatedSegments: 1 });
     const retry = await reserveAlertSmsUsage(context, { businessId, sourceKey, estimatedSegments: 1 });
@@ -37,13 +38,13 @@ async function main(): Promise<void> {
 
     const cap = await setOverageSpendingCap({ db: app.db }, { userId, businessId, capCents: 0 });
     assert(cap.overageSpendingCapCents === 0, "Zero-dollar overage cap was not persisted.");
-    const overCap = await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${businessId}:over-cap`, estimatedSegments: (billingPlanCatalog.starter.alertSmsSegmentsIncluded ?? 0) + 1 });
+    const overCap = await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${businessId}:over-cap`, estimatedSegments: (starter.alertSmsSegmentsIncluded ?? 0) + 1 });
     assert(!overCap.allowed && overCap.errorCode === "alert_sms_limit_reached", "Alert SMS reservation bypassed the shared zero-dollar cap.");
     let unauthorizedDenied = false;
     try { await setOverageSpendingCap({ db: app.db }, { userId: unauthorizedUserId, businessId, capCents: 100 }); } catch { unauthorizedDenied = true; }
     assert(unauthorizedDenied, "Non-admin user changed the overage cap.");
     await setOverageSpendingCap({ db: app.db }, { userId, businessId, capCents: null });
-    const afterRemoval = await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${businessId}:cap-removed`, estimatedSegments: (billingPlanCatalog.starter.alertSmsSegmentsIncluded ?? 0) + 1 });
+    const afterRemoval = await reserveAlertSmsUsage(context, { businessId, sourceKey: `alert_sms:test:${businessId}:cap-removed`, estimatedSegments: (starter.alertSmsSegmentsIncluded ?? 0) + 1 });
     assert(afterRemoval.allowed, "Removing the cap did not restore paid overage usage.");
 
     const planSource = `alert_sms:test:${businessId}:plan-snapshot`;
@@ -53,15 +54,15 @@ async function main(): Promise<void> {
     const planEvent = (await migrator.db.select().from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, businessId), eq(billingUsageEvents.sourceKey, planSource))).limit(1))[0];
     assert(planEvent?.planAtRecordTime === "starter", "Usage correction lost plan-at-event pricing after a plan change.");
 
-    const annualIncluded = billingPlanCatalog.starter.alertSmsSegmentsIncluded ?? 0;
+    const annualIncluded = starter.alertSmsSegmentsIncluded ?? 0;
     const annual = await reserveAlertSmsUsage(context, { businessId: annualBusinessId, sourceKey: `alert_sms:annual:${annualBusinessId}`, estimatedSegments: annualIncluded + 2 });
     assert(annual.allowed, "Annual-plan overage reservation was rejected.");
     const annualEvent = (await migrator.db.select().from(billingUsageEvents).where(eq(billingUsageEvents.id, annual.usageEventId!)).limit(1))[0];
     assert(annualEvent?.billingIntervalAtRecordTime === "annual" && annualEvent.billableQuantity === 2, "Annual-plan billable quantity was not isolated from included usage.");
 
-    const concurrentIncluded = billingPlanCatalog.starter.alertSmsSegmentsIncluded ?? 0;
+    const concurrentIncluded = starter.alertSmsSegmentsIncluded ?? 0;
     await correctAlertSmsUsage(context, { businessId: concurrentBusinessId, sourceKey: `alert_sms:concurrent:${concurrentBusinessId}:included`, segments: concurrentIncluded });
-    const perSegmentCents = billingPlanCatalog.starter.alertSmsOverageRatePerSegmentCents ?? 1;
+    const perSegmentCents = starter.alertSmsOverageRatePerSegmentCents ?? 1;
     await setOverageSpendingCap({ db: app.db }, { userId, businessId: concurrentBusinessId, capCents: perSegmentCents });
     const concurrent = await Promise.all([
       reserveAlertSmsUsage(context, { businessId: concurrentBusinessId, sourceKey: `alert_sms:concurrent:${concurrentBusinessId}:a`, estimatedSegments: 1 }),

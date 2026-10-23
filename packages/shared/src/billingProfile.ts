@@ -41,7 +41,8 @@ const proration = z.enum(["invoice", "prorate", "next_period", "reset"]);
 
 const prices = z.strictObject({ monthlyCents: cents(10_000_000).optional(), annualCents: cents(120_000_000).optional() });
 const included = z.strictObject({ voiceMinutes: count(100_000), alertSmsSegments: count(100_000), outboundCallAttempts: count(100_000), chatAiUnits: count(1_000_000) });
-const limits = z.strictObject({ knowledgeStorageMb: count(1_024), businessNumbers: count(20) });
+// A business holds one number at most, so a plan includes none or one.
+const limits = z.strictObject({ knowledgeStorageMb: count(1_024), businessNumbers: count(1) });
 const overageCents = z.strictObject({ voiceMinute: count(1_000), alertSmsSegment: count(1_000), outboundCallAttempt: count(1_000) });
 
 const freePlan = z.strictObject({ sold: z.literal(false), included, limits });

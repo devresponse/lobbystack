@@ -1302,6 +1302,25 @@ export const billingCodes = pgTable(
   ],
 );
 
+/**
+ * Each business that subscribed with a promo code, once (migration 0113): a
+ * business uses a code once, however its plan later ends. Only the worker
+ * writes them, as Polar's webhook puts a business on the code's plan.
+ */
+export const billingCodeRedemptions = pgTable(
+  "billing_code_redemptions",
+  {
+    codeId: uuid("code_id").notNull().references(() => billingCodes.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    /** When its subscription first went live on the code's plan. */
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.codeId, table.businessId] }),
+    index("billing_code_redemptions_business_idx").on(table.businessId),
+  ],
+);
+
 /** The plans on offer now: active, offer not ended, each with its live prices. Reads with the caller's row-level security. */
 export const billingOffers = pgView("billing_offers", {
   code: varchar("code", { length: 48 }).notNull(),
@@ -1995,6 +2014,7 @@ export const allTenantTables = [
   operatorNotificationDeliveries,
   billingAccounts,
   billingCheckoutRequests,
+  billingCodeRedemptions,
   billingTransactions,
   billingUsageEvents,
   billingUsageMonths,
@@ -2071,6 +2091,7 @@ export const schema = {
   billingPlans,
   billingPrices,
   billingCodes,
+  billingCodeRedemptions,
   complianceRecords,
   feedbackSubmissions,
   affiliateProfiles,

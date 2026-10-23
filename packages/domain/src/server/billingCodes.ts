@@ -35,9 +35,10 @@ import { decodeCursor, pageSize, toPage, type Page, type PageRequest } from "./p
 // Promo codes (migration 0109). An operator's platform key issues a code for a
 // plan whose access is code in billing.json, and a business that types it buys
 // that plan through Polar with the plan's discount. The checkout carries the
-// code; Polar's webhook puts the business on the plan and counts the use
-// (billing.ts). A code that doesn't work, for whatever reason, finds nothing,
-// so whoever typed it learns only that it isn't valid.
+// code; Polar's webhook puts the business on the plan and counts the use, once
+// per business (billing.ts, migration 0113). A code that doesn't work, for
+// whatever reason, finds nothing, so whoever typed it learns only that it
+// isn't valid.
 
 type Row = Record<string, unknown>;
 
@@ -65,8 +66,10 @@ export type BillingCodeOffer = {
 /**
  * The offer a code unlocks for the business in the transaction, or null for a
  * code that doesn't work for it: unknown, revoked, expired, used up, bound to
- * another business, or for a plan that isn't on sale. Callers authorize the
- * business first.
+ * another business, already used by this one, or for a plan that isn't on
+ * sale. A business whose live subscription is on the code's plan still finds
+ * it, so checkout can say it is on that plan. Callers authorize the business
+ * first.
  */
 export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string): Promise<BillingCodeOffer | null> {
   const normalized = normalizeBillingCode(code);

@@ -1,6 +1,6 @@
 import { and, eq, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 
-import { auditLogs, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -579,12 +579,13 @@ function addMonths(date: Date, months: number): Date {
  * promo plan, names that plan once its subscription is live; the code is the
  * one the paid checkout or plan change carried, else the one the business's
  * newest checkout for that plan carried. Moving onto the plan, from another
- * plan or with a new subscription, counts the code's use, records it in the
- * audit log, fixes the plan's terms and starts a time-limited plan's months;
- * a plan whose ending is keep never ends. A live standard product clears the
- * promo columns, and moving onto one from a promo plan records how the plan
- * ended. A subscription that ends leaves them as they are: nothing reads them
- * once it isn't live.
+ * plan or with a new subscription, fixes the plan's terms and starts a
+ * time-limited plan's months, and the first time the business uses that
+ * code, counts the use and records it in the audit log; a plan whose ending
+ * is keep never ends. A live standard product clears the promo columns, and
+ * moving onto one from a promo plan records how the plan ended. A
+ * subscription that ends leaves them as they are: nothing reads them once it
+ * isn't live.
  */
 async function promoPlanFields(
   tx: DatabaseTransaction,
@@ -623,9 +624,11 @@ async function promoPlanFields(
   const [paid] = input.checkoutRequestId && isUuid(input.checkoutRequestId) ? await newestRequest(eq(billingCheckoutRequests.id, input.checkoutRequestId)) : [];
   const [request] = paid ? [paid] : await newestRequest();
   const codeId = request?.codeId ?? null;
-  if (codeId !== null) {
-    await tx.execute(sql`update public.billing_codes set uses = uses + 1, updated_at = now() where id = ${codeId}::uuid`);
-    await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_code_redeemed", entityType: "billing_code", entityId: codeId, payload: { plan: planCode } });
+  // A business uses a code once (migration 0113): moving onto its plan again, with a new subscription or by an older checkout's code, counts nothing.
+  const [redeemed] = codeId === null ? [] : await tx.insert(billingCodeRedemptions).values({ codeId, businessId: input.businessId }).onConflictDoNothing().returning({ codeId: billingCodeRedemptions.codeId });
+  if (redeemed) {
+    await tx.execute(sql`update public.billing_codes set uses = uses + 1, updated_at = now() where id = ${redeemed.codeId}::uuid`);
+    await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_code_redeemed", entityType: "billing_code", entityId: redeemed.codeId, payload: { plan: planCode } });
   }
   // Its first subscriber fixes a plan's terms, which the next apply then refuses to change.
   const [row] = (await tx.execute<{ months: number | null; ends: string | null }>(sql`update public.billing_plans set frozen_at = coalesce(frozen_at, now()), updated_at = now() where code = ${planCode} returning months, ends`)).rows;

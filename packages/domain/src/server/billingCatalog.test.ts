@@ -163,7 +163,7 @@ describe("billing catalog diff", () => {
     };
     const direct = diff(profile((file) => { file.plans["pro-launch"] = { ...proLaunch, prices: { monthlyCents: 6500 } }; }), frozen());
     expect(direct.refusals).toEqual([expect.objectContaining({ code: "plan_frozen", path: "billing_file.plans.pro-launch" })]);
-    const inherited = diff(profile((file) => { file.plans["pro-launch"] = proLaunch; file.plans.pro.limits.businessNumbers = 2; }), frozen());
+    const inherited = diff(profile((file) => { file.plans["pro-launch"] = proLaunch; file.plans.pro.limits.businessNumbers = 0; }), frozen());
     expect(inherited.refusals.map((refusal) => refusal.code)).toEqual(["plan_frozen"]);
     const renamed = diff(profile((file) => { file.plans["pro-launch"] = { ...proLaunch, access: "public", names: { ...proLaunch.names, en: "Launch" } }; }), frozen());
     expect(renamed.refusals).toEqual([]);

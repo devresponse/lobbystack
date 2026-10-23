@@ -191,23 +191,28 @@ async function main(): Promise<void> {
             ,('lobbystack_worker', 'billing_codes', 'INSERT')
             ,('lobbystack_worker', 'billing_codes', 'UPDATE')
             ,('lobbystack_readonly', 'billing_codes', 'SELECT')
+            ,('lobbystack_worker', 'billing_code_redemptions', 'SELECT')
+            ,('lobbystack_worker', 'billing_code_redemptions', 'INSERT')
+            ,('lobbystack_readonly', 'billing_code_redemptions', 'SELECT')
           ) as expected(role_name, table_name, privilege_type)
           where not has_table_privilege(expected.role_name, 'public.' || expected.table_name, expected.privilege_type)
         `);
         if (grantFailures.rows.length > 0) {
           throw new Error(`Database grant verification failed for: ${grantFailures.rows.map((row) => `${row.role_name}:${row.table_name}:${row.privilege_type}`).join(", ")}`);
         }
-        // The billing catalog and its codes are retired or revoked, never deleted; the app never reads a
-        // code but through app.billing_code_offers; and the view reads with each caller's own policies.
+        // The billing catalog and its codes are retired or revoked, never deleted, and a code's uses go
+        // only with its business; the app never reads a code or a use but through app.billing_code_offers;
+        // and the view reads with each caller's own policies.
         const billingCatalogFailures = await migrator.db.execute<{ failure: string }>(sql`
           select role_name || ':' || table_name || ':DELETE' as failure
           from unnest(array['lobbystack_app', 'lobbystack_worker', 'lobbystack_dispatcher', 'lobbystack_readonly']) as role_name
-          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes']) as table_name
+          cross join unnest(array['billing_runs', 'billing_plans', 'billing_prices', 'billing_codes', 'billing_code_redemptions']) as table_name
           where exists (select 1 from pg_roles where rolname = role_name)
             and has_table_privilege(role_name, 'public.' || table_name, 'DELETE')
           union all
-          select 'lobbystack_app:billing_codes:SELECT'
-          where has_table_privilege('lobbystack_app', 'public.billing_codes', 'SELECT')
+          select 'lobbystack_app:' || table_name || ':SELECT'
+          from unnest(array['billing_codes', 'billing_code_redemptions']) as table_name
+          where has_table_privilege('lobbystack_app', 'public.' || table_name, 'SELECT')
           union all
           select role_name || ':app.billing_code_offers(text):EXECUTE'
           from unnest(array['lobbystack_app', 'lobbystack_worker']) as role_name

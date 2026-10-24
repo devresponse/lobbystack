@@ -70,7 +70,7 @@ A plan with `months` ends at the subscription's first renewal once they have run
 
 ```bash
 pnpm billing plan   --brand alloplace --polar sandbox            # shows what apply would change, changes nothing
-pnpm billing apply  --brand alloplace --polar sandbox --railway-file railway.txt
+pnpm billing apply  --brand alloplace --polar sandbox --railway-file .env.railway
 pnpm billing verify --brand alloplace --polar sandbox            # exit 0 in sync, 1 drift, 2 a side couldn't be read
 ```
 
@@ -79,6 +79,6 @@ It reaches the instance with an operator's platform key, from a `lobbystack logi
 - The first run on an organization `polar-setup.mjs` set up takes `--adopt`, which tags its meters and monthly products, keeps their ids and takes their Credits off, and `--allow-replace`, which replaces its annual products: they invoice overage once a year, and Polar never adds a meter cycle to a product. Without them, a lookalike stops the run, so a forgotten flag can't make duplicates.
 - A file the instance's code wasn't built with needs `--allow-undeployed`, for trying it on a sandbox.
 - Archiving a product or discount the file no longer has needs `--allow-archive`, and anything Polar can't change in place, such as a product's billing or meter cycle, needs `--allow-replace`. Current subscribers keep their old price; edits made in Polar's dashboard are put back to the file.
-- `--railway-file` saves `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` to a new file, readable only by you, for `railway-vars.mjs`, as soon as Polar is set up. When this run made the webhook, the file also holds `POLAR_WEBHOOK_SECRET`, even if a later step stops the run, so delete it once Railway has the values. Run again with a new file name, or none.
+- `--railway-file` saves `POLAR_API_BASE_URL` and `POLAR_ORGANIZATION_ID` to a new file, readable only by you, for `railway-vars.mjs`, as soon as Polar is set up. A name like `.env.railway`, as above, keeps it out of commits, since Git ignores `.env.*`. When this run made the webhook, the file also holds `POLAR_WEBHOOK_SECRET`, even if a later step stops the run, so delete it once Railway has the values. Run again with a new file name, or none.
 
 A run that stops part-way is finished by running it again: everything is found again by its tags, and the webhook by its address. Nothing is deleted, in Polar or in the tables. The worker checks the same things once a day, records each check as a `verify` run (`lobbystack billing catalog-runs --kind verify`) and sends `ops.billing.profile_drift` to PostHog while they differ; its `POLAR_ACCESS_TOKEN` needs four read scopes for that: organizations, meters, products and discounts. It leaves out the webhook, which Polar lists with its signing secret, so that token goes without `webhooks:read`, and `pnpm billing verify` checks the webhook and its secret. The file's `polar.upgradeProration` and `polar.downgradeProration` say how Polar charges a paying business that picks another plan, which the worker does by changing its subscription; that token also needs `subscriptions:write`, which ending a promo plan uses too, and `customers:write`, with which each checkout finds or makes the business's own Polar customer.

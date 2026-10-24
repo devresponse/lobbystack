@@ -90,6 +90,10 @@ describe("verifyBillingCatalog", () => {
     const result = await verify(await syncedInstance());
     expect(notOk(result)).toEqual([]);
     expect(result.status).toBe("passed");
+    expect(result.checks.filter((check) => check.code === "product" || check.code === "webhook").map((check) => check.message)).toEqual([
+      "4 products, tagged and priced as the file says, annual ones invoicing overage each month",
+      `webhook ${webhookUrl}, Raw, on, API version 2026-10`,
+    ]);
     expect(result.checks.map((check) => `${check.pair} ${check.code}`)).toEqual([
       "file_postgres catalog_hash",
       "file_postgres code_hash",
@@ -159,6 +163,27 @@ describe("verifyBillingCatalog", () => {
       "drift postgres_polar linked_id pro/monthly",
     ]);
     expect(result.checks.find((check) => check.code === "product" && check.level === "drift")!.message).toContain("120.00");
+  });
+
+  it("finds an annual product that invoices its overage once a year, and a webhook on another API version", async () => {
+    const instance = await syncedInstance();
+    const { state } = instance.fake;
+    // As a product made before annual products had a meter cycle.
+    const proAnnual = state.products.find((product) => product.name === "Pro annual")!;
+    proAnnual.meter_interval = null;
+    proAnnual.meter_interval_count = null;
+    state.webhooks[0]!.api_version = "2027-01";
+    const result = await verify(instance);
+    expect(notOk(result)).toEqual([
+      'drift file_polar product Product "Pro annual"',
+      `drift file_polar webhook Webhook ${webhookUrl}`,
+      'drift file_polar product Product "Pro annual"',
+    ]);
+    expect(result.checks.filter((check) => check.level === "drift").map((check) => check.message)).toEqual([
+      'Product "Pro annual": 960.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month.',
+      `Webhook ${webhookUrl}: API version 2027-01, LobbyStack reads 2026-10.`,
+      'Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it.',
+    ]);
   });
 
   it("finds a product tagged for the brand that the file no longer sells", async () => {

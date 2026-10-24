@@ -42,6 +42,8 @@ Keep your existing Polar meters and prices. Connecting this application leaves t
 
 Starter and Pro include usage allowances that reset on the first of each month (UTC), on monthly and annual subscriptions alike, whatever day the subscription renews. The worker sends only the usage past them, as `billableQuantity`, including zero, so the products carry no Credits and Polar bills every unit it receives. An event recorded without `billableQuantity` sends its whole quantity.
 
+Polar invoices that overage every month on both. A monthly subscription's renewal invoices the past month's overage with its price. An annual product has a monthly meter cycle, so its subscribers pay the price once a year and each month's overage in an order of its own, which Polar emails them as a usage invoice and sends to the webhook as `order.created` and `order.paid` with `billing_reason` `subscription_meter_cycle`; the webhook records it like any other order. Polar sets a meter cycle only when it makes a product, so `pnpm billing apply` refuses an annual product without one, such as those `polar-setup.mjs` made, until you run it with `--allow-replace`. That makes a new product and archives the old one, whose subscribers keep it and pay its overage once a year.
+
 The worker skips these events:
 
 - Provisional usage
@@ -60,6 +62,10 @@ POLAR_API_BASE_URL=https://sandbox-api.polar.sh
 ```
 
 Match `POLAR_API_BASE_URL` to the environment that issued the token and webhook secret.
+
+## Keep Polar's API version
+
+Every call to Polar asks for API version `2026-10` in its `Polar-Version` header, and `pnpm billing apply` makes the webhook send that version's payloads, or moves it to them. A new Polar version changes nothing until a release moves `POLAR_API_VERSION` in `packages/shared/src/billing.ts`. Polar answers 404 to every call that names a version it no longer serves, so move it, after reading Polar's changelog, before Polar retires `2026-10`.
 
 ## Route billing requests
 
@@ -135,6 +141,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.
 - Confirm monthly and annual subscriptions send only each month's overage quantities, and that no product carries Credits.
+- Confirm each annual product shows a separate monthly meter cycle in Polar.
 - Make usage while the worker's `POLAR_ACCESS_TOKEN` is wrong, and confirm worker logs identify the usage-sync failures and that the usage reaches Polar once the token is right again, without requeueing anything.
 
 Self-hosted workspaces remain outside hosted billing enforcement.

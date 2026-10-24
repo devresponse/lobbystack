@@ -1,5 +1,5 @@
 import type { PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
-import { billingMeterEventNames, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
+import { billingMeterEventNames, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPlan } from "./billingCatalog";
 
@@ -58,6 +58,8 @@ export type DesiredPolarProduct = {
   period: BillingInterval;
   name: string;
   interval: "month" | "year";
+  /** The meter cycle Polar invoices the overage on: month on an annual product, null on a monthly one, whose renewal invoices it. */
+  meterInterval: "month" | null;
   cents: number;
   currency: string;
   rates: Record<PolarMeterKey, number>;
@@ -94,7 +96,8 @@ function planLabel(plan: DesiredBillingPlan): string {
  * per live price of every sold plan, a discount per plan that has one, and
  * the webhook. No product carries Credits: the worker reports only the usage
  * past each UTC month's allowance, on monthly and annual plans alike, so
- * Polar bills every unit it hears of.
+ * Polar bills every unit it hears of. An annual product invoices it each
+ * month, on a meter cycle of its own, rather than a year of it at renewal.
  */
 export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; webhookUrl: string | null }): DesiredPolarCatalog {
   const products: DesiredPolarProduct[] = [];
@@ -108,6 +111,7 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
         period: price.period,
         name: `${label} ${periodWords[price.period]}`,
         interval: price.period === "annual" ? "year" : "month",
+        meterInterval: price.period === "annual" ? "month" : null,
         cents: price.cents,
         currency: price.currency,
         rates: Object.fromEntries(polarMeterSpecs.map((meter) => [meter.key, meter.rate(plan)])) as Record<PolarMeterKey, number>,
@@ -263,9 +267,27 @@ type ProductMatch = {
   found?: PolarProduct;
   adopting: boolean;
   restoring: boolean;
-  /** A product whose billing cycle can't become the file's, archived once its replacement exists. */
+  /** A product whose billing or meter cycle can't become the file's, archived once its replacement exists. */
   replaced?: PolarProduct;
+  /** What its replacement does that it can't, as the archive step says. */
+  replacedFor?: string;
 };
+
+/** When a product's overage is invoiced: on a meter cycle of its own, or once a billing cycle. */
+function overageCycle(meterInterval: string | null | undefined, meterCount: number | null | undefined, billingInterval: string | null): string {
+  if (!meterInterval) return `once a ${billingInterval ?? "period"}`;
+  return (meterCount ?? 1) === 1 ? `each ${meterInterval}` : `every ${meterCount} ${meterInterval}s`;
+}
+
+/** Why a product can't sell the file's row: Polar never changes its billing cycle, nor its meter cycle. Null when both are the file's. */
+function cycleProblem(product: PolarProduct, desired: DesiredPolarProduct): { problem: string; replacedFor: string } | null {
+  if (product.recurring_interval !== desired.interval || (product.recurring_interval_count ?? 1) !== 1) {
+    return { problem: `bills every ${product.recurring_interval_count ?? 1} ${product.recurring_interval ?? "once"}, and Polar never changes a product's billing cycle`, replacedFor: "with the file's billing cycle" };
+  }
+  if ((product.meter_interval ?? null) === desired.meterInterval && (desired.meterInterval === null || (product.meter_interval_count ?? 1) === 1)) return null;
+  const wanted = overageCycle(desired.meterInterval, 1, desired.interval);
+  return { problem: `invoices its overage ${overageCycle(product.meter_interval, product.meter_interval_count, product.recurring_interval)}, not ${wanted}, and Polar never changes a product's meter cycle`, replacedFor: `that invoices its overage ${wanted}` };
+}
 
 /**
  * The calls that make an organization sell what the file says, in the order
@@ -410,13 +432,16 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
         }
       }
     }
-    if (match.found && (match.found.recurring_interval !== desired.interval || (match.found.recurring_interval_count ?? 1) !== 1)) {
-      // Polar never changes a product's billing cycle.
+    const cycle = match.found ? cycleProblem(match.found, desired) : null;
+    if (match.found && cycle) {
       if (!options.allowReplace) {
-        refuse("product", subject, `"${match.found.name}" bills every ${match.found.recurring_interval_count ?? 1} ${match.found.recurring_interval ?? "once"}, and Polar never changes a product's billing cycle. Run with --allow-replace to make a new product and archive this one; its subscribers keep it.`);
+        refuse("product", subject, `"${match.found.name}" ${cycle.problem}. Run with --allow-replace to make a new product and archive this one; its subscribers keep it.`);
         continue;
       }
-      if (!match.found.is_archived) match.replaced = match.found;
+      if (!match.found.is_archived) {
+        match.replaced = match.found;
+        match.replacedFor = cycle.replacedFor;
+      }
       delete match.found;
       match.adopting = false;
       match.restoring = false;
@@ -443,11 +468,12 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     const tags = { [polarTags.brand]: catalog.brand, [polarTags.plan]: desired.plan, [polarTags.interval]: desired.period, [polarTags.terms]: desired.terms };
     const found = match.found;
     if (!found) {
-      steps.push({ object: "product", action: "create", subject, changes: [prices.map((price) => price.describe).join(", "), ...(desired.visibility === "private" ? ["private: only an API checkout sells it"] : [])], method: "POST", path: "/v1/products/", body: { name: desired.name, recurring_interval: desired.interval, recurring_interval_count: 1, visibility: desired.visibility, prices: prices.map((price) => price.body), metadata: tags }, produces: `product:${key}` });
+      const meterCycle = desired.meterInterval ? { meter_interval: desired.meterInterval, meter_interval_count: 1 } : {};
+      steps.push({ object: "product", action: "create", subject, changes: [prices.map((price) => price.describe).join(", "), ...(desired.meterInterval ? [`overage invoiced ${overageCycle(desired.meterInterval, 1, desired.interval)}`] : []), ...(desired.visibility === "private" ? ["private: only an API checkout sells it"] : [])], method: "POST", path: "/v1/products/", body: { name: desired.name, recurring_interval: desired.interval, recurring_interval_count: 1, ...meterCycle, visibility: desired.visibility, prices: prices.map((price) => price.body), metadata: tags }, produces: `product:${key}` });
       productIds.set(key, ref(`product:${key}`));
       if (match.replaced) {
         detachCredits(match.replaced, `Product "${match.replaced.name}"`);
-        late.push({ object: "product", action: "archive", subject: `Product "${match.replaced.name}"`, changes: ["replaced by a product with the file's billing cycle; its subscribers keep it"], method: "PATCH", path: `/v1/products/${match.replaced.id}`, body: { is_archived: true } });
+        late.push({ object: "product", action: "archive", subject: `Product "${match.replaced.name}"`, changes: [`replaced by a product ${match.replacedFor}; its subscribers keep it`], method: "PATCH", path: `/v1/products/${match.replaced.id}`, body: { is_archived: true } });
       }
       continue;
     }
@@ -574,7 +600,7 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
     const subject = `Webhook ${url}`;
     const same = snapshot.webhooks.filter((endpoint) => trimSlash(endpoint.url) === trimSlash(url));
     if (same.length > 1) refuse("webhook", subject, `${same.length} webhooks point at ${url}. Delete all but one in Polar.`);
-    else if (!same[0]) steps.push({ object: "webhook", action: "create", subject, changes: [`Raw, ${events.length} events`], method: "POST", path: "/v1/webhooks/endpoints", body: { url, name: "LobbyStack", format: "raw", events } });
+    else if (!same[0]) steps.push({ object: "webhook", action: "create", subject, changes: [`Raw, ${events.length} events, API version ${POLAR_API_VERSION}`], method: "POST", path: "/v1/webhooks/endpoints", body: { url, name: "LobbyStack", format: "raw", api_version: POLAR_API_VERSION, events } });
     else {
       const endpoint = same[0];
       const body: Record<string, unknown> = {};
@@ -586,6 +612,11 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
       if (endpoint.enabled === false) {
         body.enabled = true;
         changes.push("turned off");
+      }
+      // Its payloads come in the version every call asks for, which the webhook route reads.
+      if (endpoint.api_version !== POLAR_API_VERSION) {
+        body.api_version = POLAR_API_VERSION;
+        changes.push(`${endpoint.api_version ? `API version ${endpoint.api_version}` : "no API version"}, LobbyStack reads ${POLAR_API_VERSION}`);
       }
       const missing = events.filter((event) => !endpoint.events.includes(event));
       if (missing.length) {

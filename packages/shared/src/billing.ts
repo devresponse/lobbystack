@@ -112,6 +112,15 @@ export type BillingErrorCode =
 export const polarBaseUrls = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;
 export type PolarEnv = keyof typeof polarBaseUrls;
 
+/**
+ * The Polar API version every call asks for and the webhook's payloads use.
+ * Without one, Polar answers in its current version, which moves when it
+ * releases another; a version it no longer serves gets 404 for every call.
+ * Change it on purpose, after reading Polar's changelog: pnpm billing apply
+ * then moves the webhook to it.
+ */
+export const POLAR_API_VERSION = "2026-10";
+
 /** The server a POLAR_API_BASE_URL names: sandbox for sandbox-api.polar.sh, else production, as an unset one means api.polar.sh. */
 export function polarEnvForBaseUrl(baseUrl: string | null | undefined): PolarEnv {
   if (!baseUrl) return "production";

@@ -4,6 +4,8 @@ import { isUuid } from "@lobbystack/shared";
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue => value && typeof value === "object" && !Array.isArray(value) ? value as RecordValue : {};
 const text = (value: unknown): string | undefined => typeof value === "string" && value.length > 0 ? value : undefined;
+/** The business IDs some fields name, as an ID or a `business:<id>` billing key. */
+const businessReferences = (values: Array<string | undefined>): string[] => values.flatMap(value => value ? [value.match(/^business:(.+)$/)?.[1] ?? value] : []);
 
 /**
  * Translate signed Polar subscription/order payloads into our billing vocabulary.
@@ -15,21 +17,23 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
   const customerMetadata = record(customer.metadata);
   const subscription = type.startsWith("subscription.") ? data : record(data.subscription);
   const externalId = text(customer.external_id) ?? text(data.external_customer_id) ?? text(data.externalCustomerId);
+  // The worker names the business in each checkout's metadata, which Polar
+  // copies onto the subscription and its orders. A subscription belongs to the
+  // business that bought it, even on a customer Polar matched by email.
+  const checkoutBusinessId = [text(record(data.metadata).lobbystack_business), text(record(subscription.metadata).lobbystack_business)].find(isUuid);
   // A Polar customer that predates the Postgres migration still carries the old
   // Convex id in `external_id`, while its metadata holds the current one. Take
   // whichever reference actually identifies a business rather than trusting
   // the first field that happens to be populated.
-  const references = [
-    text(data.businessId),
+  const customerReferences = businessReferences([
     text(customer.external_id),
     text(data.external_customer_id),
     text(data.externalCustomerId),
     text(customerMetadata.externalCustomerId),
     text(customerMetadata.businessId),
-  ].flatMap(value => {
-    if (!value) return [];
-    return [value.match(/^business:(.+)$/)?.[1] ?? value];
-  });
+  ]);
+  const customerBusinessId = customerReferences.find(isUuid);
+  const references = [...businessReferences([text(data.businessId)]), ...(checkoutBusinessId ? [checkoutBusinessId] : []), ...customerReferences];
   const businessId = references.find(isUuid);
   const candidate = businessId ?? references[0];
   const productId = text(subscription.product_id) ?? text(data.product_id);
@@ -45,6 +49,8 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
   return {
     businessId,
     businessReference: candidate,
+    /** The business the customer names, when the checkout's metadata names another. */
+    ...(checkoutBusinessId && customerBusinessId && customerBusinessId !== checkoutBusinessId ? { customerBusinessId } : {}),
     payload: {
       ...data,
       ...(externalId ? { billingKey: externalId } : {}),

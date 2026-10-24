@@ -103,6 +103,12 @@ describe("parseApiInput", () => {
     expect(parseApiInput(apiCheckoutCreateSchema, { plan: "pro", interval: "annual", promo_code: "SPRING25" })).toEqual({ ok: false, details: [{ path: "promo_code", message: "Only allowed when plan is promo." }] });
   });
 
+  it("takes a billing email for the business's Polar customer with any plan", () => {
+    expect(parseApiInput(apiCheckoutCreateSchema, { plan: "starter", interval: "monthly", billing_email: "billing@example.com" })).toEqual({ ok: true, data: { plan: "starter", interval: "monthly", billing_email: "billing@example.com" } });
+    expect(parseApiInput(apiCheckoutCreateSchema, { plan: "promo", interval: "monthly", promo_code: "allo-7k2q-px9m", billing_email: "billing@example.com" }).ok).toBe(true);
+    for (const bad of ["billing", "", `${"x".repeat(320)}@example.com`]) expect(parseApiInput(apiCheckoutCreateSchema, { plan: "pro", interval: "monthly", billing_email: bad })).toMatchObject({ ok: false, details: [{ path: "billing_email" }] });
+  });
+
   it("needs a use limit and an end for a code anyone may enter", () => {
     const business = "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6";
     expect(parseApiInput(apiBillingCodeCreateSchema, { plan: "pro_launch", business_id: business }).ok).toBe(true);

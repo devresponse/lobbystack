@@ -96,6 +96,26 @@ describe("reconciling a Polar order", () => {
   });
 });
 
+describe("the billing key", () => {
+  const account = { billingKey: "business:biz_1", customerId: "cust_1", subscriptionId: "sub_1", plan: "starter", subscriptionState: "active", billingInterval: "monthly", source: "polar" };
+
+  it("stays as it was when an event names another business's customer, which Polar matched by email", async () => {
+    const { account: write } = await reconcile("subscription.updated", { billingKey: "business:biz_2", customerId: "cust_2", subscriptionId: "sub_1", plan: "pro", status: "active" }, account);
+
+    expect(write?.values).toMatchObject({ billingKey: "business:biz_1" });
+    expect(write?.set).not.toHaveProperty("billingKey");
+    expect(write?.set).toMatchObject({ customerId: "cust_2", plan: "pro" });
+  });
+
+  it("is the business's own for a new account, never another business's or Polar's customer ID", async () => {
+    const other = await reconcile("subscription.active", { billingKey: "business:biz_2", plan: "starter", status: "active" });
+    expect(other.account?.values).toMatchObject({ billingKey: "business:biz_1" });
+
+    const polarId = await reconcile("subscription.active", { customerId: "cust_9", plan: "starter", status: "active" });
+    expect(polarId.account?.values).toMatchObject({ billingKey: "business:biz_1", customerId: "cust_9" });
+  });
+});
+
 describe("reconciling Polar events for a managed plan", () => {
   const managed = { billingKey: "business:biz_1", customerId: null, subscriptionId: null, plan: "enterprise", subscriptionState: "active", billingInterval: null, source: "managed" };
 

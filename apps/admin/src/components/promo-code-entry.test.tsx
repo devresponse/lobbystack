@@ -88,6 +88,25 @@ describe("Have a promo code?", () => {
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
   });
 
+  it("asks for a billing email when Polar has theirs for another business, and buys the plan with it", async () => {
+    store["lobbystack.billing.promoCode"] = "SALONS-2026";
+    let posts = 0;
+    const { assign, fetchMock } = setup((url, init) => {
+      if (url.startsWith("/api/billing/promo?")) return Response.json(view);
+      if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: `promo-checkout-${++posts}` });
+      return posts === 1
+        ? Response.json({ status: "error", checkoutUrl: null, error: "Polar already has a customer with this email for another business.", synced: false, refusal: "billing_email_taken" })
+        : Response.json({ status: "ready", checkoutUrl: "https://checkout.example/promo", error: null, synced: false, refusal: null });
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "billing.promo.subscribe.monthly" }));
+    expect(await screen.findByText("billing.toast.planChangeRefused.billing_email_taken")).toBeTruthy();
+    await userEvent.type(screen.getByLabelText("billing.billingEmail.label"), "billing@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "billing.billingEmail.submit" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.example/promo"), { timeout: 3_000 });
+    const checkouts = fetchMock.mock.calls.filter(([url, init]) => url === "/api/billing/checkout" && init?.method === "POST").map(([, init]) => body(init));
+    expect(checkouts).toEqual([{ businessId: "business", target: "starter", billingInterval: "monthly", promoCode: "SALONS-2026" }, { businessId: "business", target: "starter", billingInterval: "monthly", promoCode: "SALONS-2026", billingEmail: "billing@example.com" }]);
+  });
+
   it("moves a paying business's subscription without a checkout page", async () => {
     store["lobbystack.billing.promoCode"] = "SALONS-2026";
     const { assign } = setup((url, init) => {

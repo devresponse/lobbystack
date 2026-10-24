@@ -11,6 +11,7 @@ import { selectActiveBusiness } from "@/lib/active-business";
 import { PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import type { WorkspaceViewModel } from "@/lib/page-view-models";
+import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
 import { UpgradePlanDialog, type HostedUpgradePlan } from "./upgrade-plan-dialog";
 import { UpgradePlanDialogProvider } from "./upgrade-plan-dialog-context";
 
@@ -22,7 +23,10 @@ type Billing = {
   plans: BillingPlanList;
   promoPlan?: BillingPromoPlanView | null;
 };
-type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan };
+type CheckoutInput = { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail?: string };
+type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail: string | null };
+/** A checkout Polar couldn't make this business's customer for, which starts again with a billing email. */
+type EmailPrompt = { refusal: BillingEmailRefusal; email: string | null; target: HostedUpgradePlan; billingInterval: BillingInterval };
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
@@ -31,6 +35,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [interval, setInterval] = useState<BillingInterval>("annual");
   const [checkout, setCheckout] = useState<Checkout | null>(null);
+  const [emailPrompt, setEmailPrompt] = useState<EmailPrompt | null>(null);
   const [leaving, setLeaving] = useState(false);
   // Redirect once per checkout. A page restored from the browser's cache can rerun the
   // effect with the old ready checkout and send them straight back to it.
@@ -48,8 +53,8 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const promoPlan = changesPlan && billing.data?.promoPlan?.tier === plan ? billing.data.promoPlan : null;
   const activeBusinessId = () => selectActiveBusiness(client.getQueryData<WorkspaceResponse>(["businesses"])?.businesses)?.businessId;
   const mutation = useMutation({
-    mutationFn: (input: { businessId: string; target: HostedUpgradePlan; billingInterval: BillingInterval }) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
-    onSuccess: (result, input) => { if (activeBusinessId() === input.businessId) setCheckout({ businessId: input.businessId, requestId: result.requestId, target: input.target }); },
+    mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: (result, input) => { if (activeBusinessId() === input.businessId) setCheckout({ businessId: input.businessId, requestId: result.requestId, target: input.target, billingInterval: input.billingInterval, billingEmail: input.billingEmail ?? null }); },
     onError: (_error, input) => { if (activeBusinessId() === input.businessId) toast.error(t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed")); },
   });
   const result = useQuery({
@@ -59,7 +64,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     // A plan change keeps checking until Polar's webhook has moved the business onto the plan.
     refetchInterval: query => ["ready", "error"].includes(query.state.data?.status ?? "") || (query.state.data?.status === "changed" && query.state.data.synced) ? false : 1500,
   });
-  useEffect(() => { setOpen(false); setCheckout(null); }, [businessId]);
+  useEffect(() => { setOpen(false); setCheckout(null); setEmailPrompt(null); }, [businessId]);
   const resetCheckoutRequest = mutation.reset;
   useEffect(() => {
     // The back button from checkout can restore this page from the browser's cache, still
@@ -85,7 +90,14 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     }
     if (result.data?.status === "error" || result.isError) {
       const refusal = result.data?.refusal;
-      toast.error(refusal ? t(`billing.toast.planChangeRefused.${refusal}`) : t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"));
+      if (checkout && isBillingEmailRefusal(refusal)) {
+        // Polar wouldn't make this business's customer with that email, so the dialog asks for another.
+        setEmailPrompt({ refusal, email: checkout.billingEmail, target: checkout.target, billingInterval: checkout.billingInterval });
+        setOpen(true);
+      } else {
+        setEmailPrompt(null);
+        toast.error(refusal ? t(`billing.toast.planChangeRefused.${refusal}`) : t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"));
+      }
       setCheckout(null);
     }
   }, [businessId, changesPlan, checkout, result.data, result.isError, t]);
@@ -128,10 +140,11 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       locale={i18n.language}
       onBillingIntervalChange={setInterval}
       onContactEnterprise={() => window.location.assign(`mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(t("billing.upgradeDialog.enterpriseSubject"))}`)}
-      onOpenChange={setOpen}
-      onStartCheckout={(target, billingInterval) => mutation.mutate({ businessId, target, billingInterval })}
+      onOpenChange={(next) => { setOpen(next); if (!next) setEmailPrompt(null); }}
+      onStartCheckout={(target, billingInterval) => { setEmailPrompt(null); mutation.mutate({ businessId, target, billingInterval }); }}
       open={open}
       plans={billing.data.plans}
+      prompt={emailPrompt ? <BillingEmailForm key={`${emailPrompt.target}:${emailPrompt.billingInterval}`} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => mutation.mutate({ businessId, target: emailPrompt.target, billingInterval: emailPrompt.billingInterval, billingEmail })} pending={pending} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
       t={t}
     /> : null}
   </UpgradePlanDialogProvider>;

@@ -106,6 +106,19 @@ it("resolves a migrated customer from metadata instead of dropping it", async ()
   expect(logged).not.toHaveBeenCalled();
 });
 
+it("stores a subscription in the business its checkout named, and logs a customer that names another", async () => {
+  const customerBusinessId = "0b3c3c55-5f39-4a43-9d36-0e9f4a3f6f10";
+  const event = (customer: string) => JSON.stringify({ type: "subscription.active", data: { id: "sub-1", status: "active", metadata: { lobbystack_business: businessId }, customer: { external_id: `business:${customer}` } } });
+  expect((await POST(request(businessId, { body: event(businessId) }))).status).toBe(200);
+  expect(warned).not.toHaveBeenCalled();
+
+  expect((await POST(request(businessId, { id: "delivery-2", body: event(customerBusinessId) }))).status).toBe(200);
+  expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[1]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
+  expect(mocks.store).toHaveBeenLastCalledWith({}, expect.objectContaining({ businessId, providerEventId: "delivery-2" }));
+  const lines = warned.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+  expect(lines).toEqual([expect.objectContaining({ message: "ops.billing.webhook_customer_mismatch", provider: "polar", eventType: "subscription.active", businessId, customerBusinessId })]);
+});
+
 it("rejects invalid, stale, missing, and unconfigured signatures before DB access", async () => {
   expect((await POST(request(businessId, { signature: "v1,invalid" }))).status).toBe(401);
   expect((await POST(request(businessId, { timestamp: 1 }))).status).toBe(401);

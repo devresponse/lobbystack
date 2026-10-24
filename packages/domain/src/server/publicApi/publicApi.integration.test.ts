@@ -904,6 +904,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "billing.createCheckout"), eq(outboxMessages.aggregateId, checkout.id)))).toHaveLength(1);
       // A per-business key makes it out to the key's creator.
       expect(await payer((await createCheckoutForApi(context, caller, { plan: "starter", interval: "annual" }, { available: true })).id)).toBe(ownerId);
+      // A billing email goes with the checkout, for the Polar customer the worker makes the business.
+      const billed = await createCheckoutForApi(context, caller, { plan: "starter", interval: "annual", billing_email: "billing@example.invalid" }, { available: true });
+      expect(await loadBillingCheckoutRequest(context, { businessId, requestId: billed.id })).toMatchObject({ customerEmail: `${ownerId}@example.invalid`, billingEmail: "billing@example.invalid", businessName: "Billing test", externalCustomerId: `business:${businessId}` });
+      expect(await loadBillingCheckoutRequest(context, { businessId, requestId: checkout.id })).toMatchObject({ customerEmail: `${customerId}@example.invalid`, billingEmail: null });
       await expectApiError(createCheckoutForApi(context, caller, { plan: "starter", interval: "annual" }, { available: false }), 409, "conflict");
       expect(await getCheckoutForApi(context, caller, checkout.id)).toMatchObject({ id: checkout.id, status: "pending" });
       await expectApiError(getCheckoutForApi(context, a.caller, checkout.id), 404, "not_found");

@@ -95,6 +95,64 @@ describe("changing the plan of a business that already pays", () => {
   });
 });
 
+describe("a billing email for a business Polar can't give their own", () => {
+  it("asks for one when Polar has their email for another business, and starts the checkout again with it", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    const taken = { status: "error", checkoutUrl: null, error: "Polar already has a customer with this email for another business.", refusal: "billing_email_taken" };
+    const answers: Record<string, Record<string, unknown>> = { "request-1": taken, "request-2": taken, "request-3": { status: "ready", checkoutUrl: "https://checkout.example/session", error: null, refusal: null } };
+    let requests = 0;
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: `request-${++requests}` }) : Response.json({ synced: false, ...answers[new URL(url, "https://app.example").searchParams.get("requestId") ?? ""] }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+
+    // Their own email: the picker says why and asks for another.
+    expect(await screen.findByText("billing.toast.planChangeRefused.billing_email_taken")).toBeTruthy();
+    const field = () => screen.getByLabelText("billing.billingEmail.label") as HTMLInputElement;
+    await userEvent.type(field(), "billing@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "billing.billingEmail.submit" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/billing/checkout", expect.objectContaining({ body: JSON.stringify({ businessId: "business", target: "pro", billingInterval: "annual", billingEmail: "billing@example.com" }) })));
+
+    // That one is taken too, and the field says so.
+    expect(await screen.findByText("billing.billingEmail.taken")).toBeTruthy();
+    expect(field().value).toBe("billing@example.com");
+    await userEvent.clear(field());
+    await userEvent.type(field(), "salon@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "billing.billingEmail.submit" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.example/session"), { timeout: 3_000 });
+    expect(JSON.parse(String((fetchMock.mock.calls.filter(([, init]) => init?.method === "POST").at(-1)![1] as RequestInit).body))).toMatchObject({ billingEmail: "salon@example.com" });
+    expect(alerts.error).not.toHaveBeenCalled();
+  });
+
+  it("drops the question when they pick a plan again or close the picker", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual"], pro: ["annual"] } });
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => init?.method === "POST" ? Response.json({ requestId: "request" }) : Response.json({ status: "error", checkoutUrl: null, error: "Polar didn't accept the billing email.", synced: false, refusal: "billing_email_invalid" })));
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    expect(await screen.findByText("billing.toast.planChangeRefused.billing_email_invalid")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "billing.billingEmail.cancel" }));
+    expect(screen.queryByLabelText("billing.billingEmail.label")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    expect(await screen.findByLabelText("billing.billingEmail.label")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "accessibility.close" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    expect(screen.queryByLabelText("billing.billingEmail.label")).toBeNull();
+    expect(alerts.error).not.toHaveBeenCalled();
+  });
+});
+
 describe("checkout workspace isolation", () => {
   it.each(["starter", "pro"])("switches displayed prices and submits %s with the selected monthly interval", async target => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });

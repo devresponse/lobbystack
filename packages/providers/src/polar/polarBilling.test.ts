@@ -20,12 +20,56 @@ describe("PolarBillingProvider", () => {
     vi.stubGlobal("fetch", fetchMock);
     const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
 
-    await expect(provider.createCheckout({ productId: "product-1", customerEmail: "owner@example.com", externalCustomerId: "business:1", successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan", idempotencyKey: "billing-checkout:request-1" })).resolves.toEqual({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
+    await expect(provider.createCheckout({ productId: "product-1", customer: { id: "customer-1" }, metadata: { lobbystack_business: "1" }, successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan", idempotencyKey: "billing-checkout:request-1" })).resolves.toEqual({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
 
     expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/checkouts/", expect.objectContaining({ method: "POST" }));
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
     expect(new Headers(request.headers).get("idempotency-key")).toBe("billing-checkout:request-1");
-    expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_email: "owner@example.com", external_customer_id: "business:1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", customer_metadata: { externalCustomerId: "business:1" }, allow_discount_codes: false });
+    expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_id: "customer-1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", allow_discount_codes: false, metadata: { lobbystack_business: "1" } });
+  });
+  it("makes a checkout out to an email and external ID when it has no customer, with nothing put on the customer", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "checkout-1", url: "https://polar.example/checkout-1" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await provider.createCheckout({ productId: "product-1", customer: { email: "owner@example.com", externalId: "business:1" }, metadata: { lobbystack_business: "1" }, successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan" });
+
+    expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toEqual({ products: ["product-1"], customer_email: "owner@example.com", external_customer_id: "business:1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", allow_discount_codes: false, metadata: { lobbystack_business: "1" } });
+  });
+  it("finds a customer by its external ID, and one Polar doesn't have as null", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "customer-1", external_id: "business:1", email: "owner@example.com" }) })
+      .mockResolvedValueOnce({ ok: false, status: 404, json: async () => ({ error: "ResourceNotFound", detail: "Not found" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.findCustomerByExternalId("business:1")).resolves.toEqual({ id: "customer-1", externalId: "business:1" });
+    await expect(provider.findCustomerByExternalId("business:2")).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "https://polar.example/v1/customers/external/business%3A1", expect.not.objectContaining({ method: expect.anything() }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "https://polar.example/v1/customers/external/business%3A2", expect.anything());
+  });
+  it("makes a customer with its external ID, email and a name Polar accepts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "customer-1", external_id: "business:1", email: "owner@example.com" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await expect(provider.createCustomer({ externalId: "business:1", email: "owner@example.com", name: "x".repeat(300) })).resolves.toEqual({ id: "customer-1", externalId: "business:1" });
+    await provider.createCustomer({ externalId: "business:2", email: "billing@example.com", name: null });
+
+    expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/customers/", expect.objectContaining({ method: "POST" }));
+    const body = (index: number) => JSON.parse(String((fetchMock.mock.calls[index]?.[1] as RequestInit).body)) as unknown;
+    expect(body(0)).toEqual({ external_id: "business:1", email: "owner@example.com", name: "x".repeat(256) });
+    expect(body(1)).toEqual({ external_id: "business:2", email: "billing@example.com" });
+  });
+  it("names the fields a refused body points at", async () => {
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "PolarRequestValidationError", detail: [{ type: "value_error", loc: ["body", "email"], msg: "A customer with this email address already exists.", input: "owner@example.com" }, { type: "value_error", loc: ["body", "external_id"], msg: "A customer with this external ID already exists.", input: "business:1" }] }) })
+      .mockResolvedValueOnce({ ok: false, status: 422, json: async () => ({ error: "RequestValidationError", detail: [{ type: "value_error", loc: ["body", "individual", "email"], msg: "value is not a valid email address" }] }) }));
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const create = async () => await provider.createCustomer({ externalId: "business:1", email: "owner@example.com", name: null }).catch((error: unknown) => error);
+
+    await expect(create()).resolves.toMatchObject({ status: 422, errorName: "PolarRequestValidationError", fields: ["email", "external_id"] });
+    await expect(create()).resolves.toMatchObject({ status: 422, errorName: "RequestValidationError", fields: ["email"] });
   });
   it("moves a subscription to another product with only the product and proration in the body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: false, ended_at: null, pending_update: null }) });
@@ -42,11 +86,11 @@ describe("PolarBillingProvider", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "checkout-2", url: "https://polar.example/checkout-2" }) });
     vi.stubGlobal("fetch", fetchMock);
     const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
-    const checkout = { productId: "product-promo", customerEmail: "owner@example.com", externalCustomerId: "business:1", successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan" };
-    const metadata = { lobbystack_plan: "salons-half-off", lobbystack_checkout: "request-2" };
+    const checkout = { productId: "product-promo", customer: { id: "customer-1" }, successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan" };
+    const metadata = { lobbystack_business: "1", lobbystack_plan: "salons-half-off", lobbystack_checkout: "request-2" };
 
-    await provider.createCheckout({ ...checkout, promo: { discountId: "discount-1", metadata } });
-    await provider.createCheckout({ ...checkout, promo: { discountId: null, metadata } });
+    await provider.createCheckout({ ...checkout, discountId: "discount-1", metadata });
+    await provider.createCheckout({ ...checkout, discountId: null, metadata });
 
     expect(JSON.parse(String((fetchMock.mock.calls[0]?.[1] as RequestInit).body))).toMatchObject({ products: ["product-promo"], discount_id: "discount-1", allow_discount_codes: false, metadata });
     const plain = JSON.parse(String((fetchMock.mock.calls[1]?.[1] as RequestInit).body)) as Record<string, unknown>;

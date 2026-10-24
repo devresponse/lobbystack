@@ -256,7 +256,9 @@
         "change_pending": "An earlier change to your subscription is still being applied. Try again in a minute.",
         "subscription_unavailable": "Your subscription can't change right now. Check it under Manage subscription.",
         "product_unavailable": "This plan can't be bought right now. Contact support.",
-        "token_scope": "Plan changes aren't set up here yet. Contact support."
+        "token_scope": "Plan changes aren't set up here yet. Contact support.",
+        "billing_email_taken": "Your email is already used for another business's billing in Polar. Enter a separate billing email for this business.",
+        "billing_email_invalid": "Polar didn't accept your email for billing. Enter a billing email for this business."
       }
     },
     "pastDueBanner": {
@@ -547,6 +549,15 @@
         "rateLimited": "Too many codes tried. Try again later.",
         "failed": "Unable to check this code. Try again."
       }
+    },
+    "billingEmail": {
+      "label": "Billing email",
+      "placeholder": "billing@example.com",
+      "hint": "Polar sends this business's receipts here.",
+      "submit": "Continue",
+      "cancel": "Cancel",
+      "taken": "This email is used for another business's billing too. Enter another one.",
+      "invalid": "Polar didn't accept this email. Check it, or enter another one."
     }
   },
   "phoneNumber": {

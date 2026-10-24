@@ -107,6 +107,10 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ accepted: true, ignored: true });
     }
+    // Each business has its own Polar customer, so the checkout's business and the customer's agree.
+    // A customer that names another business is one Polar matched by email before that, and the
+    // subscription still goes to the business that bought it.
+    if (normalized.customerBusinessId) logEvent("warn", "ops.billing.webhook_customer_mismatch", { provider: "polar", eventType: event.data.type, businessId, customerBusinessId: normalized.customerBusinessId });
     // A redelivery of an event that never applied queues it again.
     const inserted = await withBusinessTransaction(getWorkerDatabase().db, { businessId, actorType: "worker" }, async (tx) => await storePolarWebhookEvent(tx, { businessId, providerEventId: event.data.id, eventType: event.data.type, payload: normalized.payload }));
     return NextResponse.json({ accepted: true, duplicate: !inserted, eventId: event.data.id });

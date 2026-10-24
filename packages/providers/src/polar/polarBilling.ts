@@ -12,12 +12,25 @@ export type PolarProrationBehavior = "invoice" | "prorate" | "next_period" | "re
 /** A subscription as a plan change needs it. pendingProductId is the product a change waiting for the next period moves it to. */
 export type PolarSubscription = { id: string; status: string; productId: string; cancelAtPeriodEnd: boolean; endedAt: string | null; pendingProductId: string | null; discountId: string | null; currentPeriodEnd: string | null };
 
-/** A request Polar answered with an error: its status, and the error name in its body (such as AlreadyCanceledSubscription or insufficient_scope) when it gave one. */
+/**
+ * A request Polar answered with an error: its status, the error name in its
+ * body (such as AlreadyCanceledSubscription or insufficient_scope) when it
+ * gave one, and the fields a refused body names, such as email.
+ */
 export class PolarRequestError extends Error {
-  constructor(readonly status: number, readonly errorName: string | null) {
+  constructor(readonly status: number, readonly errorName: string | null, readonly fields: readonly string[] = []) {
     super(`Polar request failed with status ${status}.`);
     this.name = "PolarRequestError";
   }
+}
+
+/** A Polar customer, which a checkout is made out to. */
+export type PolarCustomer = { id: string; externalId: string | null };
+
+type PolarCustomerBody = { id: string; external_id?: string | null };
+
+function customerFrom(body: PolarCustomerBody): PolarCustomer {
+  return { id: body.id, externalId: body.external_id ?? null };
 }
 
 type PolarSubscriptionBody = { id: string; status: string; product_id: string; cancel_at_period_end?: boolean; ended_at?: string | null; pending_update?: { product_id?: string | null } | null; discount_id?: string | null; current_period_end?: string | null };
@@ -26,12 +39,18 @@ function subscriptionFrom(body: PolarSubscriptionBody): PolarSubscription {
   return { id: body.id, status: body.status, productId: body.product_id, cancelAtPeriodEnd: body.cancel_at_period_end === true, endedAt: body.ended_at ?? null, pendingProductId: body.pending_update?.product_id ?? null, discountId: body.discount_id ?? null, currentPeriodEnd: body.current_period_end ?? null };
 }
 
-async function errorName(response: Response): Promise<string | null> {
+async function requestError(response: Response): Promise<PolarRequestError> {
   try {
-    const body = (await response.json()) as { error?: unknown };
-    return typeof body.error === "string" ? body.error : null;
+    const body = (await response.json()) as { error?: unknown; detail?: unknown };
+    // A refused body lists each problem with its location, such as ["body", "email"].
+    const fields = Array.isArray(body.detail) ? body.detail.flatMap((problem: unknown) => {
+      const location = (problem as { loc?: unknown } | null)?.loc;
+      const field = Array.isArray(location) ? location.at(-1) : undefined;
+      return typeof field === "string" ? [field] : [];
+    }) : [];
+    return new PolarRequestError(response.status, typeof body.error === "string" ? body.error : null, fields);
   } catch {
-    return null;
+    return new PolarRequestError(response.status, null);
   }
 }
 
@@ -42,7 +61,7 @@ export class PolarBillingProvider {
     assertCertificationBillingSandbox(this.config.baseUrl ?? "https://api.polar.sh");
     const response = await fetch(`${this.config.baseUrl ?? "https://api.polar.sh"}${path}`, { ...init, signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${this.config.accessToken}`, "content-type": "application/json", ...(init.headers ?? {}) } });
     if (!response.ok) {
-      throw new PolarRequestError(response.status, await errorName(response));
+      throw await requestError(response);
     }
     return (await response.json()) as T;
   }
@@ -81,16 +100,39 @@ export class PolarBillingProvider {
     return subscriptionFrom(await this.request<PolarSubscriptionBody>(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "PATCH", body: JSON.stringify(body) }));
   }
 
+  /** The customer with this external ID, or null when Polar has none. Needs customers:read or customers:write. */
+  async findCustomerByExternalId(externalId: string): Promise<PolarCustomer | null> {
+    try {
+      return customerFrom(await this.request<PolarCustomerBody>(`/v1/customers/external/${encodeURIComponent(externalId)}`));
+    } catch (error) {
+      if (error instanceof PolarRequestError && error.status === 404) return null;
+      throw error;
+    }
+  }
+
   /**
-   * A checkout page for one product. Discount codes typed into Polar's page
-   * are off: a discount comes only with a promo plan, which the deployment's
-   * own codes sell. A promo checkout names its plan's discount, and its
-   * metadata is copied onto the subscription.
+   * Makes a customer with an external ID, which usage and the billing portal
+   * name it by. Polar keeps one customer per email in an organization and
+   * refuses a second with a 422 naming the email field, as it names
+   * external_id for an external ID it has. Needs customers:write.
    */
-  async createCheckout(input: { productId: string; customerEmail: string; externalCustomerId: string; successUrl: string; returnUrl: string; idempotencyKey?: string; promo?: { discountId: string | null; metadata: Record<string, string> } }): Promise<{ checkoutUrl: string; checkoutId: string }> {
-    assertCertificationRecipient("email", input.customerEmail);
-    const promo = input.promo ? { ...(input.promo.discountId ? { discount_id: input.promo.discountId } : {}), metadata: input.promo.metadata } : {};
-    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", ...(input.idempotencyKey ? { headers: { "idempotency-key": input.idempotencyKey } } : {}), body: JSON.stringify({ products: [input.productId], customer_email: input.customerEmail, external_customer_id: input.externalCustomerId, success_url: input.successUrl, return_url: input.returnUrl, customer_metadata: { externalCustomerId: input.externalCustomerId }, allow_discount_codes: false, ...promo }) });
+  async createCustomer(input: { externalId: string; email: string; name: string | null }): Promise<PolarCustomer> {
+    assertCertificationRecipient("email", input.email);
+    return customerFrom(await this.request<PolarCustomerBody>("/v1/customers/", { method: "POST", body: JSON.stringify({ external_id: input.externalId, email: input.email, ...(input.name ? { name: input.name.slice(0, 256) } : {}) }) }));
+  }
+
+  /**
+   * A checkout page for one product, made out to a customer: one the caller
+   * found or made, whose email the page then fixes, or else an email and
+   * external ID, from which Polar picks a customer by email at payment, or
+   * makes one. Discount codes typed into Polar's page are off: a discount
+   * comes only with a promo plan, which the deployment's own codes sell. Its
+   * metadata is copied onto the subscription and its orders.
+   */
+  async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
+    if ("email" in input.customer) assertCertificationRecipient("email", input.customer.email);
+    const customer = "id" in input.customer ? { customer_id: input.customer.id } : { customer_email: input.customer.email, external_customer_id: input.customer.externalId };
+    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", ...(input.idempotencyKey ? { headers: { "idempotency-key": input.idempotencyKey } } : {}), body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) });
     return { checkoutUrl: result.url, checkoutId: result.id };
   }
 

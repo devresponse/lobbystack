@@ -1,6 +1,7 @@
 "use client";
 
 import { Check } from "lucide-react";
+import type { ReactNode } from "react";
 import type { TFunction } from "i18next";
 
 import { Button } from "@/components/ui/button";
@@ -59,6 +60,7 @@ export function UpgradePlanDialog({
   onStartCheckout,
   open,
   plans,
+  prompt = null,
   t,
 }: {
   availableCheckoutPlans: Array<"starter" | "pro">;
@@ -79,6 +81,8 @@ export function UpgradePlanDialog({
   open: boolean;
   /** The deployment's plans, from GET /api/billing. */
   plans: BillingPlanList;
+  /** Shown above the plans, such as the request for a billing email. */
+  prompt?: ReactNode;
   t: BillingTranslation;
 }) {
   const annualSaving = annualSavingPercent(plans);
@@ -118,6 +122,8 @@ export function UpgradePlanDialog({
             </p>
           ) : null}
         </DialogHeader>
+
+        {prompt}
 
         <div className="flex justify-center">
           <div

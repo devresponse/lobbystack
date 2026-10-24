@@ -6,7 +6,7 @@ import { vi } from "vitest";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarRequestError, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
-import { planChangeRefusals } from "@lobbystack/shared";
+import { planChangeRefusalOf, planChangeRefusals } from "@lobbystack/shared";
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, polarProductLinks, readPolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
@@ -556,7 +556,7 @@ describe("worker handlers", () => {
     vi.stubEnv("APP_BASE_URL", "https://app.example/");
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: null, subscription: null });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
     vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
     const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
 
@@ -574,6 +574,8 @@ describe("worker handlers", () => {
     expect(result).toEqual({ status: "completed", entityId: requestId });
     expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
       productId: "product-starter-monthly",
+      customer: { email: "owner@example.com", externalId: `business:${businessId}` },
+      metadata: { lobbystack_business: businessId },
       successUrl: `https://app.example/settings/plan?checkout=success&requestId=${requestId}`,
       returnUrl: "https://app.example/settings/plan",
     }));
@@ -613,7 +615,7 @@ describe("worker handlers", () => {
     const domain = { db: undefined as never };
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: null, subscription: null });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
     const error = new PolarRequestError(503, null);
     const createCheckout = vi.fn().mockRejectedValue(error);
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
@@ -625,6 +627,94 @@ describe("worker handlers", () => {
     await expect(handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout } }, { isFinalAttempt: true })).rejects.toBe(error);
     expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Polar checkout creation failed." });
     expect(releaseBillingCheckoutRequest).toHaveBeenCalledTimes(1);
+  });
+
+  describe("a checkout's Polar customer", () => {
+    function checkout(input: { billingEmail?: string; isFinalAttempt?: boolean; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+      const businessId = randomUUID();
+      const requestId = randomUUID();
+      const domain = { db: undefined as never };
+      vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
+      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
+      vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
+      vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: input.billingEmail ?? null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
+      const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
+      const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout, findCustomerByExternalId: vi.fn().mockResolvedValue(null), createCustomer: vi.fn(), ...input.polar } }, { isFinalAttempt: input.isFinalAttempt ?? true });
+      return { businessId, requestId, domain, createCheckout, run };
+    }
+
+    afterEach(() => {
+      vi.unstubAllEnvs();
+    });
+
+    it("makes the checkout out to the business's own customer, found by its billing key", async () => {
+      const findCustomerByExternalId = vi.fn().mockResolvedValue({ id: "customer-1", externalId: "business:1" });
+      const createCustomer = vi.fn();
+      const { businessId, requestId, createCheckout, run } = checkout({ polar: { findCustomerByExternalId, createCustomer } });
+
+      await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
+      expect(findCustomerByExternalId).toHaveBeenCalledWith(`business:${businessId}`);
+      expect(createCustomer).not.toHaveBeenCalled();
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ customer: { id: "customer-1" }, metadata: { lobbystack_business: businessId } }));
+    });
+
+    it("makes the business its customer with the billing email it was given, else the person's own", async () => {
+      const createCustomer = vi.fn().mockResolvedValue({ id: "customer-2", externalId: null });
+      const given = checkout({ billingEmail: "billing@example.com", polar: { createCustomer } });
+      await expect(given.run).resolves.toEqual({ status: "completed", entityId: given.requestId });
+      expect(createCustomer).toHaveBeenCalledWith({ externalId: `business:${given.businessId}`, email: "billing@example.com", name: "Allo Salon" });
+      expect(given.createCheckout).toHaveBeenCalledWith(expect.objectContaining({ customer: { id: "customer-2" } }));
+
+      const own = checkout({ polar: { createCustomer } });
+      await expect(own.run).resolves.toEqual({ status: "completed", entityId: own.requestId });
+      expect(createCustomer).toHaveBeenLastCalledWith({ externalId: `business:${own.businessId}`, email: "owner@example.com", name: "Allo Salon" });
+    });
+
+    it("uses the customer another run made first", async () => {
+      const findCustomerByExternalId = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "customer-3", externalId: "business:1" });
+      const createCustomer = vi.fn().mockRejectedValue(new PolarRequestError(422, "PolarRequestValidationError", ["email", "external_id"]));
+      const { requestId, createCheckout, run } = checkout({ polar: { findCustomerByExternalId, createCustomer } });
+
+      await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
+      expect(findCustomerByExternalId).toHaveBeenCalledTimes(2);
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ customer: { id: "customer-3" } }));
+    });
+
+    it("fails a checkout whose email Polar has for another business's customer, or doesn't take, so the person gives another", async () => {
+      const taken = checkout({ polar: { createCustomer: vi.fn().mockRejectedValue(new PolarRequestError(422, "PolarRequestValidationError", ["email"])) } });
+      await expect(taken.run).resolves.toEqual({ status: "skipped", entityId: taken.requestId });
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(taken.domain, { businessId: taken.businessId, requestId: taken.requestId, error: planChangeRefusals.billing_email_taken });
+      expect(taken.createCheckout).not.toHaveBeenCalled();
+
+      const invalid = checkout({ billingEmail: "billing@example.invalid", polar: { createCustomer: vi.fn().mockRejectedValue(new PolarRequestError(422, "RequestValidationError", ["email"])) } });
+      await expect(invalid.run).resolves.toEqual({ status: "skipped", entityId: invalid.requestId });
+      expect(markBillingCheckoutFailed).toHaveBeenLastCalledWith(invalid.domain, { businessId: invalid.businessId, requestId: invalid.requestId, error: planChangeRefusals.billing_email_invalid });
+      expect(planChangeRefusalOf(planChangeRefusals.billing_email_taken)).toBe("billing_email_taken");
+      expect(releaseBillingCheckoutRequest).not.toHaveBeenCalled();
+    });
+
+    it("leaves the customer to Polar's email match, and warns, when the worker's token can't read or make customers", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const { businessId, requestId, createCheckout, run } = checkout({ polar: { findCustomerByExternalId: vi.fn().mockRejectedValue(new PolarRequestError(403, "insufficient_scope")) } });
+
+      await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ customer: { email: "owner@example.com", externalId: `business:${businessId}` }, metadata: { lobbystack_business: businessId } }));
+      const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+      expect(lines).toContainEqual(expect.objectContaining({ level: "warn", message: expect.stringMatching(/customers:write scope\.$/), operation: "job.billing.createCheckout", businessId, requestId }));
+      warn.mockRestore();
+    });
+
+    it("tries again when Polar can't be reached, as any checkout does", async () => {
+      const error = new PolarRequestError(503, null);
+      const { businessId, requestId, domain, createCheckout, run } = checkout({ isFinalAttempt: false, polar: { findCustomerByExternalId: vi.fn().mockRejectedValue(error) } });
+
+      await expect(run).rejects.toBe(error);
+      expect(createCheckout).not.toHaveBeenCalled();
+      expect(releaseBillingCheckoutRequest).toHaveBeenCalledWith(domain, { businessId, requestId });
+      expect(markBillingCheckoutFailed).not.toHaveBeenCalled();
+    });
   });
 
   describe("the billing sweep", () => {
@@ -688,7 +778,7 @@ describe("worker handlers", () => {
       vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
       vi.mocked(markBillingPlanChanged).mockResolvedValue(true);
       vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
-      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: input.planCode ?? null, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: input.subscriptionPlanCode ?? null } });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode ?? null, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: input.subscriptionPlanCode ?? null } });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
       const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } }, input.isFinalAttempt === undefined ? {} : { isFinalAttempt: input.isFinalAttempt });
       return { businessId, requestId, domain, run };
@@ -793,7 +883,7 @@ describe("worker handlers", () => {
   describe("a promo plan", () => {
     const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
     const catalog = (status: "draft" | "active") => ({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status, polar_disc: "disc-half-off" }] });
-    const metadata = (requestId: string) => ({ lobbystack_plan: "salons-half-off", lobbystack_checkout: requestId });
+    const metadata = (businessId: string, requestId: string) => ({ lobbystack_business: businessId, lobbystack_plan: "salons-half-off", lobbystack_checkout: requestId });
 
     function promoCheckout(input: { status?: "draft" | "active"; subscription?: { plan: "starter" | "pro"; planCode: string | null } | null; planCode?: string | null; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
       const businessId = randomUUID();
@@ -808,7 +898,7 @@ describe("worker handlers", () => {
       const links = async () => polarProductLinks(catalog(input.status ?? "active"), process.env);
       vi.mocked(readPolarProductLinks).mockImplementation(links);
       const subscription = input.subscription ? { id: "sub-1", billingInterval: "monthly" as const, ...input.subscription } : null;
-      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
       const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
       return { businessId, requestId, domain, run };
@@ -821,9 +911,9 @@ describe("worker handlers", () => {
 
     it("sells its own product with its discount and the checkout's metadata, and never lets a typed code stack on it", async () => {
       const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
-      const { requestId, run } = promoCheckout({ polar: { createCheckout } });
+      const { businessId, requestId, run } = promoCheckout({ polar: { createCheckout } });
       await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
-      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "promo-starter-monthly", promo: { discountId: "disc-half-off", metadata: metadata(requestId) }, idempotencyKey: `billing-checkout:${requestId}` }));
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "promo-starter-monthly", discountId: "disc-half-off", metadata: metadata(businessId, requestId), idempotencyKey: `billing-checkout:${requestId}` }));
     });
 
     it("fails the request when the plan isn't on sale, without asking Polar", async () => {
@@ -839,7 +929,7 @@ describe("worker handlers", () => {
       const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("promo-starter-monthly"));
       const onto = promoCheckout({ subscription: { plan: "pro", planCode: null }, polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly")), changeSubscriptionProduct } });
       await expect(onto.run).resolves.toEqual({ status: "completed", entityId: onto.requestId });
-      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "promo-starter-monthly", prorationBehavior: expect.any(String), discountId: "disc-half-off", metadata: metadata(onto.requestId) });
+      expect(changeSubscriptionProduct).toHaveBeenCalledWith({ subscriptionId: "sub-1", productId: "promo-starter-monthly", prorationBehavior: expect.any(String), discountId: "disc-half-off", metadata: metadata(onto.businessId, onto.requestId) });
 
       vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
       changeSubscriptionProduct.mockClear();

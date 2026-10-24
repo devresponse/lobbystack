@@ -39,6 +39,28 @@ describe("Polar payload normalization", () => {
     expect(result.payload).toMatchObject({ plan: "starter", billingInterval: "monthly" });
   });
 
+  it("gives a subscription to the business its checkout named, and names a customer that belongs to another", () => {
+    // Before each business had its own customer, Polar matched a second
+    // business's checkout to the first's customer by email.
+    const buyer = "22222222-2222-4222-8222-222222222222";
+    const subscription = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", product_id: "pro_month", metadata: { lobbystack_business: buyer }, customer: { id: "cust_1", external_id: `business:${businessId}` } }, variables({ POLAR_PRO_MONTHLY_PRODUCT_ID: "pro_month" }));
+    expect(subscription).toMatchObject({ businessId: buyer, customerBusinessId: businessId });
+    expect(subscription.payload).toMatchObject({ subscriptionId: "sub_1", plan: "pro" });
+
+    const order = normalizePolarEvent("order.paid", { id: "order_1", status: "paid", customer: { external_id: `business:${businessId}` }, subscription: { id: "sub_1", status: "active", product_id: "pro_month", metadata: { lobbystack_business: buyer } } });
+    expect(order).toMatchObject({ businessId: buyer, customerBusinessId: businessId });
+  });
+
+  it("names no other business when the checkout's and the customer's agree, and skips metadata that isn't an ID", () => {
+    const agreeing = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: businessId }, customer: { external_id: `business:${businessId}` } });
+    expect(agreeing.businessId).toBe(businessId);
+    expect(agreeing).not.toHaveProperty("customerBusinessId");
+
+    const garbled = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", metadata: { lobbystack_business: "not-an-id" }, customer: { external_id: `business:${businessId}` } });
+    expect(garbled.businessId).toBe(businessId);
+    expect(garbled).not.toHaveProperty("customerBusinessId");
+  });
+
   it("still reports a legacy reference when no field carries a usable id", () => {
     const result = normalizePolarEvent("subscription.active", {
       customer: {

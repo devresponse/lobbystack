@@ -27,12 +27,15 @@ CREATE INDEX IF NOT EXISTS billing_checkout_requests_open_idx
 --     p_checkouts_before.
 -- A row the sweep already queued in hour p_hour (its outbox key is
 -- billing-sweep:<kind>:<id>:<hour>, as billingSweep.ts writes it) is left out,
--- so work that keeps failing doesn't hide the rows behind it. Each kind returns
--- at most p_limit rows, oldest first.
+-- so work that keeps failing doesn't hide the rows behind it, except a checkout
+-- request created before p_checkouts_expired_before, which has waited too long
+-- and is listed for the sweep to fail it. Each kind returns at most p_limit
+-- rows, oldest first.
 CREATE OR REPLACE FUNCTION app.list_billing_sweep_work(
   p_events_before timestamptz,
   p_usage_before timestamptz,
   p_checkouts_before timestamptz,
+  p_checkouts_expired_before timestamptz,
   p_hour bigint,
   p_limit integer
 )
@@ -78,7 +81,10 @@ AS $$
     FROM public.billing_checkout_requests r
     WHERE r.status IN ('pending', 'processing')
       AND r.updated_at < p_checkouts_before
-      AND NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:checkout_request:' || r.id::text || ':' || p_hour::text)
+      AND (
+        r.created_at < p_checkouts_expired_before
+        OR NOT EXISTS (SELECT 1 FROM public.outbox_messages o WHERE o.dedupe_key = 'billing-sweep:checkout_request:' || r.id::text || ':' || p_hour::text)
+      )
       AND session_user = 'lobbystack_worker'
       AND NULLIF(current_setting('app.actor_type', true), '') = 'worker'
     ORDER BY r.updated_at
@@ -86,5 +92,5 @@ AS $$
   )
 $$;
 
-REVOKE ALL ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, bigint, integer) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, bigint, integer) TO lobbystack_worker;
+REVOKE ALL ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, timestamptz, bigint, integer) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, timestamptz, bigint, integer) TO lobbystack_worker;

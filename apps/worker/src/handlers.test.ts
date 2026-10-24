@@ -594,6 +594,19 @@ describe("worker handlers", () => {
     expect(createCheckout).not.toHaveBeenCalled();
   });
 
+  it("reports a checkout that waited too long for its job, which failed it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const businessId = randomUUID();
+    const requestId = randomUUID();
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValueOnce({ claimed: false, retryAt: null, expired: true });
+
+    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout: vi.fn() } })).toEqual({ status: "skipped", entityId: requestId });
+    expect(error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.createCheckout", businessId, requestId, alertable: true }));
+    expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
   it("hands a checkout back while Polar fails and the job will try again, and fails it on the last try", async () => {
     const businessId = randomUUID();
     const requestId = randomUUID();
@@ -644,7 +657,8 @@ describe("worker handlers", () => {
       vi.mocked(sweepBillingWork).mockResolvedValueOnce({ queued: counts({ provider_event: 2, usage_event: 1 }), overdue: counts({ provider_event: 1, checkout_request: 1 }), failed: 0 });
       expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "completed", entityId: "3:1" });
       expect(lines(warn)).toContainEqual(expect.objectContaining({ message: "ops.billing.sweep", eventsQueued: 2, usageQueued: 1, eventsOverdue: 1, checkoutsExpired: 1 }));
-      expect(lines(error)).toContainEqual(expect.objectContaining({ level: "error", message: expect.stringMatching(/\] exception: Billing work waited longer than it should/), operation: "job.billing.sweep", eventsOverdue: 1, checkoutsExpired: 1, alertable: true }));
+      // A worker without Polar's settings sends no usage and fails no job, so the report says so.
+      expect(lines(error)).toContainEqual(expect.objectContaining({ level: "error", message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.sweep", polarConfigured: false, eventsOverdue: 1, checkoutsExpired: 1, alertable: true }));
       info.mockRestore();
       warn.mockRestore();
       error.mockRestore();

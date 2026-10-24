@@ -2,7 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { billingCheckoutRequests, billingUsageEvents, enqueueOutbox, providerEvents, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
-import { BILLING_CHECKOUT_CLAIM_STALE_MS, expireBillingCheckoutRequest } from "./billing";
+import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, expireBillingCheckoutRequest } from "./billing";
 import type { DomainContext } from "./context";
 
 // Billing work keeps its row until it is done: a Polar event stays received
@@ -56,6 +56,28 @@ export function billingSweepKey(kind: BillingSweepKind, id: string, at: Date): s
 }
 
 /**
+ * Stores a Polar event the webhook received, once, and queues it to apply.
+ * Polar sends an event again when it never heard back, and when someone
+ * redelivers it from Polar's dashboard: one stored before that never applied
+ * is queued again, at most once an hour, as the sweep would queue it. Returns
+ * whether the event is new.
+ */
+export async function storePolarWebhookEvent(
+  tx: DatabaseTransaction,
+  input: { businessId: string; providerEventId: string; eventType: string; payload: Record<string, unknown>; now?: Date },
+): Promise<boolean> {
+  const { businessId, providerEventId } = input;
+  const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId, eventType: input.eventType, businessId, payload: input.payload }).onConflictDoNothing().returning({ id: providerEvents.id });
+  if (stored) {
+    await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: stored.id, dedupeKey: `provider-event:${providerEventId}:billing`, payload: { providerEventId: stored.id } });
+    return true;
+  }
+  const [waiting] = await tx.select({ id: providerEvents.id }).from(providerEvents).where(and(eq(providerEvents.provider, "polar"), eq(providerEvents.providerEventId, providerEventId), eq(providerEvents.businessId, businessId), eq(providerEvents.status, "received"))).limit(1);
+  if (waiting) await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: waiting.id, dedupeKey: billingSweepKey("provider_event", waiting.id, input.now ?? new Date()), payload: { providerEventId: waiting.id } });
+  return false;
+}
+
+/**
  * Queues billing work no job finished: Polar events never applied, final
  * usage never sent to Polar, and checkout requests a job claimed and never
  * finished or never claimed. A checkout request older than
@@ -65,7 +87,7 @@ export async function sweepBillingWork(context: DomainContext, now = new Date())
   const before = (ms: number) => new Date(now.getTime() - ms).toISOString();
   const rows = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => (await tx.execute<SweepRow>(sql`
     select kind, business_id, entity_id, created_at, updated_at
-    from app.list_billing_sweep_work(${before(EVENT_WAIT_MS)}::timestamptz, ${before(USAGE_WAIT_MS)}::timestamptz, ${before(BILLING_CHECKOUT_CLAIM_STALE_MS)}::timestamptz, ${sweepHour(now)}::bigint, ${SWEEP_LIMIT})
+    from app.list_billing_sweep_work(${before(EVENT_WAIT_MS)}::timestamptz, ${before(USAGE_WAIT_MS)}::timestamptz, ${before(BILLING_CHECKOUT_CLAIM_STALE_MS)}::timestamptz, ${before(BILLING_CHECKOUT_EXPIRES_MS)}::timestamptz, ${sweepHour(now)}::bigint, ${SWEEP_LIMIT})
   `)).rows, { accessMode: "read only" });
   const outcome: BillingSweepOutcome = { queued: { provider_event: 0, usage_event: 0, checkout_request: 0 }, overdue: { provider_event: 0, usage_event: 0, checkout_request: 0 }, failed: 0 };
   for (const row of rows) {

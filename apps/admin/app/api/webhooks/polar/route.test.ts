@@ -2,8 +2,9 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), insert: vi.fn(), enqueue: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), waiting: vi.fn() }));
-vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), store: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn() }));
+// storePolarWebhookEvent's own tests run it against PostgreSQL.
+vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog, storePolarWebhookEvent: mocks.store }));
 vi.mock("@lobbystack/providers", () => import("../../../../../../packages/providers/src/polar/webhook"));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
 vi.mock("@lobbystack/db", async importOriginal => ({
@@ -11,13 +12,8 @@ vi.mock("@lobbystack/db", async importOriginal => ({
   withDispatcherTransaction: async (_db: unknown, callback: (tx: unknown) => unknown) => callback({ select: () => ({ from: () => ({ where: (condition: unknown) => { mocks.where(condition); return { limit: mocks.lookup }; } }) }) }),
   withBusinessTransaction: async (_db: unknown, scope: unknown, callback: (tx: unknown) => unknown) => {
     mocks.scope(scope);
-    return callback({
-      insert: () => ({ values: (value: unknown) => { mocks.insert(value); return { onConflictDoNothing: () => ({ returning: async () => mocks.insert.mock.calls.length === 1 ? [{ id: "event-row" }] : [] }) }; } }),
-      // A delivery stored before, still waiting to apply.
-      select: () => ({ from: () => ({ where: () => ({ limit: mocks.waiting }) }) }),
-    });
+    return callback({});
   },
-  enqueueOutbox: mocks.enqueue,
 }));
 
 import { POST } from "./route";
@@ -42,30 +38,20 @@ beforeEach(() => {
   vi.stubEnv("POLAR_ACCEPT_LEGACY_BUSINESS_IDS", "false");
   mocks.lookup.mockResolvedValue([{ id: businessId }]);
   mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
-  mocks.waiting.mockResolvedValue([]);
+  // The first delivery is new, and Polar's next one a duplicate.
+  mocks.store.mockReset().mockResolvedValueOnce(true).mockResolvedValue(false);
   logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
   warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
-it("routes a signed UUID delivery and deduplicates retries before enqueueing", async () => {
+it("stores a signed UUID delivery in its business, as the worker, and says when Polar sent it before", async () => {
   expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: false, eventId: "delivery-1" });
   expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: true, eventId: "delivery-1" });
   expect(mocks.scope).toHaveBeenCalledWith({ businessId, actorType: "worker" });
-  expect(mocks.enqueue).toHaveBeenCalledTimes(1);
-  expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ providerEventId: "delivery-1", businessId }));
+  expect(mocks.store).toHaveBeenCalledTimes(2);
+  expect(mocks.store).toHaveBeenCalledWith({}, { businessId, providerEventId: "delivery-1", eventType: "subscription.active", payload: expect.any(Object) });
   expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
-});
-
-it("runs a redelivered event again when it never applied, at most once an hour", async () => {
-  vi.useFakeTimers({ toFake: ["Date"] });
-  vi.setSystemTime(new Date("2026-10-24T09:41:00Z"));
-  expect((await POST(request())).status).toBe(200);
-  mocks.waiting.mockResolvedValue([{ id: "event-row" }]);
-  expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: true, eventId: "delivery-1" });
-  expect(mocks.enqueue).toHaveBeenCalledTimes(2);
-  // The billing sweep's key for the hour, so the two never run it twice in one hour.
-  expect(mocks.enqueue.mock.calls[1]![1]).toEqual({ topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: "event-row", dedupeKey: `billing-sweep:provider_event:event-row:${Math.floor(Date.parse("2026-10-24T09:00:00Z") / 3_600_000)}`, payload: { providerEventId: "event-row" } });
 });
 
 it("names the plan through the catalog's Polar links, read as the worker", async () => {
@@ -73,7 +59,7 @@ it("names the plan through the catalog's Polar links, read as the worker", async
   const body = JSON.stringify({ type: "subscription.updated", data: { id: "sub-1", status: "active", product_id: "prod_pro_year", customer: { external_id: `business:${businessId}` } } });
   expect((await POST(request(businessId, { body }))).status).toBe(200);
   expect(mocks.scope).toHaveBeenCalledWith({ actorType: "worker" });
-  expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ payload: expect.objectContaining({ plan: "pro", billingInterval: "annual" }) }));
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ payload: expect.objectContaining({ plan: "pro", billingInterval: "annual" }) }));
 });
 
 it("resolves legacy references only with the explicit compatibility flag", async () => {
@@ -82,15 +68,14 @@ it("resolves legacy references only with the explicit compatibility flag", async
   vi.stubEnv("POLAR_ACCEPT_LEGACY_BUSINESS_IDS", "true");
   expect((await POST(request("legacy-business"))).status).toBe(200);
   expect(mocks.lookup).toHaveBeenCalledTimes(1);
-  expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+  expect(mocks.store).toHaveBeenCalledTimes(1);
   expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."legacy_convex_id" = $1', params: ["legacy-business"] });
 });
 
 it("ignores unknown businesses without persisting or enqueueing", async () => {
   mocks.lookup.mockResolvedValue([]);
   expect(await (await POST(request())).json()).toEqual({ accepted: true, ignored: true });
-  expect(mocks.insert).not.toHaveBeenCalled();
-  expect(mocks.enqueue).not.toHaveBeenCalled();
+  expect(mocks.store).not.toHaveBeenCalled();
   expect(unresolvedLogs()).toEqual([{ event: "ops.billing.webhook_unresolved", provider: "polar", eventType: "subscription.active", reason: "unknown_business", businessReference: businessId }]);
 });
 
@@ -117,7 +102,7 @@ it("resolves a migrated customer from metadata instead of dropping it", async ()
     },
   });
   expect(await (await POST(request(businessId, { body }))).json()).toEqual({ accepted: true, duplicate: false, eventId: "delivery-1" });
-  expect(mocks.enqueue).toHaveBeenCalledTimes(1);
+  expect(mocks.store).toHaveBeenCalledWith({}, expect.objectContaining({ businessId }));
   expect(logged).not.toHaveBeenCalled();
 });
 

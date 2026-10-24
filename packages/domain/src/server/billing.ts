@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, lt, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
@@ -325,8 +325,12 @@ export const BILLING_CHECKOUT_CLAIM_STALE_MS = 5 * 60_000;
  */
 export const BILLING_CHECKOUT_EXPIRES_MS = 15 * 60_000;
 
-/** A claimed request, or when another run holds it, when that run's claim goes stale; null when the request is done. */
-export type BillingCheckoutClaim = { claimed: true } | { claimed: false; retryAt: Date | null };
+/**
+ * A claimed request, or one this run can't work on: retryAt says when the
+ * claim of the run that holds it goes stale, and is null when the request is
+ * done; expired says this claim failed it for waiting too long.
+ */
+export type BillingCheckoutClaim = { claimed: true } | { claimed: false; retryAt: Date | null; expired?: true };
 
 /** A request no run works on: still pending, or left processing by a run whose worker died. */
 function unclaimedCheckoutRequest(input: { businessId: string; requestId: string }, now: Date): SQL | undefined {
@@ -351,10 +355,10 @@ export async function claimBillingCheckoutRequest(
     const now = new Date();
     const rows = await tx.update(billingCheckoutRequests).set({ status: "processing", updatedAt: now, error: null }).where(and(
       unclaimedCheckoutRequest(input, now),
-      gt(billingCheckoutRequests.createdAt, new Date(now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
+      gte(billingCheckoutRequests.createdAt, new Date(now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
     )).returning({ id: billingCheckoutRequests.id });
     if (rows.length > 0) return { claimed: true };
-    if (await expireBillingCheckoutRequest(tx, { ...input, now })) return { claimed: false, retryAt: null };
+    if (await expireBillingCheckoutRequest(tx, { ...input, now })) return { claimed: false, retryAt: null, expired: true };
     const [held] = await tx.select({ status: billingCheckoutRequests.status, updatedAt: billingCheckoutRequests.updatedAt }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId))).limit(1);
     if (held?.status !== "processing") return { claimed: false, retryAt: null };
     // Never sooner than a few seconds, so a worker whose clock runs behind doesn't spin.
@@ -372,7 +376,7 @@ export async function expireBillingCheckoutRequest(
 ): Promise<boolean> {
   const rows = await tx.update(billingCheckoutRequests).set({ status: "error", error: "This request waited too long to run.", updatedAt: input.now }).where(and(
     unclaimedCheckoutRequest(input, input.now),
-    lte(billingCheckoutRequests.createdAt, new Date(input.now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
+    lt(billingCheckoutRequests.createdAt, new Date(input.now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
   )).returning({ id: billingCheckoutRequests.id });
   if (rows.length > 0) {
     await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_checkout_request", aggregateId: input.requestId, dedupeKey: `billing-checkout:${input.requestId}:error`, payload: { type: "billing.updated", entityId: input.requestId } });

@@ -2,10 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, like, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingCheckoutRequests, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, providerEvents, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingCheckoutRequests, billingUsageEvents, businesses, createDatabaseClient, outboxMessages, providerEvents, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, claimBillingCheckoutRequest, releaseBillingCheckoutRequest } from "./billing";
-import { sweepBillingWork } from "./billingSweep";
+import { storePolarWebhookEvent, sweepBillingWork } from "./billingSweep";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -137,16 +137,20 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
       const lostUsage = await usage(tx, businessId, { minutes: 30 });
       const lostCheckout = await checkout(tx, businessId, { userId, created: 8 });
 
+      const none = { provider_event: 0, usage_event: 0, checkout_request: 0 };
       const first = await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
       expect(first.queued).toEqual({ provider_event: 1, usage_event: 1, checkout_request: 1 });
       // A few minutes later the same hour's jobs stand.
       const again = await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 5 * 60_000)));
-      expect(again).toEqual({ queued: { provider_event: 0, usage_event: 0, checkout_request: 0 }, overdue: { provider_event: 0, usage_event: 0, checkout_request: 0 }, failed: 0 });
+      expect(again).toEqual({ queued: none, overdue: none, failed: 0 });
+      // Once the checkout has waited too long, a sweep in the same hour fails it all the same.
+      const expired = await asWorkerLogin(tx, (context) => sweepBillingWork(context, new Date(now.getTime() + 10 * 60_000)));
+      expect(expired).toEqual({ queued: none, overdue: { ...none, checkout_request: 1 }, failed: 0 });
 
-      // The next hour queues the event and usage again, and by then the checkout has waited too long.
+      // The next hour queues the event and usage again.
       const nextHour = new Date(now.getTime() + 60 * 60_000);
       const later = await asWorkerLogin(tx, (context) => sweepBillingWork(context, nextHour));
-      expect(later).toEqual({ queued: { provider_event: 1, usage_event: 1, checkout_request: 0 }, overdue: { provider_event: 1, usage_event: 1, checkout_request: 1 }, failed: 0 });
+      expect(later).toEqual({ queued: { ...none, provider_event: 1, usage_event: 1 }, overdue: { ...none, provider_event: 1, usage_event: 1 }, failed: 0 });
       const [hour, next] = [now, nextHour].map((at) => Math.floor(at.getTime() / 3_600_000));
       expect((await sweepJobs(tx, [lostEvent, lostUsage, lostCheckout])).map((job) => {
         const [, kind, , queuedHour] = job.dedupeKey.split(":");
@@ -159,7 +163,7 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
     await rollbackTest(async (tx) => {
       const businessId = await business(tx);
       await event(tx, businessId, { minutes: 10 });
-      const list = sql`select count(*)::int as count from app.list_billing_sweep_work(${ago(5).toISOString()}::timestamptz, ${ago(15).toISOString()}::timestamptz, ${ago(5).toISOString()}::timestamptz, 0, 10)`;
+      const list = sql`select count(*)::int as count from app.list_billing_sweep_work(${ago(5).toISOString()}::timestamptz, ${ago(15).toISOString()}::timestamptz, ${ago(5).toISOString()}::timestamptz, ${ago(15).toISOString()}::timestamptz, 0, 10)`;
       // The worker's login without the worker's actor type lists nothing.
       await tx.execute(sql`set local session authorization lobbystack_worker`);
       await tx.execute(sql`select set_config('app.actor_type', 'operator', true)`);
@@ -200,12 +204,45 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
       expect(await claimBillingCheckoutRequest(context, { businessId, requestId: fresh })).toEqual({ claimed: true });
 
       expect(await claimBillingCheckoutRequest(context, { businessId, requestId: died })).toEqual({ claimed: true });
-      expect(await claimBillingCheckoutRequest(context, { businessId, requestId: stale })).toEqual({ claimed: false, retryAt: null });
+      expect(await claimBillingCheckoutRequest(context, { businessId, requestId: stale })).toEqual({ claimed: false, retryAt: null, expired: true });
       expect(await status(stale)).toBe("error");
       // A failure stands.
       expect(await claimBillingCheckoutRequest(context, { businessId, requestId: failed })).toEqual({ claimed: false, retryAt: null });
       expect(await status(failed)).toBe("error");
       await tx.execute(sql`reset role`);
+    });
+  });
+
+  it("stores a Polar delivery once, and queues one that never applied again when Polar sends it again, at most once an hour", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = await business(tx);
+      const providerEventId = `evt_${randomUUID()}`;
+      // The webhook stores each delivery as the worker, in the event's business.
+      const store = async (at: Date) => {
+        await tx.execute(sql`set local role lobbystack_worker`);
+        const isNew = await withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, async (inner) => await storePolarWebhookEvent(inner, { businessId, providerEventId, eventType: "subscription.active", payload: { plan: "starter" }, now: at }));
+        await tx.execute(sql`reset role`);
+        return isNew;
+      };
+      const jobs = async () => (await tx.select({ dedupeKey: outboxMessages.dedupeKey, payload: outboxMessages.payload }).from(outboxMessages).where(eq(outboxMessages.businessId, businessId))).sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey));
+
+      expect(await store(now)).toBe(true);
+      const [stored] = await tx.select({ id: providerEvents.id, status: providerEvents.status }).from(providerEvents).where(eq(providerEvents.providerEventId, providerEventId));
+      expect(stored?.status).toBe("received");
+      const eventId = stored!.id;
+      const [hour, next] = [now, new Date(now.getTime() + 60 * 60_000)].map((at) => Math.floor(at.getTime() / 3_600_000));
+      // Polar sends it twice more in the hour, and its first job never applied it.
+      expect(await store(now)).toBe(false);
+      expect(await store(new Date(now.getTime() + 5 * 60_000))).toBe(false);
+      expect(await jobs()).toEqual([
+        { dedupeKey: `billing-sweep:provider_event:${eventId}:${hour}`, payload: { providerEventId: eventId } },
+        { dedupeKey: `provider-event:${providerEventId}:billing`, payload: { providerEventId: eventId } },
+      ]);
+      // Once it applied, Polar's next delivery is only a duplicate.
+      await tx.update(providerEvents).set({ status: "processed" }).where(eq(providerEvents.id, eventId));
+      expect(await store(new Date(now.getTime() + 60 * 60_000))).toBe(false);
+      expect((await jobs()).map((job) => job.dedupeKey)).not.toContain(`billing-sweep:provider_event:${eventId}:${next}`);
+      expect(await tx.select({ id: providerEvents.id }).from(providerEvents).where(eq(providerEvents.providerEventId, providerEventId))).toHaveLength(1);
     });
   });
 });

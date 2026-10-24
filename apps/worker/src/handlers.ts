@@ -242,15 +242,19 @@ async function recordBillingCatalogCheck(dependencies: WorkerDependencies, outco
 }
 
 const overdueBillingWork = getMeter("lobbystack-worker").createCounter("lobbystack.billing.overdue_work", { unit: "{row}" });
+/** One PostHog issue for all overdue billing work; its operation and counts say which. */
+const OVERDUE_BILLING_WORK = "Billing work waited longer than it should.";
 
 /**
  * Logs what the billing sweep queued again, and reports work that waited
  * longer than it should to PostHog error tracking, once a run: a Polar event
  * that never applied is a business that paid without getting its plan, or
  * kept one it cancelled; usage never sent is usage never billed; and a
- * checkout request that never ran is someone who couldn't pay.
+ * checkout request that never ran is someone who couldn't pay. A worker
+ * without Polar's settings leaves usage unsent without failing a job, so the
+ * report says whether it has them.
  */
-async function recordBillingSweep(outcome: BillingSweepOutcome): Promise<void> {
+async function recordBillingSweep(outcome: BillingSweepOutcome, polarConfigured: boolean): Promise<void> {
   const counts = {
     eventsQueued: outcome.queued.provider_event,
     usageQueued: outcome.queued.usage_event,
@@ -266,7 +270,7 @@ async function recordBillingSweep(outcome: BillingSweepOutcome): Promise<void> {
   for (const kind of ["provider_event", "usage_event", "checkout_request"] as const) {
     if (outcome.overdue[kind] > 0) overdueBillingWork.add(outcome.overdue[kind], { kind });
   }
-  if (overdue > 0) await reportError(new Error("Billing work waited longer than it should, so the billing sweep ran it again or failed it."), { operation: "job.billing.sweep", ...counts });
+  if (overdue > 0) await reportError(new Error(OVERDUE_BILLING_WORK), { operation: "job.billing.sweep", polarConfigured, ...counts });
 }
 
 /**
@@ -786,8 +790,15 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const requestId = String(job.payload.requestId ?? "");
       if (!requestId) return { status: "skipped", entityId: requestId };
       const claim = await claimBillingCheckoutRequest(dependencies.domain, { businessId, requestId });
-      // Another run holds the request: look again once its claim goes stale, in case its worker died.
-      if (!claim.claimed) return claim.retryAt ? { status: "deferred", entityId: requestId, retryAt: claim.retryAt } : { status: "skipped", entityId: requestId };
+      if (!claim.claimed) {
+        // The job ran too late, so the claim failed the request: someone couldn't pay or change plan.
+        if (claim.expired) {
+          overdueBillingWork.add(1, { kind: "checkout_request" });
+          await reportError(new Error(OVERDUE_BILLING_WORK), { operation: "job.billing.createCheckout", businessId, requestId });
+        }
+        // Another run holds the request: look again once its claim goes stale, in case its worker died.
+        return claim.retryAt ? { status: "deferred", entityId: requestId, retryAt: claim.retryAt } : { status: "skipped", entityId: requestId };
+      }
       const retrying = execution.isFinalAttempt === false;
       if (!dependencies.polar?.createCheckout) {
         await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "Billing checkout provider is not configured." });
@@ -1118,7 +1129,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     }
     case "billing.sweep": {
       const outcome = await sweepBillingWork(dependencies.domain);
-      await recordBillingSweep(outcome);
+      await recordBillingSweep(outcome, Boolean(dependencies.polar));
       // The next try sweeps again and finds the rows it couldn't queue; its last one reports the error.
       if (outcome.failed > 0) throw outcome.error;
       const queued = outcome.queued.provider_event + outcome.queued.usage_event + outcome.queued.checkout_request;

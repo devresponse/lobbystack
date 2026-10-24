@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { polarWebhookSchema } from "@lobbystack/contracts";
-import { businesses, enqueueOutbox, providerEvents, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
-import { billingSweepKey, polarProductLinks, readBillingCatalogSnapshot } from "@lobbystack/domain";
+import { businesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
+import { polarProductLinks, readBillingCatalogSnapshot, storePolarWebhookEvent } from "@lobbystack/domain";
 import { verifyPolarWebhookSignature } from "@lobbystack/providers";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { runAfterResponse } from "@/lib/after-response";
@@ -107,20 +107,8 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ accepted: true, ignored: true });
     }
-    const persist = async (tx: Parameters<Parameters<ReturnType<typeof getWorkerDatabase>["db"]["transaction"]>[0]>[0]) => {
-      const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: event.data.id, eventType: event.data.type, businessId, payload: normalized.payload }).onConflictDoNothing().returning({ id: providerEvents.id });
-      if (stored) {
-        await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: stored.id, dedupeKey: `provider-event:${event.data.id}:billing`, payload: { providerEventId: stored.id } });
-        return true;
-      }
-      // Polar sends an event again when it never heard back, and when someone
-      // redelivers it from Polar's dashboard. One that never applied runs
-      // again, at most once an hour, as the billing sweep would run it.
-      const [waiting] = await tx.select({ id: providerEvents.id }).from(providerEvents).where(and(eq(providerEvents.provider, "polar"), eq(providerEvents.providerEventId, event.data.id), eq(providerEvents.businessId, businessId), eq(providerEvents.status, "received"))).limit(1);
-      if (waiting) await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: waiting.id, dedupeKey: billingSweepKey("provider_event", waiting.id, new Date()), payload: { providerEventId: waiting.id } });
-      return false;
-    };
-    const inserted = await withBusinessTransaction(getWorkerDatabase().db, { businessId, actorType: "worker" }, persist);
+    // A redelivery of an event that never applied queues it again.
+    const inserted = await withBusinessTransaction(getWorkerDatabase().db, { businessId, actorType: "worker" }, async (tx) => await storePolarWebhookEvent(tx, { businessId, providerEventId: event.data.id, eventType: event.data.type, payload: normalized.payload }));
     return NextResponse.json({ accepted: true, duplicate: !inserted, eventId: event.data.id });
   } catch (error) {
     // Polar retries the delivery, and its log shows this errorId beside the one PostHog has.

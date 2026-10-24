@@ -101,9 +101,9 @@ The worker tries each `billing.reconcile` and `billing.syncUsage` job 12 times. 
 - final Starter or Pro usage in `billing_usage_events` still `pending` 15 minutes after its last change, for a business with a Polar customer;
 - a checkout request still `pending` or `processing` 5 minutes after its last change, which fails instead once it is 15 minutes old.
 
-Nothing needs requeueing by hand. Each sweep that finds work logs `ops.billing.sweep` with its counts. When a Polar event or usage has waited more than an hour, or a checkout request failed for waiting too long, the sweep also reports `Billing work waited longer than it should` to error tracking (see [BillingWorkOverdue](../operations/alerts.md#billingworkoverdue)).
+Nothing needs requeueing by hand. Each sweep that finds work logs `ops.billing.sweep` with its counts. When a Polar event or usage has waited more than an hour, or a checkout request failed for waiting too long, the worker also reports `Billing work waited longer than it should.` to error tracking (see [BillingWorkOverdue](../operations/alerts.md#billingworkoverdue)).
 
-To find the cause, read the worker's `job.failed` lines for the job type, and fix the provider, token or database error they name, such as a worker token without `events:write`. Keep the usage rows and their source keys: Polar keeps one event per source key, so usage sent twice is billed once. Usage Polar must never bill stays in the sweep until its `sync_status` is `skipped`.
+To find the cause, read the worker's `job.failed` lines for the job type, and fix the provider, token or database error they name, such as a worker token without `events:write`. A worker without `POLAR_ACCESS_TOKEN` or `POLAR_ORGANIZATION_ID` sends no usage and fails no job, and the sweep's report says `polarConfigured: false`. Keep the usage rows and their source keys: Polar keeps one event per source key, so usage sent twice is billed once. Only usage Polar must never bill leaves the sweep by hand, by setting its `sync_status` to `skipped`.
 
 ## Recover missing orders
 

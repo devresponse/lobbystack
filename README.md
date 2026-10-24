@@ -14,13 +14,13 @@ It is built for clinics, salons, repair shops, local service companies, restaura
 
 LobbyStack gives teams a modern AI front desk that can be hosted in the cloud or self-hosted on their own infrastructure.
 
-[Website](https://lobbystack.com) &middot; [Try the app](https://app.lobbystack.com/signup) &middot; [Docs](https://docs.lobbystack.com) &middot; [Self-hosting](https://docs.lobbystack.com/self-hosting/overview) &middot; [GitHub](https://github.com/lobbystack/lobbystack)
+[Docs](./docs/README.md) &middot; [Deploy it](./docs/deployment/guide/README.md) &middot; [Develop](./docs/development/README.md) &middot; [Changelog](./docs/project/changelog.md)
 
-[![License: MIT](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE) [![Open source](https://img.shields.io/badge/open%20source-yes-22c55e.svg)](https://github.com/lobbystack/lobbystack) [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)](https://www.typescriptlang.org/) [![PostgreSQL](https://img.shields.io/badge/backend-PostgreSQL-336791.svg)](https://www.postgresql.org/) [![Self-hostable](https://img.shields.io/badge/deploy-self--hostable-7c3aed.svg)](https://docs.lobbystack.com/self-hosting/overview)
-
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/lobbystack)
+[![License: MIT](https://img.shields.io/badge/license-MIT-111111.svg)](./LICENSE) [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg)](https://www.typescriptlang.org/) [![PostgreSQL](https://img.shields.io/badge/backend-PostgreSQL-336791.svg)](https://www.postgresql.org/) [![Self-hostable](https://img.shields.io/badge/deploy-self--hostable-7c3aed.svg)](./docs/deployment/guide/README.md)
 
 </div>
+
+> **This repository is a fork of LobbyStack, run as AlloPlace.** It develops on its own: the original project's repository is no longer available. The [docs](./docs/README.md) are the project's source of truth: [what the fork is](./docs/project/overview.md), [how to deploy it](./docs/deployment/guide/README.md), [what changed](./docs/project/changelog.md) and [what is still open](./docs/project/open-items.md).
 
 ## Why teams use LobbyStack
 
@@ -89,7 +89,7 @@ LobbyStack can be adapted for many local business workflows:
 | Messages | Incoming texts with manual replies, connected to customer history. |
 | Website widget | Embeddable chat, lead capture, and browser calls with per-site access controls. Restricted: new widget keys are off unless you set `WIDGET_KEY_ISSUANCE_ENABLED=true`. |
 | Dashboard | Calls, messages, contacts, appointments, recordings, transcripts, follow-ups, and analytics together. |
-| Usage and billing | Hosted plans, voice usage, alert SMS, transfer attempts, storage, and spending caps. |
+| Usage and billing | Plans from a file per brand, billed through Polar: voice minutes, alert SMS, transfer attempts, website chats, storage, promo codes, and spending caps. |
 | Bring your own API keys | Self-hosted deployments can use your own Twilio, OpenAI-compatible AI, calendar, email, analytics, and billing provider credentials. |
 
 ## Technology
@@ -101,26 +101,16 @@ LobbyStack can be adapted for many local business workflows:
 | Voice | OpenAI GPT-Live over SIP and WebRTC, Twilio Elastic SIP Trunking |
 | Agent | Vercel AI SDK, `gpt-6-luna` or any OpenAI-compatible model |
 
-## Hosted and open source
+## Cloud or self-hosted
 
-LobbyStack is open source with a hosted cloud service.
+A deployment runs in one of two modes, set by `DEPLOYMENT_MODE`:
 
-Use **LobbyStack Cloud** when you want the product managed for you. You still control the receptionist behavior, knowledge, services, rules, numbers, integrations, and team workflow from the app.
+- **Cloud** (`cloud`): businesses sign up, pick a plan and pay through Polar, by the plans in the brand's `billing.json`. AlloPlace runs this way. Each business still controls its receptionist's behavior, knowledge, services, rules, numbers, integrations, and team workflow from the app.
+- **Self-hosted** (`self_hosted_standard`, Docker Compose's default): your team runs the stack on its own infrastructure, with its own PostgreSQL, Twilio, OpenAI-compatible AI, calendar, analytics, and email provider accounts, and every business gets the self-hosted plan, with no billing.
 
-Self-host when your team wants to run the stack on your own infrastructure, bring your own API keys, and use your own PostgreSQL, Twilio, OpenAI-compatible AI, calendar, analytics, billing, and email provider accounts.
+To deploy on Railway, or with Docker Compose on one server, follow the [deployment guide](./docs/deployment/guide/README.md): it covers every variable, the phone path, email, billing, and the first run, and [part 0](./docs/deployment/guide/part-0-start-here.md) helps you pick a path. The fork doesn't use Railway's hosted template, which was made for the original project's repository.
 
-To self-host on Railway, deploy the [LobbyStack template](https://railway.com/deploy/lobbystack). Railway generates every secret and database password, and you enter an OpenAI API key and your Twilio credentials.
-
-After deploying, set a few variables in Railway:
-
-- **Email:** `SMTP_*` and `EMAIL_FROM` on the worker. Password resets, verification codes, and invites fail without them.
-- **Phone calls:** an OpenAI webhook to `https://your_admin_domain/api/webhooks/openai/live`, its secret as `OPENAI_WEBHOOK_SECRET` on the admin, and your Twilio Elastic SIP trunk as `TWILIO_SIP_TRUNK_SID` on the worker. See [`docs/voice/runtime.md`](./docs/voice/runtime.md#set-up-the-phone-path).
-- **Optional:** `FIRECRAWL_API_KEY` on the worker for website import, and `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` on the admin for Google Calendar.
-- **Custom domain:** `APP_BASE_URL` on the admin. The other URL variables reference it.
-
-The [self-hosting guide](https://docs.lobbystack.com/self-hosting/overview#after-deploying) has each step.
-
-Full product control in the hosted app. Infrastructure ownership when you self-host. Same open-source core either way.
+Same open-source core either way.
 
 ## Architecture for contributors
 
@@ -132,24 +122,25 @@ apps/
   worker/          asynchronous jobs, outbox dispatch, and live calls
 packages/embed/    Vite bundle for the embeddable website widget loader
 packages/          database, domain, agent core, jobs, providers, telemetry, and shared contracts
-mintlify/          public documentation source
-docs/              architecture notes, ADRs, provider docs, and validation notes
+brands/            each deployment's name, logo, colour, outside links, and plans
+docs/              the project's documentation and source of truth
+mintlify/          the original project's help pages, which the fork doesn't publish
 ```
 
-Read the [self-hosting overview](https://docs.lobbystack.com/self-hosting/overview) for the provider map and deployment expectations, or use the [Docker Compose guide](https://docs.lobbystack.com/self-hosting/docker-compose) for the official single-host baseline.
+The [code map](./docs/project/overview.md#find-your-way-around-the-code) says what each package holds, and the [architecture overview](./docs/architecture/overview.md) how they fit together.
 
 ## Get started
 
-### Use the hosted app
+### Set up a business
 
-1. [Create a LobbyStack account](https://app.lobbystack.com/signup).
+1. Sign up on your deployment's dashboard.
 2. Verify your mobile number.
 3. Import website knowledge, or skip and add knowledge manually later.
-4. Choose a plan.
+4. Choose a plan, on a cloud deployment.
 5. Claim a business number on Starter or Pro.
 6. Configure AI settings, services, knowledge, and rules before sending live calls.
 
-The full hosted walkthrough lives in the [setup guide](https://docs.lobbystack.com/quickstart).
+[Part 6 of the deployment guide](./docs/deployment/guide/part-6-first-run.md) walks through the first account and business.
 
 ### Run local development
 
@@ -168,12 +159,12 @@ Open the dashboard at `http://localhost:13000`. Use `localhost`, not `127.0.0.1`
 
 Local development stores recordings and uploads under `.lobbystack/storage`. Set `STORAGE_PROVIDER=s3` when you need to test an S3-compatible service.
 
-Mock providers are part of the default development path, so contributors can exercise flows without live Twilio, AI, calendar, or email credentials. Provider setup notes live in the [docs](https://docs.lobbystack.com/self-hosting/providers).
+Mock providers are part of the default development path, so contributors can exercise flows without live Twilio, AI, calendar, or email credentials. [Part 2 of the deployment guide](./docs/deployment/guide/part-2-local-development.md) is a step-by-step local setup, and [part 3](./docs/deployment/guide/part-3-outside-services.md) sets up each provider.
 
 ### Deploy with Docker Compose
 
 ```bash
-git clone https://github.com/lobbystack/lobbystack.git
+git clone https://github.com/devresponse/lobbystack.git
 cd lobbystack
 node scripts/generate-env.mjs
 # Set APP_BASE_URL, OPENAI_API_KEY, and your Twilio credentials in .env.
@@ -182,18 +173,19 @@ docker compose --env-file .env up -d --build
 
 The stack uses stdout logs and health endpoints without running monitoring containers. Set `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS` to send server telemetry to PostHog or another OTLP-compatible backend.
 
-For prerequisites, local smoke vs production go-live, helper scripts, and troubleshooting, see the [Docker Compose self-hosting guide](https://docs.lobbystack.com/self-hosting/docker-compose).
+For prerequisites, going live, helper scripts, and troubleshooting, see [production with Docker Compose](./docs/deployment/guide/part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose) in the deployment guide.
 
 ## Contributing
 
-Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md), keep durable business logic in the domain and database layers, and put the receptionist's tools in the agent core.
+Contributions are welcome. Start with [CONTRIBUTING.md](./CONTRIBUTING.md) and [develop and test](./docs/development/README.md), keep durable business logic in the domain and database layers, and put the receptionist's tools in the agent core. A pull request updates the docs it changes.
 
 Before opening a PR, run:
 
 ```bash
 pnpm typecheck
-pnpm build
+pnpm lint
 pnpm test
+pnpm build
 ```
 
 ## License

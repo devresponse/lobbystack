@@ -1,5 +1,7 @@
 # Readiness implementation — 2026-09-12
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 **Release decision: not certified.** This records working-tree implementation and local verification, not completion of the production-readiness plan. No production import, staging reset, deployment, provider destination change, or traffic cutover was performed.
 
 ## Implemented

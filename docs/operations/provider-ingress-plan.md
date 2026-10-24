@@ -1,5 +1,7 @@
 # Provider event ingress, retry, and reconciliation plan
 
+> **The original project's plan.** The original project wrote this before the fork, while it moved from Convex to this stack in September 2026. Fork PR #71 brought the Polar row up to date; the rest is as the original left it. For how things work now, start at the [docs index](../README.md).
+
 This document satisfies the `Provider event plan` deliverable in [production readiness](../validation/production-readiness.md). It is a plan, not a certification. It requires explicit approval from each responsible provider owner before any production rehearsal or cutover. Until then `releaseCertified` remains `false` and the readiness item stays `BLOCKED`.
 
 There is no durable inbound provider-event buffer. Every handler below persists durable records only after signature validation and business resolution; a rejected request leaves no record and depends on the provider retrying.

@@ -1,5 +1,7 @@
 # Validate PostHog and OpenTelemetry
 
+> **From the original project.** The original project wrote this before the fork. It describes tooling the repository still runs, but it hasn't been checked against the fork's code, and it names the original's staging and release process. To deploy the fork, follow the [deployment guide](../deployment/guide/README.md); for everything else, start at the [docs index](../README.md).
+
 Run `pnpm replacement:telemetry` to verify correlated traces, metrics, logs, headers, redaction, and exporter-outage behavior against a temporary local OTLP receiver.
 
 In staging, confirm admin, worker, voice gateway, and migrator emit the expected `service.name`, deployed `service.version`, and environment attributes. Inspect request-to-outbox-to-job-to-provider propagation and admin-to-voice propagation using the W3C trace ID.

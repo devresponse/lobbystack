@@ -10,6 +10,8 @@ meta:
 
 # Review staging environment repairs
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 The September 8, 2026 UTC repair covers Railway project `lobbystack-parity-20260907`, environment `staging`. You can use the table below to check the configuration without exposing secret values. Production phone numbers, existing callbacks, and Polar prices remain unchanged.
 
 ## Configuration changes
@@ -23,7 +25,7 @@ The application services now use these settings:
 | Restricted SMS access | Worker | Added `TWILIO_ALERT_API_KEY_SID` and `TWILIO_ALERT_API_KEY_SECRET`. The key allows `/twilio/messaging/messages/create`; it grants no number-management or Voice permissions. |
 | Alert delivery signatures | Admin | Added `TWILIO_ALERT_WEBHOOK_KEY_ID` and `TWILIO_ALERT_WEBHOOK_SECRET`. A Twilio rule applies the signing key to the staging status-callback URL. The main account auth token stays outside staging. |
 | Number claims | Admin | Generated `NUMBER_CLAIM_TOKEN_SECRET`. |
-| Turnstile | Admin | Replaced test credentials with `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` from the existing signup widget. Added the staging hostname; retained `lobbystack.com` and `localhost`. |
+| Turnstile | Admin | Replaced test credentials with `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` from the existing signup widget. Added the staging hostname; retained the original project's website and `localhost`. |
 | Outgoing email | Worker | Configured `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_PASSWORD`, and `EMAIL_FROM` for Resend’s Simple Mail Transfer Protocol (SMTP) service. Created a domain-scoped sending key. |
 | Email verification | Admin | Enabled `REQUIRE_EMAIL_VERIFICATION` and `SEND_VERIFICATION_EMAIL_ON_SIGNUP`. |
 | Feedback email | Admin, worker | Set `FEEDBACK_TO_EMAIL` from main. |

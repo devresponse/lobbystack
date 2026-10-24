@@ -47,7 +47,7 @@ The worker emails each new owner 24 hours after they finish onboarding and asks 
 
 Set both variables on the worker to turn it on:
 
-- **`ONBOARDING_FOLLOWUP_FROM`**: the sender, such as `Raphael from LobbyStack <raphael@lobbystack.com>`. Replies go to this address, so use an inbox you read. The domain must be verified in Resend.
-- **`ONBOARDING_FOLLOWUP_SENDER_NAME`**: the first name used in the email body and signature, such as `Raphael`.
+- **`ONBOARDING_FOLLOWUP_FROM`**: the sender, such as `Sam from AlloPlace <sam@example.com>`. Replies go to this address, so use an inbox you read. The domain must be verified in Resend.
+- **`ONBOARDING_FOLLOWUP_SENDER_NAME`**: the first name used in the email body and signature, such as `Sam`.
 
 Leave either one empty to turn the email off. Each workspace gets the email at most once, and workspaces that finished onboarding before this feature shipped never get it.

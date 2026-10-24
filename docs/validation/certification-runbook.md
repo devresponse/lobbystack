@@ -1,5 +1,7 @@
 # Certify the Next.js platform
 
+> **From the original project.** The original project wrote this before the fork. It describes tooling the repository still runs, but it hasn't been checked against the fork's code, and it names the original's staging and release process. To deploy the fork, follow the [deployment guide](../deployment/guide/README.md); for everything else, start at the [docs index](../README.md).
+
 Run certification against an isolated Compose or Railway staging environment and attach results to the release record.
 
 ## Run automated gates

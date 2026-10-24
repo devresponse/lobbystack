@@ -1,5 +1,7 @@
 # Production readiness progress — 2026-09-13
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 **Not approved for production traffic.** This extends the [initial implementation record](./readiness-implementation-2026-09-12.md). All evidence refers to the modified working tree.
 
 A local candidate commit `c775fa25` ("Harden production readiness for migration cutover") now captures the tested revision. It was **not pushed and not deployed**. The per-check evidence timestamps may span just before that commit; the code is unchanged in content from the committed tree.

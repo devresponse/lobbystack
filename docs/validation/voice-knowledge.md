@@ -6,13 +6,15 @@ meta:
 
 # Validate evidence-backed voice answers
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 Use this record to review the staging knowledge changes against the approved voice-answer plan. Production rollout requires browser and telephone audio acceptance. Text probes cannot establish spoken-language behavior.
 
 ## Scope and test plan
 
 The approved plan keeps PostgreSQL, the configured embedding provider, and the current speech-to-speech model. It compares full context, retrieval, and hybrid context on 40 versioned questions before staging acceptance. The evaluation includes 20 answerable questions, 10 follow-ups, and 10 ambiguous or unsupported questions.
 
-You can inspect the cases in `packages/domain/src/evals/voiceKnowledge.v1.ts`. The HEC excerpt records the verified management identifier `MNGT 10407`; the other businesses are synthetic. Each answerable case references its supporting source.
+You can inspect the cases in `packages/domain/src/evals/voiceKnowledge.v1.ts`. The HEC excerpt records a verified course code; the other businesses are synthetic. Each answerable case references its supporting source.
 
 ## Implemented behavior
 
@@ -30,7 +32,7 @@ The agent must look up missing business facts, including payment methods and par
 
 The old staging backend missed the verified identifier for the natural French HEC question and the short management query. An exact-code query found it.
 
-The first context comparison exposed skipped lookups and invented payment and parking details. The revised prompt, `hybrid-v2`, triggered lookup for all 30 answerable questions and follow-ups in the hybrid text run. Five repeated HEC text answers returned `MNGT 10407`.
+The first context comparison exposed skipped lookups and invented payment and parking details. The revised prompt, `hybrid-v2`, triggered lookup for all 30 answerable questions and follow-ups in the hybrid text run. Five repeated HEC text answers returned the right code.
 
 The revised retrieval run covered the expected source in 34 of 34 answerable probes, including four extra HEC repeats. It returned no cross-business passages. Its 95th-percentile lookup time was 541 ms against local PostgreSQL with the staging embedding provider. The small fixture corpus does not represent the full HEC website.
 
@@ -56,13 +58,13 @@ Synthetic French speech exposed a separate answer-selection failure. The voice m
 
 The `gpt-realtime-2.1` comparison also failed two of five HEC answers and exceeded the four-second answer-start target. The deployed model remains unchanged. [OpenAI’s model documentation](https://developers.openai.com/api/docs/models/gpt-realtime-2.1) guided this comparison; the application results do not support switching models.
 
-Section-aware reindexing of a local copy of the 137 stored HEC chunks produced 426 chunks. All four query variants returned the correct identifier, and five synthetic audio answers led with `MNGT 10407`. Evidence-backed audio started 2.02–2.47 seconds after the test committed input audio. This bypasses browser microphones and turn detection; it is not end-to-end latency acceptance.
+Section-aware reindexing of a local copy of the 137 stored HEC chunks produced 426 chunks. All four query variants returned the correct identifier, and five synthetic audio answers led with it. Evidence-backed audio started 2.02–2.47 seconds after the test committed input audio. This bypasses browser microphones and turn detection; it is not end-to-end latency acceptance.
 
 The stored-content reindex workflow preserves source URLs and refuses a changed, deleted, or inactive source. Tests cover edits during embedding and stale revision retries. The original HEC index remains in LobbyStack internal for recovery. No website recrawl is required.
 
 The acronym-aware 44-probe retrieval run covered all expected sources, with no tenant-isolation failures and a 407 ms 95th-percentile lookup time. These figures measure the fixture corpus, not the live audio path.
 
-Staging now uses the 426 rebuilt chunks. Five deployed lookups returned the correct code in 253–474 ms. Five synthetic French audio answers also led with `MNGT 10407`; independent transcription of the generated audio identified French in all five. Evidence-backed audio started in 2.12–3.09 seconds. Some answers added a related course, so brevity still needs review. The report is `staging-section-audio.json` in the internal reports folder.
+Staging now uses the 426 rebuilt chunks. Five deployed lookups returned the correct code in 253–474 ms. Five synthetic French audio answers also led with the code; independent transcription of the generated audio identified French in all five. Evidence-backed audio started in 2.12–3.09 seconds. Some answers added a related course, so brevity still needs review. The report is `staging-section-audio.json` in the internal reports folder.
 
 ## Remaining release gates
 

@@ -1,5 +1,7 @@
 # Next.js MCP audit — September 11, 2026
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 **Status: fixes integrated into the active checkout and verified.** See the final validation section below. The original observations are retained as historical evidence.
 
 Audited `apps/admin` on Next.js 16.3.1 using the Next DevTools MCP, a real browser, direct local HTTP requests, TypeScript, and a production build. The Next.js development server was started at `http://localhost:3000`. The Astro marketing site is a separate application.

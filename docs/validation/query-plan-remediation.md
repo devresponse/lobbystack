@@ -1,5 +1,7 @@
 # Query plan remediation validation
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 This phase measured the query plans behind the retention sweeps, booking availability, and dashboard period counts on an isolated PostgreSQL 16/pgvector database at 10k-50k rows per table, then added five indexes where the evidence showed a repeatable plan or scan-buffer improvement. Migration `0057_query_plan_indexes.sql` adds those indexes and removes no data. All other candidates are deferred with the measurements below. These are single-node local medians, not production capacity claims.
 
 ## Method

@@ -1,5 +1,7 @@
 # Performance optimization validation
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 Status: local implementation and validation; staging acceptance and production rollout remain open. No models, prompts, pool sizes, worker concurrency, database schema, RLS policies, or hosting configuration changed.
 
 ## Change groups

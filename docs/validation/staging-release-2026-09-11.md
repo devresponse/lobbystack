@@ -1,5 +1,7 @@
 # Staging release — September 11, 2026
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 Release base: `2c9df8c0`, plus the authentication verification UI correction made during live certification. Project: `af0a130e-7b02-4fc0-94ef-b0ac45a0a0a6`; environment: `22237215-5837-4754-842b-9306d43588ed` (`staging`). Production cutover is not certified.
 
 ## Deployed

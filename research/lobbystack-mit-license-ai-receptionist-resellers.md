@@ -35,7 +35,7 @@ Do not promise a one-click white-label or reseller portal. The repository suppor
 ### Code rights are separate from the LobbyStack brand
 
 - The MIT grant applies to the software and associated documentation. The site terms state that hosted accounts, plans, support, websites, and trademarks remain governed separately, and that the LobbyStack name, logos, branding, and goodwill do not receive unrestricted use through the open-source license. Source: [`terms.astro`, lines 127–148](../apps/landing/src/pages/terms.astro#L127-L148).
-- The repository’s SEO guidance repeats the rule: keep trademark rights separate from the software license when discussing white-label use. Source: [`docs/seo-remediation.md`, lines 49–55](../docs/seo-remediation.md#L49-L55).
+- The repository’s SEO guidance repeats the rule: keep trademark rights separate from the software license when discussing white-label use. Source: the original project's SEO guidance, `docs/seo-remediation.md`, which the fork removed on 2026-10-24.
 - Recommended article wording: “You can rebrand and sell a product built from the code. The MIT License does not give you unrestricted rights to the LobbyStack name or logos.” Avoid saying the article grants trademark permission.
 
 ### Hosted and self-hosted positioning

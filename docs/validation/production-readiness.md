@@ -1,5 +1,7 @@
 # Production readiness
 
+> **From the original project.** The original project wrote this before the fork. It describes tooling the repository still runs, but it hasn't been checked against the fork's code, and it names the original's staging and release process. To deploy the fork, follow the [deployment guide](../deployment/guide/README.md); for everything else, start at the [docs index](../README.md).
+
 This is the production-readiness record for the replacement stack. It is a plan, not a certification. As of this revision, every production item is `BLOCKED` or `NOT-RUN`; no evidence record can set `releaseCertified` to `true`.
 
 Use this document with the [certification runbook](./certification-runbook.md), the [current implementation validation report](./readiness-implementation-2026-09-12.md), and the [backup and restore runbook](../operations/backup-restore.md).

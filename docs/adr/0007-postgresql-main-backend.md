@@ -4,7 +4,7 @@ PostgreSQL stores durable state while shared domain modules coordinate work acro
 
 ## Status
 
-Accepted
+Accepted. The voice gateway named below was removed by [ADR 0008](0008-gpt-live-voice.md), and the move from Convex finished in September 2026.
 
 ## Decision
 

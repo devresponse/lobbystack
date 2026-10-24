@@ -5,6 +5,6 @@ import { reportError } from "@lobbystack/telemetry/node";
  * the request handled when there is one, and logs it as one JSON line that
  * leads with the error. See reportError() for the redaction.
  */
-export async function reportServerError(error: unknown, context: { operation: string; route?: string; method?: string; digest?: string; errorId?: string }): Promise<void> {
+export async function reportServerError(error: unknown, context: { operation: string; route?: string; method?: string; digest?: string; errorId?: string } & Record<string, string | undefined>): Promise<void> {
   await reportError(error, { ...context, service: "lobbystack-admin" });
 }

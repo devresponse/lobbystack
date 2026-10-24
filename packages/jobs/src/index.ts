@@ -58,7 +58,7 @@ export function createQueue(
   });
 }
 
-const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "notification.dispatch", "billing.endPromoPlan"]);
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan"]);
 
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,
@@ -77,9 +77,11 @@ export async function enqueueJob(
     scheduled: (input.delayMs ?? 0) > 0,
   });
   // Attempts and backoff come from the queue's defaultJobOptions, which give up
-  // after about 15 seconds. Usage billing, customer notifications and a promo
-  // plan's ending or discount removal have no other retry, so they ride out a
-  // provider outage, or Polar's "a change is still pending", for about 3 hours.
+  // after about 15 seconds. Usage billing, applying a Polar event, customer
+  // notifications and a promo plan's ending or discount removal ride out a
+  // provider or database outage, or Polar's "a change is still pending", for
+  // about 3 hours instead; the billing sweep queues billing work again after
+  // that.
   const options: JobsOptions = {
     jobId,
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),

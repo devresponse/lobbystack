@@ -1,4 +1,4 @@
-import { and, eq, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
@@ -311,17 +311,89 @@ export async function loadBillingCheckoutRequest(
   });
 }
 
+/**
+ * How long a checkout request stays processing before another run of its job
+ * may take it over. A job asks Polar at most a few times, each within 15
+ * seconds, so only a job whose worker died holds a request this long.
+ */
+export const BILLING_CHECKOUT_CLAIM_STALE_MS = 5 * 60_000;
+
+/**
+ * How long a checkout request can wait for its job. By then nobody waits on
+ * its page, and a plan change would surprise whoever asked for it, so the
+ * request fails instead, and they can ask again.
+ */
+export const BILLING_CHECKOUT_EXPIRES_MS = 15 * 60_000;
+
+/**
+ * A claimed request, or one this run can't work on: retryAt says when the
+ * claim of the run that holds it goes stale, and is null when the request is
+ * done; expired says this claim failed it for waiting too long.
+ */
+export type BillingCheckoutClaim = { claimed: true } | { claimed: false; retryAt: Date | null; expired?: true };
+
+/** A request no run works on: still pending, or left processing by a run whose worker died. */
+function unclaimedCheckoutRequest(input: { businessId: string; requestId: string }, now: Date): SQL | undefined {
+  return and(
+    eq(billingCheckoutRequests.id, input.requestId),
+    eq(billingCheckoutRequests.businessId, input.businessId),
+    or(eq(billingCheckoutRequests.status, "pending"), and(eq(billingCheckoutRequests.status, "processing"), lt(billingCheckoutRequests.updatedAt, new Date(now.getTime() - BILLING_CHECKOUT_CLAIM_STALE_MS)))),
+  );
+}
+
+/**
+ * Claims a request for the job about to work on it, when no run works on it
+ * and it is younger than BILLING_CHECKOUT_EXPIRES_MS; an older one fails. A
+ * request that failed stays failed: the person asks again, rather than have a
+ * plan change the page said failed go through later.
+ */
 export async function claimBillingCheckoutRequest(
+  context: DomainContext,
+  input: { businessId: string; requestId: string },
+): Promise<BillingCheckoutClaim> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const now = new Date();
+    const rows = await tx.update(billingCheckoutRequests).set({ status: "processing", updatedAt: now, error: null }).where(and(
+      unclaimedCheckoutRequest(input, now),
+      gte(billingCheckoutRequests.createdAt, new Date(now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
+    )).returning({ id: billingCheckoutRequests.id });
+    if (rows.length > 0) return { claimed: true };
+    if (await expireBillingCheckoutRequest(tx, { ...input, now })) return { claimed: false, retryAt: null, expired: true };
+    const [held] = await tx.select({ status: billingCheckoutRequests.status, updatedAt: billingCheckoutRequests.updatedAt }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId))).limit(1);
+    if (held?.status !== "processing") return { claimed: false, retryAt: null };
+    // Never sooner than a few seconds, so a worker whose clock runs behind doesn't spin.
+    return { claimed: false, retryAt: new Date(Math.max(held.updatedAt.getTime() + BILLING_CHECKOUT_CLAIM_STALE_MS, now.getTime() + 5_000)) };
+  });
+}
+
+/**
+ * Fails a request older than BILLING_CHECKOUT_EXPIRES_MS that no run works
+ * on, and tells its page. The checkout job and the billing sweep both use it.
+ */
+export async function expireBillingCheckoutRequest(
+  tx: DatabaseTransaction,
+  input: { businessId: string; requestId: string; now: Date },
+): Promise<boolean> {
+  const rows = await tx.update(billingCheckoutRequests).set({ status: "error", error: "This request waited too long to run.", updatedAt: input.now }).where(and(
+    unclaimedCheckoutRequest(input, input.now),
+    lt(billingCheckoutRequests.createdAt, new Date(input.now.getTime() - BILLING_CHECKOUT_EXPIRES_MS)),
+  )).returning({ id: billingCheckoutRequests.id });
+  if (rows.length > 0) {
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_checkout_request", aggregateId: input.requestId, dedupeKey: `billing-checkout:${input.requestId}:error`, payload: { type: "billing.updated", entityId: input.requestId } });
+  }
+  return rows.length > 0;
+}
+
+/**
+ * Hands a claimed request back when its job will try again, so the page keeps
+ * waiting instead of showing a failure that the next attempt may undo.
+ */
+export async function releaseBillingCheckoutRequest(
   context: DomainContext,
   input: { businessId: string; requestId: string },
 ): Promise<boolean> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const staleBefore = new Date(Date.now() - 10 * 60_000);
-    const rows = await tx.update(billingCheckoutRequests).set({ status: "processing", updatedAt: new Date(), error: null }).where(and(
-      eq(billingCheckoutRequests.id, input.requestId),
-      eq(billingCheckoutRequests.businessId, input.businessId),
-      or(eq(billingCheckoutRequests.status, "pending"), eq(billingCheckoutRequests.status, "error"), and(eq(billingCheckoutRequests.status, "processing"), lt(billingCheckoutRequests.updatedAt, staleBefore))),
-    )).returning({ id: billingCheckoutRequests.id });
+    const rows = await tx.update(billingCheckoutRequests).set({ status: "pending", updatedAt: new Date() }).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "processing"))).returning({ id: billingCheckoutRequests.id });
     return rows.length > 0;
   });
 }

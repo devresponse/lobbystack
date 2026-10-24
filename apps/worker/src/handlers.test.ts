@@ -13,7 +13,7 @@ import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
-import { runDailyBillingVerify } from "@lobbystack/domain";
+import { releaseBillingCheckoutRequest, runDailyBillingVerify, sweepBillingWork } from "@lobbystack/domain";
 import { loadPromoEndWork, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file.
@@ -32,6 +32,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     expireProspectDemos: vi.fn(),
     generateAffiliatePayoutRun: vi.fn(),
     runDailyBillingVerify: vi.fn(),
+    sweepBillingWork: vi.fn(),
+    releaseBillingCheckoutRequest: vi.fn(),
     loadPromoEndWork: vi.fn(),
     recordPromoEnd: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),
@@ -527,7 +529,7 @@ describe("worker handlers", () => {
     const businessId = randomUUID();
     const requestId = randomUUID();
     const domain = { db: undefined as never };
-    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
     vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
 
     const result = await handleJob({
@@ -553,7 +555,7 @@ describe("worker handlers", () => {
     const domain = { db: undefined as never };
     vi.stubEnv("APP_BASE_URL", "https://app.example/");
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
-    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
     vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: null, subscription: null });
     vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
     const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
@@ -578,22 +580,117 @@ describe("worker handlers", () => {
     vi.unstubAllEnvs();
   });
 
+  it("waits for a checkout another run holds until that run's claim goes stale, and skips one that is done", async () => {
+    const businessId = randomUUID();
+    const requestId = randomUUID();
+    const retryAt = new Date("2026-10-24T12:05:00Z");
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+    const createCheckout = vi.fn();
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValueOnce({ claimed: false, retryAt }).mockResolvedValueOnce({ claimed: false, retryAt: null });
+
+    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout } })).toEqual({ status: "deferred", entityId: requestId, retryAt });
+    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout } })).toEqual({ status: "skipped", entityId: requestId });
+    expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
+    expect(createCheckout).not.toHaveBeenCalled();
+  });
+
+  it("reports a checkout that waited too long for its job, which failed it", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const businessId = randomUUID();
+    const requestId = randomUUID();
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValueOnce({ claimed: false, retryAt: null, expired: true });
+
+    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout: vi.fn() } })).toEqual({ status: "skipped", entityId: requestId });
+    expect(error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.createCheckout", businessId, requestId, alertable: true }));
+    expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
+    error.mockRestore();
+  });
+
+  it("hands a checkout back while Polar fails and the job will try again, and fails it on the last try", async () => {
+    const businessId = randomUUID();
+    const requestId = randomUUID();
+    const domain = { db: undefined as never };
+    vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: null, subscription: null });
+    const error = new PolarRequestError(503, null);
+    const createCheckout = vi.fn().mockRejectedValue(error);
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+
+    await expect(handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout } }, { isFinalAttempt: false })).rejects.toBe(error);
+    expect(releaseBillingCheckoutRequest).toHaveBeenCalledWith(domain, { businessId, requestId });
+    expect(markBillingCheckoutFailed).not.toHaveBeenCalled();
+
+    await expect(handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout } }, { isFinalAttempt: true })).rejects.toBe(error);
+    expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Polar checkout creation failed." });
+    expect(releaseBillingCheckoutRequest).toHaveBeenCalledTimes(1);
+  });
+
+  describe("the billing sweep", () => {
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.sweep", queue: "maintenance", businessId: null, payload: {}, trace: {}, idempotencyKey: "billing-sweep", scheduled: true };
+    const counts = (values: Partial<Record<"provider_event" | "usage_event" | "checkout_request", number>> = {}) => ({ provider_event: 0, usage_event: 0, checkout_request: 0, ...values });
+    const lines = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+
+    it("does nothing out loud when no billing work waits", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.mocked(sweepBillingWork).mockResolvedValue({ queued: counts(), overdue: counts(), failed: 0 });
+
+      expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "skipped", entityId: "0:0" });
+      expect(info).not.toHaveBeenCalled();
+      expect(error).not.toHaveBeenCalled();
+      info.mockRestore();
+      error.mockRestore();
+    });
+
+    it("logs work it queued again, and reports to PostHog only work that waited longer than it should", async () => {
+      const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      vi.mocked(sweepBillingWork).mockResolvedValueOnce({ queued: counts({ checkout_request: 1 }), overdue: counts(), failed: 0 });
+
+      expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "completed", entityId: "1:0" });
+      expect(lines(info)).toEqual([expect.objectContaining({ level: "info", message: "ops.billing.sweep", checkoutsQueued: 1, eventsOverdue: 0 })]);
+      expect(error).not.toHaveBeenCalled();
+
+      vi.mocked(sweepBillingWork).mockResolvedValueOnce({ queued: counts({ provider_event: 2, usage_event: 1 }), overdue: counts({ provider_event: 1, checkout_request: 1 }), failed: 0 });
+      expect(await handleJob(job, { domain: { db: undefined as never } })).toEqual({ status: "completed", entityId: "3:1" });
+      expect(lines(warn)).toContainEqual(expect.objectContaining({ message: "ops.billing.sweep", eventsQueued: 2, usageQueued: 1, eventsOverdue: 1, checkoutsExpired: 1 }));
+      // A worker without Polar's settings sends no usage and fails no job, so the report says so.
+      expect(lines(error)).toContainEqual(expect.objectContaining({ level: "error", message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.sweep", polarConfigured: false, eventsOverdue: 1, checkoutsExpired: 1, alertable: true }));
+      info.mockRestore();
+      warn.mockRestore();
+      error.mockRestore();
+    });
+
+    it("fails the job with the first error once the rest is queued, so the next try picks up what it couldn't", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      const failure = new Error("connection terminated");
+      vi.mocked(sweepBillingWork).mockResolvedValue({ queued: counts({ usage_event: 3 }), overdue: counts(), failed: 1, error: failure });
+
+      await expect(handleJob(job, { domain: { db: undefined as never } })).rejects.toBe(failure);
+      expect(lines(warn)).toEqual([expect.objectContaining({ message: "ops.billing.sweep", usageQueued: 3, failed: 1 })]);
+      warn.mockRestore();
+    });
+  });
+
   describe("a business that already pays", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_STARTER_ANNUAL_PRODUCT_ID: "product-starter-annual", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly", POLAR_PRO_ANNUAL_PRODUCT_ID: "product-pro-annual" };
     const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null, ...extra });
 
-    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<NonNullable<WorkerDependencies["polar"]>>; isFinalAttempt?: boolean }) {
       const businessId = randomUUID();
       const requestId = randomUUID();
       const domain = { db: undefined as never };
       for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
-      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
       vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
       vi.mocked(markBillingPlanChanged).mockResolvedValue(true);
       vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, onboardingStage: "complete", planCode: input.planCode ?? null, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: input.subscriptionPlanCode ?? null } });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
-      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
+      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } }, input.isFinalAttempt === undefined ? {} : { isFinalAttempt: input.isFinalAttempt });
       return { businessId, requestId, domain, run };
     }
 
@@ -646,12 +743,19 @@ describe("worker handlers", () => {
       expect(markBillingCheckoutFailed).toHaveBeenCalledWith(scope.domain, { businessId: scope.businessId, requestId: scope.requestId, error: planChangeRefusals.token_scope });
     });
 
-    it("retries when Polar fails for another reason", async () => {
+    it("retries when Polar fails for another reason, and the page keeps waiting until the last try fails", async () => {
       const error = new PolarRequestError(503, null);
-      const { businessId, requestId, domain, run } = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly")), changeSubscriptionProduct: vi.fn().mockRejectedValue(error) } });
+      const polar = () => ({ getSubscription: vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly")), changeSubscriptionProduct: vi.fn().mockRejectedValue(error) });
+      const retrying = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: polar(), isFinalAttempt: false });
 
-      await expect(run).rejects.toBe(error);
-      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Polar plan change failed." });
+      await expect(retrying.run).rejects.toBe(error);
+      expect(releaseBillingCheckoutRequest).toHaveBeenCalledWith(retrying.domain, { businessId: retrying.businessId, requestId: retrying.requestId });
+      expect(markBillingCheckoutFailed).not.toHaveBeenCalled();
+
+      const last = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: polar(), isFinalAttempt: true });
+      await expect(last.run).rejects.toBe(error);
+      expect(markBillingCheckoutFailed).toHaveBeenCalledWith(last.domain, { businessId: last.businessId, requestId: last.requestId, error: "Polar plan change failed." });
+      expect(releaseBillingCheckoutRequest).toHaveBeenCalledTimes(1);
     });
 
     it("opens a checkout when Polar's subscription has already ended", async () => {
@@ -696,7 +800,7 @@ describe("worker handlers", () => {
       const requestId = randomUUID();
       const domain = { db: undefined as never };
       vi.stubEnv("APP_BASE_URL", "https://app.example");
-      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue(true);
+      vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
       vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
       vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
       vi.mocked(markBillingPlanChanged).mockResolvedValue(true);

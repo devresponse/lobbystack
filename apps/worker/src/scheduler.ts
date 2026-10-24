@@ -38,6 +38,8 @@ export async function configureSchedulers(
     { queue: "maintenance", name: "affiliate-payout", type: "affiliate.generatePayoutRun", every: 24 * 60 * 60_000, businessId: null },
     // Compares the billing tables with Polar once a day; it skips until Polar is linked.
     { queue: "maintenance", name: "billing-verify", type: "billing.verifyCatalog", every: 24 * 60 * 60_000, businessId: null },
+    // Queues billing work whose job ran out of tries or died: Polar events, usage and checkouts.
+    { queue: "maintenance", name: "billing-sweep", type: "billing.sweep", every: 5 * 60_000, businessId: null },
     // A call whose worker died keeps talking with nobody answering, so look every minute.
     { queue: "critical", name: "live-orphan-recovery", type: "live.recoverOrphans", every: 60_000, businessId: null },
   ];

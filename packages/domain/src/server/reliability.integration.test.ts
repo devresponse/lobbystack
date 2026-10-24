@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listSchedulerBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
-import { correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, reserveAlertSmsUsage } from "./billing";
+import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
 import { currentWebsiteIngestion } from "./activation";
@@ -725,6 +725,134 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
     }
   });
 
+  it("orders each subscription's snapshots on their own, and never lets a late event about an ended one undo the live one", async () => {
+    // A business that canceled and subscribed again has two subscriptions. The old one's
+    // revocation can arrive late, modified after the new one's last change.
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Billing two subscriptions test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, billingInterval: "monthly", ...payload } }).returning({ id: providerEvents.id });
+      return await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: event!.id });
+    };
+    const account = async () => (await client!.db.select({ plan: billingAccounts.plan, state: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0];
+    try {
+      await reconcile("subscription.active", { plan: "pro", subscriptionId: "sub_new", subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T00:00:00.000Z" });
+      await reconcile("subscription.revoked", { plan: "starter", subscriptionId: "sub_old", subscriptionState: "canceled", subscriptionModifiedAt: "2026-09-02T00:00:00.000Z" });
+      expect(await account()).toEqual({ plan: "pro", state: "active", subscriptionId: "sub_new" });
+      // The live subscription's own change still applies, though the old one's revocation is newer.
+      await reconcile("subscription.updated", { plan: "starter", subscriptionId: "sub_new", subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T12:00:00.000Z" });
+      expect(await account()).toEqual({ plan: "starter", state: "active", subscriptionId: "sub_new" });
+      // Its own older snapshot doesn't.
+      await reconcile("subscription.updated", { plan: "pro", subscriptionId: "sub_new", subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T06:00:00.000Z" });
+      expect(await account()).toEqual({ plan: "starter", state: "active", subscriptionId: "sub_new" });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("keeps a refunded payment refunded when its paid event arrives late, and moves an order on as before", async () => {
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Billing order status test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, total_amount: 3_000, currency: "cad", created_at: "2026-09-01T00:00:00.000Z", ...payload } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: event!.id });
+    };
+    const order = async (id: string) => (await client!.db.select({ status: billingTransactions.status, refunded: billingTransactions.refundedAmountCents }).from(billingTransactions).where(and(eq(billingTransactions.businessId, businessId), eq(billingTransactions.sourceId, id))))[0];
+    try {
+      await reconcile("order.refunded", { id: "order_refunded", status: "refunded", refunded_amount: 3_000 });
+      await reconcile("order.paid", { id: "order_refunded", status: "paid" });
+      expect(await order("order_refunded")).toEqual({ status: "refunded", refunded: 3_000 });
+      await reconcile("order.created", { id: "order_paid", status: "pending" });
+      await reconcile("order.paid", { id: "order_paid", status: "paid" });
+      expect(await order("order_paid")).toEqual({ status: "paid", refunded: 0 });
+      await reconcile("order.refunded", { id: "order_paid", status: "partially_refunded", refunded_amount: 1_000 });
+      expect(await order("order_paid")).toEqual({ status: "partially_refunded", refunded: 1_000 });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("holds a live subscription to a product no plan maps to until one does, and applies an ended one", async () => {
+    // A product made by hand in Polar, which the catalog never linked.
+    const businessId = randomUUID();
+    const productId = `prod_${randomUUID()}`;
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Billing unknown product test", timezone: "UTC", businessType: "test" });
+    await client!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "active", subscriptionId: "sub_1" });
+    const stored = async (eventType: string, payload: Record<string, unknown>) => (await client!.db.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType, businessId, payload: { billingKey: `business:${businessId}`, subscriptionId: "sub_1", ...payload } }).returning({ id: providerEvents.id }))[0]!.id;
+    const context = { db: client!.db as unknown as Database };
+    const account = async () => (await client!.db.select({ plan: billingAccounts.plan, interval: billingAccounts.billingInterval, state: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0];
+    try {
+      const moved = await stored("subscription.updated", { productId, subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T00:00:00.000Z" });
+      expect(await reconcileBillingProviderEvent(context, { businessId, providerEventId: moved }, {})).toBe("held");
+      expect((await client!.db.select({ status: providerEvents.status }).from(providerEvents).where(eq(providerEvents.id, moved)))[0]).toEqual({ status: "received" });
+      expect(await account()).toEqual({ plan: "starter", interval: null, state: "active" });
+      // Once a plan sells the product, the event that waited applies.
+      expect(await reconcileBillingProviderEvent(context, { businessId, providerEventId: moved }, { POLAR_PRO_MONTHLY_PRODUCT_ID: productId })).toBe("processed");
+      expect(await account()).toEqual({ plan: "pro", interval: "monthly", state: "active" });
+      // An event that ends the subscription applies whatever its product.
+      const ended = await stored("subscription.canceled", { productId: `prod_${randomUUID()}`, subscriptionState: "canceled", subscriptionModifiedAt: "2026-09-02T00:00:00.000Z" });
+      expect(await reconcileBillingProviderEvent(context, { businessId, providerEventId: ended }, {})).toBe("processed");
+      expect(await account()).toEqual({ plan: "pro", interval: "monthly", state: "canceled" });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("waits for a catalog apply before a promo plan's first subscriber fixes its terms", async () => {
+    // pnpm billing apply reads whether a plan's terms are fixed, then writes new ones, under the
+    // catalog lock: a first subscriber in between would fix the old terms.
+    const businessId = randomUUID();
+    const apply = await client!.pool.connect();
+    let blocked: unknown;
+    try {
+      await apply.query("begin");
+      await apply.query("select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))");
+      await rollbackTest(async (tx) => {
+        await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Promo freeze lock test", timezone: "UTC", businessType: "test" });
+        const [event] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: `evt-${randomUUID()}`, eventType: "subscription.active", businessId, payload: { billingKey: `business:${businessId}`, plan: "pro", planCode: `promo-${randomUUID()}`, billingInterval: "monthly", subscriptionId: "sub_1", subscriptionState: "active" } }).returning({ id: providerEvents.id });
+        await tx.execute(sql`set local role lobbystack_worker`);
+        // Waiting for the lock fails with lock_not_available instead of hanging the test.
+        await tx.execute(sql`set local lock_timeout = '250ms'`);
+        try {
+          await reconcileBillingProviderEvent({ db: tx as unknown as Database }, { businessId, providerEventId: event!.id });
+        } catch (error) {
+          blocked = error;
+        }
+      });
+    } finally {
+      await apply.query("rollback");
+      apply.release();
+    }
+    const lockError = blocked as { code?: string; cause?: { code?: string } } | undefined;
+    // 55P03 is lock_not_available.
+    expect(lockError?.cause?.code ?? lockError?.code).toBe("55P03");
+  });
+
+  it("lets one change at a time hold a business's Polar subscription, and a dead run's claim run out", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Subscription claim test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "pro", subscriptionState: "active", subscriptionId: "sub_1" });
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const db = tx as unknown as Database;
+      const first = await claimBillingSubscription({ db }, { businessId });
+      if (!("claimId" in first)) throw new Error("The first claim waited.");
+      const waiting = await claimBillingSubscription({ db }, { businessId });
+      if (!("retryAt" in waiting)) throw new Error("A second claim went through.");
+      expect(waiting.retryAt.getTime()).toBeLessThanOrEqual(Date.now() + 15_000);
+      // Handing back a claim the run no longer holds leaves the other run's.
+      await releaseBillingSubscription({ db }, { businessId, claimId: randomUUID() });
+      expect(await claimBillingSubscription({ db }, { businessId })).toHaveProperty("retryAt");
+      await releaseBillingSubscription({ db }, { businessId, claimId: first.claimId });
+      expect(await claimBillingSubscription({ db }, { businessId })).toHaveProperty("claimId");
+      // A claim whose worker died runs out.
+      await tx.execute(sql`reset role`);
+      await tx.execute(sql`update public.billing_accounts set subscription_claimed_until = now() - interval '1 second' where business_id = ${businessId}::uuid`);
+      await tx.execute(sql`set local role lobbystack_worker`);
+      expect(await claimBillingSubscription({ db }, { businessId })).toHaveProperty("claimId");
+    });
+  });
+
   it("takes the usage lock before a status read writes the month row", async () => {
     // Browser calls read the usage status and then reserve; phone calls take
     // the usage lock first and write the month row last. A status read that
@@ -814,6 +942,69 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       const settled = await correctAlertSmsUsage({ db }, { businessId, sourceKey, segments: 1 });
       await enqueueBillingUsageSync({ db }, { businessId, usageEventId: settled });
       expect(await syncs()).toEqual([`billing-usage:${settled}:sync:1`]);
+    });
+  });
+
+  it("sends a usage correction after Polar took the first event as a new event for the difference", async () => {
+    await rollbackTest(async (tx) => {
+      // The built-in plans: Starter includes 50 texts, then bills each segment.
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext('lobbystack.billing_catalog'))`);
+      for (const table of ["billing_codes", "billing_prices", "billing_plans", "billing_runs"]) await tx.execute(sql.raw(`delete from public.${table}`));
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Usage correction sync test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "starter", subscriptionState: "active" });
+      await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `alert_sms:${randomUUID()}`, usageKind: "alert_sms_segments", quantity: 50, billableQuantity: 0, planAtRecordTime: "starter", isFinal: true, syncStatus: "synced" });
+      const db = tx as unknown as Database;
+      const sourceKey = `alert_sms:notification:${randomUUID()}`;
+      const read = async <T>(query: () => Promise<T>) => {
+        await tx.execute(sql`reset role`);
+        const result = await query();
+        await tx.execute(sql`set local role lobbystack_worker`);
+        return result;
+      };
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const usageEventId = await correctAlertSmsUsage({ db }, { businessId, sourceKey, segments: 1 });
+      const usage = { businessId, usageEventId };
+      const row = () => read(async () => (await tx.select({ status: billingUsageEvents.syncStatus, billable: billingUsageEvents.billableQuantity, synced: billingUsageEvents.syncedQuantity, seq: billingUsageEvents.syncSeq, sending: billingUsageEvents.sendingQuantity }).from(billingUsageEvents).where(eq(billingUsageEvents.id, usageEventId)))[0]);
+      const syncs = () => read(async () => (await tx.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.syncUsage")))).map((message) => message.dedupeKey));
+      const correct = (segments: number) => correctAlertSmsUsage({ db }, { businessId, sourceKey, segments });
+
+      // The first event carries the billable quantity, under the row's source key.
+      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: sourceKey, quantity: 1, seq: 0 });
+      expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 0 })).toBe(true);
+      expect(await row()).toEqual({ status: "synced", billable: 1, synced: 1, seq: 1, sending: null });
+
+      // Twilio settles on 3 segments: the 2 more go under the next number, and a run that never
+      // confirmed its event sends the same one again.
+      await correct(3);
+      await enqueueBillingUsageSync({ db }, usage);
+      expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:3:1`);
+      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(true);
+      expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(false);
+      expect(await row()).toEqual({ status: "synced", billable: 3, synced: 3, seq: 2, sending: null });
+
+      // The same count again leaves the row as Polar has it.
+      await correct(3);
+      expect(await row()).toMatchObject({ status: "synced", synced: 3, seq: 2 });
+
+      // A correction while an event is on its way: confirming it queues the rest.
+      await correct(2);
+      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:2`, quantity: -1, seq: 2 });
+      await correct(4);
+      expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 2 })).toBe(true);
+      expect(await row()).toEqual({ status: "pending", billable: 4, synced: 2, seq: 3, sending: null });
+      expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:4:3`);
+      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:3`, quantity: 2, seq: 3 });
+      expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 3 })).toBe(true);
+      expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4 });
+
+      // A correction undone before its event went out sends nothing.
+      await correct(5);
+      await correct(4);
+      expect(await claimBillingUsageSync({ db }, usage)).toBeNull();
+      expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4, sending: null });
     });
   });
 

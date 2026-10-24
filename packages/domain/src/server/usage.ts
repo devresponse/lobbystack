@@ -321,7 +321,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   const periodKey = periodKeyFor(recordedAt);
   await lockUsagePeriod(tx, input.businessId, periodKey);
   const billing = await loadUsageContext(tx, input.businessId);
-  const existing = (await tx.select({ id: billingUsageEvents.id, quantity: billingUsageEvents.quantity, syncStatus: billingUsageEvents.syncStatus }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1))[0];
+  const existing = (await tx.select({ id: billingUsageEvents.id, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncStatus: billingUsageEvents.syncStatus, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1).for("update"))[0];
   if (existing && existing.quantity > 0) return { allowed: true, errorCode: null, usageEventId: existing.id, syncNeeded: existing.syncStatus === "pending", periodKey, plan: billing.plan, quantity: existing.quantity };
   const events = await loadEvents(tx, input.businessId, periodKey);
   const current = replayEvents(events, billing, billing.limits);
@@ -348,7 +348,7 @@ export async function reserveUsageInTransaction(tx: DatabaseTransaction, input: 
   const others = events.filter((row) => row.sourceKey !== input.sourceKey);
   const billableQuantity = billableQuantityForEvent(others, eventPayload, billing, billing.limits);
   const [event] = existing
-    ? await tx.update(billingUsageEvents).set({ quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, syncStatus: syncNeeded ? "pending" : "skipped", updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id)).returning({ id: billingUsageEvents.id })
+    ? await tx.update(billingUsageEvents).set({ quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, ...usageSyncFields(existing, billableQuantity, billing.plan), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id)).returning({ id: billingUsageEvents.id })
     : await tx.insert(billingUsageEvents).values({ businessId: input.businessId, periodKey, sourceKey: input.sourceKey, usageKind: input.usageKind, quantity, billableQuantity, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, isFinal: eventPayload.isFinal, syncStatus: syncNeeded ? "pending" : "skipped", createdAt: recordedAt, updatedAt: new Date() }).returning({ id: billingUsageEvents.id });
   if (!event) throw new Error("Billing usage event could not be recorded.");
   await refreshUsageMonth(tx, { businessId: input.businessId, periodKey, billing, events: [...others, eventPayload] });
@@ -396,7 +396,8 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
   const periodKey = existingBeforeLock?.periodKey ?? periodKeyFor(recordedAt);
   await lockUsagePeriod(tx, input.businessId, periodKey);
   const billing = await loadUsageContext(tx, input.businessId);
-  const existing = (await tx.select({ id: billingUsageEvents.id, periodKey: billingUsageEvents.periodKey, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, isFinal: billingUsageEvents.isFinal }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1))[0];
+  // Locked, so the worker's claim and confirmation of its Polar event wait for the correction.
+  const existing = (await tx.select({ id: billingUsageEvents.id, periodKey: billingUsageEvents.periodKey, planAtRecordTime: billingUsageEvents.planAtRecordTime, planCodeAtRecordTime: billingUsageEvents.planCodeAtRecordTime, billingIntervalAtRecordTime: billingUsageEvents.billingIntervalAtRecordTime, createdAt: billingUsageEvents.createdAt, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, isFinal: billingUsageEvents.isFinal, syncStatus: billingUsageEvents.syncStatus, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.businessId, input.businessId), eq(billingUsageEvents.sourceKey, input.sourceKey))).limit(1).for("update"))[0];
   let eventId: string;
   if (existing) {
     const events = await loadEvents(tx, input.businessId, periodKey);
@@ -404,7 +405,7 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
     const replacement: ReplayEvent = { sourceKey: input.sourceKey, quantity: Math.max(0, input.quantity), usageKind: input.usageKind, planAtRecordTime: existing.planAtRecordTime ?? billing.plan, planCodeAtRecordTime: existing.planAtRecordTime ? existing.planCodeAtRecordTime : billing.planCode, billingIntervalAtRecordTime: existing.billingIntervalAtRecordTime ?? billing.billingInterval, createdAt: existing.createdAt, isFinal: true };
     const billed = existing.isFinal ? { quantity: existing.quantity, billableQuantity: existing.billableQuantity ?? existing.quantity } : undefined;
     const billableQuantity = billableQuantityForEvent(events.filter((row) => row.sourceKey !== input.sourceKey), replacement, billing, billing.limits, billed);
-    await tx.update(billingUsageEvents).set({ quantity: Math.max(0, input.quantity), billableQuantity, isFinal: true, syncStatus: billing.plan === "starter" || billing.plan === "pro" ? "pending" : "skipped", updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id));
+    await tx.update(billingUsageEvents).set({ quantity: Math.max(0, input.quantity), billableQuantity, isFinal: true, ...usageSyncFields(existing, billableQuantity, billing.plan), updatedAt: new Date() }).where(eq(billingUsageEvents.id, existing.id));
     eventId = existing.id;
   } else {
     const replacement: ReplayEvent = { sourceKey: input.sourceKey, quantity: Math.max(0, input.quantity), usageKind: input.usageKind, planAtRecordTime: billing.plan, planCodeAtRecordTime: billing.planCode, billingIntervalAtRecordTime: billing.billingInterval, createdAt: recordedAt, isFinal: true };
@@ -422,17 +423,35 @@ export async function correctUsageInTransaction(tx: DatabaseTransaction, input: 
  * Queues a usage event's sync to Polar once it is final. A reservation's
  * estimate waits for the correction that settles it, which queues it then: a
  * sync queued earlier would be skipped, and its key would keep the settled
- * quantity from being queued when it matches the estimate.
+ * quantity from being queued when it matches the estimate. After the first
+ * event Polar took, the key also names the next event's number, so a
+ * correction queues a sync for its difference.
  */
 export async function enqueueUsageSyncInTransaction(tx: DatabaseTransaction, input: { businessId: string; usageEventId: string }): Promise<void> {
-  const event = (await tx.select({ quantity: billingUsageEvents.quantity, syncStatus: billingUsageEvents.syncStatus, isFinal: billingUsageEvents.isFinal }).from(billingUsageEvents).where(and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId))).limit(1))[0];
+  const event = (await tx.select({ quantity: billingUsageEvents.quantity, syncStatus: billingUsageEvents.syncStatus, isFinal: billingUsageEvents.isFinal, syncSeq: billingUsageEvents.syncSeq }).from(billingUsageEvents).where(and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId))).limit(1))[0];
   if (!event || event.syncStatus !== "pending" || !event.isFinal) return;
   await enqueueOutbox(tx, {
     topic: "billing.syncUsage",
     businessId: input.businessId,
     aggregateType: "billing_usage_event",
     aggregateId: input.usageEventId,
-    dedupeKey: `billing-usage:${input.usageEventId}:sync:${event.quantity}`,
+    dedupeKey: `billing-usage:${input.usageEventId}:sync:${event.quantity}${event.syncSeq === 0 ? "" : `:${event.syncSeq}`}`,
     payload: { usageEventId: input.usageEventId },
   });
+}
+
+/**
+ * The sync columns a usage row's change writes. A row Polar has, synced or
+ * the legacy succeeded, stays so when the change leaves its billable quantity
+ * where Polar has it, as when Twilio settles on the estimated segments; any
+ * other change is pending on Starter and Pro, and skipped on other plans.
+ * Before migration 0116 a synced row's whole billable quantity went to Polar
+ * as its first event, which the row then records.
+ */
+function usageSyncFields(row: { syncStatus: string; quantity: number; billableQuantity: number | null; syncedQuantity: number | null; syncSeq: number }, billableQuantity: number, plan: BillingPlanSlug): { syncStatus: string; syncedQuantity?: number; syncSeq?: number } {
+  const sent = row.syncStatus === "synced" || row.syncStatus === "succeeded";
+  const legacy = sent && row.syncedQuantity === null ? { syncedQuantity: row.billableQuantity ?? row.quantity, syncSeq: Math.max(row.syncSeq, 1) } : {};
+  const syncedQuantity = legacy.syncedQuantity ?? row.syncedQuantity;
+  if (plan !== "starter" && plan !== "pro") return { syncStatus: "skipped", ...legacy };
+  return { syncStatus: sent && syncedQuantity !== null && Math.abs(billableQuantity - syncedQuantity) < 1e-9 ? row.syncStatus : "pending", ...legacy };
 }

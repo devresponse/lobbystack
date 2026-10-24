@@ -1,4 +1,6 @@
-import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
@@ -9,6 +11,7 @@ import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
+import { polarProductLinks, readBillingCatalogSnapshot } from "./billingPlans";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
 export type BillingCheckoutTarget = "starter" | "pro";
@@ -156,8 +159,10 @@ export type BillingCheckoutLimit = (subject: { businessId: string; userId: strin
  *
  * The person's request for the same plan, interval and billing email that is
  * still pending or processing comes back instead of a new one, so a second
- * click or a retry asks Polar for nothing; created says which. checkLimit runs
- * only before a new request is made.
+ * click or a retry asks Polar for nothing; created says which. A business that
+ * pays through Polar changes plan one request at a time, so two admins at once
+ * can't both change its subscription: another open request is a 409
+ * plan_change_pending. checkLimit runs only before a new request is made.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
@@ -165,7 +170,7 @@ export async function createBillingCheckoutRequestInTransaction(
 ): Promise<{ id: string; created: boolean }> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
-  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+  const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, billed directly by the operator."), { status: 409 });
   if (!input.promo && !standardCheckoutAllowed((await loadBillingContext(tx, input.businessId)).plan, input.target)) throw Object.assign(new Error(PAID_PLAN_CHECKOUT_REFUSAL), { status: 409 });
   // Under the lock, so two clicks at once make one request. One older than its 15 minutes fails rather than runs.
@@ -180,6 +185,15 @@ export async function createBillingCheckoutRequestInTransaction(
     input.billingEmail ? eq(billingCheckoutRequests.billingEmail, input.billingEmail) : isNull(billingCheckoutRequests.billingEmail),
   )).orderBy(desc(billingCheckoutRequests.createdAt)).limit(1);
   if (open) return { id: open.id, created: false };
+  // A plan change, as the checkout job reads it: Polar has no check for a change to the product it is already on.
+  if (paysThroughPolar(account)) {
+    const [other] = await tx.select({ id: billingCheckoutRequests.id }).from(billingCheckoutRequests).where(and(
+      eq(billingCheckoutRequests.businessId, input.businessId),
+      inArray(billingCheckoutRequests.status, ["pending", "processing"]),
+      gte(billingCheckoutRequests.createdAt, new Date(Date.now() - BILLING_CHECKOUT_EXPIRES_MS)),
+    )).limit(1);
+    if (other) throw Object.assign(new Error("Another plan change for this business is in progress. Try again in a minute."), { status: 409, code: "plan_change_pending" });
+  }
   await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}` }).onConflictDoNothing({ target: billingAccounts.businessId });
   const [request] = await tx.insert(billingCheckoutRequests).values({
@@ -223,6 +237,11 @@ export const MANAGED_BILLING_SOURCE = "managed";
 
 export function isLiveSubscriptionState(state: string | null | undefined): boolean {
   return (liveSubscriptionStates as readonly string[]).includes(state ?? "");
+}
+
+/** Whether a business pays for Starter or Pro with a live Polar subscription, which a checkout request then changes instead of starting another. */
+function paysThroughPolar(account: { source: string | null; subscriptionState: string | null; subscriptionId: string | null; plan: string | null } | undefined): account is { source: string | null; subscriptionState: string; subscriptionId: string; plan: "starter" | "pro" } {
+  return Boolean(account?.subscriptionId) && account?.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account?.subscriptionState) && (account?.plan === "starter" || account?.plan === "pro");
 }
 
 /** Whether a billing account is on a managed plan now. An ended managed plan keeps its source, for the finance export, but isn't live. */
@@ -331,13 +350,13 @@ export async function loadBillingCheckoutRequest(
       .limit(1))[0];
     if (!row || !isBillingCheckoutTarget(row.target) || !isBillingInterval(row.billingInterval)) return null;
     const { billingKey, subscriptionId, plan, currentPlanCode, currentInterval, subscriptionState, source, ...request } = row;
-    const paying = subscriptionId && source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(subscriptionState) && (plan === "starter" || plan === "pro");
+    const account = { subscriptionId, plan, subscriptionState, source };
     return {
       ...request,
       target: row.target,
       billingInterval: row.billingInterval,
       externalCustomerId: billingKey ?? `business:${input.businessId}`,
-      subscription: paying ? { id: subscriptionId, plan, billingInterval: currentInterval && isBillingInterval(currentInterval) ? currentInterval : null, planCode: currentPlanCode } : null,
+      subscription: paysThroughPolar(account) ? { id: account.subscriptionId, plan: account.plan, billingInterval: currentInterval && isBillingInterval(currentInterval) ? currentInterval : null, planCode: currentPlanCode } : null,
     };
   });
 }
@@ -426,6 +445,43 @@ export async function releaseBillingCheckoutRequest(
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const rows = await tx.update(billingCheckoutRequests).set({ status: "pending", updatedAt: new Date() }).where(and(eq(billingCheckoutRequests.id, input.requestId), eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "processing"))).returning({ id: billingCheckoutRequests.id });
     return rows.length > 0;
+  });
+}
+
+/**
+ * How long one change to a business's Polar subscription can hold it: a read
+ * and a change of 15 seconds each, and the database work around them.
+ */
+export const BILLING_SUBSCRIPTION_CLAIM_MS = 2 * 60_000;
+
+/**
+ * Claims a business's Polar subscription for one change: a plan change, a
+ * promo plan's ending or a discount's removal. Each reads the subscription
+ * from Polar and then changes it, so two at once would each change it from
+ * what the other replaced. Returns the claim, or when to look again while
+ * another change holds it. A claim its run never hands back runs out after
+ * BILLING_SUBSCRIPTION_CLAIM_MS.
+ */
+export async function claimBillingSubscription(context: DomainContext, input: { businessId: string }): Promise<{ claimId: string } | { retryAt: Date }> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const claimId = randomUUID();
+    const now = new Date();
+    const rows = await tx.update(billingAccounts).set({ subscriptionClaim: claimId, subscriptionClaimedUntil: new Date(now.getTime() + BILLING_SUBSCRIPTION_CLAIM_MS) })
+      .where(and(eq(billingAccounts.businessId, input.businessId), or(isNull(billingAccounts.subscriptionClaimedUntil), lt(billingAccounts.subscriptionClaimedUntil, now))))
+      .returning({ businessId: billingAccounts.businessId });
+    if (rows.length > 0) return { claimId };
+    const [held] = await tx.select({ until: billingAccounts.subscriptionClaimedUntil }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+    // A business with no account has no subscription for another change to hold.
+    if (!held?.until) return { claimId };
+    // A change takes seconds, so look again soon, and never later than the claim runs out.
+    return { retryAt: new Date(Math.max(now.getTime() + 1_000, Math.min(held.until.getTime(), now.getTime() + 15_000))) };
+  });
+}
+
+/** Hands the subscription back once the change is done, if the claim is still this run's. */
+export async function releaseBillingSubscription(context: DomainContext, input: { businessId: string; claimId: string }): Promise<void> {
+  await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    await tx.update(billingAccounts).set({ subscriptionClaim: null, subscriptionClaimedUntil: null }).where(and(eq(billingAccounts.businessId, input.businessId), eq(billingAccounts.subscriptionClaim, input.claimId)));
   });
 }
 
@@ -593,20 +649,63 @@ export async function loadBillingUsageEvent(
   });
 }
 
-export async function markBillingUsageSynced(
+/** A difference this small is rounding, not usage. */
+const SAME_QUANTITY = 1e-9;
+
+/** The Polar event a usage row sends next: its first under the source key, as before migration 0116, and each later one numbered. */
+export function billingUsageEventExternalId(sourceKey: string, seq: number): string {
+  return seq === 0 ? sourceKey : `${sourceKey}:${seq}`;
+}
+
+/**
+ * Claims the next Polar event for a pending usage row: its billable quantity
+ * the first time, and after a correction the difference from what Polar has,
+ * as Polar keeps one event per ID and drops a second under the same one. A
+ * claimed event the worker never confirmed goes out again as it was, which
+ * Polar keeps once. Null when nothing is left to send, as when a correction
+ * came back to what Polar has, which the row then records as synced.
+ */
+export async function claimBillingUsageSync(
   context: DomainContext,
   input: { businessId: string; usageEventId: string },
+): Promise<{ externalId: string; quantity: number; seq: number } | null> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const where = and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId));
+    const [row] = await tx.select({ sourceKey: billingUsageEvents.sourceKey, syncStatus: billingUsageEvents.syncStatus, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq, sendingQuantity: billingUsageEvents.sendingQuantity })
+      .from(billingUsageEvents).where(where).limit(1).for("update");
+    if (!row || row.syncStatus !== "pending") return null;
+    const externalId = billingUsageEventExternalId(row.sourceKey, row.syncSeq);
+    if (row.sendingQuantity !== null) return { externalId, quantity: row.sendingQuantity, seq: row.syncSeq };
+    const quantity = (row.billableQuantity ?? row.quantity) - (row.syncedQuantity ?? 0);
+    if (row.syncSeq > 0 && Math.abs(quantity) < SAME_QUANTITY) {
+      await tx.update(billingUsageEvents).set({ syncStatus: "synced", updatedAt: new Date() }).where(where);
+      return null;
+    }
+    await tx.update(billingUsageEvents).set({ sendingQuantity: quantity }).where(where);
+    return { externalId, quantity, seq: row.syncSeq };
+  });
+}
+
+/**
+ * Records that Polar took a claimed event: Polar has its quantity on top of
+ * what it had, and the next event takes the next number. A row that a
+ * correction changed meanwhile stays pending, with its next sync queued.
+ * False when another run confirmed the event first.
+ */
+export async function confirmBillingUsageSync(
+  context: DomainContext,
+  input: { businessId: string; usageEventId: string; seq: number },
 ): Promise<boolean> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const rows = await tx.update(billingUsageEvents)
-      .set({ syncStatus: "synced", updatedAt: new Date() })
-      .where(and(
-        eq(billingUsageEvents.id, input.usageEventId),
-        eq(billingUsageEvents.businessId, input.businessId),
-        eq(billingUsageEvents.syncStatus, "pending"),
-      ))
-      .returning({ id: billingUsageEvents.id });
-    return rows.length > 0;
+    const where = and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId));
+    const [row] = await tx.select({ syncStatus: billingUsageEvents.syncStatus, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq, sendingQuantity: billingUsageEvents.sendingQuantity })
+      .from(billingUsageEvents).where(where).limit(1).for("update");
+    if (!row || row.syncSeq !== input.seq || row.sendingQuantity === null) return false;
+    const syncedQuantity = (row.syncedQuantity ?? 0) + row.sendingQuantity;
+    const done = Math.abs((row.billableQuantity ?? row.quantity) - syncedQuantity) < SAME_QUANTITY;
+    await tx.update(billingUsageEvents).set({ syncedQuantity, syncSeq: input.seq + 1, sendingQuantity: null, ...(done && row.syncStatus === "pending" ? { syncStatus: "synced", updatedAt: new Date() } : {}) }).where(where);
+    if (!done) await enqueueUsageSyncInTransaction(tx, input);
+    return true;
   });
 }
 
@@ -641,6 +740,16 @@ function numberField(source: Record<string, unknown>, ...keys: string[]): number
 export function orderRefundedCents(order: Record<string, unknown>, payload: Record<string, unknown>): number {
   return (numberField(order, "refundedAmount", "refunded_amount") ?? numberField(payload, "refundedAmount", "refunded_amount") ?? 0)
     + (numberField(order, "refundedTaxAmount", "refunded_tax_amount") ?? numberField(payload, "refundedTaxAmount", "refunded_tax_amount") ?? 0);
+}
+
+/**
+ * How far an order has gone: draft, pending, paid, then partly and fully
+ * refunded. Polar moves an order only forward, but for a void one, which it
+ * can put back to pending, so it ranks with pending. A status not listed has
+ * no rank.
+ */
+function orderStatusRank(status: SQLWrapper): SQL {
+  return sql`array_position(array['draft', 'pending', 'paid', 'partially_refunded', 'refunded']::text[], (case when ${status} = 'void' then 'pending' else ${status} end)::text)`;
 }
 
 function dateField(source: Record<string, unknown>, ...keys: string[]): Date | undefined {
@@ -733,7 +842,9 @@ async function promoPlanFields(
     await tx.execute(sql`update public.billing_codes set uses = uses + 1, updated_at = now() where id = ${redeemed.codeId}::uuid`);
     await tx.insert(auditLogs).values({ businessId: input.businessId, eventType: "billing.promo_code_redeemed", entityType: "billing_code", entityId: redeemed.codeId, payload: { plan: planCode } });
   }
-  // Its first subscriber fixes a plan's terms, which the next apply then refuses to change.
+  // Its first subscriber fixes a plan's terms, which the next apply then refuses to change. The
+  // apply's lock, shared, keeps an apply that read the plan unfrozen from writing new terms after.
+  await tx.execute(sql`select pg_advisory_xact_lock_shared(hashtext('lobbystack.billing_catalog'))`);
   const [row] = (await tx.execute<{ months: number | null; ends: string | null }>(sql`update public.billing_plans set frozen_at = coalesce(frozen_at, now()), updated_at = now() where code = ${planCode} returning months, ends`)).rows;
   const months = row?.months === null || row?.months === undefined || row.ends === "keep" ? null : Number(row.months);
   // A live subscription moved onto the plan within its period keeps that period, and Polar applies the plan's discount from the next one, so the months start at the renewal.
@@ -752,11 +863,20 @@ async function isPromoPlanDiscount(tx: DatabaseTransaction, discountId: string):
   return rows.length > 0;
 }
 
+/**
+ * What applying a stored Polar event did. processed: it applied, or had
+ * already. ignored: it names no customer. missing: there is no such event.
+ * held: a live subscription to a product no plan maps to, such as one made by
+ * hand in Polar, which waits until the catalog links the product.
+ */
+export type BillingReconcileResult = "processed" | "ignored" | "missing" | "held";
+
 export async function reconcileBillingProviderEvent(
   context: DomainContext,
   input: { businessId: string; providerEventId: string },
-): Promise<boolean> {
-  const outcome = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx): Promise<{ reconciled: boolean; started: SubscriptionStart | null }> => {
+  env: Record<string, string | undefined> = process.env,
+): Promise<BillingReconcileResult> {
+  const outcome = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx): Promise<{ result: BillingReconcileResult; started: SubscriptionStart | null }> => {
     let startedSubscription: SubscriptionStart | null = null;
     // The provider can deliver several live events for one checkout at once
     // (subscription.active beside order.paid). Without this lock both workers
@@ -767,8 +887,8 @@ export async function reconcileBillingProviderEvent(
       .from(providerEvents)
       .where(and(eq(providerEvents.id, input.providerEventId), eq(providerEvents.businessId, input.businessId)))
       .limit(1))[0];
-    if (!event) return { reconciled: false, started: null };
-    if (event.status === "processed") return { reconciled: true, started: null };
+    if (!event) return { result: "missing", started: null };
+    if (event.status === "processed") return { result: "processed", started: null };
 
     const payload = recordObject(event.payload);
     const transactionPayload = recordObject(payload.order ?? payload);
@@ -795,12 +915,18 @@ export async function reconcileBillingProviderEvent(
     const billingKey = existing?.billingKey ?? (customerReference ? `business:${input.businessId}` : undefined);
     if (billingKey) {
       const customerId = stringField(transactionPayload, "customerId", "externalCustomerId") ?? stringField(payload, "customerId", "externalCustomerId") ?? stringField(customer, "id", "externalId") ?? existing?.customerId;
-      const subscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id") ?? existing?.subscriptionId;
-      // A product no catalog price or variable names keeps the stored plan rather than a display name; a retired price's product still maps.
-      const plan = stringField(transactionPayload, "plan") ?? stringField(payload, "plan");
+      // The subscription the event is about; an order may name none.
+      const eventSubscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id");
+      const subscriptionId = eventSubscriptionId ?? existing?.subscriptionId;
+      // The webhook names the plan of a product the catalog linked when the event arrived, a retired
+      // price's product too. One linked while the event waited names its plan now.
+      const productId = stringField(payload, "productId") ?? stringField(subscription, "product_id") ?? stringField(payload, "product_id");
+      const named = stringField(transactionPayload, "plan") ?? stringField(payload, "plan");
+      const linked = named || !productId ? null : polarProductLinks(await readBillingCatalogSnapshot(tx), env).planFor(productId);
+      const plan = named ?? linked?.plan;
       // The exact plan the product sells, which differs from plan for a promo plan.
-      const planCode = stringField(transactionPayload, "planCode") ?? stringField(payload, "planCode");
-      const billingInterval = stringField(transactionPayload, "billingInterval", "billing_interval", "interval") ?? stringField(payload, "billingInterval", "billing_interval", "interval") ?? stringField(subscription, "billingInterval", "billing_interval", "interval");
+      const planCode = stringField(transactionPayload, "planCode") ?? stringField(payload, "planCode") ?? linked?.code;
+      const billingInterval = stringField(transactionPayload, "billingInterval", "billing_interval", "interval") ?? stringField(payload, "billingInterval", "billing_interval", "interval") ?? stringField(subscription, "billingInterval", "billing_interval", "interval") ?? linked?.interval;
       // Only a subscription's own status is a subscription state. An order's status
       // (paid, refunded) is not, and an order without a nested subscription has none.
       const subscriptionState = stringField(transactionPayload, "subscriptionState") ?? stringField(payload, "subscriptionState") ?? (event.eventType.startsWith("subscription.") ? stringField(payload, "status") ?? event.eventType.slice("subscription.".length) : undefined);
@@ -811,9 +937,16 @@ export async function reconcileBillingProviderEvent(
       // A Polar retry or replay can arrive after a newer snapshot of the subscription was applied.
       // Both sides are normalized ISO strings (polar-event.ts), so text order is time order.
       const modifiedAt = stringField(payload, "subscriptionModifiedAt");
-      const stale = modifiedAt !== undefined && (await tx.select({ id: providerEvents.id }).from(providerEvents)
-        .where(and(eq(providerEvents.businessId, input.businessId), eq(providerEvents.status, "processed"), sql`${providerEvents.payload}->>'subscriptionModifiedAt' > ${modifiedAt}`))
+      const newerSnapshot = async (of: string | undefined, than: string) => (await tx.select({ id: providerEvents.id }).from(providerEvents)
+        .where(and(eq(providerEvents.businessId, input.businessId), eq(providerEvents.status, "processed"), of === undefined ? undefined : sql`${providerEvents.payload}->>'subscriptionId' = ${of}`, sql`${providerEvents.payload}->>'subscriptionModifiedAt' > ${than}`))
         .limit(1)).length > 0;
+      // An event about another subscription than the account's, such as one that ended before the
+      // business subscribed again, never ends a live one, and applies only when no snapshot of the
+      // account's is newer: a late event about the old subscription never undoes the new.
+      const current = existing?.subscriptionId ?? undefined;
+      const stale = eventSubscriptionId !== undefined && current !== undefined && eventSubscriptionId !== current
+        ? (isLiveSubscriptionState(existing?.subscriptionState) && !isLiveSubscriptionState(subscriptionState)) || (modifiedAt !== undefined && await newerSnapshot(current, modifiedAt))
+        : modifiedAt !== undefined && await newerSnapshot(eventSubscriptionId, modifiedAt);
       // An account whose plan the operator managed, now or before, changes only when the business
       // starts a live Starter or Pro subscription in Polar, which then takes over. Every other event,
       // such as a late cancellation of an older subscription or a product this deployment doesn't
@@ -822,6 +955,11 @@ export async function reconcileBillingProviderEvent(
       const managedSource = existing?.source === MANAGED_BILLING_SOURCE;
       const takesOver = managedSource && (plan === "starter" || plan === "pro") && isLiveSubscriptionState(subscriptionState);
       const keepsManagedPlan = managedSource && !takesOver;
+      // A live subscription to a product no plan maps to would leave the business on the plan it had,
+      // such as Pro after a switch in Polar's billing portal to a product made by hand. Its event stays
+      // received, with the account as it was, until the catalog links the product: the sweep runs it
+      // again each hour, and the worker reports it.
+      if (!plan && productId && isLiveSubscriptionState(subscriptionState) && !stale && !keepsManagedPlan) return { result: "held", started: null };
       const polarFields = stale || keepsManagedPlan ? {} : {
         ...(takesOver ? { source: "polar" } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
@@ -895,7 +1033,8 @@ export async function reconcileBillingProviderEvent(
         target: [billingTransactions.kind, billingTransactions.sourceId],
         set: {
           businessId: input.businessId,
-          status,
+          // A late event, such as a paid one retried after the refund, never moves the order back.
+          status: sql`case when ${orderStatusRank(billingTransactions.status)} > ${orderStatusRank(sql.raw("excluded.status"))} then ${billingTransactions.status} else excluded.status end`,
           amountCents,
           // Refunds only add up, so a paid event retried after a refund cannot erase it.
           refundedAmountCents: sql`greatest(${billingTransactions.refundedAmountCents}, excluded.refunded_amount_cents)`,
@@ -944,8 +1083,8 @@ export async function reconcileBillingProviderEvent(
     }
 
     await tx.update(providerEvents).set({ status: billingKey ? "processed" : "ignored", updatedAt: new Date() }).where(eq(providerEvents.id, event.id));
-    return { reconciled: Boolean(billingKey), started: startedSubscription };
+    return { result: billingKey ? "processed" : "ignored", started: startedSubscription };
   });
 
-  return outcome.reconciled;
+  return outcome.result;
 }

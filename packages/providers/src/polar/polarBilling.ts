@@ -127,12 +127,14 @@ export class PolarBillingProvider {
    * external ID, from which Polar picks a customer by email at payment, or
    * makes one. Discount codes typed into Polar's page are off: a discount
    * comes only with a promo plan, which the deployment's own codes sell. Its
-   * metadata is copied onto the subscription and its orders.
+   * metadata is copied onto the subscription and its orders. Polar takes no
+   * idempotency key here, so a retry makes another page; a customer can still
+   * hold only one subscription.
    */
-  async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string; idempotencyKey?: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
+  async createCheckout(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string }): Promise<{ checkoutUrl: string; checkoutId: string }> {
     if ("email" in input.customer) assertCertificationRecipient("email", input.customer.email);
     const customer = "id" in input.customer ? { customer_id: input.customer.id } : { customer_email: input.customer.email, external_customer_id: input.customer.externalId };
-    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", ...(input.idempotencyKey ? { headers: { "idempotency-key": input.idempotencyKey } } : {}), body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) });
+    const result = await this.request<{ url: string; id: string }>(`/v1/checkouts/`, { method: "POST", body: JSON.stringify({ products: [input.productId], ...customer, success_url: input.successUrl, return_url: input.returnUrl, allow_discount_codes: false, ...(input.discountId ? { discount_id: input.discountId } : {}), metadata: input.metadata }) });
     return { checkoutUrl: result.url, checkoutId: result.id };
   }
 

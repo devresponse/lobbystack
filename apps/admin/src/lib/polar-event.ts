@@ -56,6 +56,8 @@ export function normalizePolarEvent(type: string, data: RecordValue, links: Pick
       ...(externalId ? { billingKey: externalId } : {}),
       ...(customerId ? { customerId } : {}),
       ...(subscriptionId ? { subscriptionId } : {}),
+      // Reconcile maps a product the catalog links later, while the event waits.
+      ...(productId ? { productId } : {}),
       ...(match ? { plan: match.plan, planCode: match.code, billingInterval: match.interval } : {}),
       ...(subscriptionState ? { subscriptionState } : {}),
       ...(discountId ? { discountId } : {}),

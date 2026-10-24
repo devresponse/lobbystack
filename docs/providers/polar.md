@@ -35,10 +35,12 @@ Grant your token `events:write` access for `POST /v1/events/ingest`. You don’t
 | Field | Value |
 | --- | --- |
 | `external_customer_id` | The account’s billing key |
-| `external_id` | The usage source key, which prevents duplicate ingestion |
+| `external_id` | The usage source key, then `<source key>:<number>` for each correction, so Polar takes each event once |
 | `metadata` | Quantity, business ID, and usage kind |
 
 Keep your existing Polar meters and prices. Connecting this application leaves them unchanged. See [Polar event ingestion](https://polar.sh/docs/features/usage-based-billing/event-ingestion) for the request format.
+
+A correction can change a usage row's billable quantity after Polar took its event, as when Twilio settles a text on more segments than estimated. Polar keeps one event per `external_id`, so the worker sends the difference as a new event, numbered after the ones Polar has and negative when the count went down. A correction that leaves the billable quantity where Polar has it sends nothing. Each event keeps the usage's own time, so a correction to a period Polar has already invoiced goes on the next invoice.
 
 Starter and Pro include usage allowances that reset on the first of each month (UTC), on monthly and annual subscriptions alike, whatever day the subscription renews. The worker sends only the usage past them, as `billableQuantity`, including zero, so the products carry no Credits and Polar bills every unit it receives. An event recorded without `billableQuantity` sends its whole quantity.
 
@@ -122,6 +124,10 @@ Use this sequence to check where a checkout stops:
 
 A checkout request has 15 minutes to run. While a try fails and the job will try again, the request goes back to pending and the page keeps waiting; the last try fails it. A request whose run died is taken over 5 minutes after its last change. A request still waiting after 15 minutes fails, and the person asks again, so a plan change never goes through long after they left the page.
 
+A business that already pays changes plan one request at a time: while another of its requests is pending or processing, a new one answers 409 with the code `plan_change_pending`, and the plan screen says an earlier change is still being applied. In the worker, a plan change, a promo plan's ending and a discount's removal each claim the business's subscription while they read it from Polar and change it, for 2 minutes at most, and one that finds it claimed looks again a few seconds later. A promo plan's ending leaves a subscription that has already left the plan's product, such as after an upgrade whose webhook hasn't arrived.
+
+The worker applies each subscription's events in the order Polar changed it, so a late retry never rolls it back, and an event about an older subscription than the account's, such as one that ended before the business subscribed again, never ends the live one. A late `order.paid` never shows a refunded order as paid again. An event for a live subscription to a product no plan maps to, such as one made by hand in Polar, waits: the business keeps its plan, the event stays `received` and the sweep runs it again each hour, and the worker reports `A live Polar subscription is for a product no plan maps to` to error tracking. Link the product with `pnpm billing apply`, or move the subscription in Polar to a product the catalog sells, and the event applies.
+
 The billing page reads PostgreSQL for plan, usage, spending-cap, and transaction data. It creates portal sessions on the server for billing administrators.
 
 ## Recover lost billing work
@@ -134,7 +140,7 @@ The worker tries each `billing.reconcile` and `billing.syncUsage` job 12 times. 
 
 Nothing needs requeueing by hand. Each sweep that finds work logs `ops.billing.sweep` with its counts. When a Polar event or usage has waited more than an hour, or a checkout request failed for waiting too long, the worker also reports `Billing work waited longer than it should.` to error tracking (see [BillingWorkOverdue](../operations/alerts.md#billingworkoverdue)).
 
-To find the cause, read the worker's `job.failed` lines for the job type, and fix the provider, token or database error they name, such as a worker token without `events:write`. A worker without `POLAR_ACCESS_TOKEN` or `POLAR_ORGANIZATION_ID` sends no usage and fails no job, and the sweep's report says `polarConfigured: false`. Keep the usage rows and their source keys: Polar keeps one event per source key, so usage sent twice is billed once. Only usage Polar must never bill leaves the sweep by hand, by setting its `sync_status` to `skipped`.
+To find the cause, read the worker's `job.failed` lines for the job type, and fix the provider, token or database error they name, such as a worker token without `events:write`. A worker without `POLAR_ACCESS_TOKEN` or `POLAR_ORGANIZATION_ID` sends no usage and fails no job, and the sweep's report says `polarConfigured: false`. Keep the usage rows as they are: Polar keeps one event per `external_id`, so an event sent twice is billed once, and a row's `sync_seq` numbers the next event it sends. Only usage Polar must never bill leaves the sweep by hand, by setting its `sync_status` to `skipped`.
 
 ## Recover missing orders
 

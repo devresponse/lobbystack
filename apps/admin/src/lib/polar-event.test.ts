@@ -10,7 +10,7 @@ describe("Polar payload normalization", () => {
     const result = normalizePolarEvent("subscription.active", { id: "sub_1", status: "active", product_id: "pro_month", modified_at: "2026-09-01T12:00:00+00:00", customer: { id: "cust_1", external_id: `business:${businessId}` } }, variables({ POLAR_PRO_MONTHLY_PRODUCT_ID: "pro_month" }));
     expect(result.businessId).toBe(businessId);
     expect(result.businessReference).toBe(businessId);
-    expect(result.payload).toMatchObject({ billingKey: `business:${businessId}`, customerId: "cust_1", subscriptionId: "sub_1", subscriptionState: "active", plan: "pro", billingInterval: "monthly", subscriptionModifiedAt: "2026-09-01T12:00:00.000Z" });
+    expect(result.payload).toMatchObject({ billingKey: `business:${businessId}`, customerId: "cust_1", subscriptionId: "sub_1", productId: "pro_month", subscriptionState: "active", plan: "pro", billingInterval: "monthly", subscriptionModifiedAt: "2026-09-01T12:00:00.000Z" });
   });
   it("preserves prefixed legacy references without treating them as UUIDs", () => {
     const result = normalizePolarEvent("subscription.active", { customer: { external_id: "business:legacy-customer" } });
@@ -75,7 +75,7 @@ describe("Polar payload normalization", () => {
 
   it("uses subscription status rather than a paid order's status", () => {
     const result = normalizePolarEvent("order.paid", { id: "order_1", status: "paid", customer: { external_id: `business:${businessId}` }, subscription: { id: "sub_1", status: "active", product_id: "starter_year" } }, variables({ POLAR_STARTER_ANNUAL_PRODUCT_ID: "starter_year" }));
-    expect(result.payload).toMatchObject({ subscriptionId: "sub_1", subscriptionState: "active", plan: "starter", billingInterval: "annual" });
+    expect(result.payload).toMatchObject({ subscriptionId: "sub_1", productId: "starter_year", subscriptionState: "active", plan: "starter", billingInterval: "annual" });
   });
 
   it("names the plan of a product the catalog links, a retired price's too, before the product variables", () => {
@@ -86,9 +86,10 @@ describe("Polar payload normalization", () => {
     expect(event("prod_pro_year")).toMatchObject({ plan: "pro", billingInterval: "annual" });
     expect(event("prod_old")).toMatchObject({ plan: "starter", billingInterval: "monthly" });
     expect(event("prod_var")).toMatchObject({ plan: "pro", billingInterval: "monthly" });
-    // A product of a tier Polar doesn't sell, or one nobody knows, keeps the stored plan.
+    // A product of a tier Polar doesn't sell, or one nobody knows, names no plan, and reconcile holds its live subscription.
     expect(event("prod_free")).not.toHaveProperty("plan");
     expect(event("prod_unknown")).not.toHaveProperty("plan");
+    expect(event("prod_unknown")).toMatchObject({ productId: "prod_unknown" });
   });
 
   it("names a promo plan's own code beside the tier it behaves as", () => {

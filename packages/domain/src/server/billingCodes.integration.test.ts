@@ -305,7 +305,14 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       await as(tx, "lobbystack_app");
       const checkPromoCode = async () => {};
       const first = await createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "MOVER-BOUND", checkPromoCode });
-      await createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "MOVER-SHARED", checkPromoCode });
+      // A paying business changes plan one request at a time.
+      const second = () => createBillingCheckoutRequest(context(tx), { userId, businessId, target: "pro", billingInterval: "monthly", promoCode: "MOVER-SHARED", checkPromoCode });
+      expect(await thrown(second())).toMatchObject({ status: 409, code: "plan_change_pending" });
+      // Once the worker has made the first change, another can follow before Polar's webhook for it lands.
+      await as(tx, "owner");
+      await tx.execute(sql`update public.billing_checkout_requests set status = 'changed' where id = ${first}::uuid`);
+      await as(tx, "lobbystack_app");
+      await second();
       // Polar moves the paying subscription for the first request, keeping its period: the plan's discount starts at the November renewal.
       await event(businessId, "subscription.updated", { ...subscription, status: "active", metadata: { lobbystack_plan: "pro-launch", lobbystack_checkout: first } });
       expect(await account()).toEqual({ plan_code: "pro-launch", code_id: bound.code.id, plan_ends: "2027-05-01T00:00:00.000Z", end_with: null, subscription_state: "active" });
@@ -399,6 +406,11 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       await subscribe("starter");
       expect(await dashboard("pro", "annual")).toEqual(expect.any(String));
       expect(await thrown(dashboard("starter", "annual"))).toMatchObject({ status: 409 });
+      // While that change waits, another is refused, from the dashboard and the API alike.
+      expect(await thrown(dashboard("pro"))).toMatchObject({ status: 409, code: "plan_change_pending" });
+      const apiCaller = { businessId, platformKeyId: caller.platformKeyId, partnerId: caller.partnerId, actingUserId: randomUUID(), actor: "platform_key" as const };
+      await as(tx, "lobbystack_worker");
+      expect(await thrown(createCheckoutForApi(context(tx), apiCaller, { plan: "pro", interval: "monthly" }, { available: true }))).toMatchObject({ status: 409, code: "conflict", message: "Another plan change for this business is in progress. Try again in a minute." });
     });
   });
 
@@ -449,6 +461,33 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
       checkLimit.mockRejectedValueOnce(Object.assign(new Error("Too many checkouts started."), { status: 429 }));
       expect(await thrown(dashboard({ target: "starter", billingInterval: "annual" }))).toMatchObject({ status: 429 });
       expect(await made()).toBe(7);
+    });
+  });
+
+  it("counts a shared code's open checkouts toward its use limit, so its last use pays one checkout at a time", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const first = await ownedBusiness(tx, "first-buyer");
+      const second = await ownedBusiness(tx, "second-buyer");
+      await issue(tx, { plan: "pro-launch", code: "LAST-ONE", max_uses: 1, expires_at: inAWeek() });
+      const dashboard = (owner: { userId: string; businessId: string }) => createBillingCheckoutRequest(context(tx), { ...owner, target: "pro", billingInterval: "monthly", promoCode: "LAST-ONE", checkPromoCode: async () => {} });
+      const change = async (statement: ReturnType<typeof sql>) => {
+        await as(tx, "owner");
+        await tx.execute(statement);
+        await as(tx, "lobbystack_app");
+      };
+
+      await as(tx, "lobbystack_app");
+      const open = await dashboard(first);
+      // The open checkout holds the code's one use: its business gets it back, and no other business can start one.
+      expect(await dashboard(first)).toBe(open);
+      expect(await thrown(dashboard(second))).toMatchObject({ status: 400, code: "promo_invalid" });
+      // One older than Polar keeps a checkout page, or one that failed, holds nothing.
+      await change(sql`update public.billing_checkout_requests set created_at = now() - interval '26 hours' where id = ${open}::uuid`);
+      const later = await dashboard(second);
+      expect(await thrown(dashboard(first))).toMatchObject({ status: 400, code: "promo_invalid" });
+      await change(sql`update public.billing_checkout_requests set status = 'failed' where id = ${later}::uuid`);
+      expect(await dashboard(first)).toEqual(expect.any(String));
     });
   });
 

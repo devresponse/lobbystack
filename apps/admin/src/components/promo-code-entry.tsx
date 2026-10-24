@@ -27,6 +27,7 @@ const errorKeys: Record<string, string> = {
   promo_interval: "billing.promo.errors.interval",
   promo_rate_limited: "billing.promo.errors.rateLimited",
   billing_rate_limited: "billing.toast.rateLimited",
+  plan_change_pending: "billing.toast.planChangeRefused.change_pending",
 };
 
 function errorMessage(error: unknown, t: Translate, fallback: string): string {

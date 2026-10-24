@@ -1,19 +1,13 @@
 # Deploy the landing site on Cloudflare Pages
 
-The landing site lives in `apps/landing` and deploys through Cloudflare Pages' Git integration, matching the old standalone landing-site repo behavior without requiring a Wrangler deploy flow.
+> **The original project's site.** `apps/landing` is the original project's marketing website, which this fork doesn't publish. This page keeps how the original deployed it, without its addresses, in case the fork ever builds a site of its own from it. Its pages, host names and defaults still name the original project: see [what still points at the original](../project/open-items.md#clean-up-what-still-points-at-the-original).
+
+The site deploys through Cloudflare Pages' Git integration, with no Wrangler deploy step.
 
 ## Configure Cloudflare Pages
 
-Cloudflare currently has two landing-related Pages projects:
+Connect a Pages project to this repository with:
 
-- `lobbystack-site`: the old live project connected to
-  `lobbystack/LobbyStack-Site`.
-- `lobbystack-landing`: the monorepo-connected replacement connected to
-  `lobbystack/lobbystack`.
-
-Configure `lobbystack-landing` with:
-
-- Repository: `lobbystack/lobbystack`
 - Production branch: `main`
 - Root directory: `apps/landing`
 - Build command: `pnpm build`
@@ -32,21 +26,15 @@ The `apps/landing/.nvmrc` file pins the Node version for build environments that
 
 ## Configure environment variables
 
-Production should keep these Cloudflare Pages environment variables:
-
-- `PUBLIC_POSTHOG_ENABLED=true`
-- `PUBLIC_POSTHOG_KEY`
-- `PUBLIC_POSTHOG_HOST=https://ts.lobbystack.com`
+- `PUBLIC_POSTHOG_ENABLED=true` and `PUBLIC_POSTHOG_KEY`, to send analytics to PostHog.
+- `PUBLIC_POSTHOG_HOST`: where the site sends analytics. Without it, the site uses the original project's PostHog relay.
 - `PUBLIC_POSTHOG_UI_HOST=https://us.posthog.com`
-- `PUBLIC_LIVE_CALL_ENDPOINT`, only to point the demo call somewhere other than `https://app.lobbystack.com/api/voice/live/session`
-- `PUBLIC_WEB_CALL_BUSINESS_SLUG=lobbystack-mp35s9y1`
+- `PUBLIC_LIVE_CALL_ENDPOINT`: the dashboard's `/api/voice/live/session` address for the demo call on the home page, and `PUBLIC_WEB_CALL_BUSINESS_SLUG`, the business that answers it. Without them, the demo calls the original project's dashboard and business.
 - `INDEXNOW_KEY`
 - `GOOGLE_SITE_VERIFICATION`, if Google Search Console verification is needed
 - `BING_SITE_VERIFICATION`, if Bing verification is needed
 
-Keep `lobbystack.com`, `www.lobbystack.com`, and `ts.lobbystack.com` attached to the same Pages project after the cutover. The `ts.lobbystack.com` hostname is used by `apps/landing/functions/_middleware.js` as the first-party PostHog proxy.
-
-Do not move the production domains to `lobbystack-landing` until the landing site files are committed and pushed to GitHub. Cloudflare already verifies that `lobbystack-landing` clones `lobbystack/lobbystack`; its first manual build from `main` failed only because `apps/landing` was not present on `main` yet.
+`apps/landing/functions/_middleware.js` names the site's canonical host, and redirects its `www` and `pages.dev` hosts there. Change all three before serving the site from another domain.
 
 ## Verify the site locally
 
@@ -58,4 +46,4 @@ pnpm landing:build
 pnpm landing:preview
 ```
 
-The build output remains `apps/landing/dist`, which is the directory Cloudflare Pages should publish.
+The build output is `apps/landing/dist`, the directory Cloudflare Pages publishes.

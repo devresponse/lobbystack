@@ -4,7 +4,7 @@ Each voice call loads one durable business snapshot before starting the live mod
 
 ## Status
 
-Accepted
+Accepted. Since [ADR 0008](0008-gpt-live-voice.md) removed the voice gateway, the admin reads the snapshot to accept a call with the business's instructions, and the worker that runs the call loads it too, through a Redis cache.
 
 ## Decision
 

@@ -1,5 +1,7 @@
 # Deploy LobbyStack on Railway
 
+> **Deploying the fork?** Follow the [deployment guide](guide/README.md), which covers Railway step by step. This page describes the original project's infrastructure as code, `.railway/railway.ts`, which manages that project's own staging environment; the fork's deployments don't use it. Scripts still name this page, so it stays.
+
 Manage the project with Railway Infrastructure as Code in `.railway/railway.ts`. The definition adopts the isolated parity staging environment: admin, worker, a separate migrator, PostgreSQL 16 with pgvector, Redis 7, two persistent volumes, and a private bucket. See `.railway/README.md` for explicit environment selection and plan/apply commands.
 
 Legacy `apps/*/railway.json` files have been removed. Do not reintroduce per-service Config as Code. Review every IaC plan before applying, and preserve existing credentials with `preserve()`; never export secrets into source.
@@ -21,7 +23,7 @@ Provider credentials belong only on the services that use them. Follow `.env.exa
 
 1. Provision PostgreSQL, Redis, and the bucket.
 2. Configure Redis AOF persistence and `noeviction`.
-3. Bootstrap the least-privilege database roles with `docker/postgres/init/roles.sh` using the managed PostgreSQL administrator connection. This is a privileged, user-run operation.
+3. Give the least-privilege database roles their passwords from the `LOBBYSTACK_<ROLE>_PASSWORD` variables: on Railway the migrator's `bootstrap` step does it, and under Docker Compose `docker/postgres/init/roles.sh` does.
 4. Run the separate migrator, applying migrations twice and checking database consistency and RLS. Deploy worker with only worker/dispatcher database credentials after migration succeeds.
 5. Deploy admin.
 6. Run the smoke, RLS, telemetry, webhook, storage, realtime, privacy, and Playwright certification checks.

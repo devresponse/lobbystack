@@ -6,7 +6,7 @@ Store, for each website chat reply, each call's voice session and each request t
 
 Accepted, 2026-10-19.
 
-It started with a demo web call on 2026-10-19, where the receptionist invented strata council members and a manager's email. The transcript showed the wrong answer, but nothing recorded what the knowledge search returned or what GPT-Live was handed, so the cause had to be inferred from the code (fixed in PR #50).
+It started with a demo web call on 2026-10-19, where the receptionist invented board members and a manager's email. The transcript showed the wrong answer, but nothing recorded what the knowledge search returned or what GPT-Live was handed, so the cause had to be inferred from the code (fixed in PR #50).
 
 ## What was recorded before
 

@@ -1,6 +1,6 @@
 # Contribute to LobbyStack
 
-LobbyStack accepts focused fixes and features that preserve tenant isolation, provider boundaries, and the live call path. This guide explains the repository expectations and required checks.
+LobbyStack accepts focused fixes and features that preserve tenant isolation, provider boundaries, and the live call path. This guide explains the repository expectations and required checks. [Develop and test](docs/development/README.md) has the longer version: what trips the checks up, integration tests, and Windows.
 
 ## Follow the architecture boundaries
 
@@ -14,7 +14,7 @@ LobbyStack accepts focused fixes and features that preserve tenant isolation, pr
 
 1. Open an issue or draft a proposal for an architecture change.
 2. Add tests for affected critical paths.
-3. Update documentation and architecture decision records when behavior changes.
+3. Update the docs in the same pull request when behavior changes: `docs/` is the project's source of truth, and [keep this folder true](docs/README.md#keep-this-folder-true) lists what to update. Add an architecture decision record for an architecture change.
 4. Keep the change focused enough for a reviewer to verify.
 
 ## Run the project

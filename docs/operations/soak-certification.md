@@ -1,5 +1,7 @@
 # Run the operations soak certification tooling
 
+> **From the original project.** The original project wrote this before the fork. It describes tooling the repository still runs, but it hasn't been checked against the fork's code, and it names the original's staging and release process. To deploy the fork, follow the [deployment guide](../deployment/guide/README.md); for everything else, start at the [docs index](../README.md).
+
 This document describes tooling. It is not a completed certification, and no run of
 it can satisfy the operations-soak exit gate on its own. Every artifact it produces
 sets `releaseCertified: false`, and every evidence record keeps `owner` and `reviewer`

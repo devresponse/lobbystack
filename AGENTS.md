@@ -4,7 +4,7 @@
 
 - `apps/admin/`: Next.js operator dashboard, authentication, and HTTP API. Hosts the embeddable widget API (`/api/widget/*`), the loader (`/embed.js`), and the widget iframe app (`/embed/[key]`) in addition to the dashboard.
 - `apps/worker/`: asynchronous jobs, transactional outbox dispatch, and GPT-Live calls. The admin asks it to attach to each session at `/internal/live/attach`; it answers delegated requests, saves transcripts, and finishes the call. Phone calls reach GPT-Live through a Twilio Elastic SIP trunk; see `docs/voice/runtime.md`.
-- `apps/landing/`: public marketing site.
+- `apps/landing/`: the original project's marketing site, which this fork doesn't publish.
 - `packages/db/`: Drizzle schema, PostgreSQL migrations, role-specific clients, and RLS helpers.
 - `packages/domain/`: durable business logic shared by admin and worker runtimes. Widget conversations use the `web_chat` channel and key on `widget_visitor_id` (no phone required).
 - `packages/agent-core/`: the receptionist agent (AI SDK `ToolLoopAgent`) shared by website chat and calls, its tools, and the GPT-Live session config and call controller.
@@ -78,3 +78,8 @@
 
 - PostgreSQL is the canonical runtime datastore.
 - `legacy_convex_id` columns hold IDs from the previous Convex platform. The Polar webhook business lookup, the finance export, and call and contact ID display still read them.
+
+## Documentation
+
+- `docs/` is the project's source of truth; start at `docs/README.md`. Update the pages a change affects in the same PR, as its "Keep this folder true" section lists: the feature page, the changelog, open items, the deployment guide for a new variable or step, and the route catalog for a new page or route.
+- The repository is public. Keep secrets, personal names and addresses, and customer or demo business data out of the docs, and name the original project's sites in words instead of linking to them.

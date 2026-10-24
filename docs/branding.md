@@ -88,7 +88,7 @@ The admin caches the saved row for 30 seconds, so other admin replicas pick up a
 - The picture in link previews of those pages, from the brand file's `ogImage`. A business's public profile page has its own preview, without it.
 - The logo and name above the sign-in, sign-up, password reset, invitation, email change, verification, OAuth consent, and onboarding pages.
 - The header of the public demo page.
-- The foot of each business's [public profile page](../mintlify/settings/public-profile.mdx) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
+- The foot of each business's [public profile page](features/public-profile-and-qr.md) at `/profile/<slug>`, after "Answered by", and of the page a visitor gets for a profile that isn't published. Both link to the website.
 - Every dashboard string in all four languages that used to say LobbyStack: 21 strings, which now use the `{{appName}}` i18n variable.
 
 A deployment still named LobbyStack with no logo of its own shows LobbyStack's mark. A renamed deployment with no logo shows its name on its own, so LobbyStack's mark never appears beside another name.
@@ -113,15 +113,17 @@ The admin also links to pages outside itself: the website, the terms of service 
 
 | Link | Field in `brand.json` | Without it |
 | --- | --- | --- |
-| Website | `links.site` | `https://lobbystack.com` |
+| Website | `links.site` | The original project's website |
 | Terms of service | `links.terms` | `/terms` on the website |
 | Privacy policy | `links.privacy` | `/privacy` on the website |
-| Docs | `links.docs` | `https://docs.lobbystack.com` |
-| Contact address | `contactEmail` | LobbyStack's address for each place: `support@lobbystack.com` in the feedback panel, `hello@lobbystack.ai` for Enterprise plans, and `hello@lobbystack.com` in text messages. |
+| Docs | `links.docs` | The original project's documentation site |
+| Contact address | `contactEmail` | The original project's address for each place: its support address in the feedback panel, its sales address for Enterprise plans, and its general address in text messages. |
+
+**Give every deployment a brand file with its own links.** Without one, as on a domain no brand claims and with no `BRAND_PRESET`, the default `lobbystack` brand applies, and these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all five, with alloplace.com's home page standing in for docs.
 
 Where each one appears:
 
-- **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when the brand file has no page for them. On lobbystack.com the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
+- **Website**: the logo on the public demo page, the "visit" link in the SMS HELP reply, and the terms and privacy links when the brand file has no page for them. On the original project's website the links open the page in the reader's language, under `/fr/`, `/es/`, or `/sr/`. Any other site gets the same path in every language, such as `/terms`.
 - **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `links.terms` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
 - **Docs**: the "see docs" and Help Center links in the dashboard's feedback panel, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`.
 - **Contact address**: the feedback panel's "Contact us" link, the Enterprise plan's contact button in onboarding and billing, and both SMS HELP replies. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when the address or the website changes.
@@ -176,15 +178,15 @@ These use the name from `deploymentAppName()` or `loadBranding()`, like emails:
 
 ## Still branded
 
-These places still say LobbyStack or link to lobbystack.com. Variables marked "proposed" don't exist yet. When they're added, they should come from the brand file, like the name and logo.
+These places still say LobbyStack or link to the original project's sites. Variables marked "proposed" don't exist yet. When they're added, they should come from the brand file, like the name and logo.
 
 | Area | Where | Proposed setting |
 | --- | --- | --- |
-| Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to `https://app.lobbystack.com` | `SITE_URL` already overrides it. |
+| Referral links | `apps/admin/app/api/affiliate/route.ts` falls back to the original project's dashboard address | `SITE_URL` already overrides it. |
 | API wire names | The `LobbyStack-Business` header, the `LobbyStack-Webhooks/1.0` and `LobbyStack-OAuth/1.0` user agents, the `lsk_` and `lsp_` key prefixes, and the MCP server id `lobbystack` | None: API clients, the CLI and Zapier send or match them, so renaming them would break integrations. Descriptions and messages around them name no product. |
 | Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use the brand's `accentColor`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
-| CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to `docs.lobbystack.com` in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
+| CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to the original project's docs in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
 | Zapier | The integration's name and logo in Zapier's developer dashboard | `ZAPIER_APP_NAME`, `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` set its labels, messages, default address and docs link (`integrations/zapier/README.md`); registering it under that name is done in Zapier. |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |

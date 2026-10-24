@@ -4,7 +4,7 @@ PostgreSQL and shared domain operations form the authoritative backend for every
 
 ## Status
 
-Amended by ADR 0007
+Amended by [ADR 0007](0007-postgresql-main-backend.md). The voice gateway named below was removed by [ADR 0008](0008-gpt-live-voice.md): the admin starts each call and the worker runs it, through the same domain code as the rest of the backend.
 
 ## Decision
 

@@ -7,6 +7,8 @@ meta:
 
 # Roll out the reliability fixes
 
+> **The original project's record.** The original project wrote this before the fork, while it moved from Convex to this stack and readied it for production in September and early October 2026. It is kept as evidence, as it was, and isn't kept up to date: for how things work now, start at the [docs index](../README.md).
+
 Use this runbook to validate and deploy the booking, voice, authentication, and packaging changes. Content retention now runs from the business plan, so review the schedule and backfill decision in the retention section. Keep new widget-key issuance disabled while chat remains restricted.
 
 ## Deployment scope and prerequisites

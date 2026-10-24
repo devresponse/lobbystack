@@ -1013,6 +1013,10 @@ export const billingAccounts = pgTable(
     endNoticeAt: timestamp("end_notice_at", { withTimezone: true }),
     /** When Polar was told to change or cancel the subscription at the renewal that ends the plan. */
     endSetAt: timestamp("end_set_at", { withTimezone: true }),
+    /** The worker run changing the business's Polar subscription, while it does. Migration 0116. */
+    subscriptionClaim: uuid("subscription_claim"),
+    /** When that run's claim runs out, in case its worker died. */
+    subscriptionClaimedUntil: timestamp("subscription_claimed_until", { withTimezone: true }),
     ...legacyId,
     ...timestamps,
   },
@@ -1045,6 +1049,8 @@ export const billingCheckoutRequests = pgTable(
     index("billing_checkout_requests_plan_code_idx").on(table.businessId, table.planCode, table.createdAt).where(sql`${table.codeId} is not null`),
     // The billing sweep's read of requests no job finished. Migration 0114.
     index("billing_checkout_requests_open_idx").on(table.updatedAt).where(sql`${table.status} in ('pending', 'processing')`),
+    // A promo code's open checkouts, which count toward its use limit. Migration 0116.
+    index("billing_checkout_requests_code_idx").on(table.codeId, table.createdAt).where(sql`${table.codeId} is not null`),
   ],
 );
 
@@ -1088,6 +1094,12 @@ export const billingUsageEvents = pgTable(
     isFinal: boolean("is_final").default(true).notNull(),
     ...legacyId,
     syncStatus: varchar("sync_status", { length: 32 }).default("pending").notNull(),
+    /** The billable quantity Polar has, the sum of the events it took; null before the first, and on rows synced before migration 0116. */
+    syncedQuantity: doublePrecision("synced_quantity"),
+    /** The number of the next event to send Polar: 0 goes out under sourceKey, each later one under sourceKey:<number>. */
+    syncSeq: integer("sync_seq").default(0).notNull(),
+    /** The difference the event numbered syncSeq carries, once a worker run claimed it and until Polar takes it. */
+    sendingQuantity: doublePrecision("sending_quantity"),
     ...timestamps,
   },
   (table) => [uniqueIndex("billing_usage_source_unique").on(table.businessId, table.sourceKey), index("billing_usage_status_idx").on(table.syncStatus, table.createdAt), index("billing_usage_events_plan_code_idx").on(table.businessId, table.planCodeAtRecordTime).where(sql`${table.planCodeAtRecordTime} is not null`)],

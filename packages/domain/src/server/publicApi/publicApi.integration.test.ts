@@ -926,6 +926,9 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       expect(await audited("api.billing.updated")).toBe(1);
       // A Starter business can still move up to Pro, which the worker does on its Polar subscription.
       await admin!.db.update(billingAccounts).set({ plan: "starter", subscriptionId: "sub-starter" }).where(eq(billingAccounts.businessId, businessId));
+      // It changes plan one checkout at a time, and the two Starter checkouts above still wait for the worker.
+      await expectApiError(createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true }), 409, "conflict");
+      await admin!.db.update(billingCheckoutRequests).set({ status: "failed" }).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.status, "pending")));
       const move = await createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true });
       expect(move).toMatchObject({ plan: "pro", status: "pending" });
       expect(await loadBillingCheckoutRequest(context, { businessId, requestId: move.id })).toMatchObject({ target: "pro", billingInterval: "annual", subscription: { id: "sub-starter", plan: "starter", billingInterval: "monthly" } });

@@ -137,14 +137,14 @@ describe("subscription start telemetry", () => {
     const late = { id: "evt_1", providerEventId: "polar_1", eventType: "subscription.updated", status: "pending", payload: { ...startPayload, subscriptionModifiedAt: "2026-09-01T00:00:00.000Z" }, createdAt: new Date() };
     const { result } = await reconcileThroughTransaction([], [[late], [], [{ id: "evt_newer" }]]);
 
-    await expect(result).resolves.toBe(true);
+    await expect(result).resolves.toBe("processed");
     expect(mocks.recordProductEventInTransaction).not.toHaveBeenCalled();
   });
 
   it("records nothing when the event reconciles without starting a subscription", async () => {
-    mocks.withBusinessTransaction.mockResolvedValue({ reconciled: true, started: null });
+    mocks.withBusinessTransaction.mockResolvedValue({ result: "processed", started: null });
 
-    await expect(reconcileBillingProviderEvent(context, { businessId: "biz_1", providerEventId: "evt_2" })).resolves.toBe(true);
+    await expect(reconcileBillingProviderEvent(context, { businessId: "biz_1", providerEventId: "evt_2" })).resolves.toBe("processed");
 
     expect(mocks.recordProductEventInTransaction).not.toHaveBeenCalled();
   });

@@ -8,7 +8,7 @@ import { billingPlanName, brandLinks, contactEmailFor, isPaidSubscription, type 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
-import { isBillingRateLimited, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
+import { isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import type { WorkspaceViewModel } from "@/lib/page-view-models";
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
@@ -55,7 +55,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const mutation = useMutation({
     mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify(input) }),
     onSuccess: (result, input) => { if (activeBusinessId() === input.businessId) setCheckout({ businessId: input.businessId, requestId: result.requestId, target: input.target, billingInterval: input.billingInterval, billingEmail: input.billingEmail ?? null }); },
-    onError: (error, input) => { if (activeBusinessId() === input.businessId) toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed")); },
+    onError: (error, input) => { if (activeBusinessId() === input.businessId) toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : isPlanChangePending(error) ? "billing.toast.planChangeRefused.change_pending" : changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed")); },
   });
   const result = useQuery({
     queryKey: ["billing-checkout", checkout?.businessId, checkout?.requestId],

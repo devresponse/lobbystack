@@ -12,8 +12,9 @@ import type { DomainContext } from "./context";
 // and nothing else would run the work again. The sweep, every few minutes,
 // queues such work once more, at most once an hour for each row, and the
 // worker reports work that has waited an hour. Every job it queues is safe to
-// run beside another for the same row: a Polar event applies once, Polar keeps
-// one event per usage row, and a checkout job claims its request.
+// run beside another for the same row: a Polar event applies once, a usage job
+// claims the row's next Polar event, which Polar keeps once by its ID, and a
+// checkout job claims its request.
 
 /** A Polar event applies within seconds of its webhook. */
 const EVENT_WAIT_MS = 5 * 60_000;

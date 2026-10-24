@@ -106,9 +106,13 @@ export type BillingCodeRefusal = "invalid" | "current" | "interval";
 /**
  * The plan a code sells the business, at an interval Polar sells it: the
  * offer, or why not. A business already paying for that plan has nothing to
- * buy.
+ * buy. A shared code's open checkouts count toward its use limit, so the
+ * caller makes its checkout request in the same transaction, under the lock
+ * this takes on the code: two businesses can't both take its last use.
  */
 export async function billingCodeCheckout(tx: DatabaseTransaction, input: { businessId: string; code: string; billingInterval: BillingInterval }): Promise<{ offer: BillingCodeOffer } | { refusal: BillingCodeRefusal }> {
+  const normalized = normalizeBillingCode(input.code);
+  if (isBillingCode(normalized)) await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`billing-code:${normalized}`}, 0))`);
   const offer = await findBillingCodeOffer(tx, input.code);
   if (!offer) return { refusal: "invalid" };
   if (await paysForPlan(tx, input.businessId, offer.plan)) return { refusal: "current" };

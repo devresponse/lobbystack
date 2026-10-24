@@ -7,13 +7,13 @@ import { vi } from "vitest";
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarRequestError, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import { planChangeRefusalOf, planChangeRefusals } from "@lobbystack/shared";
-import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimNotificationDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, polarProductLinks, readPolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markBillingUsageSynced, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
+import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimBillingSubscription, claimBillingUsageSync, claimNotificationDelivery, confirmBillingUsageSync, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, polarProductLinks, readPolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
 import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
-import { releaseBillingCheckoutRequest, runDailyBillingVerify, sweepBillingWork } from "@lobbystack/domain";
+import { releaseBillingCheckoutRequest, releaseBillingSubscription, runDailyBillingVerify, sweepBillingWork } from "@lobbystack/domain";
 import { loadPromoEndWork, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file.
@@ -29,6 +29,11 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     ...actual,
     claimAppointmentChangeOtp: vi.fn(),
     claimBillingCheckoutRequest: vi.fn(),
+    // No other change holds the subscription unless a test says so.
+    claimBillingSubscription: vi.fn(async () => ({ claimId: "subscription-claim" })),
+    releaseBillingSubscription: vi.fn(),
+    claimBillingUsageSync: vi.fn(),
+    confirmBillingUsageSync: vi.fn(),
     expireProspectDemos: vi.fn(),
     generateAffiliatePayoutRun: vi.fn(),
     runDailyBillingVerify: vi.fn(),
@@ -44,7 +49,6 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     // No catalog rows: checkout sells through the product variables each test sets.
     readPolarProductLinks: vi.fn(async () => actual.polarProductLinks({ plans: [], prices: [] }, process.env)),
     markBillingPlanChanged: vi.fn(),
-    markBillingUsageSynced: vi.fn(),
     markBillingCheckoutCreated: vi.fn(),
     markBillingCheckoutFailed: vi.fn(),
     markAppointmentChangeOtpSent: vi.fn(),
@@ -508,7 +512,7 @@ describe("worker handlers", () => {
   it("reconciles a persisted Polar provider event", async () => {
     const businessId = randomUUID();
     const providerEventId = randomUUID();
-    vi.mocked(reconcileBillingProviderEvent).mockResolvedValue(true);
+    vi.mocked(reconcileBillingProviderEvent).mockResolvedValue("processed");
 
     const result = await handleJob({
       jobId: randomUUID(),
@@ -523,6 +527,16 @@ describe("worker handlers", () => {
 
     expect(result).toEqual({ status: "completed", entityId: providerEventId });
     expect(reconcileBillingProviderEvent).toHaveBeenCalledWith({ db: undefined as never }, { businessId, providerEventId });
+  });
+
+  it("leaves a held Polar event for the sweep to run again", async () => {
+    const businessId = randomUUID();
+    const providerEventId = randomUUID();
+    vi.mocked(reconcileBillingProviderEvent).mockResolvedValue("held");
+
+    const result = await handleJob({ jobId: randomUUID(), type: "billing.reconcile", queue: "default", businessId, payload: { providerEventId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false }, { domain: { db: undefined as never } });
+
+    expect(result).toEqual({ status: "skipped", entityId: providerEventId });
   });
 
   it("fails checkout requests instead of leaving them pending when Polar is unavailable", async () => {
@@ -848,6 +862,30 @@ describe("worker handlers", () => {
       expect(releaseBillingCheckoutRequest).toHaveBeenCalledTimes(1);
     });
 
+    it("waits while another change holds the subscription, handing the request back, and hands the subscription back after", async () => {
+      const retryAt = new Date(Date.now() + 15_000);
+      vi.mocked(claimBillingSubscription).mockResolvedValueOnce({ retryAt });
+      const getSubscription = vi.fn().mockResolvedValue(liveSubscription("product-starter-monthly"));
+      const changeSubscriptionProduct = vi.fn().mockResolvedValue(liveSubscription("product-pro-monthly"));
+      const held = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription, changeSubscriptionProduct } });
+      await expect(held.run).resolves.toEqual({ status: "deferred", entityId: held.requestId, retryAt });
+      expect(getSubscription).not.toHaveBeenCalled();
+      expect(releaseBillingCheckoutRequest).toHaveBeenCalledWith(held.domain, { businessId: held.businessId, requestId: held.requestId });
+      expect(releaseBillingSubscription).not.toHaveBeenCalled();
+
+      const free = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription, changeSubscriptionProduct } });
+      await expect(free.run).resolves.toMatchObject({ status: "completed" });
+      expect(claimBillingSubscription).toHaveBeenLastCalledWith(free.domain, { businessId: free.businessId });
+      expect(releaseBillingSubscription).toHaveBeenCalledWith(free.domain, { businessId: free.businessId, claimId: "subscription-claim" });
+
+      // A failed try hands it back too, and a failed hand-back leaves the claim to run out.
+      vi.mocked(releaseBillingSubscription).mockRejectedValueOnce(new Error("connection terminated"));
+      const error = new PolarRequestError(503, null);
+      const failing = await changePlan({ target: "pro", billingInterval: "monthly", plan: "starter", polar: { getSubscription, changeSubscriptionProduct: vi.fn().mockRejectedValue(error) }, isFinalAttempt: false });
+      await expect(failing.run).rejects.toBe(error);
+      expect(releaseBillingSubscription).toHaveBeenLastCalledWith(failing.domain, { businessId: failing.businessId, claimId: "subscription-claim" });
+    });
+
     it("opens a checkout when Polar's subscription has already ended", async () => {
       vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
       const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
@@ -913,7 +951,7 @@ describe("worker handlers", () => {
       const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
       const { businessId, requestId, run } = promoCheckout({ polar: { createCheckout } });
       await expect(run).resolves.toEqual({ status: "completed", entityId: requestId });
-      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "promo-starter-monthly", discountId: "disc-half-off", metadata: metadata(businessId, requestId), idempotencyKey: `billing-checkout:${requestId}` }));
+      expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({ productId: "promo-starter-monthly", discountId: "disc-half-off", metadata: metadata(businessId, requestId) }));
     });
 
     it("fails the request when the plan isn't on sale, without asking Polar", async () => {
@@ -1016,6 +1054,45 @@ describe("worker handlers", () => {
       expect(recordPromoEnd).not.toHaveBeenCalled();
       expect(getSubscription).not.toHaveBeenCalled();
       await expect(endPromo({ work: null, polar: {} }).run).resolves.toMatchObject({ status: "skipped" });
+    });
+
+    it("leaves a subscription that left the promo plan, as after an upgrade the account hasn't heard of yet", async () => {
+      const changeSubscriptionProduct = vi.fn();
+      const cancelSubscriptionAtPeriodEnd = vi.fn();
+      const upgraded = endPromo({ work: work(), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId: "product-pro-monthly", discountId: null })), changeSubscriptionProduct, cancelSubscriptionAtPeriodEnd } });
+      await expect(upgraded.run).resolves.toEqual({ status: "skipped", entityId: upgraded.businessId });
+      // Another promo plan's product, and one the catalog doesn't know.
+      for (const productId of ["promo-pro-monthly", "made-in-polar"]) {
+        await expect(endPromo({ work: work({ ending: "cancel" }), polar: { getSubscription: vi.fn().mockResolvedValue(subscription({ productId })), changeSubscriptionProduct, cancelSubscriptionAtPeriodEnd } }).run).resolves.toMatchObject({ status: "skipped" });
+      }
+      expect(changeSubscriptionProduct).not.toHaveBeenCalled();
+      expect(cancelSubscriptionAtPeriodEnd).not.toHaveBeenCalled();
+      expect(recordPromoEnd).not.toHaveBeenCalled();
+    });
+
+    it("waits while another change holds the subscription, and hands it back after", async () => {
+      const retryAt = new Date(Date.now() + 15_000);
+      const getSubscription = vi.fn().mockResolvedValue(subscription());
+      vi.mocked(claimBillingSubscription).mockResolvedValueOnce({ retryAt });
+      const held = endPromo({ work: work(), polar: { getSubscription } });
+      await expect(held.run).resolves.toEqual({ status: "deferred", entityId: held.businessId, retryAt });
+      vi.mocked(claimBillingSubscription).mockResolvedValueOnce({ retryAt });
+      const heldDrop = endPromo({ work: null, payload: { dropDiscount: "disc-half-off", subscriptionId: "sub-1" }, polar: { getSubscription } });
+      await expect(heldDrop.run).resolves.toEqual({ status: "deferred", entityId: heldDrop.businessId, retryAt });
+      expect(getSubscription).not.toHaveBeenCalled();
+      expect(recordPromoEnd).not.toHaveBeenCalled();
+
+      const ending = endPromo({ work: work(), polar: { getSubscription, changeSubscriptionProduct: vi.fn().mockResolvedValue(subscription()) } });
+      await expect(ending.run).resolves.toMatchObject({ status: "completed" });
+      expect(releaseBillingSubscription).toHaveBeenLastCalledWith(ending.domain, { businessId: ending.businessId, claimId: "subscription-claim" });
+      const failing = endPromo({ work: null, payload: { dropDiscount: "disc-half-off", subscriptionId: "sub-1" }, polar: { getSubscription: vi.fn().mockRejectedValue(new PolarRequestError(500, null)) } });
+      await expect(failing.run).rejects.toThrow("status 500");
+      expect(releaseBillingSubscription).toHaveBeenLastCalledWith(failing.domain, { businessId: failing.businessId, claimId: "subscription-claim" });
+
+      // An email with nothing to tell Polar claims nothing.
+      vi.mocked(claimBillingSubscription).mockClear();
+      await expect(endPromo({ work: work({ set: false }), polar: { getSubscription } }).run).resolves.toMatchObject({ status: "completed" });
+      expect(claimBillingSubscription).not.toHaveBeenCalled();
     });
 
     it("removes a promo plan's discount from a standard product, and nowhere else", async () => {
@@ -1149,7 +1226,7 @@ describe("worker handlers", () => {
     expect(recordUsage).not.toHaveBeenCalled();
   });
 
-  it("syncs the existing usage event with a stable Polar idempotency key", async () => {
+  it("sends a usage row to Polar as numbered events, a correction as its difference", async () => {
     const job = billingJob({ usageEventId: randomUUID() });
     const domain = { db: undefined as never };
     vi.mocked(loadBillingUsageEvent).mockResolvedValue({
@@ -1167,12 +1244,15 @@ describe("worker handlers", () => {
       billingKey: "business-key",
       customerId: "polar-customer-id",
     });
-    vi.mocked(markBillingUsageSynced).mockResolvedValue(true);
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0 });
+    vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
     const recordUsage = vi.fn().mockResolvedValue(undefined);
+    const usage = { businessId: job.businessId, usageEventId: String(job.payload.usageEventId) };
 
     const result = await handleJob(job, { domain, polar: { recordUsage } });
 
     expect(result).toEqual({ status: "completed", entityId: String(job.payload.usageEventId) });
+    expect(claimBillingUsageSync).toHaveBeenCalledWith(domain, usage);
     expect(recordUsage).toHaveBeenCalledWith({
       eventName: "billing.alert_sms_segments",
       externalCustomerId: "business-key",
@@ -1182,18 +1262,34 @@ describe("worker handlers", () => {
       businessId: job.businessId,
       usageKind: "alert_sms_segments",
     });
-    expect(markBillingUsageSynced).toHaveBeenCalledWith(domain, { businessId: job.businessId, usageEventId: String(job.payload.usageEventId) });
+    expect(confirmBillingUsageSync).toHaveBeenCalledWith(domain, { ...usage, seq: 0 });
+
+    // A correction after Polar took the first event: one segment fewer, under the row's next number.
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2 });
+    await handleJob(job, { domain, polar: { recordUsage } });
+    expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ quantity: -1, idempotencyKey: "alert_sms:operator_notification:delivery-1:2", timestamp: "2026-01-01T00:00:00.000Z" }));
+    expect(confirmBillingUsageSync).toHaveBeenLastCalledWith(domain, { ...usage, seq: 2 });
 
     const event = vi.mocked(loadBillingUsageEvent).mock.results[0]!.value;
     const original = await event;
     vi.mocked(loadBillingUsageEvent).mockResolvedValue({ ...original!, usageKind: "voice_seconds", quantity: 180, billableQuantity: 30, billingIntervalAtRecordTime: "annual" });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call-1", quantity: 30, seq: 0 });
     await handleJob(job, { domain, polar: { recordUsage } });
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ eventName: "billing.voice_minutes", quantity: 0.5, externalCustomerId: "business-key" }));
 
+    // Nothing left to send, as when a correction came back to what Polar has.
+    recordUsage.mockClear();
+    vi.mocked(confirmBillingUsageSync).mockClear();
+    vi.mocked(claimBillingUsageSync).mockResolvedValue(null);
+    expect(await handleJob(job, { domain, polar: { recordUsage } })).toEqual({ status: "completed", entityId: String(job.payload.usageEventId) });
+    expect(recordUsage).not.toHaveBeenCalled();
+    expect(confirmBillingUsageSync).not.toHaveBeenCalled();
+
     for (const change of [{ isFinal: false }, { customerId: null }, { syncStatus: "skipped" }, { plan: "free_cloud" }]) {
-      recordUsage.mockClear();
+      vi.mocked(claimBillingUsageSync).mockClear();
       vi.mocked(loadBillingUsageEvent).mockResolvedValue({ ...original!, ...change });
       expect((await handleJob(job, { domain, polar: { recordUsage } })).status).toBe("skipped");
+      expect(claimBillingUsageSync).not.toHaveBeenCalled();
       expect(recordUsage).not.toHaveBeenCalled();
     }
   });
@@ -1713,6 +1809,7 @@ describe("worker handlers", () => {
       billingKey: "business-key",
       customerId: "polar-customer-id",
     });
+    vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call_1", quantity: 120, seq: 0 });
     const error = new Error("polar unavailable");
     const recordUsage = vi.fn().mockRejectedValue(error);
 
@@ -1724,7 +1821,7 @@ describe("worker handlers", () => {
       properties: { provider: "polar" },
     }));
     expect(recordProductEvent).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "ops.billing.usage_sync_recovered" }));
-    expect(markBillingUsageSynced).not.toHaveBeenCalled();
+    expect(confirmBillingUsageSync).not.toHaveBeenCalled();
   });
 
   it("samples a tenant outbox backlog and records a durable product event only when non-empty", async () => {

@@ -180,7 +180,7 @@ describe("pnpm billing", () => {
     expect(context.fake.writes).toEqual([]);
   });
 
-  it("takes over polar-setup.mjs's objects with --adopt, keeping their IDs, links them and passes verify", async () => {
+  it("takes over polar-setup.mjs's objects with --adopt, keeping the monthly products' IDs, replaces its annual ones with --allow-replace, links them and passes verify", async () => {
     const context = await setUp();
     const ids = context.fake.state.products.map((product) => product.id);
 
@@ -190,28 +190,40 @@ describe("pnpm billing", () => {
     expect(refused.err).toContain('Product "Pro monthly"');
     expect(refused.err).toContain("--adopt");
 
-    const plan = await billing(["plan", ...sandbox, "--adopt"], context);
+    // polar-setup.mjs's annual products invoice overage once a year, and Polar never adds a meter cycle to a product.
+    const yearly = await billing(["plan", ...sandbox, "--adopt"], context);
+    expect(yearly.code).toBe(1);
+    expect(yearly.err).toContain('Product "Pro annual": "Pro annual" invoices its overage once a year, not each month, and Polar never changes a product\'s meter cycle. Run with --allow-replace');
+
+    const plan = await billing(["plan", ...sandbox, "--adopt", "--allow-replace"], context);
     expect(plan.code).toBe(0);
     expect(plan.out).toContain("Postgres: the file is applied");
     expect(plan.out).toContain('tag Product "Pro monthly"');
+    expect(plan.out).toContain('create Product "Pro annual"');
+    expect(plan.out).toContain('archive Product "Pro annual"');
     expect(plan.out).toContain("Links: 4 live prices of 2 sold plans");
     expect(plan.out).toContain("This was a plan, so nothing changed.");
     expect(context.fake.writes).toEqual([]);
 
     const railwayFile = join(root, "railway.txt");
-    const applied = await billing(["apply", ...sandbox, "--adopt", "--yes", "--railway-file", railwayFile], context);
+    const applied = await billing(["apply", ...sandbox, "--adopt", "--allow-replace", "--yes", "--railway-file", railwayFile], context);
     expect(applied.err).toBe("");
     expect(applied.code).toBe(0);
-    // Tags, and the Credits taken off the monthly products: nothing new is made.
-    expect(context.fake.writes.every((entry) => entry.method === "PATCH" || entry.path.endsWith("/benefits"))).toBe(true);
+    // Tags, the Credits taken off the monthly products, and two annual products that invoice overage each month.
+    const made = context.fake.writes.filter((entry) => entry.method === "POST" && !entry.path.endsWith("/benefits"));
+    expect(made.map((entry) => [entry.path, (entry.body as { name: string; meter_interval?: string }).name, (entry.body as { meter_interval?: string }).meter_interval])).toEqual([["/v1/products/", "Starter annual", "month"], ["/v1/products/", "Pro annual", "month"]]);
     expect(applied.out).toContain('detach Product "Starter monthly"');
-    expect(context.fake.state.products.map((product) => product.id)).toEqual(ids);
+    expect(context.fake.state.products.slice(0, 4).map((product) => product.id)).toEqual(ids);
+    const live = context.fake.state.products.filter((product) => !product.is_archived);
+    expect(live.map((product) => product.id)).toEqual(expect.arrayContaining(ids.filter((_id, index) => context.fake.state.products[index]!.recurring_interval === "month")));
     expect(applied.out).toContain("Links: recorded 6 changes in run");
+    // The annual variables polar-setup.mjs left on Railway name the archived products, which checkout ignores.
+    expect(applied.out).toContain("warn   product_vars: POLAR_STARTER_ANNUAL_PRODUCT_ID is");
     expect(applied.out).toContain("Result: in sync (exit 0).");
     // Postgres wasn't asked to apply again, only for dry runs: the file was applied in step 1.
-    expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run)).toEqual([true, true, true]);
+    expect(context.instance.requests.filter((request) => request.path === "POST /api/v1/billing/catalog/runs").map((request) => (request.body as { dry_run?: boolean }).dry_run)).toEqual([true, true, true, true]);
     expect(context.instance.plans.filter((entry) => entry.sold).map((entry) => entry.status)).toEqual(["active", "active"]);
-    expect(context.instance.prices.map((price) => price.polar_id).sort()).toEqual([...ids].sort());
+    expect(context.instance.prices.map((price) => price.polar_id).sort()).toEqual(live.map((product) => product.id).sort());
 
     // The Railway values, readable only by this user, without a webhook secret: Polar already had the webhook.
     const railway = await readFile(railwayFile, "utf8");
@@ -232,7 +244,7 @@ describe("pnpm billing", () => {
 
   it("applies an applied file again when the running code resolves it to other rows", async () => {
     const context = await setUp();
-    expect((await billing(["apply", ...sandbox, "--adopt", "--yes"], context)).code).toBe(0);
+    expect((await billing(["apply", ...sandbox, "--adopt", "--allow-replace", "--yes"], context)).code).toBe(0);
     // As if older code had written another value for the same file.
     context.instance.plans.find((plan) => plan.code === "pro")!.sort = 99;
     context.instance.requests.length = 0;
@@ -320,8 +332,8 @@ describe("pnpm billing", () => {
 
   it("asks before changing anything, and changes nothing on another answer", async () => {
     const context = await setUp();
-    expect(await billing(["apply", ...sandbox, "--adopt"], context)).toMatchObject({ code: 2, err: "Add --yes to apply without a question." });
-    const declined = await billing(["apply", ...sandbox, "--adopt"], context, { answer: "no" });
+    expect(await billing(["apply", ...sandbox, "--adopt", "--allow-replace"], context)).toMatchObject({ code: 2, err: "Add --yes to apply without a question." });
+    const declined = await billing(["apply", ...sandbox, "--adopt", "--allow-replace"], context, { answer: "no" });
     expect(declined.asked).toEqual([expect.stringContaining("Apply these to https://demo.alloplace.com and Polar sandbox organization Test organization? Type yes to continue:")]);
     expect(declined).toMatchObject({ code: 1, out: expect.stringContaining("Nothing changed.") });
     expect(context.fake.writes).toEqual([]);
@@ -339,7 +351,7 @@ describe("pnpm billing", () => {
 
   it("verifies the three copies, exits 1 on a drift with --json listing every check, and 2 when Polar can't be read", async () => {
     const context = await setUp();
-    expect((await billing(["apply", ...sandbox, "--adopt", "--yes"], context)).code).toBe(0);
+    expect((await billing(["apply", ...sandbox, "--adopt", "--allow-replace", "--yes"], context)).code).toBe(0);
     // Credits put back on a product in Polar's dashboard.
     context.fake.state.products.find((product) => product.name === "Pro monthly")!.benefitIds = [context.fake.state.benefits[0]!.id];
     const drift = await billing(["verify", ...sandbox], context);

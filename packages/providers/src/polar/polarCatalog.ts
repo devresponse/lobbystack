@@ -5,7 +5,7 @@
 // write that timed out may have landed, and the caller finds it again by its
 // metadata tags instead of repeating it.
 
-import { trimTrailingSlashes } from "@lobbystack/shared";
+import { POLAR_API_VERSION, trimTrailingSlashes } from "@lobbystack/shared";
 
 export type PolarMetadata = Record<string, string | number | boolean>;
 
@@ -35,6 +35,9 @@ export type PolarProduct = {
   name: string;
   recurring_interval: string | null;
   recurring_interval_count?: number | null;
+  /** The meter cycle its overage is invoiced on, such as month on an annual product; null when that follows the billing cycle. Polar never changes it. */
+  meter_interval?: string | null;
+  meter_interval_count?: number | null;
   visibility?: string;
   is_archived: boolean;
   metadata: PolarMetadata;
@@ -60,7 +63,8 @@ export type PolarDiscount = {
   metadata: PolarMetadata;
 };
 
-export type PolarWebhookEndpoint = { id: string; url: string; format: string; events: string[]; enabled: boolean; secret?: string };
+/** api_version is the version of the payloads Polar sends it. */
+export type PolarWebhookEndpoint = { id: string; url: string; format: string; events: string[]; enabled: boolean; api_version?: string; secret?: string };
 
 /** Everything in one organization that LobbyStack reads, archived objects included. */
 export type PolarSnapshot = {
@@ -112,7 +116,7 @@ export class PolarCatalogClient {
       try {
         response = await this.send(`${trimTrailingSlashes(this.config.baseUrl)}${path}`, {
           method,
-          headers: { authorization: `Bearer ${this.config.token}`, accept: "application/json", ...(body === undefined ? {} : { "content-type": "application/json" }) },
+          headers: { authorization: `Bearer ${this.config.token}`, accept: "application/json", "polar-version": POLAR_API_VERSION, ...(body === undefined ? {} : { "content-type": "application/json" }) },
           ...(body === undefined ? {} : { body: JSON.stringify(body) }),
           signal: AbortSignal.timeout(this.config.timeoutMs ?? 30_000),
         });

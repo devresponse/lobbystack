@@ -32,6 +32,27 @@ export type FakePolar = {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const refuse = (message: string, field = "body") => json(422, { detail: [{ loc: ["body", field], msg: message }] });
 
+/** The API versions Polar serves, and the one it answers in when a call names none. */
+const polarVersions = ["2026-04", "2026-10", "2027-01"];
+const currentPolarVersion = "2026-10";
+
+/**
+ * A new product's meter cycle as Polar stores it: null when it is the billing
+ * cycle, or a refusal when it doesn't divide it evenly. Only months and years,
+ * which are all LobbyStack sells.
+ */
+function meterCycle(body: Record<string, unknown>): { meter_interval: string | null; meter_interval_count: number | null } | Response {
+  if (body.meter_interval === undefined || body.meter_interval === null) return { meter_interval: null, meter_interval_count: null };
+  const meter = String(body.meter_interval);
+  const meterCount = Number(body.meter_interval_count ?? 1);
+  const billing = String(body.recurring_interval);
+  const billingCount = Number(body.recurring_interval_count ?? 1);
+  const months = (interval: string, count: number) => (interval === "year" ? 12 * count : interval === "month" ? count : NaN);
+  if (months(billing, billingCount) % months(meter, meterCount) !== 0) return refuse("The meter interval must evenly divide the billing interval, so the meter cycle re-aligns with the billing cycle at every renewal.", "meter_interval");
+  if (meter === billing && meterCount === billingCount) return { meter_interval: null, meter_interval_count: null };
+  return { meter_interval: meter, meter_interval_count: meterCount };
+}
+
 export function createFakePolar(options: { currency?: string; organization?: Partial<PolarOrganization> } = {}): FakePolar {
   let next = 0;
   const id = (prefix: string) => `${prefix}_${String(++next).padStart(4, "0")}`;
@@ -112,7 +133,9 @@ export function createFakePolar(options: { currency?: string; organization?: Par
       if (method === "POST" && !objectId) {
         const prices = makePrices(body.prices as Array<Record<string, unknown>>, currency);
         if (!prices.some((price) => price.price_currency === currency)) return refuse("A product needs a price in the default currency.", "prices");
-        const product: StoredProduct = { id: id("product"), name: String(body.name), recurring_interval: String(body.recurring_interval), recurring_interval_count: Number(body.recurring_interval_count ?? 1), visibility: String(body.visibility ?? "public"), is_archived: false, metadata: (body.metadata ?? {}) as PolarMetadata, prices, benefitIds: [], created_at: new Date().toISOString(), modified_at: null };
+        const cycle = meterCycle(body);
+        if (cycle instanceof Response) return cycle;
+        const product: StoredProduct = { id: id("product"), name: String(body.name), recurring_interval: String(body.recurring_interval), recurring_interval_count: Number(body.recurring_interval_count ?? 1), ...cycle, visibility: String(body.visibility ?? "public"), is_archived: false, metadata: (body.metadata ?? {}) as PolarMetadata, prices, benefitIds: [], created_at: new Date().toISOString(), modified_at: null };
         state.products.push(product);
         return json(201, productView(product));
       }
@@ -125,6 +148,7 @@ export function createFakePolar(options: { currency?: string; organization?: Par
         return json(200, productView(product));
       }
       if (body.recurring_interval !== undefined || body.recurring_interval_count !== undefined) return refuse("The recurring interval can't be changed.", "recurring_interval");
+      // An update has no meter cycle, so Polar ignores one sent: it is set only when the product is made.
       if (body.prices !== undefined) {
         // Prices left out are archived; a price's amount never changes.
         const sent = body.prices as Array<Record<string, unknown>>;
@@ -161,13 +185,15 @@ export function createFakePolar(options: { currency?: string; organization?: Par
       return json(200, discount);
     }
     if (resource === "webhooks") {
+      if (body.api_version !== undefined && body.api_version !== null && !polarVersions.includes(String(body.api_version))) return refuse(`Invalid API version: ${String(body.api_version)}`, "api_version");
       if (method === "POST") {
-        const endpoint: PolarWebhookEndpoint = { id: id("webhook"), url: String(body.url), format: String(body.format), events: (body.events as string[]).slice(), enabled: true, secret: `polar_whs_secret_${next}` };
+        const endpoint: PolarWebhookEndpoint = { id: id("webhook"), url: String(body.url), format: String(body.format), events: (body.events as string[]).slice(), enabled: true, api_version: String(body.api_version ?? currentPolarVersion), secret: `polar_whs_secret_${next}` };
         state.webhooks.push(endpoint);
         return json(201, endpoint);
       }
       const endpoint = state.webhooks.find((entry) => entry.id === sub);
       if (!endpoint) return json(404, { detail: "Not found" });
+      if (body.api_version !== undefined && body.api_version !== null) endpoint.api_version = String(body.api_version);
       if (body.format !== undefined) endpoint.format = String(body.format);
       if (body.events !== undefined) endpoint.events = (body.events as string[]).slice();
       if (body.enabled !== undefined) endpoint.enabled = Boolean(body.enabled);
@@ -178,6 +204,9 @@ export function createFakePolar(options: { currency?: string; organization?: Par
 
   fake.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     if (fake.rejectToken) return json(401, { detail: "Invalid token" });
+    // A version Polar doesn't serve finds nothing, as on Polar.
+    const version = new Headers(init?.headers).get("polar-version");
+    if (version !== null && !polarVersions.includes(version)) return json(404, { detail: "Not Found" });
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};

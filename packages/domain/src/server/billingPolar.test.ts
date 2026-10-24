@@ -64,11 +64,11 @@ describe("desiredPolarCatalog", () => {
       ["alert_sms_segments", "Alert SMS segments", "billing.alert_sms_segments"],
       ["outbound_call_attempts", "Call transfers", "billing.outbound_call_attempts"],
     ]);
-    expect(catalog.products.map((product) => [product.name, product.interval, product.cents, product.currency, product.rates, product.visibility])).toEqual([
-      ["Starter annual", "year", 28800, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Starter monthly", "month", 3000, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Pro annual", "year", 96000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Pro monthly", "month", 10000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+    expect(catalog.products.map((product) => [product.name, product.interval, product.meterInterval, product.cents, product.currency, product.rates, product.visibility])).toEqual([
+      ["Starter annual", "year", "month", 28800, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Starter monthly", "month", null, 3000, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Pro annual", "year", "month", 96000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Pro monthly", "month", null, 10000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
     ]);
     expect(catalog.discounts).toEqual([]);
     expect(catalog.webhook).toEqual({ url: webhookUrl, events: expect.arrayContaining(["subscription.created", "order.refunded"]) });
@@ -92,6 +92,25 @@ describe("desiredPolarCatalog", () => {
   });
 });
 
+describe("PolarCatalogClient", () => {
+  it("asks Polar for API version 2026-10 on every call, reads and writes alike", async () => {
+    const fake = createFakePolar();
+    const versions: Array<string | null> = [];
+    const polar = new PolarCatalogClient({
+      token: "polar_oat_test",
+      baseUrl: "https://sandbox-api.polar.sh",
+      fetch: (async (input: string | URL | Request, init?: RequestInit) => {
+        versions.push(new Headers(init?.headers).get("polar-version"));
+        return await fake.fetch(input, init);
+      }) as typeof fetch,
+      sleep: async () => undefined,
+    });
+    await runPolarSteps(polar, planPolarChanges({ catalog: catalogFor(profile()), snapshot: await polar.readSnapshot(), options: strict, now }).steps);
+    expect(fake.writes.length).toBeGreaterThan(0);
+    expect(versions).toEqual(Array(5 + fake.writes.length).fill("2026-10"));
+  });
+});
+
 describe("planPolarChanges", () => {
   it("sets up an empty organization with creates only, and a second run makes no call", async () => {
     const fake = createFakePolar();
@@ -108,15 +127,34 @@ describe("planPolarChanges", () => {
     expect(fake.state.products.every((product) => product.benefitIds.length === 0)).toBe(true);
     expect(fake.state.benefits).toEqual([]);
     expect(fake.state.meters.map((meter) => meter.metadata)).toEqual([{ lobbystack_meter: "voice_minutes" }, { lobbystack_meter: "alert_sms_segments" }, { lobbystack_meter: "outbound_call_attempts" }]);
+    // Annual products invoice each month's overage, not a year of it at renewal.
+    expect(fake.state.products.map((product) => [product.name, product.meter_interval, product.meter_interval_count])).toEqual([
+      ["Starter annual", "month", 1],
+      ["Starter monthly", null, null],
+      ["Pro annual", "month", 1],
+      ["Pro monthly", null, null],
+    ]);
+    expect(first.steps.find((step) => step.subject === 'Product "Pro annual"')!.changes).toEqual(["960.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each", "overage invoiced each month"]);
+    expect(fake.state.webhooks.map((endpoint) => endpoint.api_version)).toEqual(["2026-10"]);
   });
 
-  it("adopts what polar-setup.mjs made by tagging it, so product ids stay and every link is found, and takes its Credits off", async () => {
+  it("adopts what polar-setup.mjs made by tagging it, so meter and monthly product ids stay and every link is found, and takes its Credits off", async () => {
     const fake = createFakePolar();
     await seedPolarSetup(fake);
     const ids = fake.state.products.map((product) => product.id);
-    const { first } = await apply(fake, profile(), { adopt: true });
-    expect(summary(first.steps)).toEqual([...Array(3).fill("tag meter"), ...Array(4).fill("tag product"), "detach product", "detach product"]);
+    const monthlyIds = fake.state.products.filter((product) => product.recurring_interval === "month").map((product) => product.id);
+    // Its annual products invoice overage once a year, and Polar never adds a meter cycle to a product.
+    expect((await plan(fake, profile(), { adopt: true })).refusals).toEqual([
+      { object: "product", subject: 'Product "Starter annual"', message: "\"Starter annual\" invoices its overage once a year, not each month, and Polar never changes a product's meter cycle. Run with --allow-replace to make a new product and archive this one; its subscribers keep it." },
+      expect.objectContaining({ subject: 'Product "Pro annual"' }),
+    ]);
+    const { first } = await apply(fake, profile(), { adopt: true, allowReplace: true });
+    expect(summary(first.steps)).toEqual([...Array(3).fill("tag meter"), "create product", "tag product", "create product", "tag product", "detach product", "detach product", "archive product", "archive product"]);
     expect(first.steps.filter((step) => step.action === "tag").every((step) => step.changes.includes("tag it as LobbyStack's"))).toBe(true);
+    expect(first.steps.filter((step) => step.action === "archive").map((step) => [step.subject, step.changes])).toEqual([
+      ['Product "Starter annual"', ["replaced by a product that invoices its overage each month; its subscribers keep it"]],
+      ['Product "Pro annual"', ["replaced by a product that invoices its overage each month; its subscribers keep it"]],
+    ]);
     expect(first.steps.filter((step) => step.action === "detach").map((step) => [step.subject, step.changes])).toEqual([
       ['Product "Starter monthly"', ['detach "150 voice minutes a month", "50 alert SMS segments a month", "20 call transfers a month": the worker reports only each month\'s overage']],
       ['Product "Pro monthly"', ['detach "500 voice minutes a month", "200 alert SMS segments a month", "100 call transfers a month": the worker reports only each month\'s overage']],
@@ -124,11 +162,14 @@ describe("planPolarChanges", () => {
     // The Credits stay in Polar, on no product.
     expect(fake.state.products.every((product) => product.benefitIds.length === 0)).toBe(true);
     expect(fake.state.benefits).toHaveLength(6);
-    expect(fake.state.products.map((product) => product.id)).toEqual(ids);
+    expect(fake.state.products.slice(0, 4).map((product) => product.id)).toEqual(ids);
     expect(fake.state.products.every((product) => product.prices.every((price) => !price.is_archived))).toBe(true);
+    const live = fake.state.products.filter((product) => !product.is_archived);
+    expect(live.map((product) => [product.name, product.meter_interval])).toEqual([["Starter monthly", null], ["Pro monthly", null], ["Starter annual", "month"], ["Pro annual", "month"]]);
     const links = polarLinkPlans({ catalog: catalogFor(profile()), plans: desiredBillingPlans(profile()), snapshot: await client(fake).readSnapshot(), now });
     expect(links.missing).toEqual([]);
-    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id)).sort()).toEqual([...ids].sort());
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id)).sort()).toEqual(live.map((product) => product.id).sort());
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id))).toEqual(expect.arrayContaining(monthlyIds));
   });
 
   it("refuses each untagged lookalike without --adopt, so a forgotten flag makes no duplicate", async () => {
@@ -249,7 +290,7 @@ describe("planPolarChanges", () => {
   it("refuses a billing cycle Polar can't change, and replaces the product with --allow-replace", async () => {
     const fake = createFakePolar();
     await seedPolarSetup(fake);
-    await apply(fake, profile(), { adopt: true });
+    await apply(fake, profile(), { adopt: true, allowReplace: true });
     const monthly = fake.state.products.find((product) => product.name === "Starter monthly")!;
     monthly.recurring_interval = "year";
     monthly.benefitIds = fake.state.benefits.slice(0, 1).map((benefit) => benefit.id);
@@ -260,6 +301,28 @@ describe("planPolarChanges", () => {
     expect([monthly.benefitIds, monthly.is_archived]).toEqual([[], true]);
   });
 
+  it("replaces an annual product that invoices its overage once a year only with --allow-replace, and links the new one", async () => {
+    const fake = createFakePolar();
+    await apply(fake, profile());
+    // As a product made before annual products had a meter cycle.
+    const yearly = fake.state.products.find((product) => product.name === "Pro annual")!;
+    yearly.meter_interval = null;
+    yearly.meter_interval_count = null;
+    const refused = await plan(fake, profile());
+    expect(refused.refusals).toEqual([{ object: "product", subject: 'Product "Pro annual"', message: "\"Pro annual\" invoices its overage once a year, not each month, and Polar never changes a product's meter cycle. Run with --allow-replace to make a new product and archive this one; its subscribers keep it." }]);
+    expect(refused.steps).toEqual([]);
+    const { first } = await apply(fake, profile(), { allowReplace: true });
+    expect(first.steps.map((step) => [step.action, step.subject, step.changes.at(-1)])).toEqual([
+      ["create", 'Product "Pro annual"', "overage invoiced each month"],
+      ["archive", 'Product "Pro annual"', "replaced by a product that invoices its overage each month; its subscribers keep it"],
+    ]);
+    expect(first.steps[0]!.body).toMatchObject({ recurring_interval: "year", recurring_interval_count: 1, meter_interval: "month", meter_interval_count: 1 });
+    expect(yearly.is_archived).toBe(true);
+    const links = polarLinkPlans({ catalog: catalogFor(profile()), plans: desiredBillingPlans(profile()), snapshot: await client(fake).readSnapshot(), now });
+    const linked = links.plans.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "annual")!.polar_id;
+    expect(fake.state.products.find((product) => product.id === linked)).toMatchObject({ name: "Pro annual", is_archived: false, meter_interval: "month", meter_interval_count: 1 });
+  });
+
   it("replaces a meter Polar locked only after the products that used it, so one --allow-replace run finishes", async () => {
     const fake = createFakePolar();
     await seedPolarSetup(fake);
@@ -268,7 +331,8 @@ describe("planPolarChanges", () => {
     voice.counted = true;
     const annual = fake.state.products.find((product) => product.name === "Starter annual")!;
     annual.recurring_interval = "month";
-    expect((await plan(fake, profile(), { adopt: true })).refusals.map((refusal) => refusal.object)).toEqual(["meter", "product"]);
+    // Starter annual bills monthly now; Pro annual has no meter cycle.
+    expect((await plan(fake, profile(), { adopt: true })).refusals.map((refusal) => [refusal.object, refusal.message.match(/never changes a product's (\w+ cycle)/)?.[1] ?? null])).toEqual([["meter", null], ["product", "billing cycle"], ["product", "meter cycle"]]);
     const { first } = await apply(fake, profile(), { adopt: true, allowReplace: true });
     expect(summary(first.steps).slice(-2)).toEqual(["archive product", "archive meter"]);
     expect([annual.is_archived, voice.archived_at !== null]).toEqual([true, true]);
@@ -294,15 +358,15 @@ describe("planPolarChanges", () => {
     const fake = createFakePolar();
     await seedPolarSetup(fake);
     fake.state.products[0]!.metadata = { owner: "finance" };
-    await apply(fake, profile(), { adopt: true });
+    await apply(fake, profile(), { adopt: true, allowReplace: true });
     expect(fake.state.products[0]!.metadata).toMatchObject({ owner: "finance", lobbystack_brand: "alloplace" });
   });
 
   it("takes Credits added in Polar's dashboard off again and puts back a dashboard rename", async () => {
     const fake = createFakePolar();
     await seedPolarSetup(fake);
-    await apply(fake, profile(), { adopt: true });
-    const annual = fake.state.products.find((product) => product.name === "Pro annual")!;
+    await apply(fake, profile(), { adopt: true, allowReplace: true });
+    const annual = fake.state.products.find((product) => product.name === "Pro annual" && !product.is_archived)!;
     annual.benefitIds = [fake.state.benefits.find((benefit) => benefit.description === "500 voice minutes a month")!.id];
     annual.name = "Pro yearly";
     const { first } = await apply(fake, profile());
@@ -321,6 +385,15 @@ describe("planPolarChanges", () => {
       await apply(fake, profile());
       expect([fake.state.meters.length, fake.state.products.length, fake.state.webhooks.length]).toEqual([3, 4, 1]);
     }
+  });
+
+  it("moves a webhook on another API version to the one every call asks for", async () => {
+    const fake = createFakePolar();
+    await apply(fake, profile());
+    fake.state.webhooks[0]!.api_version = "2026-04";
+    const { first } = await apply(fake, profile());
+    expect(first.steps).toEqual([expect.objectContaining({ object: "webhook", action: "update", changes: ["API version 2026-04, LobbyStack reads 2026-10"], body: { api_version: "2026-10" } })]);
+    expect(fake.state.webhooks[0]!.api_version).toBe("2026-10");
   });
 
   it("returns the new webhook's secret, and none when the webhook already existed", async () => {

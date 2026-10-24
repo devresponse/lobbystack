@@ -1,4 +1,4 @@
-import { assertCertificationBillingSandbox, assertCertificationRecipient } from "@lobbystack/shared";
+import { assertCertificationBillingSandbox, assertCertificationRecipient, POLAR_API_VERSION } from "@lobbystack/shared";
 
 export type PolarBillingConfig = {
   accessToken: string;
@@ -59,7 +59,7 @@ export class PolarBillingProvider {
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     assertCertificationBillingSandbox(this.config.baseUrl ?? "https://api.polar.sh");
-    const response = await fetch(`${this.config.baseUrl ?? "https://api.polar.sh"}${path}`, { ...init, signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${this.config.accessToken}`, "content-type": "application/json", ...(init.headers ?? {}) } });
+    const response = await fetch(`${this.config.baseUrl ?? "https://api.polar.sh"}${path}`, { ...init, signal: AbortSignal.timeout(15_000), headers: { authorization: `Bearer ${this.config.accessToken}`, "content-type": "application/json", "polar-version": POLAR_API_VERSION, ...(init.headers ?? {}) } });
     if (!response.ok) {
       throw await requestError(response);
     }

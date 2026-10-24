@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
-import { billingProfileSchema, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
 
 import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, POLAR_WEBHOOK_PATH, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -105,9 +105,9 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
     ["org_settings", `currency ${desired.currency.toUpperCase()}, ${desired.settings.allowMultipleSubscriptions ? "several subscriptions" : "one subscription"} per customer, plan changes ${desired.settings.portalPlanChanges ? "on" : "off"} in the portal`],
     ["meter", `${desired.meters.length} meters`],
     ["credits", "no Credits on the products: the worker reports only each month's overage"],
-    ["product", `${desired.products.length} products, tagged and priced as the file says`],
+    ["product", `${desired.products.length} products, tagged and priced as the file says${desired.products.some((product) => product.meterInterval) ? ", annual ones invoicing overage each month" : ""}`],
     ["discount", desired.discounts.length ? `${desired.discounts.length} ${desired.discounts.length === 1 ? "discount" : "discounts"}` : "no discounts"],
-    ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, Raw, on`] as [BillingCheckCode, string]] : []),
+    ...(desired.webhook ? [["webhook", `webhook ${desired.webhook.url}, Raw, on, API version ${POLAR_API_VERSION}`] as [BillingCheckCode, string]] : []),
     ["leftover", `nothing else tagged for ${file.brand}`],
   ];
   for (const [code, message] of okLines) if (!found.has(code)) add(code, "file_polar", "ok", code, message);

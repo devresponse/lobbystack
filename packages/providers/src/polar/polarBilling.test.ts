@@ -27,6 +27,17 @@ describe("PolarBillingProvider", () => {
     expect(new Headers(request.headers).get("idempotency-key")).toBe("billing-checkout:request-1");
     expect(JSON.parse(String(request.body))).toEqual({ products: ["product-1"], customer_id: "customer-1", success_url: "https://app.example/settings/plan?checkout=success", return_url: "https://app.example/settings/plan", allow_discount_codes: false, metadata: { lobbystack_business: "1" } });
   });
+  it("asks for Polar API version 2026-10 on every call, so a new Polar version changes nothing until this one moves", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "subscription-1", status: "active", product_id: "product-1", url: "https://polar.example/checkout-1" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+
+    await provider.getSubscription("subscription-1");
+    await provider.createCheckout({ productId: "product-1", customer: { id: "customer-1" }, metadata: { lobbystack_business: "1" }, successUrl: "https://app.example/settings/plan?checkout=success", returnUrl: "https://app.example/settings/plan", idempotencyKey: "billing-checkout:request-1" });
+    await provider.recordUsage({ eventName: "billing.voice_minutes", externalCustomerId: "business:1", quantity: 1, timestamp: "2026-09-08T00:00:00.000Z", idempotencyKey: "voice:call-1", businessId: "1", usageKind: "voice_seconds" });
+
+    expect(fetchMock.mock.calls.map(([, init]) => new Headers((init as RequestInit).headers).get("polar-version"))).toEqual(["2026-10", "2026-10", "2026-10"]);
+  });
   it("makes a checkout out to an email and external ID when it has no customer, with nothing put on the customer", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ id: "checkout-1", url: "https://polar.example/checkout-1" }) });
     vi.stubGlobal("fetch", fetchMock);

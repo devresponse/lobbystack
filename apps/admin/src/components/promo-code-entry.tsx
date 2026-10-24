@@ -11,6 +11,7 @@ import { formatMoney, includedLines, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-p
 import { requestJson } from "@/lib/request-json";
 import { capturePromoCodeFromUrl, clearStoredPromoCode, getStoredPromoCode } from "@/lib/promo-code";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
+import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
 import { Button } from "./ui/button";
 import { FieldError } from "./ui/field";
 import { Input } from "./ui/input";
@@ -18,7 +19,7 @@ import { Label } from "./ui/label";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
 type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
-type Checkout = { requestId: string; interval: BillingInterval };
+type Checkout = { requestId: string; interval: BillingInterval; billingEmail: string | null };
 
 const errorKeys: Record<string, string> = {
   promo_invalid: "billing.promo.errors.invalid",
@@ -55,12 +56,14 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
   const [view, setView] = useState<BillingCodeView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [checkout, setCheckout] = useState<Checkout | null>(null);
+  // A checkout Polar couldn't make this business's customer for starts again with a billing email.
+  const [emailPrompt, setEmailPrompt] = useState<{ refusal: BillingEmailRefusal; email: string | null; interval: BillingInterval } | null>(null);
   const redirected = useRef<string | null>(null);
   const announced = useRef<string | null>(null);
 
   const lookup = useMutation({
     mutationFn: (code: string) => requestJson<BillingCodeView>(`/api/billing/promo?businessId=${encodeURIComponent(businessId)}`, { method: "POST", body: JSON.stringify({ code }) }),
-    onMutate: () => { setError(null); setView(null); },
+    onMutate: () => { setError(null); setView(null); setEmailPrompt(null); },
     onSuccess: (result) => {
       setView(result);
       setValue(result.code);
@@ -74,9 +77,9 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
     },
   });
   const start = useMutation({
-    mutationFn: (input: { code: BillingCodeView; interval: BillingInterval }) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ businessId, target: input.code.tier, billingInterval: input.interval, promoCode: input.code.code }) }),
+    mutationFn: (input: { code: BillingCodeView; interval: BillingInterval; billingEmail?: string }) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ businessId, target: input.code.tier, billingInterval: input.interval, promoCode: input.code.code, ...(input.billingEmail ? { billingEmail: input.billingEmail } : {}) }) }),
     onMutate: () => setError(null),
-    onSuccess: (result, input) => setCheckout({ requestId: result.requestId, interval: input.interval }),
+    onSuccess: (result, input) => setCheckout({ requestId: result.requestId, interval: input.interval, billingEmail: input.billingEmail ?? null }),
     onError: (cause) => setError(errorMessage(cause, t, t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"))),
   });
   const status = useQuery({
@@ -106,7 +109,9 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
       window.location.assign(result.checkoutUrl);
     }
     if (result?.status === "error" || status.isError) {
-      setError(result?.refusal ? t(`billing.toast.planChangeRefused.${result.refusal}`) : t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"));
+      const refusal = result?.refusal;
+      if (isBillingEmailRefusal(refusal)) setEmailPrompt({ refusal, email: checkout.billingEmail, interval: checkout.interval });
+      else setError(refusal ? t(`billing.toast.planChangeRefused.${refusal}`) : t(changesPlan ? "billing.toast.planChangeFailed" : "billing.toast.checkoutFailed"));
       setCheckout(null);
     }
   }, [changesPlan, checkout, status.data, status.isError, t]);
@@ -147,6 +152,7 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
     setValue("");
     setView(null);
     setError(null);
+    setEmailPrompt(null);
     clearStoredPromoCode();
   }
 
@@ -173,7 +179,8 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
       </div>
     </form>
     {error ? <FieldError>{error}</FieldError> : null}
-    {view ? <PromoOffer busy={busy} changesPlan={changesPlan} locale={locale} onChoose={(interval) => start.mutate({ code: view, interval })} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
+    {view ? <PromoOffer busy={busy} changesPlan={changesPlan} locale={locale} onChoose={(interval) => { setEmailPrompt(null); start.mutate({ code: view, interval }); }} pendingInterval={start.isPending ? start.variables.interval : checkout?.interval ?? null} t={t} view={view} /> : null}
+    {view && emailPrompt ? <BillingEmailForm key={emailPrompt.interval} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => start.mutate({ code: view, interval: emailPrompt.interval, billingEmail })} pending={busy} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /> : null}
   </div>;
 }
 

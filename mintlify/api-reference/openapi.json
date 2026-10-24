@@ -1887,7 +1887,7 @@
       "post": {
         "operationId": "createCheckout",
         "summary": "Start a checkout",
-        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, and a key 20 across the businesses it reaches. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409.",
+        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, and a key 20 across the businesses it reaches. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own Polar customer, made on its first checkout with the payer's email or billing_email. Polar keeps one customer per email, so when the email already belongs to another business's customer the checkout ends in error, and another with a separate billing_email works.",
         "tags": [
           "Billing"
         ],
@@ -15455,6 +15455,12 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "billing_email": {
+            "description": "The email Polar gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here.",
+            "type": "string",
+            "maxLength": 320,
+            "format": "email"
           }
         },
         "required": [

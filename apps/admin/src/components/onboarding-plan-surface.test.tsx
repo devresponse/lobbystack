@@ -88,6 +88,25 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     expect(await screen.findByText("plan.continueFailed")).toBeTruthy();
     await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
   });
+  it("asks for a billing email when Polar has theirs for another business, and starts the checkout again with it", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    setup();
+    const posted: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") { posted.push(JSON.parse(String(init.body))); return Response.json({ requestId: `checkout-${posted.length}` }); }
+      return posted.length === 1
+        ? Response.json({ status: "error", checkoutUrl: null, error: "Polar already has a customer with this email for another business.", refusal: "billing_email_taken" })
+        : Response.json({ status: "ready", checkoutUrl: "https://checkout.example/session", error: null, refusal: null });
+    }));
+    await userEvent.click(screen.getByRole("button", { name: "plan.tiers.pro.cta.annual" }));
+    expect(await screen.findByText("billing.toast.planChangeRefused.billing_email_taken")).toBeTruthy();
+    expect(screen.queryByText("plan.continueFailed")).toBeNull();
+    await userEvent.type(screen.getByLabelText("billing.billingEmail.label"), "billing@example.com");
+    await userEvent.click(screen.getByRole("button", { name: "billing.billingEmail.submit" }));
+    await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.example/session"));
+    expect(posted).toEqual([{ businessId: "business", target: "pro", billingInterval: "annual" }, { businessId: "business", target: "pro", billingInterval: "annual", billingEmail: "billing@example.com" }]);
+  });
   it("lets them pick again when the back button restores the page from cache", async () => {
     const assign = vi.fn();
     vi.stubGlobal("location", { ...window.location, assign });

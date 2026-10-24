@@ -6,10 +6,11 @@ import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { annualSavingPercent, brandLinks, contactEmailFor, type BillingPlanList } from "@lobbystack/shared";
+import { annualSavingPercent, brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "@/components/billing-email-form";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
@@ -20,7 +21,8 @@ import { cn } from "@/lib/utils";
 
 type BillingInterval = "monthly" | "annual";
 type Plan = "free_cloud" | "starter" | "pro" | "enterprise";
-type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null };
+type Checkout = { id: string; status: string; checkoutUrl: string | null; error: string | null; refusal: PlanChangeRefusal | null };
+type CheckoutInput = { target: "starter" | "pro"; billingEmail?: string };
 type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList };
 
 const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
@@ -64,6 +66,8 @@ export function OnboardingPlanSurface() {
   const [interval, setInterval] = useState<BillingInterval>("annual");
   const [checkoutRequestId, setCheckoutRequestId] = useState<string | null>(null);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  // A checkout Polar couldn't make this business's customer for starts again with a billing email.
+  const [emailPrompt, setEmailPrompt] = useState<{ refusal: BillingEmailRefusal; email: string | null; target: "starter" | "pro" } | null>(null);
   const returnAttempt = useRef<{ key: string; promise: Promise<unknown> } | null>(null);
   const { business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingStatus>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business) });
@@ -84,7 +88,7 @@ export function OnboardingPlanSurface() {
     meta: { inlineError: true },
   });
   const startCheckout = useMutation({
-    mutationFn: (target: "starter" | "pro") => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ businessId: business!.businessId, target, billingInterval: interval }) }),
+    mutationFn: (input: CheckoutInput) => requestJson<{ requestId: string }>("/api/billing/checkout", { method: "POST", body: JSON.stringify({ businessId: business!.businessId, target: input.target, billingInterval: interval, ...(input.billingEmail ? { billingEmail: input.billingEmail } : {}) }) }),
     onSuccess: ({ requestId }) => setCheckoutRequestId(requestId),
     meta: { inlineError: true },
   });
@@ -112,13 +116,16 @@ export function OnboardingPlanSurface() {
     }).catch(() => { if (!cancelled) returnAttempt.current = null; });
     return () => { cancelled = true; };
   }, [business, returnRequestId, returnedCheckout.data?.synced, returnedCheckout.data?.target, router, telemetry]);
+  const lastCheckout = startCheckout.variables;
   useEffect(() => {
     if (checkout.data?.status === "error" || checkout.isError) {
+      const refusal = checkout.data?.refusal;
+      if (lastCheckout && isBillingEmailRefusal(refusal)) setEmailPrompt({ refusal, email: lastCheckout.billingEmail ?? null, target: lastCheckout.target });
       // The worker's own error is for operators, in English; the screen says it in the person's language.
-      setCheckoutError(t("plan.continueFailed"));
+      else setCheckoutError(t("plan.continueFailed"));
       setCheckoutRequestId(null);
     }
-  }, [checkout.data, checkout.isError, t]);
+  }, [checkout.data, checkout.isError, lastCheckout, t]);
   useEffect(() => {
     if (checkout.data?.status === "ready" && checkout.data.checkoutUrl) window.location.assign(checkout.data.checkoutUrl);
   }, [checkout.data]);
@@ -141,11 +148,12 @@ export function OnboardingPlanSurface() {
   function act(plan: Plan) {
     if (!business || pendingPlan) return;
     setCheckoutError(null);
+    setEmailPrompt(null);
     telemetry.track("web.onboarding.plan_selected", { businessId: business.businessId, plan });
     if (plan === "free_cloud") selectFree.mutate();
     else if (plan === "starter" || plan === "pro") {
       telemetry.track("web.onboarding.plan_checkout_started", { businessId: business.businessId, plan });
-      startCheckout.mutate(plan);
+      startCheckout.mutate({ target: plan });
     }
     else window.location.assign(`mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(t("plan.enterpriseSubject"))}`);
   }
@@ -206,6 +214,7 @@ export function OnboardingPlanSurface() {
           </section>;
         })}
       </div>
+      {emailPrompt ? <div className="flex justify-center"><BillingEmailForm key={emailPrompt.target} onCancel={() => setEmailPrompt(null)} onSubmit={(billingEmail) => startCheckout.mutate({ target: emailPrompt.target, billingEmail })} pending={pendingPlan === "paid"} refusal={emailPrompt.refusal} refusedEmail={emailPrompt.email} /></div> : null}
       {selectFree.isError || startCheckout.isError || checkoutError ? <FieldError>{selectFree.error?.message ?? startCheckout.error?.message ?? checkoutError ?? t("plan.continueFailed")}</FieldError> : null}
       <OnboardingPlanComparison locale={locale} plans={plans} t={t} />
     </div>

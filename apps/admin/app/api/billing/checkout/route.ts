@@ -1,5 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
+import { z } from "zod";
 
 import { billingAccounts, billingCheckoutRequests } from "@lobbystack/db";
 import { createBillingCheckoutRequest, type BillingCheckoutTarget, type BillingInterval } from "@lobbystack/domain";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 
 const targets = ["starter", "pro"] as const;
 const intervals = ["monthly", "annual"] as const;
+const billingEmailSchema = z.email().max(320);
 
 export async function GET(request: Request) {
   try {
@@ -42,13 +44,16 @@ export async function POST(request: Request) {
     if (typeof input.target !== "string" || !targets.includes(input.target as BillingCheckoutTarget)) throw new Error("target is invalid.");
     if (typeof input.billingInterval !== "string" || !intervals.includes(input.billingInterval as BillingInterval)) throw new Error("billingInterval is invalid.");
     if (input.promoCode !== undefined && typeof input.promoCode !== "string") throw new Error("promoCode is invalid.");
+    // The email the business's new Polar customer gets when Polar already has the person's own for another business.
+    const billingEmail = typeof input.billingEmail === "string" ? input.billingEmail.trim() : input.billingEmail;
+    if (billingEmail !== undefined && !billingEmailSchema.safeParse(billingEmail).success) throw Object.assign(new Error("billingEmail must be an email address."), { status: 400 });
     // A code sells the plan it unlocks, whatever the target; each try counts as a guess.
     const promoCode = typeof input.promoCode === "string" && input.promoCode.trim() ? input.promoCode : undefined;
     const checkPromoCode = async () => {
       const limit = await checkPromoCodeLimit({ businessId, userId: session.user.id, ip: trustedClientIp(request) });
       if (!limit.allowed) throw promoCodeLimitResponse(limit.status);
     };
-    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target as BillingCheckoutTarget, billingInterval: input.billingInterval as BillingInterval, promoCode, checkPromoCode });
+    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target as BillingCheckoutTarget, billingInterval: input.billingInterval as BillingInterval, promoCode, ...(typeof billingEmail === "string" ? { billingEmail } : {}), checkPromoCode });
     return NextResponse.json({ requestId }, { status: 202 });
   } catch (error) {
     return asApiResponse(error);

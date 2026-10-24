@@ -256,7 +256,9 @@
         "change_pending": "Un changement précédent de votre abonnement est encore en cours. Réessayez dans une minute.",
         "subscription_unavailable": "Votre abonnement ne peut pas changer pour le moment. Vérifiez-le dans Gérer l'abonnement.",
         "product_unavailable": "Ce forfait ne peut pas être acheté pour le moment. Contactez l'assistance.",
-        "token_scope": "Les changements de forfait ne sont pas encore configurés ici. Contactez l'assistance."
+        "token_scope": "Les changements de forfait ne sont pas encore configurés ici. Contactez l'assistance.",
+        "billing_email_taken": "Votre courriel sert déjà à la facturation d'une autre entreprise dans Polar. Saisissez un courriel de facturation distinct pour cette entreprise.",
+        "billing_email_invalid": "Polar n'a pas accepté votre courriel pour la facturation. Saisissez un courriel de facturation pour cette entreprise."
       }
     },
     "pastDueBanner": {
@@ -558,6 +560,15 @@
         "rateLimited": "Trop de codes essayés. Réessayez plus tard.",
         "failed": "Impossible de vérifier ce code. Réessayez."
       }
+    },
+    "billingEmail": {
+      "label": "Courriel de facturation",
+      "placeholder": "facturation@exemple.com",
+      "hint": "Polar envoie ici les reçus de cette entreprise.",
+      "submit": "Continuer",
+      "cancel": "Annuler",
+      "taken": "Ce courriel sert aussi à la facturation d'une autre entreprise. Saisissez-en un autre.",
+      "invalid": "Polar n'a pas accepté ce courriel. Vérifiez-le ou saisissez-en un autre."
     }
   },
   "phoneNumber": {

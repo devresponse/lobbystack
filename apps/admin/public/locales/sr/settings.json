@@ -256,7 +256,9 @@
         "change_pending": "Prethodna promena Vaše pretplate se još primenjuje. Pokušajte ponovo za minut.",
         "subscription_unavailable": "Vaša pretplata se trenutno ne može promeniti. Proverite je u delu Upravljaj pretplatom.",
         "product_unavailable": "Ovaj paket se trenutno ne može kupiti. Obratite se podršci.",
-        "token_scope": "Promene paketa ovde još nisu podešene. Obratite se podršci."
+        "token_scope": "Promene paketa ovde još nisu podešene. Obratite se podršci.",
+        "billing_email_taken": "Vaš imejl se već koristi za naplatu druge firme u Polaru. Unesite poseban imejl za naplatu ove firme.",
+        "billing_email_invalid": "Polar nije prihvatio Vaš imejl za naplatu. Unesite imejl za naplatu ove firme."
       }
     },
     "pastDueBanner": {
@@ -558,6 +560,15 @@
         "rateLimited": "Previše pokušaja. Pokušajte ponovo kasnije.",
         "failed": "Nije moguće proveriti ovaj kod. Pokušajte ponovo."
       }
+    },
+    "billingEmail": {
+      "label": "Imejl za naplatu",
+      "placeholder": "naplata@primer.com",
+      "hint": "Polar ovde šalje račune ove firme.",
+      "submit": "Nastavi",
+      "cancel": "Otkaži",
+      "taken": "I ovaj imejl se koristi za naplatu druge firme. Unesite drugi.",
+      "invalid": "Polar nije prihvatio ovaj imejl. Proverite ga ili unesite drugi."
     }
   },
   "phoneNumber": {

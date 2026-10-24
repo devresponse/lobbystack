@@ -70,9 +70,11 @@ export function planChangeDirection(
 }
 
 /**
- * Why Polar didn't move a paying business to the plan it picked. The worker
- * stores the sentence as the checkout request's error, which API callers read;
- * the dashboard turns it back into the code to say it in the viewer's language.
+ * Why Polar didn't move a paying business to the plan it picked, or make the
+ * customer a new checkout is for. The worker stores the sentence as the
+ * checkout request's error, which API callers read; the dashboard turns it
+ * back into the code to say it in the viewer's language. The two billing email
+ * ones ask for a billing email, which a new checkout request carries.
  */
 export const planChangeRefusals = {
   payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
@@ -81,6 +83,8 @@ export const planChangeRefusals = {
   subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
   product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
   token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
+  billing_email_taken: "Polar already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
+  billing_email_invalid: "Polar didn't accept the billing email. Start the checkout again with another one.",
 } as const;
 export type PlanChangeRefusal = keyof typeof planChangeRefusals;
 

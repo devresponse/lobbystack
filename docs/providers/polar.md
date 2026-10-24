@@ -78,12 +78,24 @@ Set `POLAR_WEBHOOK_SECRET` in production. The route rejects missing secrets and 
 
 Set `POLAR_ACCEPT_LEGACY_BUSINESS_IDS=true` only in production. It lets signed webhooks resolve `business:<legacy-id>` customer references from before the PostgreSQL move through the `businesses.legacy_convex_id` column. Keep it disabled in staging so a shared Polar organization cannot route production customer events into the staging database.
 
+## Give each business its own Polar customer
+
+Polar keeps one customer per email in an organization, and a checkout made out to an email goes to the customer that already has it. So before each checkout the worker finds the business's own customer by the account's billing key, `business:<business ID>`, with `GET /v1/customers/external/{id}`, or makes it with `POST /v1/customers/`, and makes the checkout out to that customer. Grant the worker's `POLAR_ACCESS_TOKEN` `customers:write` for this. Without it the worker reports `The worker's Polar token can't read or make customers` to error tracking and leaves the customer to Polar's email match, so someone who pays for two businesses gets the second one's subscription on the first one's customer.
+
+A new customer gets the business's name and the email of the person who asked, unless they gave a billing email. When Polar already has that email for another business's customer, or doesn't accept it as an email, the checkout fails and the plan screen asks for a separate billing email, then starts the checkout again with it. API callers send it as `billing_email` on `POST /billing/checkout`.
+
+Each checkout names its business in its metadata as `lobbystack_business`, which Polar copies onto the subscription and its orders. The webhook gives an event to that business, and logs `ops.billing.webhook_customer_mismatch` with both business IDs when the event's customer belongs to another one, which happens only for a subscription bought without the business's own customer. An event never changes an account's billing key, which usage and the billing portal use. An account whose key an earlier release changed to a Polar customer ID or another business's key keeps it; this lists them, apart from legacy `business:<Convex ID>` keys:
+
+```sql
+select business_id, billing_key, customer_id from billing_accounts where billing_key <> 'business:' || business_id::text;
+```
+
 ## Understand the billing flow
 
 Use this sequence to check where a checkout stops:
 
 1. The admin API writes a checkout request and enqueues `billing.createCheckout`.
-2. The worker creates the Polar checkout with the product the catalog links to the plan and interval. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
+2. The worker finds or makes the business's Polar customer, then creates the Polar checkout for it with the product the catalog links to the plan and interval. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
 3. The browser opens the checkout URL after the request becomes ready, or for a plan change waits until the webhook moves the business onto the plan.
 4. Polar sends subscription and order events to the Next.js webhook route.
 5. The route stores each provider event once and enqueues `billing.reconcile`. When Polar sends an event again, or someone redelivers it from Polar's dashboard, and it never applied, the route queues it again.
@@ -118,6 +130,7 @@ Run these checks in the Polar sandbox before enabling production billing:
 - Confirm only business administrators can start checkout or open the portal.
 - Complete monthly and annual checkout for Starter and Pro.
 - Upgrade a paying Starter business to Pro from **Settings** > **Plan**, and confirm Polar invoices the difference and the page shows Pro.
+- Pay for a second business from the same account, and confirm the plan screen asks for a separate billing email and Polar shows each subscription on its own business's customer.
 - Confirm invalid webhook signatures receive an unauthorized response and log `ops.billing.webhook_refused`.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.

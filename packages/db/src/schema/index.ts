@@ -1035,6 +1035,8 @@ export const billingCheckoutRequests = pgTable(
     planCode: varchar("plan_code", { length: 48 }).references(() => billingPlans.code),
     /** The promo code entered for it. */
     codeId: uuid("code_id").references(() => billingCodes.id),
+    /** The email the business's new Polar customer gets instead of the requester's, which another customer has. Migration 0115. */
+    billingEmail: varchar("billing_email", { length: 320 }),
     ...timestamps,
   },
   (table) => [

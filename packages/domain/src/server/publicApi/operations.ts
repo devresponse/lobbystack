@@ -443,12 +443,12 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
       await options.checkPromoCode?.();
       const sale = await billingCodeCheckout(tx, { businessId: caller.businessId, code: input.promo_code ?? "", billingInterval: input.interval });
       if ("refusal" in sale) throw promoRefusals[sale.refusal]();
-      const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
+      const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, billingEmail: input.billing_email, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
       await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
       return await loadCheckout(tx, caller.businessId, checkoutId);
     }
     if (!standardCheckoutAllowed((await loadBillingContext(tx, caller.businessId)).plan, input.plan)) throw conflict(PAID_PLAN_CHECKOUT_REFUSAL);
-    const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval });
+    const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval, billingEmail: input.billing_email });
     await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
     return await loadCheckout(tx, caller.businessId, checkoutId);
   });

@@ -126,7 +126,7 @@ export function billingCodeRefusalError(refusal: BillingCodeRefusal): Error {
  */
 export async function createBillingCheckoutRequest(
   context: DomainContext,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promoCode?: string | undefined; checkPromoCode?: (() => Promise<void>) | undefined },
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promoCode?: string | undefined; billingEmail?: string | undefined; checkPromoCode?: (() => Promise<void>) | undefined },
 ): Promise<string> {
   const { checkPromoCode, ...request } = input;
   return await withBusinessTransaction(context.db, { ...request, actorType: "operator" }, async (tx) => {
@@ -143,15 +143,16 @@ export async function createBillingCheckoutRequest(
 export type BillingCheckoutPromo = { planCode: string; codeId: string };
 
 /**
- * Queues a Polar checkout for a plan in the name of the person asking, whose
- * email Polar fills in. A business on a managed plan is refused, because the
+ * Queues a Polar checkout for a plan in the name of the person asking. A
+ * business without a Polar customer gets one with the billing email they
+ * gave, else their own. A business on a managed plan is refused, because the
  * operator bills it and a Polar subscription would bill it twice, and so is a
  * standard plan the business can't buy (standardCheckoutAllowed). Callers
  * authorize first, and check a promo code with billingCodeCheckout.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined },
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined; billingEmail?: string | undefined },
 ): Promise<string> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
@@ -166,6 +167,7 @@ export async function createBillingCheckoutRequestInTransaction(
     billingInterval: input.billingInterval,
     status: "pending",
     ...(input.promo ? { planCode: input.promo.planCode, codeId: input.promo.codeId } : {}),
+    ...(input.billingEmail ? { billingEmail: input.billingEmail } : {}),
   }).returning({ id: billingCheckoutRequests.id });
   if (!request) throw new Error("Billing checkout request could not be created.");
   await enqueueOutbox(tx, {
@@ -264,8 +266,13 @@ export async function loadBillingCheckoutRequest(
   checkoutId: string | null;
   checkoutUrl: string | null;
   error: string | null;
+  /** The email of the person who asked, which Polar's customer gets unless they gave a billing email. */
   customerEmail: string;
+  /** The email the person gave for this business's billing, when their own already belongs to another Polar customer. */
+  billingEmail: string | null;
+  /** The account's billing key: the external ID of the business's Polar customer. */
   externalCustomerId: string;
+  businessName: string;
   onboardingStage: string;
   /** The plan other than the target's standard one it sells, such as a promo plan; null for the standard plan. */
   planCode: string | null;
@@ -284,6 +291,7 @@ export async function loadBillingCheckoutRequest(
       error: billingCheckoutRequests.error,
       planCode: billingCheckoutRequests.planCode,
       customerEmail: users.email,
+      billingEmail: billingCheckoutRequests.billingEmail,
       billingKey: billingAccounts.billingKey,
       subscriptionId: billingAccounts.subscriptionId,
       plan: billingAccounts.plan,
@@ -291,6 +299,7 @@ export async function loadBillingCheckoutRequest(
       currentInterval: billingAccounts.billingInterval,
       subscriptionState: billingAccounts.subscriptionState,
       source: billingAccounts.source,
+      businessName: businesses.name,
       onboardingStage: businesses.onboardingStage,
     }).from(billingCheckoutRequests)
       .innerJoin(users, eq(users.id, billingCheckoutRequests.requestedByUserId))
@@ -755,7 +764,13 @@ export async function reconcileBillingProviderEvent(
       currentPeriodStart: billingAccounts.currentPeriodStart,
       endSetAt: billingAccounts.endSetAt,
     }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
-    const billingKey = stringField(transactionPayload, "billingKey", "externalCustomerId", "customerId") ?? stringField(payload, "billingKey", "externalCustomerId", "customerId") ?? stringField(customer, "id", "externalId") ?? existing?.billingKey;
+    // The billing key is the external ID that usage and the billing portal name the business's Polar
+    // customer by, and the checkout makes that customer with it, so an event never changes it. Polar
+    // can put a subscription on a customer it matched by email, whose external ID names another
+    // business, and Polar's own customer ID is no external ID at all, so usage sent with either
+    // would never be billed to this business.
+    const customerReference = stringField(transactionPayload, "billingKey", "externalCustomerId", "customerId") ?? stringField(payload, "billingKey", "externalCustomerId", "customerId") ?? stringField(customer, "id", "externalId");
+    const billingKey = existing?.billingKey ?? (customerReference ? `business:${input.businessId}` : undefined);
     if (billingKey) {
       const customerId = stringField(transactionPayload, "customerId", "externalCustomerId") ?? stringField(payload, "customerId", "externalCustomerId") ?? stringField(customer, "id", "externalId") ?? existing?.customerId;
       const subscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id") ?? stringField(subscription, "id") ?? existing?.subscriptionId;
@@ -818,7 +833,6 @@ export async function reconcileBillingProviderEvent(
       }).onConflictDoUpdate({
         target: billingAccounts.businessId,
         set: {
-          billingKey,
           ...(customerId ? { customerId } : {}),
           ...subscriptionFields,
           updatedAt: new Date(),

@@ -5,6 +5,7 @@ import { CircleAlert } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { isBillingRateLimited } from "@/lib/billing-plans";
 
 export type BillingPermissions = {
   hasBillingManagementAccess: boolean;
@@ -27,11 +28,14 @@ export function BillingPastDueBanner({ businessId, plan, subscriptionState, perm
     setPending(true);
     try {
       const response = await fetch(`/api/billing/portal?businessId=${encodeURIComponent(businessId)}`, { method: "POST", credentials: "include" });
-      if (!response.ok) throw new Error("Portal unavailable");
+      if (!response.ok) {
+        const refusal = await response.json().catch(() => null) as { code?: string } | null;
+        throw Object.assign(new Error("Portal unavailable"), { code: refusal?.code });
+      }
       const result = await response.json() as { url: string };
       window.location.assign(result.url);
-    } catch {
-      toast.error(t("billing.toast.portalFailed"));
+    } catch (error) {
+      toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : "billing.toast.portalFailed"));
     } finally {
       setPending(false);
     }

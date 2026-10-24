@@ -5,6 +5,7 @@ const fixture = vi.hoisted(() => ({
   denied: false,
   transaction: vi.fn(),
   portal: vi.fn(),
+  limit: vi.fn(async (_call: string, _subject: { businessId: string; userId: string }) => undefined),
 }));
 vi.mock("@/lib/api-helpers", () => ({
   jsonError: (message: string, status = 400, code?: string) => Response.json({ error: message, ...(code ? { code } : {}) }, { status }),
@@ -12,10 +13,11 @@ vi.mock("@/lib/api-helpers", () => ({
   withOperatorTransaction: async (_request: Request, callback: (input: unknown) => unknown, options: unknown) => {
     fixture.transaction(options);
     if (fixture.denied) throw { status: 403 };
-    return callback({ businessId: "business", tx: { select: () => ({ from: () => ({ where: () => ({ limit: async () => fixture.account ? [fixture.account] : [] }) }) }) } });
+    return callback({ businessId: "business", session: { user: { id: "user" } }, tx: { select: () => ({ from: () => ({ where: () => ({ limit: async () => fixture.account ? [fixture.account] : [] }) }) }) } });
   },
 }));
 vi.mock("@lobbystack/providers", () => ({ PolarBillingProvider: class { createCustomerPortalSession = fixture.portal; } }));
+vi.mock("@/lib/billing-limit", () => ({ assertBillingCallAllowed: fixture.limit }));
 
 import { POST } from "./route";
 
@@ -36,12 +38,19 @@ describe("billing portal route", () => {
     expect(response.status).toBe(200);
     expect(fixture.transaction).toHaveBeenCalledWith({ minimumRole: "business_admin" });
     expect(fixture.portal).toHaveBeenCalledWith({ externalCustomerId: "tenant-billing-key", returnUrl: "http://localhost:3000/settings/plan" });
+    expect(fixture.limit).toHaveBeenCalledWith("portal", { businessId: "business", userId: "user" });
+  });
+  it("asks Polar for no session over the limit", async () => {
+    fixture.limit.mockRejectedValueOnce(Object.assign(new Error("The billing portal was opened too many times. Try again in 5 minutes."), { status: 429 }));
+    expect((await POST(new Request("http://localhost:3000/api/billing/portal?businessId=business", { method: "POST" }))).status).toBe(429);
+    expect(fixture.portal).not.toHaveBeenCalled();
   });
   it("opens no Polar portal for a managed plan, which LobbyStack bills directly", async () => {
     fixture.account = { source: "managed", billingKey: "tenant-billing-key", customerId: "customer", subscriptionId: null, plan: "enterprise", subscriptionState: "active" };
     const response = await POST(new Request("http://localhost:3000/api/billing/portal?businessId=business", { method: "POST" }));
     expect(response.status).toBe(409);
     expect(fixture.portal).not.toHaveBeenCalled();
+    expect(fixture.limit).not.toHaveBeenCalled();
   });
   it("rejects a customer without billing history before calling the provider", async () => {
     fixture.account = null;

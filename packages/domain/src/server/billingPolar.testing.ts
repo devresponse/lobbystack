@@ -27,6 +27,8 @@ export type FakePolar = {
   dropAfterWrite?: number;
   /** Set to answer every request 401, as Polar does for another server's token. */
   rejectToken?: boolean;
+  /** When set, the token's scopes, such as products:read: a call without its object's write scope, or for a read its read one, is refused 403, as on Polar. */
+  scopes?: string[];
 };
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -209,6 +211,8 @@ export function createFakePolar(options: { currency?: string; organization?: Par
     if (version !== null && !polarVersions.includes(version)) return json(404, { detail: "Not Found" });
     const url = new URL(String(input));
     const method = init?.method ?? "GET";
+    const object = url.pathname.split("/")[2];
+    if (fake.scopes && !fake.scopes.includes(`${object}:write`) && (method !== "GET" || !fake.scopes.includes(`${object}:read`))) return json(403, { error: "insufficient_scope", error_description: "The request requires higher privileges than provided by the access token." });
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
     const response = route(method, url.pathname.replace(/\/$/, ""), body);
     if (method !== "GET" && response.ok) {

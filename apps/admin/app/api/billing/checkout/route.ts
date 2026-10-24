@@ -6,6 +6,7 @@ import { billingAccounts, billingCheckoutRequests } from "@lobbystack/db";
 import { createBillingCheckoutRequest, type BillingCheckoutTarget, type BillingInterval } from "@lobbystack/domain";
 import { planChangeRefusalOf } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
+import { assertBillingCallAllowed } from "@/lib/billing-limit";
 import { createDomainContext } from "@/lib/domain-context";
 import { checkPromoCodeLimit, promoCodeLimitResponse } from "@/lib/promo-code-limit";
 import { trustedClientIp } from "@/lib/trusted-client-ip";
@@ -53,7 +54,9 @@ export async function POST(request: Request) {
       const limit = await checkPromoCodeLimit({ businessId, userId: session.user.id, ip: trustedClientIp(request) });
       if (!limit.allowed) throw promoCodeLimitResponse(limit.status);
     };
-    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target as BillingCheckoutTarget, billingInterval: input.billingInterval as BillingInterval, promoCode, ...(typeof billingEmail === "string" ? { billingEmail } : {}), checkPromoCode });
+    // Each new request is a call to Polar; the person's open one for the same checkout comes back without one.
+    const checkLimit = (subject: { businessId: string; userId: string }) => assertBillingCallAllowed("checkout", subject);
+    const requestId = await createBillingCheckoutRequest(createDomainContext(), { userId: session.user.id, businessId, target: input.target as BillingCheckoutTarget, billingInterval: input.billingInterval as BillingInterval, promoCode, ...(typeof billingEmail === "string" ? { billingEmail } : {}), checkPromoCode, checkLimit });
     return NextResponse.json({ requestId }, { status: 202 });
   } catch (error) {
     return asApiResponse(error);

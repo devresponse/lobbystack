@@ -26,6 +26,7 @@ const errorKeys: Record<string, string> = {
   promo_current: "billing.promo.errors.current",
   promo_interval: "billing.promo.errors.interval",
   promo_rate_limited: "billing.promo.errors.rateLimited",
+  billing_rate_limited: "billing.toast.rateLimited",
 };
 
 function errorMessage(error: unknown, t: Translate, fallback: string): string {

@@ -109,6 +109,17 @@ describe("PolarCatalogClient", () => {
     expect(fake.writes.length).toBeGreaterThan(0);
     expect(versions).toEqual(Array(5 + fake.writes.length).fill("2026-10"));
   });
+
+  it("reads everything but the webhook with four read scopes when told to leave it out", async () => {
+    const fake = createFakePolar();
+    await apply(fake, profile());
+    // The worker's token: the webhook listing would hand it the signing secret.
+    fake.scopes = ["organizations:read", "meters:read", "products:read", "discounts:read"];
+    const snapshot = await client(fake).readSnapshot({ webhooks: false });
+    expect(snapshot).toMatchObject({ organization: { id: "org_test" }, webhooks: [] });
+    expect([snapshot.meters.length, snapshot.products.length]).toEqual([3, 4]);
+    await expect(client(fake).readSnapshot()).rejects.toThrow("Polar answered 403 to GET /v1/webhooks/endpoints");
+  });
 });
 
 describe("planPolarChanges", () => {

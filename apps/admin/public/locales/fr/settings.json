@@ -248,6 +248,7 @@
       "checkoutSuccess": "Le paiement a bien été lancé.",
       "checkoutFailed": "Impossible d'ouvrir le paiement.",
       "portalFailed": "Impossible d'ouvrir le portail client.",
+      "rateLimited": "Trop de tentatives. Réessayez plus tard.",
       "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que Polar l'aura confirmé.",
       "planChangeFailed": "Impossible de changer votre forfait.",
       "planChangeRefused": {

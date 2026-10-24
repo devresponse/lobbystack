@@ -156,15 +156,21 @@ export class PolarCatalogClient {
     }
   }
 
-  /** The organization the token belongs to, and every object LobbyStack reads in it. The token must reach exactly one organization. */
-  async readSnapshot(): Promise<PolarSnapshot> {
+  /**
+   * The organization the token belongs to, and every object LobbyStack reads
+   * in it. The token must reach exactly one organization. With webhooks false
+   * it leaves the webhook endpoints out, as an empty list: Polar lists each
+   * one with its signing secret, so a token that never needs the secret goes
+   * without webhooks:read.
+   */
+  async readSnapshot(options: { webhooks?: boolean } = {}): Promise<PolarSnapshot> {
     const organizations = await this.listAll<PolarOrganization>("/v1/organizations/");
     if (organizations.length !== 1) throw new Error(`The Polar token reaches ${organizations.length} organizations. Use an organization access token, which reaches exactly one.`);
     // One list at a time: a sandbox organization is small, and Polar limits the rate per token.
     const meters = await this.listAll<PolarMeter>("/v1/meters/");
     const products = await this.listAll<PolarProduct>("/v1/products/");
     const discounts = await this.listAll<PolarDiscount>("/v1/discounts/");
-    const webhooks = await this.listAll<PolarWebhookEndpoint>("/v1/webhooks/endpoints");
+    const webhooks = options.webhooks === false ? [] : await this.listAll<PolarWebhookEndpoint>("/v1/webhooks/endpoints");
     return { organization: organizations[0]!, meters, products, discounts, webhooks };
   }
 }

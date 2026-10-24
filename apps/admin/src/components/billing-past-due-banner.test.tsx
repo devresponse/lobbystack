@@ -36,4 +36,10 @@ describe("past-due billing banner", () => {
     await waitFor(() => expect(errorToast).toHaveBeenCalledWith("billing.toast.portalFailed"));
     expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(false);
   });
+  it("says so when the portal was opened too many times this hour", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "The billing portal was opened too many times. Try again in 5 minutes.", code: "billing_rate_limited" }, { status: 429 })));
+    render(<BillingPastDueBanner {...props} />);
+    fireEvent.click(screen.getByRole("button"));
+    await waitFor(() => expect(errorToast).toHaveBeenCalledWith("billing.toast.rateLimited"));
+  });
 });

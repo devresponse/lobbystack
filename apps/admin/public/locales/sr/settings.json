@@ -248,6 +248,7 @@
       "checkoutSuccess": "Plaćanje je uspešno završeno.",
       "checkoutFailed": "Nije moguće otvoriti plaćanje.",
       "portalFailed": "Nije moguće otvoriti portal za korisnike.",
+      "rateLimited": "Previše pokušaja. Pokušajte ponovo kasnije.",
       "planChanged": "Vaš paket se menja. Prikazaće se ovde čim ga Polar potvrdi.",
       "planChangeFailed": "Nije moguće promeniti Vaš paket.",
       "planChangeRefused": {

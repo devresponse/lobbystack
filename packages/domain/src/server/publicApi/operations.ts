@@ -100,7 +100,7 @@ import { AuthorizationError, requireBusinessAdmin, requireBusinessMembership } f
 import { hasAnsweredPhoneCall, loadSetupGuideInTransaction, setupGuideStepIds, updateSetupGuideSkippedStepsInTransaction, type SetupGuideStepId } from "../activation";
 import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
-import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed } from "../billing";
+import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
@@ -432,8 +432,10 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
  * deployment sells a standard plan and interval, and limit promo code tries
  * in checkPromoCode, which runs once the key may pay for the business, before
  * the code is looked up, so a key that is refused spends none of its tries.
+ * The payer's open request for the same checkout comes back instead of a new
+ * one; checkLimit runs only before a new one is made.
  */
-export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void> }): Promise<ApiCheckout> {
+export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void>; checkLimit?: BillingCheckoutLimit }): Promise<ApiCheckout> {
   if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
@@ -443,14 +445,14 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
       await options.checkPromoCode?.();
       const sale = await billingCodeCheckout(tx, { businessId: caller.businessId, code: input.promo_code ?? "", billingInterval: input.interval });
       if ("refusal" in sale) throw promoRefusals[sale.refusal]();
-      const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, billingEmail: input.billing_email, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
-      await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
-      return await loadCheckout(tx, caller.businessId, checkoutId);
+      const checkout = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: sale.offer.tier, billingInterval: input.interval, billingEmail: input.billing_email, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId }, checkLimit: options.checkLimit });
+      if (checkout.created) await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkout.id, payload: { plan: sale.offer.tier, promoPlan: sale.offer.plan, codeId: sale.offer.codeId, interval: input.interval, payerUserId: userId } });
+      return await loadCheckout(tx, caller.businessId, checkout.id);
     }
     if (!standardCheckoutAllowed((await loadBillingContext(tx, caller.businessId)).plan, input.plan)) throw conflict(PAID_PLAN_CHECKOUT_REFUSAL);
-    const checkoutId = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval, billingEmail: input.billing_email });
-    await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkoutId, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
-    return await loadCheckout(tx, caller.businessId, checkoutId);
+    const checkout = await createBillingCheckoutRequestInTransaction(tx, { userId, businessId: caller.businessId, target: input.plan, billingInterval: input.interval, billingEmail: input.billing_email, checkLimit: options.checkLimit });
+    if (checkout.created) await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkout.id, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
+    return await loadCheckout(tx, caller.businessId, checkout.id);
   });
 }
 

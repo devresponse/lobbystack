@@ -248,6 +248,7 @@
       "checkoutSuccess": "Checkout completed successfully.",
       "checkoutFailed": "Unable to open checkout.",
       "portalFailed": "Unable to open the customer portal.",
+      "rateLimited": "Too many tries. Try again later.",
       "planChanged": "Your plan is changing. It shows here as soon as Polar confirms it.",
       "planChangeFailed": "Unable to change your plan.",
       "planChangeRefused": {

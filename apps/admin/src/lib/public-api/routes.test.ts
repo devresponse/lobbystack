@@ -577,9 +577,9 @@ describe("billing", () => {
     try {
       domain.createCheckoutForApi.mockResolvedValue({ id: checkoutId, plan: "pro", interval: "monthly", status: "pending", checkout_url: null, error: null, paid: false, created_at: "2026-10-11T12:00:00.000Z", updated_at: "2026-10-11T12:00:00.000Z" });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }))).status).toBe(202);
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: true });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: true, checkLimit: expect.any(Function) });
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false, checkLimit: expect.any(Function) });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "enterprise", interval: "monthly" }) }))).status).toBe(400);
       domain.getCheckoutForApi.mockResolvedValue({ id: checkoutId });
       expect((await v1.getCheckout(call(`/billing/checkout/${checkoutId}`), { params: Promise.resolve({ checkout_id: checkoutId }) })).status).toBe(200);
@@ -589,15 +589,15 @@ describe("billing", () => {
       const pro = { code: "pro" as const, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 20 };
       domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [pro], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, polar_id: "prod_pro_annual", retired: false }] }, process.env));
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: true });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: true, checkLimit: expect.any(Function) });
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "monthly" }) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: false });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "monthly" }, { available: false, checkLimit: expect.any(Function) });
 
       // Without Polar's token nothing sells, and the catalog isn't read.
       vi.stubEnv("POLAR_ACCESS_TOKEN", "");
       domain.readPolarProductLinks.mockClear();
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: false, checkLimit: expect.any(Function) });
       expect(domain.readPolarProductLinks).not.toHaveBeenCalled();
     } finally {
       vi.unstubAllEnvs();
@@ -658,9 +658,11 @@ describe("billing", () => {
         return { id: checkoutId, plan: "starter", interval: "monthly", status: "pending", promo_plan: "salons-half-off", checkout_url: null, error: null, paid: false, created_at: "2026-10-22T12:00:00.000Z", updated_at: "2026-10-22T12:00:00.000Z" };
       });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }))).status).toBe(202);
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true, checkPromoCode: expect.any(Function) });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: true, checkPromoCode: expect.any(Function), checkLimit: expect.any(Function) });
+      // The person the key acts for shares their dashboard's hour, however many businesses and keys they have.
       expect(invites.limit).toHaveBeenLastCalledWith([
         ["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "user-hour", "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f", 20, 3_600, "rate_limit_user_hour"],
         ["promo-code", "key-hour", "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", 20, 3_600, "rate_limit_key_hour"],
       ]);
       // A plan checkout tries no code.
@@ -678,6 +680,9 @@ describe("billing", () => {
       const keyLimited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
       expect(keyLimited.status).toBe(429);
       expect(await keyLimited.json()).toMatchObject({ error: { code: "rate_limited", message: expect.stringContaining("A key can try 20 codes an hour") } });
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_user_hour" });
+      const personLimited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
+      expect(await personLimited.json()).toMatchObject({ error: { code: "rate_limited", message: expect.stringContaining("The person this key acts for can try 20 codes an hour") } });
       expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "promo", interval: "monthly" }) }))).status).toBe(400);
 
       // A platform key's hour spans every business it reaches.
@@ -690,16 +695,50 @@ describe("billing", () => {
       expect(invites.limit).toHaveBeenCalledTimes(2);
       expect(invites.limit).toHaveBeenNthCalledWith(1, [
         ["promo-code", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "user-hour", "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f", 20, 3_600, "rate_limit_user_hour"],
         ["promo-code", "key-hour", `platform:${operator.entry.id}`, 20, 3_600, "rate_limit_key_hour"],
       ]);
       expect(invites.limit).toHaveBeenNthCalledWith(2, [
         ["promo-code", "business-hour", "7c2e4a1b-9d3f-4e5a-8b6c-1d2e3f4a5b6c", 10, 3_600, "rate_limit_business_hour"],
+        ["promo-code", "user-hour", "6a1f0c2d-8e3b-4c5d-9e6f-7a8b9c0d1e2f", 20, 3_600, "rate_limit_user_hour"],
         ["promo-code", "key-hour", `platform:${operator.entry.id}`, 20, 3_600, "rate_limit_key_hour"],
       ]);
 
       vi.stubEnv("POLAR_ACCESS_TOKEN", "");
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(promo) }));
-      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: false, checkPromoCode: expect.any(Function) });
+      expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), promo, { available: false, checkPromoCode: expect.any(Function), checkLimit: expect.any(Function) });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("counts each new checkout against the dashboard's hour for the business and for the person it is made out to", async () => {
+    vi.stubEnv("POLAR_ACCESS_TOKEN", "polar-token");
+    vi.stubEnv("POLAR_ORGANIZATION_ID", "org");
+    vi.stubEnv("POLAR_PRO_MONTHLY_PRODUCT_ID", "prod_pro_monthly");
+    domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [], prices: [] }, process.env));
+    try {
+      const plan = { plan: "pro", interval: "monthly" };
+      // The domain asks only before it makes a request, with the payer it chose.
+      domain.createCheckoutForApi.mockImplementation(async (_context: unknown, caller: { businessId: string }, _body: unknown, options: { checkLimit?: (subject: { businessId: string; userId: string }) => Promise<void> }) => {
+        await options.checkLimit?.({ businessId: caller.businessId, userId: "payer" });
+        return { id: checkoutId, plan: "pro", interval: "monthly", status: "pending", checkout_url: null, error: null, paid: false, created_at: "2026-10-24T12:00:00.000Z", updated_at: "2026-10-24T12:00:00.000Z" };
+      });
+      invites.limit.mockClear();
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(plan) }))).status).toBe(202);
+      expect(invites.limit).toHaveBeenCalledExactlyOnceWith([
+        ["billing-checkout", "business-hour", "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", 10, 3_600, "rate_limit_business_hour"],
+        ["billing-checkout", "user-hour", "payer", 20, 3_600, "rate_limit_user_hour"],
+      ]);
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_business_hour" });
+      const limited = await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(plan) }));
+      expect(limited.status).toBe(429);
+      expect(limited.headers.get("Retry-After")).toMatch(/^\d+$/);
+      expect(await limited.json()).toMatchObject({ error: { code: "rate_limited", message: expect.stringContaining("Too many checkouts. A business can start 10 an hour") } });
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 429, reason: "rate_limit_user_hour" });
+      expect(await (await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(plan) }))).json()).toMatchObject({ error: { message: expect.stringContaining("can have 20 started an hour across businesses") } });
+      invites.limit.mockResolvedValueOnce({ allowed: false, status: 503, reason: "rate_limit_unavailable" });
+      expect((await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify(plan) }))).status).toBe(503);
     } finally {
       vi.unstubAllEnvs();
     }

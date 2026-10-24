@@ -161,6 +161,7 @@ import {
 } from "@lobbystack/shared";
 
 import { getAuthDatabase } from "../auth";
+import { billingCallLimits, checkBillingCallLimit } from "../billing-limit";
 import { getDatabase } from "../databases";
 import { createDomainContext } from "../domain-context";
 import { enforceFixedWindow, fixedWindowLimit } from "../fixed-window-limit";
@@ -211,17 +212,32 @@ function billingDeployment() {
 
 /**
  * Each promo code a key tries is a guess at a secret, so a business can try 10
- * codes an hour, as on the dashboard, and a key 20 across the businesses it
- * reaches, as a person can.
+ * codes an hour, as on the dashboard, a key 20 across the businesses it
+ * reaches, and the person the key acts for 20, here and on the dashboard
+ * together, however many keys and businesses they have.
  */
-async function requirePromoCodeAllowed(caller: RestApiCaller): Promise<void> {
-  const result = await checkPromoCodeLimit({ businessId: caller.businessId, keyId: callerPrincipalId(caller) });
+async function requirePromoCodeAllowed(caller: RestApiCaller, userId: string): Promise<void> {
+  const result = await checkPromoCodeLimit({ businessId: caller.businessId, userId, keyId: callerPrincipalId(caller) });
   if (result.allowed) return;
   if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Promo codes are unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
   // The limits count in fixed one-hour windows.
   const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
-  const limit = result.reason === "rate_limit_key_hour" ? "A key can try 20 codes an hour across the businesses it reaches" : "A business can try 10 codes an hour";
+  const limit = result.reason === "rate_limit_key_hour" ? "A key can try 20 codes an hour across the businesses it reaches"
+    : result.reason === "rate_limit_user_hour" ? "The person this key acts for can try 20 codes an hour, with their dashboard and keys together"
+    : "A business can try 10 codes an hour";
   throw new PublicApiError(429, "rate_limited", `Too many promo codes. ${limit}. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
+}
+
+/** Each new checkout is a call to Polar, so it counts against the dashboard's limits for the business and for the person it is made out to. */
+async function requireCheckoutAllowed(subject: { businessId: string; userId: string }): Promise<void> {
+  const result = await checkBillingCallLimit("checkout", subject);
+  if (result.allowed) return;
+  if (result.status === 503) throw new PublicApiError(503, "rate_limit_unavailable", "Checkout is unavailable for a moment. Retry shortly.", undefined, { "Retry-After": "5" });
+  // The limits count in fixed one-hour windows.
+  const retryAfter = 3_600 - (Math.floor(Date.now() / 1_000) % 3_600);
+  const { business, person } = billingCallLimits.checkout;
+  const limit = result.reason === "rate_limit_user_hour" ? `The person a checkout is made out to can have ${person} started an hour across businesses` : `A business can start ${business} an hour`;
+  throw new PublicApiError(429, "rate_limited", `Too many checkouts. ${limit}. Retry in ${retryAfter} seconds.`, undefined, { "Retry-After": String(retryAfter) });
 }
 
 /** A key searches numbers as the account it acts as, so its searches count against that account's dashboard limit. */
@@ -341,10 +357,11 @@ export const v1 = {
   createCheckout: (request: Request) => handleApiRequest(request, "createCheckout", async ({ context, caller }) => {
     const body = await readApiBody(request, apiCheckoutCreateSchema);
     if (body.plan === "promo") {
-      const checkPromoCode = () => requirePromoCodeAllowed(caller);
-      return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env), checkPromoCode })) };
+      const userId = await resolveActingUserId(context, caller);
+      const checkPromoCode = () => requirePromoCodeAllowed(caller, userId);
+      return { body: data(await createCheckoutForApi(context, caller, body, { available: polarCheckoutConfigured(process.env), checkPromoCode, checkLimit: requireCheckoutAllowed })) };
     }
-    return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval) })) };
+    return { body: data(await createCheckoutForApi(context, caller, body, { available: await checkoutAvailable(context, body.plan, body.interval), checkLimit: requireCheckoutAllowed })) };
   }),
   listBillingPlans: (request: Request) => handleApiRequest(request, "listBillingPlans", async ({ context }) => ({ body: data(await listBillingPlansForApi(context)) })),
   getCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getCheckout", async ({ context, caller }) => ({ body: data(await getCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),

@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, lt, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
@@ -122,25 +122,29 @@ export function billingCodeRefusalError(refusal: BillingCodeRefusal): Error {
  * Queues a checkout from the dashboard. With a promo code it sells the plan
  * the code unlocks, at that plan's tier, instead of the target. checkPromoCode
  * runs once the person is known to manage the business, before the code is
- * looked up, so only its own admins spend the business's tries.
+ * looked up, so only its own admins spend the business's tries. checkLimit
+ * runs only when a new request is made.
  */
 export async function createBillingCheckoutRequest(
   context: DomainContext,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promoCode?: string | undefined; billingEmail?: string | undefined; checkPromoCode?: (() => Promise<void>) | undefined },
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promoCode?: string | undefined; billingEmail?: string | undefined; checkPromoCode?: (() => Promise<void>) | undefined; checkLimit?: BillingCheckoutLimit | undefined },
 ): Promise<string> {
   const { checkPromoCode, ...request } = input;
   return await withBusinessTransaction(context.db, { ...request, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, request);
-    if (request.promoCode === undefined) return await createBillingCheckoutRequestInTransaction(tx, request);
+    if (request.promoCode === undefined) return (await createBillingCheckoutRequestInTransaction(tx, request)).id;
     await checkPromoCode?.();
     const sale = await billingCodeCheckout(tx, { businessId: request.businessId, code: request.promoCode, billingInterval: request.billingInterval });
     if ("refusal" in sale) throw billingCodeRefusalError(sale.refusal);
-    return await createBillingCheckoutRequestInTransaction(tx, { ...request, target: sale.offer.tier, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } });
+    return (await createBillingCheckoutRequestInTransaction(tx, { ...request, target: sale.offer.tier, promo: { planCode: sale.offer.plan, codeId: sale.offer.codeId } })).id;
   });
 }
 
 /** The plan other than the target's standard one that a checkout sells, and the promo code that unlocked it. */
 export type BillingCheckoutPromo = { planCode: string; codeId: string };
+
+/** A caller's limit on the checkouts it makes, by business and by the person a checkout is made out to; it throws to refuse. */
+export type BillingCheckoutLimit = (subject: { businessId: string; userId: string }) => Promise<void>;
 
 /**
  * Queues a Polar checkout for a plan in the name of the person asking. A
@@ -149,16 +153,34 @@ export type BillingCheckoutPromo = { planCode: string; codeId: string };
  * operator bills it and a Polar subscription would bill it twice, and so is a
  * standard plan the business can't buy (standardCheckoutAllowed). Callers
  * authorize first, and check a promo code with billingCodeCheckout.
+ *
+ * The person's request for the same plan, interval and billing email that is
+ * still pending or processing comes back instead of a new one, so a second
+ * click or a retry asks Polar for nothing; created says which. checkLimit runs
+ * only before a new request is made.
  */
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
-  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined; billingEmail?: string | undefined },
-): Promise<string> {
+  input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined; billingEmail?: string | undefined; checkLimit?: BillingCheckoutLimit | undefined },
+): Promise<{ id: string; created: boolean }> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
   const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account)) throw Object.assign(new Error("This business is on a managed plan, billed directly by the operator."), { status: 409 });
   if (!input.promo && !standardCheckoutAllowed((await loadBillingContext(tx, input.businessId)).plan, input.target)) throw Object.assign(new Error(PAID_PLAN_CHECKOUT_REFUSAL), { status: 409 });
+  // Under the lock, so two clicks at once make one request. One older than its 15 minutes fails rather than runs.
+  const [open] = await tx.select({ id: billingCheckoutRequests.id }).from(billingCheckoutRequests).where(and(
+    eq(billingCheckoutRequests.businessId, input.businessId),
+    eq(billingCheckoutRequests.requestedByUserId, input.userId),
+    inArray(billingCheckoutRequests.status, ["pending", "processing"]),
+    gte(billingCheckoutRequests.createdAt, new Date(Date.now() - BILLING_CHECKOUT_EXPIRES_MS)),
+    eq(billingCheckoutRequests.target, input.target),
+    eq(billingCheckoutRequests.billingInterval, input.billingInterval),
+    input.promo ? and(eq(billingCheckoutRequests.planCode, input.promo.planCode), eq(billingCheckoutRequests.codeId, input.promo.codeId)) : isNull(billingCheckoutRequests.planCode),
+    input.billingEmail ? eq(billingCheckoutRequests.billingEmail, input.billingEmail) : isNull(billingCheckoutRequests.billingEmail),
+  )).orderBy(desc(billingCheckoutRequests.createdAt)).limit(1);
+  if (open) return { id: open.id, created: false };
+  await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
   await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}` }).onConflictDoNothing({ target: billingAccounts.businessId });
   const [request] = await tx.insert(billingCheckoutRequests).values({
     businessId: input.businessId,
@@ -178,7 +200,7 @@ export async function createBillingCheckoutRequestInTransaction(
     dedupeKey: `billing-checkout:${request.id}`,
     payload: { requestId: request.id },
   });
-  return request.id;
+  return { id: request.id, created: true };
 }
 
 /**

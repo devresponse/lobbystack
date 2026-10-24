@@ -76,7 +76,7 @@ export type WorkerDependencies = {
     removeSubscriptionDiscount?(subscriptionId: string): Promise<PolarSubscription>;
   };
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
-  polarCatalog?: { readSnapshot(): Promise<PolarSnapshot> };
+  polarCatalog?: { readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
   crawler?: { crawl(input: { url: string; limit?: number }): Promise<Array<{ url: string; title?: string; markdown?: string }>> };
   calendar?: CalendarOperations;
@@ -1149,7 +1149,8 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     case "billing.verifyCatalog": {
       if (!dependencies.polarCatalog) return { status: "skipped" };
       const polarCatalog = dependencies.polarCatalog;
-      const outcome = await runDailyBillingVerify(dependencies.domain, { brand: currentBrand().id, env: process.env, readPolar: () => polarCatalog.readSnapshot() });
+      // Without the webhook, which Polar lists with its signing secret: the worker's token goes without webhooks:read.
+      const outcome = await runDailyBillingVerify(dependencies.domain, { brand: currentBrand().id, env: process.env, readPolar: () => polarCatalog.readSnapshot({ webhooks: false }) });
       if (outcome.status === "skipped") return { status: "skipped" };
       await recordBillingCatalogCheck(dependencies, outcome);
       return { status: "completed", entityId: `${outcome.runId}:${outcome.status}` };

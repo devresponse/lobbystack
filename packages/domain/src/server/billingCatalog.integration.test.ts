@@ -626,7 +626,10 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
       await link(tx, { hash: deployedHash, plans });
       // No product ID variables: a linked deployment doesn't need them.
       const env = polarEnv;
-      const readPolar = () => polarClient(fake).readSnapshot();
+      // The worker's read: its token has no webhooks:read, so the check leaves the webhook to pnpm billing verify.
+      fake.scopes = ["organizations:read", "meters:read", "products:read", "discounts:read"];
+      fake.state.webhooks[0]!.enabled = false;
+      const readPolar = () => polarClient(fake).readSnapshot({ webhooks: false });
       const passed = await runDailyBillingVerify(context(tx), { brand: "alloplace", env, readPolar });
       expect(passed).toMatchObject({ status: "passed", previousStatus: null, problems: [], polarEnv: "sandbox" });
       const [stored] = await rows(tx, sql`select * from public.billing_runs where id = ${passed.status === "skipped" ? null : passed.runId}::uuid`);

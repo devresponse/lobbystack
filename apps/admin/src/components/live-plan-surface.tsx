@@ -16,7 +16,7 @@ import { SectionBlock } from "./section-block";
 import { Button } from "./ui/button";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { SpendingCapSection } from "./billing-spending-cap";
-import { findPlan, formatMoney, includedLines, monthlyPriceCents } from "@/lib/billing-plans";
+import { findPlan, formatMoney, includedLines, isBillingRateLimited, monthlyPriceCents } from "@/lib/billing-plans";
 import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -67,7 +67,7 @@ export function LivePlanSurface() {
 
   useEffect(() => { if (searchParams.get("checkout") && business?.businessId) void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] }); }, [business?.businessId, queryClient, searchParams]);
 
-  async function openPortal() { if (!business) return; setPortalPending(true); try { const result = await requestJson<{ url: string }>(`/api/billing/portal?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({}) }); window.location.assign(result.url); } catch { toast.error(t("billing.toast.portalFailed")); } finally { setPortalPending(false); } }
+  async function openPortal() { if (!business) return; setPortalPending(true); try { const result = await requestJson<{ url: string }>(`/api/billing/portal?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({}) }); window.location.assign(result.url); } catch (error) { toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : "billing.toast.portalFailed")); } finally { setPortalPending(false); } }
 
   if (businesses.isLoading || billing.isLoading) return <PageSurface title={t("sections.billing")}><BillingSkeleton t={t} /></PageSurface>;
   if (businesses.isError || billing.isError || !business || !billing.data) return <PageSurface title={t("sections.billing")}><Surface className="flex flex-col items-start gap-4 p-6"><p role="alert">{t("billing.usage.unavailable")}</p><Button variant="outline" onClick={() => { if (businesses.isError || !business) void businesses.refetch(); else void billing.refetch(); }}>{t("billing.actions.retry")}</Button></Surface></PageSurface>;

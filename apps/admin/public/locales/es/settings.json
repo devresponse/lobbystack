@@ -248,6 +248,7 @@
       "checkoutSuccess": "El pago se completó correctamente.",
       "checkoutFailed": "No se pudo abrir el pago.",
       "portalFailed": "No se pudo abrir el portal del cliente.",
+      "rateLimited": "Demasiados intentos. Inténtelo más tarde.",
       "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto Polar lo confirme.",
       "planChangeFailed": "No se pudo cambiar su plan.",
       "planChangeRefused": {

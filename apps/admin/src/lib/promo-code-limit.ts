@@ -4,8 +4,9 @@ import { enforceFixedWindow, fixedWindowLimit, type FixedWindowResult } from "./
 
 /**
  * Each promo code someone tries is a guess at a secret. A business can try 10
- * codes an hour, from the dashboard and its API keys together; a person, an
- * address and an API key 20 each, across businesses.
+ * codes an hour, from the dashboard and its API keys together; a person 20, on
+ * the dashboard and through the keys that act for them together; an address
+ * and an API key 20 each. All but the business's count across businesses.
  */
 export async function checkPromoCodeLimit(input: { businessId: string; userId?: string | undefined; ip?: string | undefined; keyId?: string | undefined }): Promise<FixedWindowResult> {
   return await enforceFixedWindow([

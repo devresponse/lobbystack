@@ -63,6 +63,17 @@ POLAR_API_BASE_URL=https://sandbox-api.polar.sh
 
 Match `POLAR_API_BASE_URL` to the environment that issued the token and webhook secret.
 
+## Give each service its own token
+
+Make an organization access token for each service in Polar under **Settings** > **Developers**, with only the scopes it uses:
+
+| Service | `POLAR_ACCESS_TOKEN` scopes |
+| --- | --- |
+| Admin | `customer_sessions:write`, for the billing portal |
+| Worker | `checkouts:write`, `customers:write`, `events:write` and `subscriptions:write`, and for the daily billing check `organizations:read`, `meters:read`, `products:read` and `discounts:read` |
+
+Give neither `webhooks:read`. Polar lists each webhook with its signing secret, and whoever has the secret can send events that put any business on any plan. The worker's daily check leaves the webhook out, and `pnpm billing verify`, run with a read token of your own, checks the webhook and its secret. When Polar turns the webhook off, it emails the organization's members.
+
 ## Keep Polar's API version
 
 Every call to Polar asks for API version `2026-10` in its `Polar-Version` header, and `pnpm billing apply` makes the webhook send that version's payloads, or moves it to them. A new Polar version changes nothing until a release moves `POLAR_API_VERSION` in `packages/shared/src/billing.ts`. Polar answers 404 to every call that names a version it no longer serves, so move it, after reading Polar's changelog, before Polar retires `2026-10`.
@@ -77,6 +88,8 @@ The Next.js app exposes four billing entry points.
 | `POST /api/billing/promo` | Look up the plan a promo code unlocks, with its discount and prices. |
 | `POST /api/billing/portal` | Create a customer portal session for an active paid subscription. |
 | `POST /api/webhooks/polar` | Verify and store Polar events for worker reconciliation. |
+
+Polar's request budget is the whole organization's, and past it Polar refuses every call, payments and usage included. So each checkout request and portal session counts against hourly limits: a business can start 10 checkouts and open the portal 20 times an hour, and a person 20 checkouts and 40 portal sessions across businesses. The API's `POST /billing/checkout` counts against the same limits, for the business and the person the checkout is made out to. A person who asks again for the same plan, interval and billing email while their request is still pending or processing gets that request back, which counts nothing and asks Polar for nothing. Over a limit, the route answers 429 with the code `billing_rate_limited`, and the plan screen says to try again later.
 
 `pnpm billing apply` makes Polar's webhook for subscription and order events at the instance's own `/api/webhooks/polar`, or at the address `--webhook-url` names, and finds it again by that address on later runs. When the run makes the webhook, `--railway-file` saves its secret as `POLAR_WEBHOOK_SECRET`; otherwise copy the secret from the webhook in Polar's settings.
 

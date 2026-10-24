@@ -4,7 +4,7 @@ import type { PolarSnapshot } from "@lobbystack/providers";
 import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
 
 import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
-import { desiredPolarCatalog, planPolarChanges, polarTags, POLAR_WEBHOOK_PATH, type PolarStep, type PolarStepObject } from "./billingPolar";
+import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
 import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
 
@@ -199,7 +199,7 @@ export function billingVerifyReport(result: BillingVerifyResult, heading: string
 export type DailyBillingVerifyInput = {
   brand: string;
   env: Record<string, string | undefined>;
-  /** Reads the worker's Polar organization with its own token. */
+  /** Reads the worker's Polar organization with its own token, webhooks left out. */
   readPolar(): Promise<PolarSnapshot>;
 };
 
@@ -208,9 +208,11 @@ export type DailyBillingVerifyOutcome =
   | { status: BillingVerifyStatus; previousStatus: string | null; problems: ApiBillingCheck[]; polarEnv: PolarEnv; runId: string };
 
 /**
- * The worker's daily check: every check but the webhook secret, which only
- * the admin knows, against the profile stored on the latest catalog run.
- * Skipped until the deployment has a Polar organization and a first link.
+ * The worker's daily check: every check but the webhook's, against the
+ * profile stored on the latest catalog run. Polar lists the webhook with its
+ * signing secret, so the worker's token goes without webhooks:read, and
+ * pnpm billing verify checks the webhook. Skipped until the deployment has a
+ * Polar organization and a first link.
  */
 export async function runDailyBillingVerify(context: DomainContext, input: DailyBillingVerifyInput): Promise<DailyBillingVerifyOutcome> {
   const polar = billingDeploymentPolar(input.env, { withSecret: false });
@@ -220,7 +222,6 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   if (!latest || !catalog.profile || !catalog.polar.last_link) return { status: "skipped", reason: "nothing was linked yet" };
   const parsed = billingProfileSchema.safeParse(catalog.profile);
   if (!parsed.success) throw new Error(`The profile stored on catalog run ${latest.id} no longer passes billingProfileSchema.`);
-  const base = input.env.APP_BASE_URL?.trim();
   let snapshot: { env: PolarEnv; snapshot: PolarSnapshot } | { env: PolarEnv; error: string };
   try {
     snapshot = { env: polar.env, snapshot: await input.readPolar() };
@@ -231,7 +232,7 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
     file: { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(parsed.data) },
     catalog,
     polar: snapshot,
-    webhookUrl: base ? `${new URL(base).origin}${POLAR_WEBHOOK_PATH}` : null,
+    webhookUrl: null,
     checkWebhookSecret: false,
   });
   const problems = billingProblems(result.checks);

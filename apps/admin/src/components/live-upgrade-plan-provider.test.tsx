@@ -174,6 +174,17 @@ describe("checkout workspace isolation", () => {
     await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.toast.checkoutFailed"));
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
+  it("says so when the business or person started too many checkouts this hour", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role: "business_owner" }] });
+    client.setQueryData(["billing", "business"], { plans: builtInBillingPlanList(), account: { plan: "free_cloud" }, availableCheckoutPlans: ["starter", "pro"], availableCheckoutIntervals: { starter: ["annual", "monthly"], pro: ["annual", "monthly"] } });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({ error: "Too many checkouts started. Try again in 12 minutes.", code: "billing_rate_limited" }, { status: 429 })));
+    render(<QueryClientProvider client={client}><LiveUpgradePlanProvider><OpenButton /></LiveUpgradePlanProvider></QueryClientProvider>);
+    await userEvent.click(screen.getByRole("button", { name: "Open plans" }));
+    await userEvent.click(screen.getByRole("button", { name: "billing.upgradeDialog.actions.pro" }));
+    await waitFor(() => expect(alerts.error).toHaveBeenCalledWith("billing.toast.rateLimited"));
+  });
   it.each(["success", "failure"])("ignores late checkout %s after changing workspaces", async outcome => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
     clients.push(client);

@@ -12,6 +12,11 @@ import { intlLocale } from "./locale";
  */
 export const PLAN_CHANGE_SYNC_MS = 90_000;
 
+/** Whether a checkout or billing portal request was refused for too many this hour. */
+export function isBillingRateLimited(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "billing_rate_limited";
+}
+
 /** Formats cents as currency, dropping the decimals for whole amounts. */
 export function formatMoney(cents: number, currency = "usd", locale = "en"): string {
   return new Intl.NumberFormat(intlLocale(locale), { style: "currency", currency: currency.toUpperCase(), minimumFractionDigits: cents % 100 === 0 ? 0 : 2, maximumFractionDigits: 2 }).format(cents / 100);

@@ -402,6 +402,56 @@ describe.skipIf(!testUrl)("billing promo codes", () => {
     });
   });
 
+  it("gives a person back their open request for the same checkout, and counts only new requests against the limit", async () => {
+    await rollbackTest(async (tx) => {
+      await promoCatalog(tx);
+      const { userId, businessId } = await ownedBusiness(tx, "clicker");
+      const checkLimit = vi.fn(async (_subject: { businessId: string; userId: string }) => {});
+      type Ask = { target?: "starter" | "pro"; billingInterval?: "monthly" | "annual"; billingEmail?: string; user?: string };
+      const dashboard = (ask: Ask = {}) => createBillingCheckoutRequest(context(tx), { userId: ask.user ?? userId, businessId, target: ask.target ?? "pro", billingInterval: ask.billingInterval ?? "monthly", ...(ask.billingEmail ? { billingEmail: ask.billingEmail } : {}), checkLimit });
+      const made = async () => {
+        await as(tx, "owner");
+        const [row] = await rows(tx, sql`select count(*)::int as made from public.billing_checkout_requests where business_id = ${businessId}::uuid`);
+        await as(tx, "lobbystack_app");
+        return row!.made;
+      };
+      const change = async (statement: ReturnType<typeof sql>) => {
+        await as(tx, "owner");
+        await tx.execute(statement);
+        await as(tx, "lobbystack_app");
+      };
+
+      await as(tx, "lobbystack_app");
+      const first = await dashboard();
+      // A second click while the first waits for its page asks Polar for nothing.
+      expect(await dashboard()).toBe(first);
+      expect(checkLimit).toHaveBeenCalledExactlyOnceWith({ businessId, userId });
+      // Another plan, interval or billing email is another checkout, and so is another admin's.
+      await as(tx, "owner");
+      const adminId = randomUUID();
+      await tx.insert(users).values({ id: adminId, email: `promo-admin-${adminId}@example.invalid`, normalizedEmail: `promo-admin-${adminId}@example.invalid`, name: "admin" });
+      await tx.execute(sql`insert into public.business_memberships (business_id, user_id, role, status) values (${businessId}::uuid, ${adminId}::uuid, 'business_admin', 'active')`);
+      await as(tx, "lobbystack_app");
+      const others = [await dashboard({ target: "starter" }), await dashboard({ billingInterval: "annual" }), await dashboard({ billingEmail: "billing@example.invalid" }), await dashboard({ user: adminId })];
+      expect(new Set([first, ...others]).size).toBe(5);
+      expect(checkLimit).toHaveBeenLastCalledWith({ businessId, userId: adminId });
+      expect(await dashboard({ billingEmail: "billing@example.invalid" })).toBe(others[2]);
+
+      // One that has its page, or is past its 15 minutes and will fail, isn't given back.
+      await change(sql`update public.billing_checkout_requests set status = 'ready' where id = ${first}::uuid`);
+      const second = await dashboard();
+      expect(second).not.toBe(first);
+      await change(sql`update public.billing_checkout_requests set status = 'processing', created_at = now() - interval '16 minutes' where id = ${second}::uuid`);
+      const third = await dashboard();
+      expect([first, second]).not.toContain(third);
+      expect(await made()).toBe(7);
+      // A limit that refuses makes nothing.
+      checkLimit.mockRejectedValueOnce(Object.assign(new Error("Too many checkouts started."), { status: 429 }));
+      expect(await thrown(dashboard({ target: "starter", billingInterval: "annual" }))).toMatchObject({ status: 429 });
+      expect(await made()).toBe(7);
+    });
+  });
+
   it("sells a code's plan through the API to a claimed business, and answers a code that doesn't work on promo_code", async () => {
     await rollbackTest(async (tx) => {
       await promoCatalog(tx);

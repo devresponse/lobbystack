@@ -64,7 +64,9 @@ function createPolarProvider(): PolarBillingProvider | undefined {
   return accessToken && organizationId ? new PolarBillingProvider({ accessToken, organizationId, ...(process.env.POLAR_API_BASE_URL ? { baseUrl: process.env.POLAR_API_BASE_URL } : {}) }) : undefined;
 }
 
-// The daily billing check reads with the same token, which needs Polar's six read scopes for it.
+// The daily billing check reads with the same token, which needs organizations:read, meters:read,
+// products:read and discounts:read for it. It never reads the webhook, so the token goes without
+// webhooks:read, with which Polar lists the webhook's signing secret.
 function createPolarCatalog(): WorkerDependencies["polarCatalog"] {
   const token = process.env.POLAR_ACCESS_TOKEN?.trim();
   if (!token || !process.env.POLAR_ORGANIZATION_ID?.trim()) return undefined;

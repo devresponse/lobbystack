@@ -1082,7 +1082,8 @@ describe("worker handlers", () => {
     expect(await handleJob(job, dependencies)).toEqual({ status: "skipped" });
     expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readPolar: expect.any(Function) });
     await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readPolar().catch(() => undefined);
-    expect(readSnapshot).toHaveBeenCalledTimes(1);
+    // Never the webhook, whose listing carries its signing secret.
+    expect(readSnapshot).toHaveBeenCalledExactlyOnceWith({ webhooks: false });
 
     expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-1:drift" });
     expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-2:failed" });

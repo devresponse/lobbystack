@@ -2,7 +2,7 @@ import { createHmac } from "node:crypto";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from "vitest";
 
-const mocks = vi.hoisted(() => ({ lookup: vi.fn(), insert: vi.fn(), enqueue: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn() }));
+const mocks = vi.hoisted(() => ({ lookup: vi.fn(), insert: vi.fn(), enqueue: vi.fn(), scope: vi.fn(), where: vi.fn(), catalog: vi.fn(), waiting: vi.fn() }));
 vi.mock("@lobbystack/domain", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/domain")>(), readBillingCatalogSnapshot: mocks.catalog }));
 vi.mock("@lobbystack/providers", () => import("../../../../../../packages/providers/src/polar/webhook"));
 vi.mock("@/lib/api-helpers", () => ({ getDispatcherDatabase: () => ({ db: {} }), getWorkerDatabase: () => ({ db: {} }) }));
@@ -11,7 +11,11 @@ vi.mock("@lobbystack/db", async importOriginal => ({
   withDispatcherTransaction: async (_db: unknown, callback: (tx: unknown) => unknown) => callback({ select: () => ({ from: () => ({ where: (condition: unknown) => { mocks.where(condition); return { limit: mocks.lookup }; } }) }) }),
   withBusinessTransaction: async (_db: unknown, scope: unknown, callback: (tx: unknown) => unknown) => {
     mocks.scope(scope);
-    return callback({ insert: () => ({ values: (value: unknown) => { mocks.insert(value); return { onConflictDoNothing: () => ({ returning: async () => mocks.insert.mock.calls.length === 1 ? [{ id: "event-row" }] : [] }) }; } }) });
+    return callback({
+      insert: () => ({ values: (value: unknown) => { mocks.insert(value); return { onConflictDoNothing: () => ({ returning: async () => mocks.insert.mock.calls.length === 1 ? [{ id: "event-row" }] : [] }) }; } }),
+      // A delivery stored before, still waiting to apply.
+      select: () => ({ from: () => ({ where: () => ({ limit: mocks.waiting }) }) }),
+    });
   },
   enqueueOutbox: mocks.enqueue,
 }));
@@ -20,7 +24,9 @@ import { POST } from "./route";
 const businessId = "ed4f1b6f-a237-4c09-8e26-68c3b976b110";
 const secret = Buffer.from("polar-route-test-secret").toString("base64");
 let logged: MockInstance<typeof console.error>;
+let warned: MockInstance<typeof console.warn>;
 const unresolvedLogs = () => logged.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+const refusalLogs = () => warned.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>).map(({ message, reason, webhookId }) => ({ message, reason, webhookId }));
 
 function request(reference = businessId, options: { id?: string; timestamp?: number; body?: string; signature?: string } = {}) {
   const body = options.body ?? JSON.stringify({ type: "subscription.active", data: { customer: { external_id: `business:${reference}` }, id: "sub-1", status: "active" } });
@@ -36,9 +42,11 @@ beforeEach(() => {
   vi.stubEnv("POLAR_ACCEPT_LEGACY_BUSINESS_IDS", "false");
   mocks.lookup.mockResolvedValue([{ id: businessId }]);
   mocks.catalog.mockResolvedValue({ plans: [], prices: [] });
+  mocks.waiting.mockResolvedValue([]);
   logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 });
-afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
 it("routes a signed UUID delivery and deduplicates retries before enqueueing", async () => {
   expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: false, eventId: "delivery-1" });
@@ -47,6 +55,17 @@ it("routes a signed UUID delivery and deduplicates retries before enqueueing", a
   expect(mocks.enqueue).toHaveBeenCalledTimes(1);
   expect(mocks.insert).toHaveBeenCalledWith(expect.objectContaining({ providerEventId: "delivery-1", businessId }));
   expect(new PgDialect().sqlToQuery(mocks.where.mock.calls[0]![0])).toMatchObject({ sql: '"businesses"."id" = $1', params: [businessId] });
+});
+
+it("runs a redelivered event again when it never applied, at most once an hour", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-24T09:41:00Z"));
+  expect((await POST(request())).status).toBe(200);
+  mocks.waiting.mockResolvedValue([{ id: "event-row" }]);
+  expect(await (await POST(request())).json()).toEqual({ accepted: true, duplicate: true, eventId: "delivery-1" });
+  expect(mocks.enqueue).toHaveBeenCalledTimes(2);
+  // The billing sweep's key for the hour, so the two never run it twice in one hour.
+  expect(mocks.enqueue.mock.calls[1]![1]).toEqual({ topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: "event-row", dedupeKey: `billing-sweep:provider_event:event-row:${Math.floor(Date.parse("2026-10-24T09:00:00Z") / 3_600_000)}`, payload: { providerEventId: "event-row" } });
 });
 
 it("names the plan through the catalog's Polar links, read as the worker", async () => {
@@ -112,6 +131,24 @@ it("rejects invalid, stale, missing, and unconfigured signatures before DB acces
   vi.stubEnv("POLAR_WEBHOOK_SECRET", "");
   expect((await POST(request())).status).toBe(401);
   expect(mocks.lookup).not.toHaveBeenCalled();
+  // Polar turns the endpoint off after 10 refusals in a row, so each one is logged, with Polar's delivery ID and never the body.
+  const refused = { message: "ops.billing.webhook_refused" };
+  expect(refusalLogs()).toEqual([
+    { ...refused, reason: "bad_signature", webhookId: "delivery-1" },
+    { ...refused, reason: "bad_signature", webhookId: "delivery-1" },
+    { ...refused, reason: "missing_headers", webhookId: undefined },
+    { ...refused, reason: "bad_signature", webhookId: "other-delivery" },
+    { ...refused, reason: "unconfigured", webhookId: "delivery-1" },
+  ]);
+});
+
+it("reports a failure with an error ID that Polar's delivery log shows too", async () => {
+  mocks.catalog.mockRejectedValue(new Error("connection terminated"));
+  const response = await POST(request());
+  expect(response.status).toBe(500);
+  const { errorId } = await response.json() as { errorId: string };
+  expect(response.headers.get("x-error-id")).toBe(errorId);
+  await vi.waitFor(() => expect(unresolvedLogs()).toContainEqual(expect.objectContaining({ level: "error", message: expect.stringMatching(/\] exception: connection terminated$/), operation: "billing.webhook", errorId, eventType: "subscription.active", webhookId: "delivery-1" })));
 });
 
 it("rejects malformed JSON in the verifier and invalid event envelopes in the route", async () => {

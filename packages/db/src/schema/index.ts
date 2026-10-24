@@ -1041,6 +1041,8 @@ export const billingCheckoutRequests = pgTable(
     uniqueIndex("billing_checkout_requests_id_unique").on(table.id),
     index("billing_checkout_requests_business_status_idx").on(table.businessId, table.status, table.createdAt),
     index("billing_checkout_requests_plan_code_idx").on(table.businessId, table.planCode, table.createdAt).where(sql`${table.codeId} is not null`),
+    // The billing sweep's read of requests no job finished. Migration 0114.
+    index("billing_checkout_requests_open_idx").on(table.updatedAt).where(sql`${table.status} in ('pending', 'processing')`),
   ],
 );
 
@@ -1566,7 +1568,12 @@ export const providerEvents = pgTable(
     status: varchar("status", { length: 32 }).default("received").notNull(),
     ...timestamps,
   },
-  (table) => [uniqueIndex("provider_events_provider_id_unique").on(table.provider, table.providerEventId), index("provider_events_business_idx").on(table.businessId, table.createdAt)],
+  (table) => [
+    uniqueIndex("provider_events_provider_id_unique").on(table.provider, table.providerEventId),
+    index("provider_events_business_idx").on(table.businessId, table.createdAt),
+    // The billing sweep's read of Polar events still waiting to apply. Migration 0114.
+    index("provider_events_polar_received_idx").on(table.createdAt).where(sql`${table.status} = 'received' and ${table.provider} = 'polar'`),
+  ],
 );
 
 export const outboxMessages = pgTable(

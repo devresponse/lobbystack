@@ -925,7 +925,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const move = await createCheckoutForApi(context, caller, { plan: "pro", interval: "annual" }, { available: true });
       expect(move).toMatchObject({ plan: "pro", status: "pending" });
       expect(await loadBillingCheckoutRequest(context, { businessId, requestId: move.id })).toMatchObject({ target: "pro", billingInterval: "annual", subscription: { id: "sub-starter", plan: "starter", billingInterval: "monthly" } });
-      expect(await claimBillingCheckoutRequest(context, { businessId, requestId: move.id })).toBe(true);
+      expect(await claimBillingCheckoutRequest(context, { businessId, requestId: move.id })).toEqual({ claimed: true });
       expect(await markBillingPlanChanged(context, { businessId, requestId: move.id })).toBe(true);
       expect(await markBillingPlanChanged(context, { businessId, requestId: move.id })).toBe(false);
       const changed = await getCheckoutForApi(context, caller, move.id);

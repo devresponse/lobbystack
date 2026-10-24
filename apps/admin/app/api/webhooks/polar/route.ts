@@ -1,28 +1,43 @@
 import { NextResponse } from "next/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import { polarWebhookSchema } from "@lobbystack/contracts";
 import { businesses, enqueueOutbox, providerEvents, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
-import { polarProductLinks, readBillingCatalogSnapshot } from "@lobbystack/domain";
+import { billingSweepKey, polarProductLinks, readBillingCatalogSnapshot } from "@lobbystack/domain";
 import { verifyPolarWebhookSignature } from "@lobbystack/providers";
+import { logEvent } from "@lobbystack/telemetry/node";
+import { runAfterResponse } from "@/lib/after-response";
 import { getDispatcherDatabase, getWorkerDatabase } from "@/lib/api-helpers";
+import { reportServerError } from "@/lib/error-reporting";
 import { normalizePolarEvent } from "@/lib/polar-event";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function validSignature(body: string, headers: Headers): boolean {
+type SignatureRefusal = "unconfigured" | "missing_headers" | "bad_signature";
+
+/** Why a delivery isn't Polar's, or null when it is. A signature older than five minutes doesn't match either. */
+function signatureRefusal(body: string, headers: Headers): SignatureRefusal | null {
   const secret = process.env.POLAR_WEBHOOK_SECRET;
-  if (!secret) return false;
+  if (!secret) return "unconfigured";
   const id = headers.get("webhook-id");
   const timestamp = headers.get("webhook-timestamp");
   const signature = headers.get("webhook-signature");
-  if (!id || !timestamp || !signature) return false;
+  if (!id || !timestamp || !signature) return "missing_headers";
   return verifyPolarWebhookSignature(body, {
     "webhook-id": id,
     "webhook-timestamp": timestamp,
     "webhook-signature": signature,
-  }, secret);
+  }, secret) ? null : "bad_signature";
+}
+
+// Polar turns an endpoint off after 10 failed deliveries in a row, and its
+// billing events stop arriving, so each refusal leaves a line: a run of
+// unconfigured or bad_signature means POLAR_WEBHOOK_SECRET is missing or isn't
+// the endpoint's secret. It carries Polar's delivery ID, never the body.
+function recordRefusedWebhook(reason: SignatureRefusal, headers: Headers): void {
+  const webhookId = headers.get("webhook-id")?.slice(0, 64);
+  logEvent("warn", "ops.billing.webhook_refused", { provider: "polar", reason, ...(webhookId ? { webhookId } : {}) });
 }
 
 // A webhook we cannot attribute to a business is dropped with a 200, which is
@@ -42,9 +57,14 @@ function recordUnresolvedWebhook(
 }
 
 export async function POST(request: Request) {
+  let eventType: string | undefined;
   try {
     const body = await request.text();
-    if (!validSignature(body, request.headers)) return new NextResponse("Unauthorized", { status: 401 });
+    const refusal = signatureRefusal(body, request.headers);
+    if (refusal) {
+      recordRefusedWebhook(refusal, request.headers);
+      return new NextResponse("Unauthorized", { status: 401 });
+    }
     // Standard Webhooks supplies the delivery ID in headers, not the JSON body.
     let raw: Record<string, unknown>;
     try {
@@ -55,6 +75,7 @@ export async function POST(request: Request) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
     const event = polarWebhookSchema.safeParse({ ...raw, id: request.headers.get("webhook-id") ?? raw.id });
     if (!event.success) return NextResponse.json({ error: "Invalid webhook." }, { status: 400 });
+    eventType = event.data.type;
     // The catalog names the plan of a product it links; a retired price's product still counts.
     const links = await withBusinessTransaction(getWorkerDatabase().db, { actorType: "worker" }, (tx) => readBillingCatalogSnapshot(tx), { accessMode: "read only" });
     const normalized = normalizePolarEvent(event.data.type, event.data.data, polarProductLinks(links, process.env));
@@ -88,14 +109,24 @@ export async function POST(request: Request) {
     }
     const persist = async (tx: Parameters<Parameters<ReturnType<typeof getWorkerDatabase>["db"]["transaction"]>[0]>[0]) => {
       const [stored] = await tx.insert(providerEvents).values({ provider: "polar", providerEventId: event.data.id, eventType: event.data.type, businessId, payload: normalized.payload }).onConflictDoNothing().returning({ id: providerEvents.id });
-      if (stored && businessId) {
+      if (stored) {
         await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: stored.id, dedupeKey: `provider-event:${event.data.id}:billing`, payload: { providerEventId: stored.id } });
+        return true;
       }
-      return Boolean(stored);
+      // Polar sends an event again when it never heard back, and when someone
+      // redelivers it from Polar's dashboard. One that never applied runs
+      // again, at most once an hour, as the billing sweep would run it.
+      const [waiting] = await tx.select({ id: providerEvents.id }).from(providerEvents).where(and(eq(providerEvents.provider, "polar"), eq(providerEvents.providerEventId, event.data.id), eq(providerEvents.businessId, businessId), eq(providerEvents.status, "received"))).limit(1);
+      if (waiting) await enqueueOutbox(tx, { topic: "billing.reconcile", businessId, aggregateType: "provider_event", aggregateId: waiting.id, dedupeKey: billingSweepKey("provider_event", waiting.id, new Date()), payload: { providerEventId: waiting.id } });
+      return false;
     };
     const inserted = await withBusinessTransaction(getWorkerDatabase().db, { businessId, actorType: "worker" }, persist);
     return NextResponse.json({ accepted: true, duplicate: !inserted, eventId: event.data.id });
-  } catch {
-    return NextResponse.json({ error: "Webhook processing failed." }, { status: 500 });
+  } catch (error) {
+    // Polar retries the delivery, and its log shows this errorId beside the one PostHog has.
+    const errorId = crypto.randomUUID();
+    const webhookId = request.headers.get("webhook-id")?.slice(0, 64);
+    runAfterResponse(async () => await reportServerError(error, { operation: "billing.webhook", errorId, route: "/api/webhooks/polar", ...(eventType ? { eventType } : {}), ...(webhookId ? { webhookId } : {}) }));
+    return NextResponse.json({ error: "Webhook processing failed.", errorId }, { status: 500, headers: { "x-error-id": errorId } });
   }
 }

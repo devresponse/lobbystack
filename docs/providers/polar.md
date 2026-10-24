@@ -74,7 +74,7 @@ The Next.js app exposes four billing entry points.
 
 `pnpm billing apply` makes Polar's webhook for subscription and order events at the instance's own `/api/webhooks/polar`, or at the address `--webhook-url` names, and finds it again by that address on later runs. When the run makes the webhook, `--railway-file` saves its secret as `POLAR_WEBHOOK_SECRET`; otherwise copy the secret from the webhook in Polar's settings.
 
-Set `POLAR_WEBHOOK_SECRET` in production. The route rejects missing secrets and invalid signatures with HTTP 401.
+Set `POLAR_WEBHOOK_SECRET` in production. The route rejects missing secrets and invalid signatures with HTTP 401, and logs each refusal as `ops.billing.webhook_refused` with its reason (`unconfigured`, `missing_headers` or `bad_signature`) and Polar's delivery ID. Polar turns the webhook off after 10 failed deliveries in a row, so a run of `bad_signature` lines means `POLAR_WEBHOOK_SECRET` isn't the webhook's secret: fix the variable, turn the webhook back on in Polar's settings, and redeliver the failed events. When the route can't store an event it answers 500 with an `errorId`, which Polar's delivery log shows and error tracking reports under the same ID, and Polar delivers it again later.
 
 Set `POLAR_ACCEPT_LEGACY_BUSINESS_IDS=true` only in production. It lets signed webhooks resolve `business:<legacy-id>` customer references from before the PostgreSQL move through the `businesses.legacy_convex_id` column. Keep it disabled in staging so a shared Polar organization cannot route production customer events into the staging database.
 
@@ -86,30 +86,28 @@ Use this sequence to check where a checkout stops:
 2. The worker creates the Polar checkout with the product the catalog links to the plan and interval. A business that already pays for Starter or Pro gets no checkout, because Polar refuses a second subscription: the worker moves its subscription to the new product instead (`PATCH /v1/subscriptions/{id}`, which needs `subscriptions:write` on the worker's token) and marks the request `changed`. An upgrade is charged as `billing.json`'s `polar.upgradeProration` says (`invoice`: the prorated difference now), and a downgrade as `polar.downgradeProration` (`next_period`: from the next renewal).
 3. The browser opens the checkout URL after the request becomes ready, or for a plan change waits until the webhook moves the business onto the plan.
 4. Polar sends subscription and order events to the Next.js webhook route.
-5. The route stores each provider event once and enqueues `billing.reconcile`.
+5. The route stores each provider event once and enqueues `billing.reconcile`. When Polar sends an event again, or someone redelivers it from Polar's dashboard, and it never applied, the route queues it again.
 6. The worker updates local subscription and transaction records.
+
+A checkout request has 15 minutes to run. While a try fails and the job will try again, the request goes back to pending and the page keeps waiting; the last try fails it. A request whose run died is taken over 5 minutes after its last change. A request still waiting after 15 minutes fails, and the person asks again, so a plan change never goes through long after they left the page.
 
 The billing page reads PostgreSQL for plan, usage, spending-cap, and transaction data. It creates portal sessions on the server for billing administrators.
 
-## Recover failed usage syncs
+## Recover lost billing work
 
-Use `billing_usage_events` to investigate metered usage that did not reach Polar.
+The worker tries each `billing.reconcile` and `billing.syncUsage` job 12 times. It waits 5 seconds before the first retry and doubles the wait each time, so it gives up about 3 hours after the first failure. The worker's billing sweep runs every 5 minutes and queues the billing work no job finished again, at most once an hour for each row, until it is done:
 
-Inspect these columns and the worker’s job logs:
+- a Polar event in `provider_events` still `received` 5 minutes after its webhook;
+- final Starter or Pro usage in `billing_usage_events` still `pending` 15 minutes after its last change, for a business with a Polar customer;
+- a checkout request still `pending` or `processing` 5 minutes after its last change, which fails instead once it is 15 minutes old.
 
-- `sync_status`
-- `source_key`
-- `quantity` and `billable_quantity`
-- `is_final`
-- `updated_at`
+Nothing needs requeueing by hand. Each sweep that finds work logs `ops.billing.sweep` with its counts. When a Polar event or usage has waited more than an hour, or a checkout request failed for waiting too long, the sweep also reports `Billing work waited longer than it should` to error tracking (see [BillingWorkOverdue](../operations/alerts.md#billingworkoverdue)).
 
-The worker tries each `billing.syncUsage` job 12 times. It waits 5 seconds before the first retry and doubles the wait each time, so it gives up about 3 hours after the first failure. Inspect worker logs for provider failures before you requeue a job.
-
-Fix the provider error before you requeue `billing.syncUsage`. Keep the usage row and source key to prevent duplicate ingestion.
+To find the cause, read the worker's `job.failed` lines for the job type, and fix the provider, token or database error they name, such as a worker token without `events:write`. Keep the usage rows and their source keys: Polar keeps one event per source key, so usage sent twice is billed once. Usage Polar must never bill stays in the sweep until its `sync_status` is `skipped`.
 
 ## Recover missing orders
 
-Replay a signed Polar webhook when Polar contains an order missing from `billing_transactions`.
+When Polar has an order missing from `billing_transactions`, redeliver its events from the webhook's deliveries in Polar's dashboard. The route stores an event it never received and queues it, and queues again one it stored that never applied; one that applied is a duplicate and changes nothing.
 
 The webhook handler uses provider event IDs for idempotency. Do not insert billing transactions by hand.
 
@@ -120,10 +118,10 @@ Run these checks in the Polar sandbox before enabling production billing:
 - Confirm only business administrators can start checkout or open the portal.
 - Complete monthly and annual checkout for Starter and Pro.
 - Upgrade a paying Starter business to Pro from **Settings** > **Plan**, and confirm Polar invoices the difference and the page shows Pro.
-- Confirm invalid webhook signatures receive an unauthorized response.
+- Confirm invalid webhook signatures receive an unauthorized response and log `ops.billing.webhook_refused`.
 - Confirm duplicate webhook deliveries create one provider event.
 - Generate each metered usage type and verify the Polar quantity.
 - Confirm monthly and annual subscriptions send only each month's overage quantities, and that no product carries Credits.
-- Confirm worker logs identify usage-sync failures and that requeueing recovers them.
+- Make usage while the worker's `POLAR_ACCESS_TOKEN` is wrong, and confirm worker logs identify the usage-sync failures and that the usage reaches Polar once the token is right again, without requeueing anything.
 
 Self-hosted workspaces remain outside hosted billing enforcement.

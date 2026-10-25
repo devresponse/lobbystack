@@ -21,7 +21,7 @@ On a Windows clone made before fork PR #83:
 - `git pull` brings `roles.sh` down again with LF. `git ls-files --eol docker/postgres/init/roles.sh` then shows `w/lf`.
 - If Postgres already started with the old script, `docker compose logs postgres` shows `/usr/bin/env: ‘bash\r’: No such file or directory`, and the admin and worker can't connect to the database. Run `docker compose down -v`. It deletes the database, which has nothing usable yet, along with the other Docker volumes, so the script runs again on the next start.
 - If `pnpm env:generate` said it generated 0 secrets, `.env` holds the placeholders from `.env.example`. Run `pnpm env:generate --force`, then `docker compose down -v`.
-- Other files keep CRLF until a pull changes them. Of those, only the shell scripts in `scripts/` mind, when you run them with bash; a new clone gives them LF.
+- Other files keep CRLF until a pull changes them, and `git add` warns `CRLF will be replaced by LF the next time Git touches it` about one you edited, which is expected. Of those files, only the shell scripts in `scripts/` mind, when you run them with bash; a new clone gives them LF.
 
 ### Create the environment files
 

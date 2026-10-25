@@ -35,9 +35,9 @@ The call button shows only when the business has an active voice number, the bus
 
 ## Know which language the chat uses
 
-- **The widget's words** are in English, French, Spanish or Serbian. **Settings** > **Website widget** > **Language** sets one of them. Left at "Visitor's language", the widget shows the first of the visitor's browser languages it has, and otherwise the business's **Default customer language** (`widgetLocale` in `apps/admin/src/components/widget/widget-chat-client.tsx`). Until fork PR #81 it always showed the business's language, English or French.
+- **The widget's words** are in English, French, Spanish or Serbian. **Settings** > **Website widget** > **Language** sets one of them. Left at "Visitor's language", the widget shows the first of the visitor's browser languages it has, and otherwise the business's **Default customer language** when it's one of those four, or else English (`widgetLocale` in `apps/admin/src/components/widget/widget-chat-client.tsx`). Until fork PR #81 it always showed the business's language, English or French.
 - **The replies** start in the widget's language. When the visitor writes in another language, or asks for one, the receptionist answers in it and keeps it for the rest of the chat, even when the documents it answers from are in another language, until the visitor switches again (the chat's `extraInstructions` in `apps/admin/app/api/widget/chat/route.ts`). Until fork PR #81 it switched only when the visitor asked.
-- **"Say Allo!"** opens in the business's **Default customer language**, English or French, as a phone call does, and follows the caller from there ([calls](calls.md)).
+- **"Say Allo!"** opens in the business's **Default customer language**, any of the 13 that calls open in since fork PR #82, as a phone call does, and follows the caller from there ([calls](calls.md#know-which-language-a-call-uses)).
 
 ## Hand a chat to the team
 
@@ -129,6 +129,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #79 | A failed reply shows an Error ID, and the admin logs and reports why ([above](#find-out-why-a-reply-failed)). A reply cut off by an error is no longer saved as if it were whole, and a request that fails its checks answers 400 instead of 500. |
 | #80 | A call's captions leave out the sounds GPT-Live's transcription marks in square brackets, such as "[tongue click]" or "[laughs]", and a caption that was only a sound goes. The saved transcript and the receptionist's agent leave them out too ([calls](calls.md#follow-a-call)). |
 | #81 | The chat answers in the language the visitor writes in and keeps it, and "Visitor's language" follows the visitor's browser ([above](#know-which-language-the-chat-uses)). |
+| #82 | "Say Allo!" opens in any of the 13 languages a business can pick, and the widget's words fall back to English for a business language they aren't translated into. |
 
 ## Know the gaps
 

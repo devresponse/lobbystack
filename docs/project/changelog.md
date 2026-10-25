@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#81](https://github.com/devresponse/lobbystack/pull/81) | Answer website chats in the visitor's language |  | `a2e57ff` | [docs](../features/website-widget.md#know-which-language-the-chat-uses) |
 | [#80](https://github.com/devresponse/lobbystack/pull/80) | Leave GPT-Live's sound tags out of call captions and transcripts |  | `f30fce3` | [docs](../features/calls.md) |
 | [#79](https://github.com/devresponse/lobbystack/pull/79) | Say why a website chat reply failed |  | `8280dab` | [docs](../features/website-widget.md#find-out-why-a-reply-failed) |
 
@@ -17,6 +18,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#77](https://github.com/devresponse/lobbystack/pull/77) | Make docs/ the project's source of truth |  | `1a2c81b` | [docs](../README.md) |
 | [#76](https://github.com/devresponse/lobbystack/pull/76) | Bring the Polar token note and two billing docs up to date |  | `da1f548` | [docs](../providers/polar.md) |
 | [#75](https://github.com/devresponse/lobbystack/pull/75) | Send usage corrections to Polar and make billing changes take turns | `0116` | `24e211d` | [docs](../billing/design-history.md) |
 | [#74](https://github.com/devresponse/lobbystack/pull/74) | Limit checkouts and the portal, and keep tokens off the webhook secret |  | `7d20322` | [docs](../billing/design-history.md) |

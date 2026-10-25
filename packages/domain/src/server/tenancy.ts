@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, normalizeAuthEmail, parseDeploymentMode, type InterfaceLocale } from "@lobbystack/shared";
+import { defaultAppointmentChangePolicy, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
@@ -56,6 +56,13 @@ function requireIanaTimeZone(value: unknown): string {
   return zone;
 }
 
+/** A business's default customer language must be one calls can open in. */
+function requireRuntimeLocale(value: unknown): RuntimeLocale {
+  const locale = typeof value === "string" ? value.trim() : value;
+  if (!isRuntimeLocale(locale)) throw Object.assign(new Error(`defaultLocale must be one of ${runtimeLocales.join(", ")}.`), { status: 400, code: "invalid_locale" });
+  return locale;
+}
+
 export async function createBusiness(
   context: DomainContext,
   input: CreateBusinessInput,
@@ -94,6 +101,7 @@ export async function insertBusinessInTransaction(
 ): Promise<{ businessId: string; membershipId: string }> {
   const { businessId, timezone } = input;
   const name = input.name.trim();
+  const defaultLocale = input.defaultLocale === undefined ? undefined : requireRuntimeLocale(input.defaultLocale);
   const generatedSlug = name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 96).replace(/-$/, "") || "business";
   const baseSlug = input.slug === undefined ? generatedSlug : cleanSlug(input.slug);
   let business: { id: string } | undefined;
@@ -108,7 +116,7 @@ export async function insertBusinessInTransaction(
       // every mode but cloud skips billing and the paid-plan check on numbers.
       deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
       onboardingStage: "website",
-      ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale } : {}),
+      ...(defaultLocale !== undefined ? { defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
     });
     // Only generated slugs are replaceable. Target this constraint explicitly
@@ -181,7 +189,8 @@ export async function updateBusinessInTransaction(
   input: { businessId: string; name?: string; timezone?: string; businessType?: string; defaultLocale?: string; websiteUrl?: string | null },
 ): Promise<void> {
   const timezone = input.timezone === undefined ? undefined : requireIanaTimeZone(input.timezone);
-  const values = { ...(input.name !== undefined ? { name: input.name.trim() } : {}), ...(timezone !== undefined ? { timezone } : {}), ...(input.businessType !== undefined ? { businessType: input.businessType.trim() } : {}), ...(input.defaultLocale !== undefined ? { defaultLocale: input.defaultLocale.trim() } : {}), ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}), updatedAt: new Date() };
+  const defaultLocale = input.defaultLocale === undefined ? undefined : requireRuntimeLocale(input.defaultLocale);
+  const values = { ...(input.name !== undefined ? { name: input.name.trim() } : {}), ...(timezone !== undefined ? { timezone } : {}), ...(input.businessType !== undefined ? { businessType: input.businessType.trim() } : {}), ...(defaultLocale !== undefined ? { defaultLocale } : {}), ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}), updatedAt: new Date() };
   if (Object.keys(values).length === 1) throw new Error("At least one business field is required.");
   const [business] = await tx.update(businesses).set(values).where(eq(businesses.id, input.businessId)).returning({ id: businesses.id });
   if (!business) throw new Error("Business not found.");

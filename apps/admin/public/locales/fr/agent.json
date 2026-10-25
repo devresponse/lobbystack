@@ -269,7 +269,7 @@
     "defaultLocale": {
       "label": "Langue client par défaut",
       "placeholder": "Choisir une langue par défaut",
-      "hint": "Choisissez la langue de repli que votre réceptionniste doit utiliser quand la préférence du client est inconnue."
+      "hint": "Les appels commencent dans cette langue, puis passent à celle de l'appelant s'il en parle une autre. Rédigez aussi votre message d'accueil dans cette langue. Les résumés d'appel y sont écrits."
     },
     "timezone": {
       "label": "Fuseau horaire de l’entreprise",

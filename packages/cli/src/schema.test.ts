@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { apiComponentSchemas } from "@lobbystack/shared";
+import { apiComponentSchemas, runtimeLocales } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { fieldValue, flagName, objectFields, type Field } from "./schema";
@@ -11,7 +11,7 @@ describe("request schemas as flags", () => {
   it("reads each field's type, whether it can be left out or null, and its description", () => {
     const fields = objectFields(apiComponentSchemas.BusinessUpdate)!;
     expect(fields.map((field) => field.name)).toEqual(["name", "timezone", "locale", "website_url", "business_type", "hours", "ai_traces_enabled"]);
-    expect(fields.find((field) => field.name === "locale")).toMatchObject({ kind: "string", optional: true, choices: ["en", "fr"] });
+    expect(fields.find((field) => field.name === "locale")).toMatchObject({ kind: "string", optional: true, choices: [...runtimeLocales] });
     expect(fields.find((field) => field.name === "website_url")).toMatchObject({ kind: "string", optional: true, nullable: true });
     expect(fields.find((field) => field.name === "hours")).toMatchObject({ kind: "array", element: "object", description: expect.stringContaining("Replaces the whole week") });
     expect(objectFields(apiComponentSchemas.ServiceCreate)!.find((field) => field.name === "duration_minutes")).toMatchObject({ kind: "number", optional: false });

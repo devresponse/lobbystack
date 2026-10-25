@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +153,35 @@ describe("AgentBasicSettingsPage saves", () => {
       { businessId: "business", appointmentChangePolicy: { enabled: true, allowCancel: false, allowReschedule: true, verificationMode: "phone_match_and_facts" } },
       { businessId: "business", locale: "fr" },
     ]);
+    client.clear();
+  });
+
+  it("offers each language calls can open in, by its own name, and saves the one picked", async () => {
+    const patches: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        patches.push(JSON.parse(String(init.body)));
+        return Response.json({ profile: {} });
+      }
+      // A language calls can't open in, saved before the list was checked, shows as English.
+      return Response.json({
+        business: { defaultLocale: "sr" },
+        profile: { greeting: "Thanks for calling.", summary: "Clinic", summarySource: "operator", transferNumber: "+15145550123", transferMode: "on_request", appointmentChangePolicy: null, bookingMode: "instant" },
+      });
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><AgentBasicSettingsPage businessId="business" canManageTenant /></QueryClientProvider>);
+
+    const user = userEvent.setup();
+    const language = await screen.findByRole("combobox", { name: "agent:fields.defaultLocale.label" });
+    await waitFor(() => expect((language as HTMLSelectElement).value).toBe("en"));
+    const options = within(language).getAllByRole("option") as HTMLOptionElement[];
+    expect(options.map((option) => option.value)).toEqual(["en", "es", "fr", "de", "hi", "ja", "ko", "pt", "zh", "it", "uk", "ru", "ar"]);
+    expect(options.map((option) => option.textContent)).toEqual(expect.arrayContaining(["English", "Español", "Deutsch", "日本語", "العربية"]));
+    expect(options.find((option) => option.value === "ar")?.lang).toBe("ar");
+
+    await user.selectOptions(language, "ja");
+    await waitFor(() => expect(patches).toEqual([{ businessId: "business", locale: "ja" }]));
     client.clear();
   });
 

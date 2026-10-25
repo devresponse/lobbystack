@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import { billingPlanSlugs, cloudBillingPlanSlugs, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
-import { interfaceLocales } from "../locales";
+import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
 import { widgetPositions } from "../widget";
@@ -22,8 +22,9 @@ const withoutSeconds = z.iso.datetime({ offset: true, precision: -1 });
 const inputTimestamp = z.stringFormat("datetime", (value) => withSeconds.safeParse(value).success || withoutSeconds.safeParse(value).success).describe("ISO 8601 timestamp with a Z or numeric offset.");
 const e164 = z.string().regex(/^\+[1-9]\d{6,14}$/, "Use E.164 format, for example +14165550134.").describe("Phone number in E.164 format.");
 const clock = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$|^24:00$/, "Use 24-hour HH:MM.").describe("Local time as 24-hour HH:MM.");
-// A business's caller language is the language the AI receptionist speaks.
-const locale = z.enum(["en", "fr"]);
+// A business's caller language is the language calls open in.
+const locale = z.enum(runtimeLocales);
+const localeChoices = `${runtimeLocales.slice(0, -1).join(", ")} or ${runtimeLocales.at(-1)}`;
 // A contact's language picks the copy of the reminders and confirmations they receive.
 const contactLocale = z.enum(interfaceLocales).describe("Language for the contact's reminders and confirmations: en, fr, es or sr.");
 
@@ -86,7 +87,7 @@ export const apiBusinessSchema = z.object({
   name: z.string(),
   slug: z.string().describe("A short name no other business uses, set when the business is created. Its public profile page is at /profile/{slug}."),
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
-  locale: z.string().describe("Default language for callers: en or fr."),
+  locale: z.string().describe(`Default language for callers, which calls open in and call summaries are written in: ${localeChoices}.`),
   website_url: z.string().nullable(),
   business_type: z.string().describe("What kind of business it is. The dashboard uses service_company."),
   onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
@@ -101,7 +102,7 @@ export const apiBusinessSchema = z.object({
 export const apiBusinessUpdateSchema = z.strictObject({
   name: z.string().trim().min(1).max(200).optional(),
   timezone: z.string().trim().min(1).max(80).optional(),
-  locale: locale.optional(),
+  locale: locale.optional().describe(`Default language for callers, which calls open in and call summaries are written in: ${localeChoices}.`),
   website_url: z.url().max(2_000).nullable().optional(),
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them."),
@@ -745,7 +746,7 @@ export const apiBusinessCreateSchema = z.strictObject({
   timezone: z.string().trim().min(1).max(80).describe("IANA time zone, for example America/Toronto."),
   business_type: z.string().trim().min(1).max(64).optional().describe("Defaults to service_company, the type the dashboard uses."),
   slug: z.string().trim().min(2).max(120).optional().describe("Lowercase letters, digits and hyphens. Made from the name when left out. Another business already using it is a 409."),
-  locale: locale.optional().describe("Default language for callers: en or fr. Defaults to en."),
+  locale: locale.optional().describe(`Default language for callers, which calls open in: ${localeChoices}. Defaults to en.`),
   website_url: z.url().max(2_000).optional(),
 });
 
@@ -753,7 +754,7 @@ export const apiBusinessSummarySchema = z.object({
   id,
   name: z.string(),
   timezone: z.string().describe("IANA time zone, for example America/Toronto."),
-  locale: z.string().describe("Default language for callers: en or fr."),
+  locale: z.string().describe(`Default language for callers, which calls open in: ${localeChoices}.`),
   website_url: z.string().nullable(),
   onboarding_stage: z.enum(onboardingStages).describe("The step the dashboard's onboarding shows, the same as stage in GET /onboarding. complete: onboarding is finished."),
   created_at: timestamp,
@@ -886,7 +887,7 @@ export const apiContactSchema = z.object({
   name: z.string().nullable(),
   phone: z.string().nullable(),
   email: z.string().nullable(),
-  locale: z.string().nullable().describe("Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language."),
+  locale: z.string().nullable().describe("Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language when it's one of these, else en."),
   timezone: z.string().nullable(),
   passcode: z.object({
     set_at: timestamp,

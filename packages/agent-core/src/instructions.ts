@@ -1,4 +1,4 @@
-import { canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { countKnowledgeTokens } from "@lobbystack/domain";
 import { DateTime } from "luxon";
 
@@ -276,11 +276,9 @@ function backendCapabilities(snapshot: BusinessContextSnapshot, channel: LiveCha
   ].filter(Boolean);
 }
 
-const LANGUAGE_NAMES: Record<BusinessContextSnapshot["defaultLocale"], string> = { en: "English", fr: "French" };
-
 /** The language a call starts in, named for GPT-Live: the business's default locale. */
 export function liveLanguage(snapshot: BusinessContextSnapshot): string {
-  return LANGUAGE_NAMES[snapshot.defaultLocale] ?? "English";
+  return runtimeLocaleNames[snapshot.defaultLocale] ?? "English";
 }
 
 // Instructions for GPT-Live itself, in the structure OpenAI's GPT-Live
@@ -303,7 +301,9 @@ export function buildLiveInstructions(snapshot: BusinessContextSnapshot, now: Da
     snapshot.voiceInstructions?.trim() ?? "",
     "Speak warmly and naturally, at an unhurried pace. Be clear and direct, not overly cheerful. Keep replies short and conversational.",
     "If the caller is frustrated, acknowledge it briefly and focus on the next helpful step. If the caller sounds unsure, ask one simple question to find out what they need.",
-    `Speak ${liveLanguage(snapshot)} unless the caller asks to switch or clearly speaks another language.`,
+    // Backend results and the worker's notes arrive in English, so a call that
+    // switched language is told to stay in it after a lookup too.
+    `Speak ${liveLanguage(snapshot)} at the start of the call. When the caller asks to switch or clearly speaks another language, switch to their language and keep using it for the rest of the call, even when a backend result or note arrives in English. Switch again only when the caller does.`,
     "Your job is to help each caller get what they called for. Answer their question, then keep the conversation moving with one short follow-up when it helps: offer to book a time, ask what they're looking for, or ask whether they need anything else. Ask one question at a time, and don't end on a bare fact when there's a natural next step.",
     topicRule(snapshot, `Decline it yourself without delegating: say briefly that you can only help with questions about ${snapshot.displayName}, and ask what you can help with.`),
     "If an important name, date, or number is unclear, ask about that part. Use the caller's correction. Do not guess the missing value.",

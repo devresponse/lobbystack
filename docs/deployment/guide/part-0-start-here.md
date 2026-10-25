@@ -1,6 +1,6 @@
 # Part 0. Start here
 
-**Status:** written on 2026-10-19, from the rest of this guide and the code on `main` at `d18f916`.
+**Status:** written on 2026-10-19, from the rest of this guide and the code on `main` at `d18f916`; the languages calls start in were updated on 2026-10-25 for fork PR #82.
 
 ## 0.1 Who this guide is for
 
@@ -11,7 +11,7 @@ LobbyStack is an AI receptionist for businesses. For each business it serves, it
 - texts phone callers a confirmation and a reminder of their booking, if they agree;
 - gives the business's team a dashboard with its calls, messages, appointments and contacts, where they also answer texts.
 
-One installation, which this guide calls an **instance**, serves any number of businesses. Each has its own team and data, and the database itself keeps them apart. Anyone who signs up can create up to 10 businesses, and no administrator sits above them all ([6.1](part-6-first-run.md#61-create-your-account), [7.19](part-7-operations.md#719-manage-operators-api-keys-and-platform-keys)). The dashboard is in English, French, Spanish and Serbian. Calls start in English or French, and the receptionist switches when a caller asks for another language or clearly speaks one ([8.10](part-8-troubleshooting.md#810-language)).
+One installation, which this guide calls an **instance**, serves any number of businesses. Each has its own team and data, and the database itself keeps them apart. Anyone who signs up can create up to 10 businesses, and no administrator sits above them all ([6.1](part-6-first-run.md#61-create-your-account), [7.19](part-7-operations.md#719-manage-operators-api-keys-and-platform-keys)). The dashboard is in English, French, Spanish and Serbian. Calls start in the business's language, which can be any of 13, and the receptionist switches when a caller asks for another language or clearly speaks one, then keeps that language for the rest of the call ([8.10](part-8-troubleshooting.md#810-language)).
 
 LobbyStack is open-source, under the MIT license (`LICENSE`), so anyone may run it. This guide builds it from its code on GitHub ([1.4](part-1-prepare.md#14-get-the-code)).
 

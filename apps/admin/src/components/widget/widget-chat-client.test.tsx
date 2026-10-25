@@ -477,6 +477,8 @@ describe("widget voice captions", () => {
 
     expect(await screen.findByText("Hi, how can I help?")).toBeTruthy();
     expect(screen.getByText("Are you open Sunday?")).toBeTruthy();
+    // Each caption takes its text's direction, so Arabic reads from the right.
+    expect(screen.getByText("Are you open Sunday?").getAttribute("dir")).toBe("auto");
     expect(screen.getByText("chat.voiceLive")).toBeTruthy();
     expect(screen.getByRole("button", { name: "chat.voiceEnd" })).toBeTruthy();
     await vi.waitFor(() => expect(postMessage).toHaveBeenCalledWith({ type: "leave-warning", enabled: true }, "*"));

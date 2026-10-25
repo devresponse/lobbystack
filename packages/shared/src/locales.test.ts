@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { interfaceLocaleTags, interfaceLocales, intlLocale, normalizeInterfaceLocale } from "./locales";
+import { interfaceLocaleTags, interfaceLocales, intlLocale, isRuntimeLocale, normalizeInterfaceLocale, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocaleNames, runtimeLocales } from "./locales";
 
 const CYRILLIC = /[Ѐ-ӿ]/;
 const sample = new Date(Date.UTC(2026, 8, 30, 12));
@@ -44,5 +44,29 @@ describe("normalizeInterfaceLocale", () => {
     expect(normalizeInterfaceLocale("FR")).toBe("fr");
     expect(normalizeInterfaceLocale("de")).toBeNull();
     expect(normalizeInterfaceLocale("")).toBeNull();
+  });
+});
+
+describe("runtime locales", () => {
+  it("lists the 13 languages a call can open in, English first", () => {
+    expect(runtimeLocales).toEqual(["en", "es", "fr", "de", "hi", "ja", "ko", "pt", "zh", "it", "uk", "ru", "ar"]);
+    expect(runtimeLocaleNames.zh).toBe("Mandarin Chinese");
+    expect(runtimeLocaleEndonyms.de).toBe("Deutsch");
+    expect(isRuntimeLocale("ja")).toBe(true);
+    // Serbian is a dashboard language, not one calls open in.
+    expect(isRuntimeLocale("sr")).toBe(false);
+  });
+
+  it("gives every language a distinct name for prompts and for the dashboard", () => {
+    expect(new Set(Object.values(runtimeLocaleNames)).size).toBe(runtimeLocales.length);
+    expect(new Set(Object.values(runtimeLocaleEndonyms)).size).toBe(runtimeLocales.length);
+  });
+
+  it("reduces language tags to the language calls open in", () => {
+    expect(normalizeRuntimeLocale("pt-BR")).toBe("pt");
+    expect(normalizeRuntimeLocale("zh_Hans_CN")).toBe("zh");
+    expect(normalizeRuntimeLocale(" ES-mx ")).toBe("es");
+    expect(normalizeRuntimeLocale("sr-Latn")).toBeNull();
+    expect(normalizeRuntimeLocale(undefined)).toBeNull();
   });
 });

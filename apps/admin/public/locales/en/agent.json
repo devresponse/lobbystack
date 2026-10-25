@@ -269,7 +269,7 @@
     "defaultLocale": {
       "label": "Default customer language",
       "placeholder": "Select a default language",
-      "hint": "Choose the fallback language your receptionist should use when a caller's preference is unknown."
+      "hint": "Calls start in this language, and switch when a caller speaks another one. Write your greeting in this language too. Call summaries are written in it."
     },
     "timezone": {
       "label": "Business timezone",

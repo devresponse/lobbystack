@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, ilike, lt, ne, sql } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { FULL_CRAWL_PAGE_LIMIT, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { FULL_CRAWL_PAGE_LIMIT, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeRuntimeLocale, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { buildBusinessContextSnapshot } from "../snapshot";
 import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
 
@@ -584,7 +584,7 @@ export async function refreshBusinessSnapshot(
       displayName: business[0].name,
       ...(business[0].legalName ? { legalName: business[0].legalName } : {}),
       timezone: business[0].timezone,
-      defaultLocale: business[0].defaultLocale === "fr" ? "fr" : "en",
+      defaultLocale: normalizeRuntimeLocale(business[0].defaultLocale) ?? "en",
       businessType: ["clinic", "repair_shop", "salon", "service_company"].includes(business[0].businessType) ? business[0].businessType as BusinessContextSnapshot["businessType"] : "other",
       telemetryEnabled: business[0].telemetryEnabled,
       ...(phoneNumber ? { phoneNumber } : {}),

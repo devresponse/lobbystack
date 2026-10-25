@@ -60,6 +60,15 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("where a widget may run", () => {
+  it("carries the business's language, or English when calls can't open in the stored one", async () => {
+    rows.key = [keyRow()];
+    for (const [stored, expected] of [["ja", "ja"], ["fr", "fr"], ["sr", "en"]]) {
+      rows.business = [{ name: "Acme Dental", slug: "acme-dental", defaultLocale: stored }];
+      const access = await resolveWidgetAccess(sessionRequest("https://acmedental.example"), "wk_live_abc", { requireOrigin: true, strictOrigin: true });
+      expect(access.ok && access.session.defaultLocale, stored).toBe(expected);
+    }
+  });
+
   it("starts a session on one of the key's websites", async () => {
     rows.key = [keyRow()];
     const access = await resolveWidgetAccess(sessionRequest("https://acmedental.example"), "wk_live_abc", { requireOrigin: true, strictOrigin: true });

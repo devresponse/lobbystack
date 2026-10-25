@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useTranslation } from "react-i18next";
-import { normalizeInterfaceLocale, withoutSoundTags, type InterfaceLocale } from "@lobbystack/shared";
+import { normalizeInterfaceLocale, withoutSoundTags, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import { useWebVoiceCall, type WebVoiceErrorKey, type WebVoiceTranscriptTurn } f
 
 type WidgetConfigPayload = {
   key: string;
-  business: { id: string; name: string; defaultLocale: "en" | "fr" };
+  business: { id: string; name: string; defaultLocale: RuntimeLocale };
   config: {
     color?: string;
     title?: string;
@@ -751,7 +751,7 @@ function VoiceTranscript({ captions, color, onColor, t }: { captions: VoiceCapti
       {captions.live && turns.length === 0 ? <p className="text-center text-xs text-zinc-400">{t("chat.voiceConnected")}</p> : null}
       {turns.map((turn, index) => (
         <div key={index} className={cn("flex", turn.speaker === "caller" ? "justify-end" : "justify-start")}>
-          <p className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color, color: onColor } : undefined}>
+          <p dir="auto" className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color, color: onColor } : undefined}>
             {turn.text.trim()}
           </p>
         </div>

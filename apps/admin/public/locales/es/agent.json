@@ -269,7 +269,7 @@
     "defaultLocale": {
       "label": "Idioma predeterminado del cliente",
       "placeholder": "Seleccione un idioma predeterminado",
-      "hint": "Elija el idioma que su recepcionista debe usar cuando no se conoce la preferencia de la persona que llama."
+      "hint": "Las llamadas empiezan en este idioma y cambian al de la persona que llama si habla otro. Escriba también su saludo en este idioma. Los resúmenes de llamadas se escriben en él."
     },
     "timezone": {
       "label": "Zona horaria del negocio",

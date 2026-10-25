@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
 import { auditLogs, businesses, businessHours, businessMemberships, businessPublicProfiles, closures, phoneNumbers, receptionistProfiles, services, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { normalizeBookingMode, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type PublicProfileAddress, type PublicProfileSettings, type RuntimeLocale } from "@lobbystack/shared";
+import { normalizeBookingMode, normalizeInterfaceLocale, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type InterfaceLocale, type PublicProfileAddress, type PublicProfileSettings, type ServiceNameLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { checkAvailability } from "./booking";
@@ -19,7 +19,7 @@ import { candidateStartTimes } from "./receptionistActions";
 export type PublicProfileService = {
   name: string;
   /** The name in English or French, when the business gave one. */
-  localizedNames?: Partial<Record<RuntimeLocale, string>>;
+  localizedNames?: Partial<Record<ServiceNameLocale, string>>;
   durationMinutes: number;
   description: string | null;
 };
@@ -28,7 +28,7 @@ export type PublicProfileService = {
 export type PublicProfileOpening = {
   startsAt: string;
   serviceName: string;
-  serviceLocalizedNames?: Partial<Record<RuntimeLocale, string>>;
+  serviceLocalizedNames?: Partial<Record<ServiceNameLocale, string>>;
 };
 
 /** When a caller can ask the receptionist for a person: at any time, while the business is open, or never. */
@@ -43,7 +43,8 @@ export type PublicBusinessProfile = {
   category: string | null;
   description: string | null;
   timezone: string;
-  defaultLocale: RuntimeLocale;
+  /** The page's language nearest the business's default customer language: English unless the page is translated into it. */
+  defaultLocale: InterfaceLocale;
   /** Null when no part of the address is set. */
   address: PublicProfileAddress | null;
   /** Whether the owner shows a map of the address. */
@@ -90,7 +91,7 @@ function addressOf(row: ProfileRow): PublicProfileAddress {
   return { line1: row.addressLine1, line2: row.addressLine2, city: row.city, region: row.region, postalCode: row.postalCode, countryCode: row.countryCode };
 }
 
-function localizedNamesOf(value: Record<string, string> | null): Partial<Record<RuntimeLocale, string>> | undefined {
+function localizedNamesOf(value: Record<string, string> | null): Partial<Record<ServiceNameLocale, string>> | undefined {
   if (!value) return undefined;
   const names = { ...(typeof value.en === "string" && value.en.trim() ? { en: value.en.trim() } : {}), ...(typeof value.fr === "string" && value.fr.trim() ? { fr: value.fr.trim() } : {}) };
   return Object.keys(names).length ? names : undefined;
@@ -129,7 +130,7 @@ export function toPublicBusinessProfile(rows: PublicProfileRows, input: { now: D
     category: profile.category,
     description: profile.description,
     timezone: rows.business.timezone,
-    defaultLocale: rows.business.defaultLocale === "fr" ? "fr" : "en",
+    defaultLocale: normalizeInterfaceLocale(rows.business.defaultLocale) ?? "en",
     address: Object.values(address).some(Boolean) ? address : null,
     showMap: profile.showMap,
     phone: profile.showPhone ? rows.phone : null,

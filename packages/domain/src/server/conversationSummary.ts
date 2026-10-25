@@ -1,3 +1,5 @@
+import { normalizeRuntimeLocale, type RuntimeLocale } from "@lobbystack/shared";
+
 export type ConversationSessionSummary =
   | { kind: "message_taking"; summary?: string }
   | { kind: "disposition"; disposition: string }
@@ -51,10 +53,11 @@ export function extractCallerContext(transcript: ConversationTranscriptTurn[]): 
   };
 }
 
-export type CallSummaryLocale = "en" | "fr";
+/** The language a call's summary is written in: the business's default customer language. */
+export type CallSummaryLocale = RuntimeLocale;
 
 export function normalizeCallSummaryLocale(locale: string | null | undefined): CallSummaryLocale {
-  return locale?.trim().toLowerCase().startsWith("fr") ? "fr" : "en";
+  return normalizeRuntimeLocale(locale) ?? "en";
 }
 
 /** A model-written summary and caller name, before the domain validates them. */

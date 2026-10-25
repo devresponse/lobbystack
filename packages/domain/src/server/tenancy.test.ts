@@ -58,6 +58,20 @@ describe("business timezone", () => {
     expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
   });
 
+  it("saves any language calls can open in, and refuses one they can't without saving anything", async () => {
+    const saved = useTransaction();
+    await updateBusinessInTransaction(saved.tx, { businessId: "biz-1", defaultLocale: " ko " });
+    expect(saved.updates).toEqual([{ table: businesses, values: expect.objectContaining({ defaultLocale: "ko" }) }]);
+
+    for (const locale of ["sr", "english", 5]) {
+      vi.clearAllMocks();
+      const refused = useTransaction();
+      await expect(updateBusinessInTransaction(refused.tx, { businessId: "biz-1", defaultLocale: locale as string })).rejects.toMatchObject({ status: 400, code: "invalid_locale" });
+      expect(refused.updates).toEqual([]);
+      expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
+    }
+  });
+
   it("refreshes the receptionist's snapshot when the dashboard updates the business", async () => {
     const { tx } = useTransaction();
     await updateBusiness({ db: undefined as never }, { userId: "operator", businessId: "biz-1", timezone: "Europe/Belgrade" });

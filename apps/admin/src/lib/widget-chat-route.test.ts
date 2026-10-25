@@ -398,17 +398,21 @@ describe("POST /api/widget/chat", () => {
     expect(agent.context.liveChat?.locale).toBe(locale);
   });
 
-  it("uses the widget's settings, then the business's language, for a widget that sends none", async () => {
+  it("uses the widget's settings, then the business's language when the widget has it, for a widget that sends none", async () => {
     mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
     mocks.loadWidgetChatHistory.mockResolvedValue([]);
     mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: { localeOverride: "es" } } });
     await readSse(await POST(widgetRequest()));
     mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: {} } });
     await readSse(await POST(widgetRequest()));
+    // Calls can open in German, but the widget isn't translated into it.
+    mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "de", config: {} } });
+    await readSse(await POST(widgetRequest()));
 
     expect(mocks.createReceptionistAgent.mock.calls.map(([input]) => (input as { extraInstructions: string }).extraInstructions)).toEqual([
       expect.stringContaining("Reply in Spanish until"),
       expect.stringContaining("Reply in French until"),
+      expect.stringContaining("Reply in English until"),
     ]);
   });
 

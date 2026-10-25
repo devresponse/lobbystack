@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 
-import { tool, type ToolSet } from "ai";
+import { APICallError, tool, type ToolSet } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
@@ -8,7 +8,7 @@ import { z } from "zod";
 import { demoSnapshot } from "@lobbystack/shared";
 import { initializeTelemetry, injectTraceContext, shutdownTelemetry, withCallContext, withSpan } from "@lobbystack/telemetry/node";
 
-import { createReceptionistAgent, WEB_CHAT_MAX_OUTPUT_TOKENS, withToolSpans } from "./agent";
+import { createReceptionistAgent, WEB_CHAT_MAX_OUTPUT_TOKENS, withToolSpans, type ReceptionistStreamOptions } from "./agent";
 import type { AgentChannel, AgentToolContext } from "./tools";
 
 type LanguageModelV4CallOptions = Parameters<MockLanguageModelV4["doGenerate"]>[0];
@@ -48,6 +48,24 @@ describe("createReceptionistAgent", () => {
     const plain = await firstCall("web_chat", { conversationId: "conv_1" });
     expect(plain.tools?.map((tool) => tool.name)).not.toContain("requestTeamMember");
     expect(JSON.stringify(plain.prompt)).not.toContain("requestTeamMember");
+  });
+
+  it("hands a request the model provider refused to onError, which the SDK would otherwise print", async () => {
+    const refusal = new APICallError({ message: "Project does not have access to model gpt-6-luna.", url: "https://api.openai.com/v1/responses", requestBodyValues: {}, statusCode: 403, isRetryable: false });
+    const model = new MockLanguageModelV4({ doStream: async () => { throw refusal; } });
+    const printed = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errors: unknown[] = [];
+    const agent = createReceptionistAgent({ model, context: { domain: { db: {} as never }, snapshot: demoSnapshot, channel: "web_chat", conversationId: "conv_1" } });
+
+    const options: ReceptionistStreamOptions = { messages: [{ role: "user", content: "Are you open on Sunday?" }], onError: ({ error }) => { errors.push(error); } };
+    const result = await agent.stream(options);
+    let text = "";
+    for await (const part of result.textStream) text += part;
+
+    // The text just ends: only onError hears why.
+    expect(text).toBe("");
+    expect(errors).toEqual([refusal]);
+    expect(printed).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,5 @@
 import { demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/domain", async () => ({
   countKnowledgeTokens: (await import("../../domain/src/knowledgeRanking")).countKnowledgeTokens,
@@ -29,6 +29,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-10-01T14:00:00Z"));
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 afterAll(() => {
   vi.useRealTimers();
 });
@@ -53,6 +57,22 @@ describe("requestTeamMember", () => {
     expect(result).toEqual({ ok: true, status: "The team was alerted. Someone should join this chat within 3 minutes. If nobody does, the chat comes back to you and the visitor is asked for a name and number for a callback." });
     expect(requestTeamForWidgetChat).toHaveBeenCalledWith(chat.domain, { businessId: demoSnapshot.businessId, conversationId: "conv_1", locale: "fr", reason: "A question about an invoice" });
     expect(onTeamRequested).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs whether the team was asked, without what the visitor needs", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    vi.mocked(requestTeamForWidgetChat).mockResolvedValue({ ok: true, waitMinutes: 3 });
+    await requestTeamMember({ ...chat, liveChat }, { reason: "A question about an invoice" });
+    // Thursday at 18:00 in Toronto, after closing.
+    vi.setSystemTime(new Date("2026-10-01T22:00:00Z"));
+    await requestTeamMember({ ...chat, liveChat }, { reason: "A question about an invoice" });
+
+    const lines = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toEqual([
+      expect.objectContaining({ level: "info", message: "widget.team_request", businessId: demoSnapshot.businessId, conversationId: "conv_1", outcome: "requested" }),
+      expect.objectContaining({ message: "widget.team_request", outcome: "closed" }),
+    ]);
+    expect(JSON.stringify(lines)).not.toContain("invoice");
   });
 
   it("alerts nobody outside opening hours", async () => {

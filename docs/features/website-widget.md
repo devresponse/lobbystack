@@ -1,6 +1,6 @@
 # Run the website widget
 
-The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `da1f548`.
+The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `1a2c81b`.
 
 ## Know how it works
 
@@ -72,6 +72,41 @@ Every allowed call start counts, even one that then fails at OpenAI. A refused s
 
 A website call lasts at most 30 minutes. A minute before the end, the receptionist warns the caller, and at the end it says goodbye before hanging up ([calls](calls.md#end-calls-politely-at-the-time-limit)). On a plan with included minutes, a website call reserves its whole length when it starts.
 
+## Find out why a reply failed
+
+When the receptionist can't answer, the widget says "Your message couldn't be sent. Please try again." and shows an Error ID under it (fork PR #79). By then the visitor's message is saved and the "New website chat message" alert has gone out, so the message waits in **Messages**.
+
+1. Copy the Error ID from the widget. The browser has it too: in the developer tools' **Network** tab, the `chat` request's answer ends with an `error` part whose `errorText` holds `"code":"chat_reply_failed"` and the `errorId`.
+2. Filter the admin's log with `@errorId:<id>` ([guide, 7.11](../deployment/guide/part-7-operations.md#711-logs-error-ids-and-following-one-call)). The line starts with `[admin] exception:` and the error's own message, such as OpenAI's explanation. With PostHog set up, Error Tracking has the same report, with the operation `widget.chat_reply`.
+3. Read the line's fields. None of them holds what the visitor or the receptionist wrote.
+
+| Field | What it says |
+| --- | --- |
+| `category` | Why the reply failed, from the table below |
+| `providerErrorStatus`, `providerErrorCode`, `providerErrorKind`, `providerErrorParam` | What OpenAI answered: the HTTP status, its error code and type, and the request field it objected to |
+| `retryable`, `attempts` | Whether trying again could help, and, when the AI SDK retried, how many tries it made (3 at most) |
+| `stage` | How far the reply got: `load_context` (the business's details and the chat so far), `generate` (the AI) or `save_reply` |
+| `modelSteps`, `tools`, `durationMs` | The model steps that finished, the tools they called, and how long the reply ran |
+| `businessId`, `conversationId` | The business, and the chat |
+
+| `category` | What it usually means | What to check |
+| --- | --- | --- |
+| `provider_auth` | OpenAI answered 401 or 403: the key is wrong or revoked, or its project may not use the model | `AI_CHAT_API_KEY` on the admin, or `OPENAI_API_KEY` when that isn't set, and the key's project at OpenAI |
+| `provider_rejected` | Another 4xx, such as 400 or 404: a model the account can't use, a setting the model doesn't take, or a request that's too big. `providerErrorParam` names the setting | `AI_CHAT_MODEL`, `AI_CHAT_REASONING_EFFORT` and `AI_CHAT_SERVICE_TIER` on the admin |
+| `provider_rate_limited` | 429. `insufficient_quota` means the OpenAI account is out of credit; any other code is a rate limit | Billing and limits at OpenAI ([guide, 7.13](../deployment/guide/part-7-operations.md#713-costs-and-usage-limits)) |
+| `provider_unavailable` | 408, 409 or 5xx, still failing after the AI SDK's retries | OpenAI's status page. It usually passes |
+| `provider_unreachable` | No answer from OpenAI: the name lookup, the network or TLS failed | The admin's outbound network, and `AI_CHAT_BASE_URL` when it's set |
+| `invalid_response` | An answer the AI SDK couldn't read | The `ai` and `@ai-sdk/openai` versions, against the model |
+| `output_limit` | The model used the reply's 4,000 output tokens, usually on reasoning, before writing anything | `AI_CHAT_REASONING_EFFORT` |
+| `content_filter` | The provider's filter stopped the reply | The chat in **Messages** |
+| `step_limit` | The model called tools in all 4 of its steps and never wrote a reply | The reply's AI trace ([calls](calls.md#trace-what-the-ai-was-given)) |
+| `no_reply` | The model stopped without writing anything | The reply's AI trace |
+| `generation_failed` | Anything else, such as a tool that threw, or the database while the chat loaded | `stage`, and the error's stack in PostHog |
+
+A message turned away before the reply starts shows the same words without an Error ID. The admin's `widget.chat_refused` line has its `status` and `code`, and for a rate limit the `reason`, which names the count that ran out, such as `rate_limit_visitor_hour`. When the admin fails before the reply starts, such as while saving the message, the widget shows an Error ID, and the report's operation is `widget.chat`.
+
+Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and the token counts. A visitor's request for a person logs `widget.team_request` with its `outcome`: `requested`, `closed` (outside opening hours), `team_has_chat` or `not_found`. These lines carry `businessId` and `conversationId`, and never the chat's words.
+
 ## Know what was changed in the fork
 
 | Pull request | Change |
@@ -85,6 +120,7 @@ A website call lasts at most 30 minutes. A minute before the end, the receptioni
 | #30 | The call button appears as soon as the business gets its number (migration `0101` refreshes existing snapshots). |
 | #43 | Messages and the widget keep updating after a dropped connection, such as during a deploy. Streams reopen with backoff, and the loader renews its session before it expires. |
 | #45, #49, #52, #54 | The recorded greeting, clearer call refusals and higher limits, the greeting on the caller's first audio, and 30-minute calls with a polite ending. |
+| #79 | A failed reply shows an Error ID, and the admin logs and reports why ([above](#find-out-why-a-reply-failed)). A reply cut off by an error is no longer saved as if it were whole, and a request that fails its checks answers 400 instead of 500. |
 
 ## Know the gaps
 
@@ -92,4 +128,5 @@ A website call lasts at most 30 minutes. A minute before the end, the receptioni
 - Capacity: one admin process handled about 400 people chatting at once in a local test. Past that, add admin replicas, which first needs connection pooling ([scalability](../reviews/scalability-2026-10-18.md)).
 - Left from the review's improvement list: stop the 45-second fallback poll and add jitter, measure time to the first word, cache the loader with an ETag, a panel-only layout, Turnstile, and a spending cap per website.
 - Left from the realtime work: hand back an overdue team request when the visitor writes, keep polling whenever live updates are down, link a website call to its widget visitor, and show who replied on Messages.
+- When only the reply fails, the widget still says "Your message couldn't be sent. Please try again.", though the message was saved and the team alerted, and sending it again saves it twice.
 - A real GPT-Live call through the widget, and `pnpm voice:eval --browser`, haven't been run since fork PRs #18, #52 and #54.

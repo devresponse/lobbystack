@@ -1,4 +1,4 @@
-import { stepCountIs, ToolLoopAgent, type LanguageModel, type StopCondition, type ToolExecutionOptions, type ToolSet } from "ai";
+import { stepCountIs, ToolLoopAgent, type LanguageModel, type StopCondition, type StreamTextOnErrorCallback, type ToolExecutionOptions, type ToolSet } from "ai";
 
 import type { AiTraceStep } from "@lobbystack/domain";
 import { reportError, withOpenSpan } from "@lobbystack/telemetry/node";
@@ -8,6 +8,14 @@ import { directToolAnswer } from "./live/directAnswer";
 import { createReceptionistTools, offersLiveChat, type AgentToolContext } from "./tools";
 
 export type ReceptionistAgent = ToolLoopAgent<never, ToolSet>;
+
+/**
+ * What a streamed reply takes. ToolLoopAgent passes the options it doesn't
+ * use itself on to streamText, onError among them. A failed request to the
+ * model only reaches onError: the text just stops. Without one, the SDK
+ * prints the error as a block of lines that names no business or chat.
+ */
+export type ReceptionistStreamOptions = Parameters<ReceptionistAgent["stream"]>[0] & { onError: StreamTextOnErrorCallback };
 
 /**
  * Website chat's cap on each model step's output, so no reply runs long even

@@ -63,11 +63,19 @@ function messageText(message: WidgetMessage): string {
   return message.parts.filter((part): part is Extract<WidgetMessage["parts"][number], { type: "text" }> => part.type === "text").map((part) => part.text).join("");
 }
 
-function chatErrorKey(error: unknown): string {
+/**
+ * What to show for a message the server didn't answer: a translation key, or,
+ * for a failure the server reported, the key and the report's Error ID, which
+ * the business can look up in its logs.
+ */
+type SubmitError = string | { key: string; errorId: string };
+
+function chatError(error: unknown): SubmitError {
   if (!(error instanceof Error)) return "chat.sendingFailed";
   try {
-    const parsed = JSON.parse(error.message) as { code?: unknown };
-    return parsed.code === "chat_ai_limit_reached" ? "chat.limitReached" : "chat.sendingFailed";
+    const parsed = JSON.parse(error.message) as { code?: unknown; errorId?: unknown };
+    const key = parsed.code === "chat_ai_limit_reached" ? "chat.limitReached" : "chat.sendingFailed";
+    return typeof parsed.errorId === "string" && parsed.errorId ? { key, errorId: parsed.errorId } : key;
   } catch {
     return "chat.sendingFailed";
   }
@@ -169,7 +177,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const [draft, setDraft] = useState("");
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadDone, setLeadDone] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<SubmitError | null>(null);
+  const submitErrorKey = typeof submitError === "string" ? submitError : submitError?.key;
+  const submitErrorId = typeof submitError === "string" ? undefined : submitError?.errorId;
   const [configState, setConfigState] = useState<WidgetConfigPayload | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   // Whether the thread follows new messages: true while the visitor is at the bottom.
@@ -229,7 +239,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
     id: `widget:${widgetKey}`,
     generateId: () => crypto.randomUUID(),
     transport,
-    onError: (error) => setSubmitError(chatErrorKey(error)),
+    onError: (error) => setSubmitError(chatError(error)),
     onFinish: ({ message }) => {
       setChatSaved(true);
       const metadata = message.metadata;
@@ -531,7 +541,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
   const configErrorCode = config.error instanceof Error && ["originDenied", "invalidKey", "configLoad"].includes(config.error.message) ? config.error.message : null;
   // Until the settings and the history load, placeholders hold the place of the name, the call
   // button, the chat and the visitor ID, so nothing moves when they arrive.
-  const chatPending = !chatLoaded && !config.isError && !submitError?.startsWith("errors.");
+  const chatPending = !chatLoaded && !config.isError && !submitErrorKey?.startsWith("errors.");
 
   return (
     // The chat fills the frame at a fixed height and only the thread scrolls, so new messages never
@@ -594,7 +604,7 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
         )) : null}
         {sending && !handoff && messages.at(-1)?.role === "user" ? <div className="flex justify-start"><div className="rounded-2xl rounded-bl-sm bg-zinc-100 px-3 py-2 text-sm text-zinc-400">{t("chat.pendingLabel")}</div></div> : null}
         {voiceTranscriptShown ? <VoiceTranscript captions={voiceCaptions} color={color} onColor={onColor} t={t} /> : null}
-        {submitError ? <p className="text-center text-xs text-red-600">{t(submitError)}</p> : null}
+        {submitErrorKey ? <p className="text-center text-xs text-red-600">{t(submitErrorKey)}{submitErrorId ? <span className="block select-all text-zinc-400 tabular-nums">{t("chat.errorId", { id: submitErrorId })}</span> : null}</p> : null}
       </div>
 
       {showLeadBeforeChat ? (

@@ -548,8 +548,13 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
       description: "Ask someone from the team to join this chat, when the visitor asks for a person or a rule says to transfer them. The team gets an alert and replies in this chat. Only works during opening hours, or at any time when the business has set none.",
       inputSchema: z.object({ reason: z.string().optional().describe("What the visitor needs, in a few words, for the team's alert.") }),
       execute: async ({ reason }) => {
-        if (snapshot.hours.length && !isBusinessOpen(snapshot)) return { ok: false, reason: "It's outside opening hours, so nobody from the team can join the chat now." };
+        // Says whether a visitor who asked for a person got one, without the reason they gave.
+        if (snapshot.hours.length && !isBusinessOpen(snapshot)) {
+          logEvent("info", "widget.team_request", { businessId, conversationId, outcome: "closed" });
+          return { ok: false, reason: "It's outside opening hours, so nobody from the team can join the chat now." };
+        }
         const outcome = await requestTeamForWidgetChat(domain, { businessId, conversationId, locale: liveChat.locale, ...(reason?.trim() ? { reason } : {}) });
+        logEvent("info", "widget.team_request", { businessId, conversationId, outcome: outcome.ok ? "requested" : outcome.reason });
         if (outcome.ok) {
           liveChat.onTeamRequested?.();
           return { ok: true, status: `The team was alerted. Someone should join this chat within ${outcome.waitMinutes} minutes. If nobody does, the chat comes back to you and the visitor is asked for a name and number for a callback.` };

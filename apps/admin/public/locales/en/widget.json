@@ -6,6 +6,7 @@
     "composerPlaceholder": "Type your message...",
     "send": "Send",
     "sendingFailed": "Your message couldn't be sent. Please try again.",
+    "errorId": "Error ID: {{id}}",
     "loadingTranscript": "Loading conversation...",
     "chatUnavailable": "Chat is unavailable right now.",
     "emptyBody": "Please enter a message.",

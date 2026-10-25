@@ -1,4 +1,5 @@
-export { createReceptionistAgent, createTraceReplayAgent, receptionistInstructions, toAiTraceSteps, type ReceptionistAgent } from "./agent";
+export { createReceptionistAgent, createTraceReplayAgent, receptionistInstructions, toAiTraceSteps, type ReceptionistAgent, type ReceptionistStreamOptions } from "./agent";
+export { describeAgentFailure, EmptyReplyError, type AgentFailure, type AgentFailureCategory } from "./failure";
 export { buildAgentInstructions, buildLiveInstructions, liveLanguage } from "./instructions";
 export { agentModelId, callSummaryEnvironment, createAgentModel, describeAgentUsage, liveDelegationEnvironment } from "./model";
 export { createReceptionistTools, type AgentChannel, type AgentToolContext, type CallControl, type KeypadPasscodeCheck, type KeypadPasscodeOutcome, type LiveChannel } from "./tools";

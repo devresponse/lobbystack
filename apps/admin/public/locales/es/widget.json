@@ -6,6 +6,7 @@
     "composerPlaceholder": "Escriba su mensaje...",
     "send": "Enviar",
     "sendingFailed": "No se pudo enviar su mensaje. Inténtelo de nuevo.",
+    "errorId": "ID del error: {{id}}",
     "loadingTranscript": "Cargando la conversación...",
     "chatUnavailable": "El chat no está disponible en este momento.",
     "emptyBody": "Escriba un mensaje.",

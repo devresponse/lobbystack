@@ -97,7 +97,7 @@ owner:
 
 | Section | What it sets |
 | --- | --- |
-| `business` | `name` and `timezone` are required. `locale` (`en` or `fr`), `website_url`, `business_type` and `slug` are optional. `hours` lists the week's open windows by `day`, `open` and `close`, and replaces the hours the business had. `id` sets up a business that already exists instead of creating one. |
+| `business` | `name` and `timezone` are required. `locale` (the language calls open in: `en`, `es`, `fr`, `de`, `hi`, `ja`, `ko`, `pt`, `zh`, `it`, `uk`, `ru` or `ar`), `website_url`, `business_type` and `slug` are optional. `hours` lists the week's open windows by `day`, `open` and `close`, and replaces the hours the business had. `id` sets up a business that already exists instead of creating one. |
 | `receptionist` | The fields of `PATCH /receptionist`, such as `greeting`, `tone`, `transfer_mode`, `transfer_number` and `booking_mode`. |
 | `services` | The fields of `POST /services`. A service with the same name is updated instead of added again. |
 | `rules` | The fields of `POST /rules`. A rule with the same title is updated. |

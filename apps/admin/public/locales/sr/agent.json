@@ -269,7 +269,7 @@
     "defaultLocale": {
       "label": "Podrazumevani jezik za klijente",
       "placeholder": "Izaberite podrazumevani jezik",
-      "hint": "Izaberite jezik koji recepcioner koristi kada ne znamo koji jezik pozivalac želi."
+      "hint": "Pozivi počinju na ovom jeziku i prelaze na jezik pozivaoca ako govori neki drugi. Napišite i pozdrav na ovom jeziku. Rezimei poziva se pišu na njemu."
     },
     "timezone": {
       "label": "Vremenska zona firme",

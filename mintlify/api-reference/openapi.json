@@ -13108,7 +13108,7 @@
           },
           "locale": {
             "type": "string",
-            "description": "Default language for callers: en or fr."
+            "description": "Default language for callers, which calls open in and call summaries are written in: en, es, fr, de, hi, ja, ko, pt, zh, it, uk, ru or ar."
           },
           "website_url": {
             "type": [
@@ -13237,10 +13237,22 @@
             "maxLength": 80
           },
           "locale": {
+            "description": "Default language for callers, which calls open in and call summaries are written in: en, es, fr, de, hi, ja, ko, pt, zh, it, uk, ru or ar.",
             "type": "string",
             "enum": [
               "en",
-              "fr"
+              "es",
+              "fr",
+              "de",
+              "hi",
+              "ja",
+              "ko",
+              "pt",
+              "zh",
+              "it",
+              "uk",
+              "ru",
+              "ar"
             ]
           },
           "website_url": {
@@ -13333,11 +13345,22 @@
             "maxLength": 120
           },
           "locale": {
-            "description": "Default language for callers: en or fr. Defaults to en.",
+            "description": "Default language for callers, which calls open in: en, es, fr, de, hi, ja, ko, pt, zh, it, uk, ru or ar. Defaults to en.",
             "type": "string",
             "enum": [
               "en",
-              "fr"
+              "es",
+              "fr",
+              "de",
+              "hi",
+              "ja",
+              "ko",
+              "pt",
+              "zh",
+              "it",
+              "uk",
+              "ru",
+              "ar"
             ]
           },
           "website_url": {
@@ -13369,7 +13392,7 @@
           },
           "locale": {
             "type": "string",
-            "description": "Default language for callers: en or fr."
+            "description": "Default language for callers, which calls open in: en, es, fr, de, hi, ja, ko, pt, zh, it, uk, ru or ar."
           },
           "website_url": {
             "type": [
@@ -14418,7 +14441,7 @@
             ]
           },
           "locale": {
-            "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
+            "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language when it's one of these, else en.",
             "type": [
               "string",
               "null"
@@ -14733,7 +14756,7 @@
                   ]
                 },
                 "locale": {
-                  "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
+                  "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language when it's one of these, else en.",
                   "type": [
                     "string",
                     "null"
@@ -22466,7 +22489,7 @@
                 ]
               },
               "locale": {
-                "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language.",
+                "description": "Language for the contact's reminders and confirmations: en, fr, es or sr. null: the business's default language when it's one of these, else en.",
                 "type": [
                   "string",
                   "null"

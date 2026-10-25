@@ -91,6 +91,12 @@ describe("buildLiveInstructions", () => {
     expect(instructions).toContain(`Open the call with this greeting as soon as you're told to start: "${demoSnapshot.greeting}" Say it once, at the start of the call only.`);
   });
 
+  it("opens the call in any of the languages a business can pick", () => {
+    expect(buildLiveInstructions({ ...demoSnapshot, defaultLocale: "ja" }, callStart)).toContain("Speak Japanese at the start of the call.");
+    expect(buildLiveInstructions({ ...demoSnapshot, defaultLocale: "zh" }, callStart)).toContain("Speak Mandarin Chinese at the start of the call.");
+    expect(buildLiveInstructions({ ...demoSnapshot, defaultLocale: "pt" }, callStart)).toContain("Speak Portuguese at the start of the call.");
+  });
+
   // A 2026-10-19 demo call invented council members and a manager's email.
   it("forbids inventing names and contact details as well as prices", () => {
     const instructions = buildLiveInstructions(demoSnapshot, callStart);

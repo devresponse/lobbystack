@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { normalizeRuntimeLocale } from "@lobbystack/shared";
 import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
@@ -43,7 +44,8 @@ export function OnboardingGreetingSurface() {
   }, [agent.data?.profile?.greeting, hasUserEdited]);
   const save = useMutation({
     mutationFn: async () => {
-      await requestJson("/api/agent", { method: "PATCH", body: JSON.stringify({ greeting: greeting.trim(), locale: i18n.language.startsWith("fr") ? "fr" : "en" }) });
+      // Calls open in the dashboard's language when they can: English, French or Spanish.
+      await requestJson("/api/agent", { method: "PATCH", body: JSON.stringify({ greeting: greeting.trim(), locale: normalizeRuntimeLocale(i18n.language) ?? "en" }) });
       return await requestJson(`/api/onboarding/stage?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ to: "plan" }) });
     },
     onSuccess: async () => {

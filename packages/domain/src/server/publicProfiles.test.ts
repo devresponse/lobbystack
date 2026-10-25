@@ -55,6 +55,13 @@ describe("the public profile's shape", () => {
     expect(profile.closures).toEqual([{ startsAt: "2026-11-11T08:00:00.000Z", endsAt: "2026-11-12T08:00:00.000Z", reason: "Remembrance Day" }]);
   });
 
+  it("suggests the page in the business's language when the page has it, else in English", () => {
+    const language = (defaultLocale: string) => toPublicBusinessProfile(rows({ business: { ...rows().business, defaultLocale } }), { now }).defaultLocale;
+    expect(language("fr")).toBe("fr");
+    expect(language("es")).toBe("es");
+    expect(language("de")).toBe("en");
+  });
+
   it("leaves out the sections the owner switched off", () => {
     const profile = toPublicBusinessProfile(rows({}, { showPhone: false, showHours: false, showServices: false, showMap: false }), { now });
     expect(profile).toMatchObject({ phone: null, hours: null, closures: null, services: null, showMap: false });

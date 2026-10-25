@@ -1,4 +1,4 @@
-import type { AiUsage } from "@lobbystack/shared";
+import { normalizeRuntimeLocale, runtimeLocaleNames, type AiUsage } from "@lobbystack/shared";
 import type { LanguageModel } from "ai";
 import { z } from "zod";
 
@@ -23,8 +23,6 @@ export type BusinessSummarizer = {
 /** Long enough for what the business does, who it serves and what it offers; the agent settings API caps a summary at 2,000. */
 export const MAX_BUSINESS_SUMMARY_CHARACTERS = 700;
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-const LANGUAGES: Record<string, string> = { en: "English", fr: "French", es: "Spanish", sr: "Serbian" };
 
 export const businessSummarySchema = z.object({
   summary: z.string().describe(`Two to four sentences, at most ${MAX_BUSINESS_SUMMARY_CHARACTERS} characters, or an empty string when the sources don't say what the business does.`),
@@ -59,7 +57,7 @@ export async function summarizeBusiness(input: {
     model: input.model,
     name: "business_summary",
     schema: businessSummarySchema,
-    instructions: instructions(LANGUAGES[input.locale.slice(0, 2).toLowerCase()] ?? "English"),
+    instructions: instructions(runtimeLocaleNames[normalizeRuntimeLocale(input.locale) ?? "en"]),
     prompt: buildBusinessSummaryPrompt(input),
     timeoutMs: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     abortSignal: input.abortSignal,

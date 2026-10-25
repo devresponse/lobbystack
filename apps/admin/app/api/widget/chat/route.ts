@@ -155,8 +155,9 @@ async function answerChat(request: Request) {
           const activeSnapshot = snapshot ?? fallbackSnapshot(session);
           const history = await loadWidgetChatHistory(context, { businessId: session.businessId, conversationId });
           // The widget's language, which the visitor reads the chat in. A widget
-          // from before it sent one shows its settings' language, or the business's.
-          const locale: InterfaceLocale = body.locale ?? normalizeInterfaceLocale(session.config.localeOverride) ?? session.defaultLocale;
+          // from before it sent one shows its settings' language, or else the
+          // business's when the widget is translated into it, or else English.
+          const locale: InterfaceLocale = body.locale ?? normalizeInterfaceLocale(session.config.localeOverride) ?? normalizeInterfaceLocale(session.defaultLocale) ?? "en";
           const agentInput = {
             model: model!,
             context: {

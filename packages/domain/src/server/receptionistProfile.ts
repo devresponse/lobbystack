@@ -3,11 +3,13 @@ import {
   appointmentChangeVerificationModes,
   bookingModes,
   defaultAppointmentChangePolicy,
+  isRuntimeLocale,
   RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH,
   RECEPTIONIST_TEXT_MAX_LENGTH,
   transferModes,
   type AppointmentChangePolicy,
   type BookingMode,
+  type RuntimeLocale,
   type TransferPolicy,
 } from "@lobbystack/shared";
 
@@ -31,7 +33,8 @@ export type ReceptionistProfilePatch = {
 
 export type ReceptionistSettingsChange = {
   patch: ReceptionistProfilePatch;
-  locale?: "en" | "fr";
+  /** The business's default customer language, which calls open in. */
+  locale?: RuntimeLocale;
   timezone?: string;
   /** Hands the summary back to AI, which rewrites it from the knowledge sources. */
   regenerateSummary: boolean;
@@ -85,7 +88,7 @@ export function readReceptionistSettingsChange(body: unknown): ReceptionistSetti
   const patch = { ...fields, ...(policy !== undefined ? { appointmentChangePolicy: policy } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}) } as ReceptionistProfilePatch;
 
   const locale = input.locale;
-  if (locale !== undefined && locale !== "en" && locale !== "fr") throw invalid("locale is invalid.");
+  if (locale !== undefined && !isRuntimeLocale(locale)) throw invalid("locale is invalid.");
   const timezone = input.timezone;
   if (timezone !== undefined && typeof timezone !== "string") throw invalid("timezone must be a string.");
   const regenerateSummary = input.regenerateSummary;

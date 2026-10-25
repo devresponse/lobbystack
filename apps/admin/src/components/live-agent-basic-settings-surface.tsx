@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
-import { appointmentChangeVerificationModes, intlLocale, normalizeBookingMode, type AppointmentChangePolicy, type AppointmentChangeVerificationMode, type BookingMode, type RuntimeLocale } from "@lobbystack/shared";
+import { appointmentChangeVerificationModes, intlLocale, normalizeBookingMode, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocales, type AppointmentChangePolicy, type AppointmentChangeVerificationMode, type BookingMode, type RuntimeLocale } from "@lobbystack/shared";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
@@ -145,7 +145,7 @@ export function AgentBasicSettingsPage({
     setGreeting(profile.greeting);
     // The sign-up placeholder isn't a summary, so the field starts empty.
     setSummary(profile.summarySource === "placeholder" ? "" : profile.summary);
-    setDefaultLocale(configuration.business?.defaultLocale ?? "en");
+    setDefaultLocale(normalizeRuntimeLocale(configuration.business?.defaultLocale) ?? "en");
     setTransferNumber(profile.transferNumber ?? "");
     setTransferNumberInputValue(profile.transferNumber ?? "");
     setBookingMode(normalizeBookingMode(profile.bookingMode));
@@ -450,11 +450,11 @@ export function AgentBasicSettingsPage({
               </ItemContent>
               <ItemActions className="w-full sm:w-auto">
                 {isLoadingConfiguration ? (
-                  <Skeleton className="h-10 w-full rounded-md sm:w-32" />
+                  <Skeleton className="h-10 w-full rounded-md sm:w-40" />
                 ) : (
                   <NativeSelect
                     aria-label={t("agent:fields.defaultLocale.label")}
-                    className="w-full sm:w-32"
+                    className="w-full sm:w-40"
                     disabled={!canManageTenant}
                     id="agent-default-language"
                     onChange={(event) => {
@@ -480,12 +480,12 @@ export function AgentBasicSettingsPage({
                     }}
                     value={defaultLocale}
                   >
-                    <NativeSelectOption value="en">
-                      {t("common:language.english")}
-                    </NativeSelectOption>
-                    <NativeSelectOption value="fr">
-                      {t("common:language.french")}
-                    </NativeSelectOption>
+                    {/* Each language in its own name, as in every dashboard language. */}
+                    {runtimeLocales.map((locale) => (
+                      <NativeSelectOption key={locale} lang={locale} value={locale}>
+                        {runtimeLocaleEndonyms[locale]}
+                      </NativeSelectOption>
+                    ))}
                   </NativeSelect>
                 )}
               </ItemActions>

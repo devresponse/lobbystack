@@ -19,7 +19,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - **Polar, end to end on the sandbox.** Nothing has been tried against Polar itself since fork PR #59: a checkout, an upgrade, a second business with the same payer, a promo code, a promo plan's end, the portal, and Polar's invoices against **Settings > Usage** ([billing](../billing/README.md#know-the-known-problems)).
 - **A real call with a keypad PIN:** one that cancels a test appointment with the right PIN, then one with a wrong PIN three times ([caller authentication](../features/caller-authentication.md#know-what-is-untested)).
 - **`pnpm voice:eval` and `pnpm voice:call`,** which need an OpenAI key and haven't been run since fork PRs #13, #18, #45, #50, #52, #54 and #78 ([calls](../features/calls.md#know-what-hasnt-been-tried)); and `pnpm voice:eval --browser` for the widget's calls.
-- **Other languages on GPT-Live:** fork PR #78's Spanish callers, 3 runs each (`pnpm voice:eval --scenario spanish-switch --scenario spanish-only`), and a French call over a phone line. OpenAI doesn't publish GPT-Live's languages ([calls](../features/calls.md#know-which-language-a-call-uses), [voice platforms](../research/voice-platforms.md)).
+- **Other languages on GPT-Live:** fork PR #78's Spanish callers, 3 runs each (`pnpm voice:eval --scenario spanish-switch --scenario spanish-only`), a French call over a phone line, and a call that opens in one of the languages fork PR #82 added, such as Japanese or Arabic. OpenAI doesn't publish GPT-Live's languages ([calls](../features/calls.md#know-which-language-a-call-uses), [voice platforms](../research/voice-platforms.md)).
 
 ## Decide these
 
@@ -47,7 +47,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 
 **Finish the widget** ([website widget](../features/website-widget.md#know-the-gaps), [widget review](../reviews/widget-2026-10-15.md#follow-the-code-improvements)): improvements 5, 6 and 8 to 11 (stop the history poll while live updates are up, time to first word for chats, loader caching, a panel-only layout, Turnstile, a spending cap per website), and the realtime leftovers listed there.
 
-**Serve callers in more languages** ([calls](../features/calls.md#know-which-language-a-call-uses)): Spanish and Serbian as default customer languages, which changes the public API's `locale`; a starter greeting in the business's language; saving the language a caller spoke on the contact, so texts after the call follow it; a voice per business or per language; and GPT-Live 1.1 once OpenAI's API offers it (`LIVE_MODEL`).
+**Serve callers in more languages** ([calls](../features/calls.md#know-which-language-a-call-uses)): since fork PR #82 calls can open in 13 languages. Still open: Serbian, which the dashboard has and calls can't open in; a starter greeting in the business's language; texts to callers in the 10 of the 13 that texts have no wording for; saving the language a caller spoke on the contact, so texts after the call follow it; a voice per business or per language; and GPT-Live 1.1 once OpenAI's API offers it (`LIVE_MODEL`).
 
 **Close smaller gaps:**
 

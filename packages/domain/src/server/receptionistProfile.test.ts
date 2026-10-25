@@ -28,15 +28,16 @@ describe("readReceptionistSettingsChange", () => {
     [{ bookingMode: "later" }, "bookingMode is invalid."],
     [{ appointmentChangePolicy: {} }, "appointmentChangePolicy is invalid."],
     [{ appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode: "email" } }, "appointmentChangePolicy is invalid."],
-    [{ locale: "de" }, "locale is invalid."],
+    // Serbian is a dashboard language, not one calls open in.
+    [{ locale: "sr" }, "locale is invalid."],
     [{ timezone: 5 }, "timezone must be a string."],
     [{ regenerateSummary: false }, "regenerateSummary must be true."],
     [{ regenerateSummary: true, summary: "Written by hand." }, "Send summary or regenerateSummary, not both."],
     // With several problems, the first check that fails names the field, as before.
     [{ transferMode: "sometimes", greeting: "" }, "greeting is invalid."],
     [{ bookingMode: "later", transferMode: "sometimes" }, "transferMode is invalid."],
-    [{ locale: "de", bookingMode: "later" }, "bookingMode is invalid."],
-    [{ regenerateSummary: false, locale: "de" }, "locale is invalid."],
+    [{ locale: "sr", bookingMode: "later" }, "bookingMode is invalid."],
+    [{ regenerateSummary: false, locale: "sr" }, "locale is invalid."],
   ])("refuses %j with a 400", (body, message) => {
     expect(() => readReceptionistSettingsChange(body)).toThrow(message);
     try {
@@ -52,6 +53,10 @@ describe("readReceptionistSettingsChange", () => {
       locale: "fr",
       regenerateSummary: false,
     });
+  });
+
+  it.each(["en", "es", "de", "ja", "zh", "ar"])("takes %s as the language calls open in", (locale) => {
+    expect(readReceptionistSettingsChange({ locale })).toEqual({ patch: {}, locale, regenerateSummary: false });
   });
 
   it("keeps only the policy's known fields, and the longest allowed text", () => {

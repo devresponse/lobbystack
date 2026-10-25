@@ -69,6 +69,14 @@ describe("model-written call summaries", () => {
     expect(normalizeCallSummaryLocale(null)).toBe("en");
   });
 
+  it("asks for the summary in any language a call can open in", () => {
+    expect(normalizeCallSummaryLocale("de-CH")).toBe("de");
+    expect(normalizeCallSummaryLocale("ar")).toBe("ar");
+    expect(normalizeCallSummaryLocale("sr")).toBe("en");
+    // The fallback without a model summary has English and French wording only.
+    expect(buildConversationSessionSummary({ locale: "de", transcript: ["Hallo"] })).toEqual({ kind: "summary", summary: "Call summary: Hallo" });
+  });
+
   it("bounds a generated summary to one short line", () => {
     const summary = sanitizeGeneratedSummary(`"${"Asked about parking. ".repeat(20)}\n"`);
     expect(summary?.length).toBeLessThanOrEqual(200);

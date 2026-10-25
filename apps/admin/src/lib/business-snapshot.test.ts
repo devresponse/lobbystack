@@ -5,6 +5,8 @@ vi.mock("@lobbystack/db", () => ({ businessContextSnapshots: {}, businesses: {},
 vi.mock("@lobbystack/domain", () => ({ refreshBusinessSnapshot: mocks.refresh }));
 vi.mock("./api-helpers", () => ({ getWorkerDatabase: () => ({ db: {} }) }));
 vi.mock("./domain-context", () => ({ createWorkerDomainContext: () => mocks.context }));
+import { runtimeLocales } from "@lobbystack/shared";
+
 import { loadValidBusinessSnapshot } from "./business-snapshot";
 
 const snapshot = {
@@ -33,6 +35,12 @@ describe("voice snapshot readiness", () => {
     expect(transported.services[0].localizedNames.fr).toBe("Consultation française");
   });
   beforeEach(() => { mocks.read.mockReset(); mocks.refresh.mockReset(); });
+  // The snapshot contract keeps its own copy of the list, so a language added to one must be added to the other.
+  it.each(runtimeLocales)("takes a snapshot of a business whose calls open in %s", async (defaultLocale) => {
+    mocks.read.mockResolvedValueOnce({ ...snapshot, defaultLocale });
+    await expect(loadValidBusinessSnapshot(snapshot.businessId)).resolves.toMatchObject({ defaultLocale });
+    expect(mocks.refresh).not.toHaveBeenCalled();
+  });
   it("generates a missing snapshot before the first voice session", async () => {
     mocks.read.mockResolvedValueOnce(null).mockResolvedValueOnce(snapshot);
     await expect(loadValidBusinessSnapshot(snapshot.businessId)).resolves.toMatchObject({ businessId: snapshot.businessId });

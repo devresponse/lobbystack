@@ -62,7 +62,7 @@
 - Avoid concatenating translated sentences; use interpolation.
 - Format dates, times, and numbers with the active locale through `Intl` or Luxon.
 - The interface languages are `en`, `fr`, `es`, and `sr`. Serbian uses Latin script only. Pass a locale through `intlLocale()` from `@lobbystack/shared` before you hand it to `Intl`, Luxon, `lang`, or `hreflang`, so `sr` becomes `sr-Latn`. A bare `sr` formats in Cyrillic.
-- A business's default caller language is English or French (`RuntimeLocale`), and calls open in it. GPT-Live then switches to the caller's language when they ask or clearly speak another one. Keep business default languages and voice prompts on the `RuntimeLocale` list.
+- A business's default caller language is one of the 13 in `runtimeLocales` (`packages/shared/src/locales.ts`), and calls open in it. GPT-Live then switches to the caller's language when they ask or clearly speak another one. Prompts name a language with `runtimeLocaleNames`, and the dashboard shows it with `runtimeLocaleEndonyms`. The contracts package's snapshot schema repeats the list, so change both. Texts and the widget's words exist only in the interface languages, so map a business language to one with `normalizeInterfaceLocale`, falling back to `en`.
 
 ## Testing
 

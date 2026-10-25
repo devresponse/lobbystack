@@ -1,4 +1,4 @@
-import { canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { countKnowledgeTokens } from "@lobbystack/domain";
 import { DateTime } from "luxon";
 
@@ -276,11 +276,9 @@ function backendCapabilities(snapshot: BusinessContextSnapshot, channel: LiveCha
   ].filter(Boolean);
 }
 
-const LANGUAGE_NAMES: Record<BusinessContextSnapshot["defaultLocale"], string> = { en: "English", fr: "French" };
-
 /** The language a call starts in, named for GPT-Live: the business's default locale. */
 export function liveLanguage(snapshot: BusinessContextSnapshot): string {
-  return LANGUAGE_NAMES[snapshot.defaultLocale] ?? "English";
+  return runtimeLocaleNames[snapshot.defaultLocale] ?? "English";
 }
 
 // Instructions for GPT-Live itself, in the structure OpenAI's GPT-Live

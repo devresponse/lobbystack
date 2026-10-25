@@ -1,9 +1,9 @@
 import { z } from "zod";
 
 export { isMaintenanceMode } from "./maintenance";
-export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, normalizeInterfaceLocale } from "./locales";
-export type { InterfaceLocale } from "./locales";
-import { interfaceLocales, type InterfaceLocale } from "./locales";
+export { interfaceLocaleTags, interfaceLocales, intlLocale, isInterfaceLocale, isRuntimeLocale, normalizeInterfaceLocale, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocaleNames, runtimeLocales } from "./locales";
+export type { InterfaceLocale, RuntimeLocale } from "./locales";
+import { interfaceLocales, type InterfaceLocale, type RuntimeLocale } from "./locales";
 import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
@@ -69,14 +69,6 @@ export type BusinessRole =
   | "scheduler"
   | "viewer";
 
-/**
- * Languages the AI receptionist speaks and the business default language.
- * Interface languages (dashboard, widget UI, email) are {@link InterfaceLocale}.
- */
-export type RuntimeLocale = "en" | "fr";
-
-export const runtimeLocales = ["en", "fr"] as const satisfies ReadonlyArray<RuntimeLocale>;
-
 export type HoursWindow = {
   dayOfWeek: number;
   openMinutes: number;
@@ -89,10 +81,13 @@ export type ClosureWindow = {
   reason: string;
 };
 
+/** The languages a service can have a name in besides its own: English and French. */
+export type ServiceNameLocale = "en" | "fr";
+
 export type ServiceSummary = {
   id: string;
   name: string;
-  localizedNames?: Partial<Record<RuntimeLocale, string>>;
+  localizedNames?: Partial<Record<ServiceNameLocale, string>>;
   durationMinutes: number;
   description?: string;
 };

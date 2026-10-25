@@ -122,7 +122,8 @@ export const snapshotSchema = z.object({
   displayName: z.string().min(1),
   legalName: z.string().optional(),
   timezone: z.string().min(1),
-  defaultLocale: z.enum(["en", "fr"]),
+  // runtimeLocales in @lobbystack/shared: the languages a call can open in.
+  defaultLocale: z.enum(["en", "es", "fr", "de", "hi", "ja", "ko", "pt", "zh", "it", "uk", "ru", "ar"]),
   businessType: z.string().min(1),
   telemetryEnabled: z.boolean().optional(),
   greeting: z.string(),

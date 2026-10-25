@@ -1,0 +1,8 @@
+# Check text files out with LF line endings everywhere, Windows included, whatever
+# core.autocrlf says. Postgres runs docker/postgres/init/roles.sh in Linux, where
+# bash fails on CRLF, and the repository's other tools expect LF too.
+* text=auto eol=lf
+
+# Windows' command prompt needs CRLF in batch files.
+*.bat text eol=crlf
+*.cmd text eol=crlf

@@ -12,23 +12,16 @@ You need:
 - Node 26, which the repo requires, and pnpm 10.30.3: `npm install --global pnpm@10.30.3`.
 - Git.
 
-### Keep Linux line endings on Windows
+### Line endings on Windows
 
-Git for Windows checks files out with Windows line endings (CRLF) unless you've changed its default. Two files break with them:
+There's nothing to set. Git for Windows checks files out with Windows line endings (CRLF) by default, but the repository's `.gitattributes` gives every text file Linux line endings (LF), whatever `core.autocrlf` says. That matters for `docker/postgres/init/roles.sh`, which gives the app's database roles their passwords: Postgres runs it in Linux when it first creates its database, bash fails on CRLF, and Postgres never runs it again. `pnpm env:generate` reads `.env.example` with either line ending.
 
-- `docker/postgres/init/roles.sh` runs in Linux when Postgres first creates its database, and gives the app's database roles their passwords. With CRLF it fails, Docker restarts the container, and Postgres then skips the script because the database exists. The admin and worker can't connect to the database after that.
-- `pnpm env:generate` reads `.env.example` line by line. With CRLF it generates no secrets and copies the placeholders.
+On a Windows clone made before fork PR #83:
 
-Before you start Postgres for the first time, switch the clone to LF and check both files out again:
-
-```powershell
-git config core.autocrlf input
-Remove-Item docker/postgres/init/roles.sh, .env.example
-git restore docker/postgres/init/roles.sh .env.example
-git ls-files --eol docker/postgres/init/roles.sh .env.example
-```
-
-The last command should show `w/lf` for both files. If Postgres already started with the CRLF script, run `docker compose down -v`. It deletes the database, which has nothing usable yet, along with the other Docker volumes, so the script runs again on the next start.
+- `git pull` brings `roles.sh` down again with LF. `git ls-files --eol docker/postgres/init/roles.sh` then shows `w/lf`.
+- If Postgres already started with the old script, `docker compose logs postgres` shows `/usr/bin/env: ‘bash\r’: No such file or directory`, and the admin and worker can't connect to the database. Run `docker compose down -v`. It deletes the database, which has nothing usable yet, along with the other Docker volumes, so the script runs again on the next start.
+- If `pnpm env:generate` said it generated 0 secrets, `.env` holds the placeholders from `.env.example`. Run `pnpm env:generate --force`, then `docker compose down -v`.
+- Other files keep CRLF until a pull changes them. Of those, only the shell scripts in `scripts/` mind, when you run them with bash; a new clone gives them LF.
 
 ### Create the environment files
 
@@ -37,7 +30,7 @@ pnpm install
 pnpm env:generate
 ```
 
-`pnpm env:generate` writes `.env` from `.env.example` with new random secrets and says how many it generated. If it says 0, `.env.example` still has CRLF line endings. Fix them and run `pnpm env:generate --force`, which replaces every secret in `.env`.
+`pnpm env:generate` writes `.env` from `.env.example` with new random secrets and says how many it generated. `pnpm env:generate --force` replaces `.env` and every secret in it.
 
 Keep your own keys and overrides in `.env.local` at the repo root. `pnpm dev` and the database commands load it before `.env`, so its values win, and Git ignores it. Add `OPENAI_API_KEY` there for website chat and browser test calls.
 
@@ -254,8 +247,8 @@ A phone call keeps running while you're paused:
 
 | What you see | Likely cause |
 | --- | --- |
-| The admin or worker can't connect as a `lobbystack_` role: `is not permitted to log in`, `does not exist`, or `password authentication failed` | Postgres started with a CRLF `roles.sh`, or the passwords in `.env` changed after its first start. See [Keep Linux line endings on Windows](#keep-linux-line-endings-on-windows) |
-| `pnpm env:generate` says it generated 0 secrets | `.env.example` has CRLF line endings |
+| The admin or worker can't connect as a `lobbystack_` role: `is not permitted to log in`, `does not exist`, or `password authentication failed` | The passwords in `.env` changed after Postgres's first start, or, on a Windows clone made before fork PR #83, Postgres started with a CRLF `roles.sh`. See [Line endings on Windows](#line-endings-on-windows) |
+| `pnpm env:generate` says it generated 0 secrets | A Windows clone made before fork PR #83, with CRLF line endings. Run `git pull`, then see [Line endings on Windows](#line-endings-on-windows) |
 | The admin or worker container keeps restarting and logs `must not use a placeholder value in production` | `.env` still has the placeholder secrets from `.env.example` |
 | Docker says `Ports are not available` | Another program, or a port range Windows reserved, holds the port. `netsh interface ipv4 show excludedportrange protocol=tcp` lists the reserved ranges. Change the port in `.env`, along with the URLs that contain it |
 | Sign-in fails with `Invalid origin` | The dashboard isn't open at `APP_BASE_URL` |

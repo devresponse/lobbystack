@@ -48,7 +48,7 @@ Parallel queries are fine on the pool, outside a transaction, since each gets it
 
 ## Develop on Windows
 
-- Keep Linux line endings: with Git for Windows' default, `docker/postgres/init/roles.sh` and `.env.example` get Windows line endings, Postgres's setup fails and `pnpm env:generate` writes no secrets. [Keep Linux line endings on Windows](../voice/local-debugging.md#keep-linux-line-endings-on-windows) has the fix.
+- Line endings need no setting: `.gitattributes` checks every text file out with Linux line endings (LF), whatever Git for Windows' `core.autocrlf` says, because Postgres runs `docker/postgres/init/roles.sh` in Linux and bash fails on Windows line endings (CRLF). `scripts/line-endings.test.ts` fails if a shell script or `.env.example` would come out with CRLF. A clone made before fork PR #83 needs a `git pull`, and `docker compose down -v` if Postgres already started ([line endings on Windows](../voice/local-debugging.md#line-endings-on-windows)).
 - Keep keys in `.env.local`, never in another untracked file: a `docker compose ... --build` sends the whole folder to Docker, and `.dockerignore` leaves out the `.env` files but not other files you keep there.
 - Never add files with `git add -A` in a checkout that has untracked notes or scripts: add them by name.
 

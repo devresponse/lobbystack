@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# Postgres runs this in Linux when it first creates its database, and never again.
+# bash fails on CRLF line endings, so .gitattributes checks it out with LF on
+# Windows too.
 set -euo pipefail
 
 # The statements carry the role passwords, so psql prints nothing on success.

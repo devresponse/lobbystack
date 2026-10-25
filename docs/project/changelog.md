@@ -10,6 +10,8 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#82](https://github.com/devresponse/lobbystack/pull/82) | Let calls open in any of 13 languages |  | `f933e19` | [docs](../features/calls.md#know-which-language-a-call-uses) |
+| [#78](https://github.com/devresponse/lobbystack/pull/78) | Keep calls in the caller's language and test it in Spanish, merged with #82 |  | `f933e19` | [docs](../features/calls.md#know-which-language-a-call-uses) |
 | [#81](https://github.com/devresponse/lobbystack/pull/81) | Answer website chats in the visitor's language |  | `a2e57ff` | [docs](../features/website-widget.md#know-which-language-the-chat-uses) |
 | [#80](https://github.com/devresponse/lobbystack/pull/80) | Leave GPT-Live's sound tags out of call captions and transcripts |  | `f30fce3` | [docs](../features/calls.md) |
 | [#79](https://github.com/devresponse/lobbystack/pull/79) | Say why a website chat reply failed |  | `8280dab` | [docs](../features/website-widget.md#find-out-why-a-reply-failed) |

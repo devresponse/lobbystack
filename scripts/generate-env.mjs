@@ -13,7 +13,8 @@ export function generateEnv(example, random = () => randomBytes(32).toString("he
   const generated = [];
   const valuesByPlaceholder = new Map();
   const output = example
-    .split("\n")
+    // A Windows checkout made before .gitattributes pinned LF has CRLF line endings.
+    .split(/\r?\n/)
     .map((line) => {
       const match = /^([A-Z0-9_]+)=(.*)$/.exec(line);
       if (!match) return line;

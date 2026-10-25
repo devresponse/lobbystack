@@ -380,11 +380,11 @@ describe("POST /api/widget/chat", () => {
   });
 
   it.each([
-    ["en", "Reply in English unless"],
-    ["fr", "Reply in French unless"],
-    ["es", "Reply in Spanish unless"],
-    ["sr", "Reply in Serbian in Latin script (not Cyrillic) unless"],
-  ])("replies in the widget's language, %s, and says so if nobody from the team joins", async (locale, instruction) => {
+    ["en", "Reply in English until"],
+    ["fr", "Reply in French until"],
+    ["es", "Reply in Spanish until"],
+    ["sr", "Reply in Serbian in Latin script (not Cyrillic) until"],
+  ])("starts in the widget's language, %s, follows the visitor's, and says so if nobody from the team joins", async (locale, instruction) => {
     mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session: { ...session, defaultLocale: "fr", config: { liveChat: { enabled: true } } } });
     mocks.getCachedBusinessSnapshot.mockResolvedValue({ businessId } as BusinessContextSnapshot);
     mocks.loadWidgetChatHistory.mockResolvedValue([]);
@@ -393,6 +393,8 @@ describe("POST /api/widget/chat", () => {
 
     const agent = mocks.createReceptionistAgent.mock.calls[0]![0] as { extraInstructions: string; context: { liveChat?: { locale: string } } };
     expect(agent.extraInstructions).toContain(instruction);
+    // A visitor who writes in another language gets replies in it from then on.
+    expect(agent.extraInstructions).toContain("until the visitor writes in another language or asks for one. Then reply in the visitor's language and keep using it for the rest of the chat, even when a document or tool result is in another language.");
     expect(agent.context.liveChat?.locale).toBe(locale);
   });
 
@@ -405,8 +407,8 @@ describe("POST /api/widget/chat", () => {
     await readSse(await POST(widgetRequest()));
 
     expect(mocks.createReceptionistAgent.mock.calls.map(([input]) => (input as { extraInstructions: string }).extraInstructions)).toEqual([
-      expect.stringContaining("Reply in Spanish unless"),
-      expect.stringContaining("Reply in French unless"),
+      expect.stringContaining("Reply in Spanish until"),
+      expect.stringContaining("Reply in French until"),
     ]);
   });
 

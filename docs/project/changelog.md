@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#80](https://github.com/devresponse/lobbystack/pull/80) | Leave GPT-Live's sound tags out of call captions and transcripts |  | `f30fce3` | [docs](../features/calls.md) |
 | [#79](https://github.com/devresponse/lobbystack/pull/79) | Say why a website chat reply failed |  | `8280dab` | [docs](../features/website-widget.md#find-out-why-a-reply-failed) |
 
 ### 2026-10-24

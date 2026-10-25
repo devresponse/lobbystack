@@ -341,7 +341,7 @@ export const widgetChatRequestSchema = z.object({
   visitorId: z.guid(),
   messageId: z.guid(),
   content: z.string().min(1).max(4_000),
-  /** The widget's language, which the receptionist replies in. */
+  /** The widget's language, which the receptionist's replies start in. */
   locale: z.enum(interfaceLocales).optional(),
 });
 

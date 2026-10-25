@@ -138,19 +138,30 @@ test("the sidebar opens widget settings, where an owner creates, edits, pauses a
         await context.close();
       }
     };
-    // The keyed loader carries the saved look and the chat's language, here the business's, and is cached only
-    // briefly; the plain loader keeps its long cache.
+    // The keyed loader carries the saved look, and no language until the widget's settings set one, so the chat
+    // follows the visitor's browser. It is cached only briefly; the plain loader keeps its long cache.
     const keyedLoader = await request.get(`/embed.js?key=${encodeURIComponent(widgetKey)}`);
     expect(keyedLoader.headers()["cache-control"]).toBe("public, max-age=60, s-maxage=60");
-    expect(await keyedLoader.text()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#0f766e","position":"bottom-left","locale":"en"};`);
+    expect(await keyedLoader.text()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#0f766e","position":"bottom-left"};`);
     expect((await request.get("/embed.js")).headers()["cache-control"]).toContain("max-age=600");
     expect(await bubbleOnSite()).toEqual({ position: "bottom-left", color: "rgb(15, 118, 110)" });
     await editor.getByLabel(new RegExp(`^${settings.widget.fields.color}`)).fill("#112233");
     await editor.getByRole("combobox", { name: new RegExp(`^${settings.widget.fields.position}`) }).selectOption("bottom-center");
+    const language = editor.getByRole("combobox", { name: new RegExp(`^${settings.widget.fields.localeOverride}`) });
+    await language.selectOption("fr");
     const restyled = page.waitForResponse((response) => response.url().includes("/api/widget-keys?") && response.request().method() === "PATCH");
     await editor.getByRole("button", { name: settings.widget.keys.save, exact: true }).click();
     expect((await restyled).ok()).toBe(true);
     expect(await bubbleOnSite()).toEqual({ position: "bottom-center", color: "rgb(17, 34, 51)" });
+    // A language the settings set reaches the loader, which opens the chat in it, and "Visitor's language" takes it
+    // out again, so the chat below follows the browser.
+    const keyedAppearance = async () => (await request.get(`/embed.js?key=${encodeURIComponent(widgetKey)}`)).text();
+    expect(await keyedAppearance()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#112233","position":"bottom-center","locale":"fr"};`);
+    await language.selectOption({ label: settings.widget.locales.visitor });
+    const unset = page.waitForResponse((response) => response.url().includes("/api/widget-keys?") && response.request().method() === "PATCH");
+    await editor.getByRole("button", { name: settings.widget.keys.save, exact: true }).click();
+    expect((await unset).ok()).toBe(true);
+    expect(await keyedAppearance()).toContain(`[${JSON.stringify(widgetKey)}]={"color":"#112233","position":"bottom-center"};`);
 
     // Pausing stops new sessions and resuming brings them back.
     await editor.getByRole("button", { name: settings.widget.keys.pause, exact: true }).click();

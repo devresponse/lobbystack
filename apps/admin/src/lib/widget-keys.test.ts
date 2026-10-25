@@ -4,7 +4,7 @@ import { defaultWidgetConfig, widgetConfigSchema } from "@lobbystack/shared";
 
 const lookups = vi.hoisted(() => ({
   keys: [] as Array<{ business_id: string; widget_key_id: string }>,
-  rows: [] as Array<{ config: unknown; defaultLocale: string }>,
+  rows: [] as Array<{ config: unknown }>,
 }));
 
 vi.mock("./api-helpers", () => ({
@@ -12,7 +12,7 @@ vi.mock("./api-helpers", () => ({
 }));
 vi.mock("@lobbystack/db", async (importOriginal) => {
   // The key's row, read through a transaction's select chain.
-  const query = { from: () => query, innerJoin: () => query, where: () => query, limit: async () => lookups.rows };
+  const query = { from: () => query, where: () => query, limit: async () => lookups.rows };
   return {
     ...(await importOriginal<typeof import("@lobbystack/db")>()),
     withBusinessTransaction: async (_db: unknown, _context: unknown, run: (tx: unknown) => unknown) => await run({ select: () => query }),
@@ -130,19 +130,16 @@ describe("what the loader takes from the dashboard", () => {
     lookups.keys = [{ business_id: "00000000-0000-4000-8000-000000000011", widget_key_id: "00000000-0000-4000-8000-000000000010" }];
   });
 
-  it("sends the business's language along with the bubble look", async () => {
-    lookups.rows = [{ config: { color: "#112233" }, defaultLocale: "fr" }];
-    await expect(loadWidgetAppearance("wk_live_abc")).resolves.toEqual({ color: "#112233", locale: "fr" });
+  it("sends the bubble look without a language when the key sets none, so the chat follows the visitor's browser", async () => {
+    lookups.rows = [{ config: { color: "#112233" } }];
+    await expect(loadWidgetAppearance("wk_live_abc")).resolves.toEqual({ color: "#112233" });
+    lookups.rows = [{ config: {} }];
+    await expect(loadWidgetAppearance("wk_live_abc")).resolves.toEqual({});
   });
 
-  it("sends the language the key sets over the business's", async () => {
-    lookups.rows = [{ config: { localeOverride: "es", position: "bottom-left" }, defaultLocale: "fr" }];
+  it("sends the language the key sets", async () => {
+    lookups.rows = [{ config: { localeOverride: "es", position: "bottom-left" } }];
     await expect(loadWidgetAppearance("wk_live_abc")).resolves.toEqual({ position: "bottom-left", locale: "es" });
-  });
-
-  it("sends English for an English-speaking business", async () => {
-    lookups.rows = [{ config: {}, defaultLocale: "en" }];
-    await expect(loadWidgetAppearance("wk_live_abc")).resolves.toEqual({ locale: "en" });
   });
 
   it("sends nothing for an unknown key", async () => {

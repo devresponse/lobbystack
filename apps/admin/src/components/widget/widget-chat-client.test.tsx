@@ -526,6 +526,41 @@ describe("widget voice captions", () => {
     postMessage.mockRestore();
     client.clear();
   });
+
+  it("leaves the sounds GPT-Live marks out of the captions, and joins the words around a sound on its own", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({
+      status: "connected",
+      errorKey: null,
+      remoteAudioRef: { current: null },
+      transcript: [
+        { speaker: "assistant", text: "We're open Monday through Friday," },
+        { speaker: "caller", text: "[tongue click ]" },
+        { speaker: "assistant", text: " 9 to 8." },
+        { speaker: "caller", text: "[tongue click ]No, can you connect me [laughs] to the live person?" },
+        { speaker: "assistant", text: "I can't bring anyone else onto this call." },
+        // A tag still arriving.
+        { speaker: "caller", text: " Okay. [coug" },
+      ],
+      startCall: vi.fn(),
+      endCall: vi.fn(),
+    } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    expect(await screen.findByText("We're open Monday through Friday, 9 to 8.")).toBeTruthy();
+    expect(screen.getByText("No, can you connect me to the live person?")).toBeTruthy();
+    expect(screen.getByText("I can't bring anyone else onto this call.")).toBeTruthy();
+    expect(screen.getByText("Okay.")).toBeTruthy();
+    expect(screen.queryByText(/click|laughs|coug/)).toBeNull();
+    client.clear();
+  });
 });
 
 describe("widget composer", () => {

@@ -1,6 +1,6 @@
 # Run the website widget
 
-The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `1a2c81b`.
+The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `8280dab`.
 
 ## Know how it works
 
@@ -121,6 +121,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #43 | Messages and the widget keep updating after a dropped connection, such as during a deploy. Streams reopen with backoff, and the loader renews its session before it expires. |
 | #45, #49, #52, #54 | The recorded greeting, clearer call refusals and higher limits, the greeting on the caller's first audio, and 30-minute calls with a polite ending. |
 | #79 | A failed reply shows an Error ID, and the admin logs and reports why ([above](#find-out-why-a-reply-failed)). A reply cut off by an error is no longer saved as if it were whole, and a request that fails its checks answers 400 instead of 500. |
+| #80 | A call's captions leave out the sounds GPT-Live's transcription marks in square brackets, such as "[tongue click]" or "[laughs]", and a caption that was only a sound goes. The saved transcript and the receptionist's agent leave them out too ([calls](calls.md#follow-a-call)). |
 
 ## Know the gaps
 

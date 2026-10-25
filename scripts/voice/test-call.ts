@@ -11,7 +11,8 @@ import twilio from "twilio";
 
 import { findScenarios, OPENING } from "./scenarios";
 
-const VOICE = "Polly.Joanna-Neural";
+// A voice for each caller language. The shared opening is always English.
+const VOICES = { en: "Polly.Joanna-Neural", es: "Polly.Mia-Neural" } as const;
 const GREETING_WAIT_S = 6;
 const ANSWER_WAIT_S = 12;
 const FINAL_SILENCE_S = 40;
@@ -36,9 +37,10 @@ for (const scenario of findScenarios(values.scenario)) {
     console.log(`SKIP ${scenario.name.padEnd(17)} only pnpm voice:eval can set the call's time limit`);
     continue;
   }
+  const voice = VOICES[scenario.language ?? "en"];
   const twiml = new twilio.twiml.VoiceResponse();
   twiml.pause({ length: GREETING_WAIT_S });
-  twiml.say({ voice: VOICE }, OPENING);
+  twiml.say({ voice: scenario.opening ? voice : VOICES.en }, scenario.opening ?? OPENING);
   twiml.pause({ length: ANSWER_WAIT_S });
   let pausesS = GREETING_WAIT_S + ANSWER_WAIT_S + FINAL_SILENCE_S;
   for (const line of scenario.lines) {
@@ -46,7 +48,7 @@ for (const scenario of findScenarios(values.scenario)) {
     const pauseS = Math.round((line.pauseMs ?? 0) / 1000);
     if (pauseS > 0) twiml.pause({ length: pauseS });
     pausesS += pauseS;
-    twiml.say({ voice: VOICE }, line.text);
+    twiml.say({ voice }, line.text);
   }
   twiml.pause({ length: FINAL_SILENCE_S });
 

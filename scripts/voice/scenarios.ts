@@ -1,7 +1,7 @@
 // Scripted callers shared by live-call-eval.ts (GPT-Live over the API) and
-// test-call.ts (a real phone call). Every call opens with OPENING and waits for
-// the receptionist's answer; then the scenario's lines play, each after
-// pauseMs of the caller's silence.
+// test-call.ts (a real phone call). Every call opens with OPENING, or the
+// scenario's own opening, and waits for the receptionist's answer; then the
+// scenario's lines play, each after pauseMs of the caller's silence.
 
 export type CallerLine = { text: string; pauseMs?: number };
 
@@ -10,6 +10,10 @@ export type CallScenario = {
   /** "ends": the receptionist should hang up after the last line. "continues": the call should go on. */
   expect: "ends" | "continues";
   lines: CallerLine[];
+  /** Replaces OPENING. The eval then checks the receptionist's answer to it as part of the scenario. */
+  opening?: string;
+  /** The caller's language, English unless set. The phone script reads the scenario's own opening and lines in a voice that speaks it. */
+  language?: "en" | "es";
   /** The eval fails a run when any of the receptionist's lines matches this. The phone script can't check it. */
   mustNotSay?: RegExp;
   /**
@@ -22,6 +26,10 @@ export type CallScenario = {
 
 export const OPENING = "Hi, are you open on Saturday?";
 
+// Common English words that no Spanish reply has. A business or service name
+// with one of them, as a --snapshot business can have, fails the run too.
+const ENGLISH_WORDS = /\b(the|you|your|we|our|is|are|it|that|this|what|have|and|with|for|of|yes|please|sorry|moment|let|check|checking|hello|thanks)\b/i;
+
 export const SCENARIOS: CallScenario[] = [
   { name: "thanks-bye", expect: "ends", lines: [{ text: "Okay, perfect. That is all I needed. Thanks, bye!" }] },
   { name: "goodbye", expect: "ends", lines: [{ text: "No, that's everything. Goodbye!" }] },
@@ -31,6 +39,13 @@ export const SCENARIOS: CallScenario[] = [
   { name: "trailing-goodbye", expect: "ends", lines: [{ text: "No, that's everything." }, { text: "Goodbye!", pauseMs: 1_500 }] },
   // The caller pauses before the question, so the receptionist mustn't hang up meanwhile.
   { name: "one-more-thing", expect: "continues", lines: [{ text: "No, that's everything." }, { text: "Oh wait, one more thing.", pauseMs: 3_000 }, { text: "Do you have parking?", pauseMs: 3_000 }] },
+  // Spanish callers, so every reply must be in Spanish. The demo business's
+  // facts don't say whether it takes cards or when it has openings, so
+  // GPT-Live hands both questions to the backend, whose answers come back in
+  // English. The first caller asks to switch after the English opening; the
+  // second speaks Spanish from the first word, after the English greeting.
+  { name: "spanish-switch", expect: "continues", language: "es", mustNotSay: ENGLISH_WORDS, lines: [{ text: "¿Podemos seguir en español? ¿Aceptan tarjeta de crédito?" }, { text: "¿Y tienen citas disponibles el martes por la mañana?", pauseMs: 15_000 }] },
+  { name: "spanish-only", expect: "continues", language: "es", mustNotSay: ENGLISH_WORDS, opening: "Hola, ¿abren el sábado?", lines: [{ text: "¿Aceptan tarjeta de crédito?" }, { text: "¿Y tienen citas disponibles el martes por la mañana?", pauseMs: 15_000 }] },
 ];
 
 // Scenarios that book a real appointment, so they run only by name.

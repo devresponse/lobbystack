@@ -1,6 +1,6 @@
 # Understand phone and browser calls
 
-OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `da1f548`.
+OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `1a2c81b`.
 
 ## Follow a call
 
@@ -37,9 +37,20 @@ A deploy cuts every call on the old worker unless `RAILWAY_DEPLOYMENT_DRAINING_S
 
 With AI traces on for a business, each website chat reply, call and delegated request keeps a trace: the input, every tool call and its result, and the output, with the snapshot and instructions stored once per business (fork PR #51, migration `0106`). Traces are off by default; turn them on with `PATCH /business` (`ai_traces_enabled`). They are kept 30 days and never go to logs, OpenTelemetry or PostHog. Read them with `GET /ai-traces` and `GET /ai-traces/{trace_id}` (`calls:read`), `lobbystack calls traces`, or replay one with `pnpm ai:replay`. [ADR 0009](../adr/0009-ai-conversation-traces.md) explains the design.
 
+## Know which language a call uses
+
+GPT-Live has no language setting. The call's instructions name the language to start in, and GPT-Live understands and speaks other languages on its own. Phone and browser calls work the same way.
+
+- **Opening:** calls start in the business's **Default customer language** in **AI settings**, English or French. Onboarding picks French only from a French dashboard. The greeting plays as written, so write it in that language: a new business's starter greeting ("Thanks for calling" and the business's name) is English.
+- **Switching:** when a caller asks for another language or clearly speaks one, the receptionist switches, with no menu to press, and keeps answering in that language for the rest of the call, until the caller switches again. The worker's answers and notes to GPT-Live are written in English, so since fork PR #78 the instructions also say to stay in the caller's language when one arrives (`buildLiveInstructions` in `packages/agent-core/src/instructions.ts`).
+- **Voice:** every call uses the `marin` voice (`LIVE_VOICE` in `packages/agent-core/src/live/session.ts`), whatever the language. OpenAI has voices made for Brazilian Portuguese, German, French, Hindi, Japanese and Korean, none for Spanish, and the fork uses none of them.
+- **After the call:** the summary is in the business's language, English or French. Texts to the caller use the contact's preferred language, or else the business's. Nothing saves the language the caller spoke.
+- **Captions and transcripts:** since fork PR #78, each line of the widget's captions and of the call page's transcript takes its own text direction, so Arabic and Hebrew read from the right.
+- **Which languages work well:** as of 2026-10-24, OpenAI publishes no list of languages for GPT-Live, and its API offers only `gpt-live-1` (`LIVE_MODEL` in the same file). The better French, German, Hindi, Mexican Spanish, Korean and Japanese that OpenAI announced for GPT-Live 1.1 on 2026-10-15 is in ChatGPT, and OpenAI says it's coming soon to the API. Test a language before promising it: `pnpm voice:eval` has two Spanish callers ([testing](../voice/testing.md#check-another-language)).
+
 ## Know what hasn't been tried
 
-- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52 and #54, because the environment that built them had no OpenAI key. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`.
+- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54 and #78, because the environment that built them had no OpenAI key. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English.
 - No real call has typed a keypad PIN ([caller authentication](caller-authentication.md)).
 - The [phone call review](../reviews/phone-calls-2026-10-06.md) of 2026-10-06 lists what was open then. Several findings were fixed since, such as calls recovered after a worker crash, withheld numbers and the drain during a deploy, so check a finding against the code before acting on it.
 - A recording played to a phone caller, and a website call reserving minutes in slices instead of its whole length, aren't built.

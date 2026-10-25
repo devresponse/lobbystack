@@ -715,7 +715,7 @@ function VoiceTranscript({ captions, color, onColor, t }: { captions: VoiceCapti
       {captions.live && turns.length === 0 ? <p className="text-center text-xs text-zinc-400">{t("chat.voiceConnected")}</p> : null}
       {turns.map((turn, index) => (
         <div key={index} className={cn("flex", turn.speaker === "caller" ? "justify-end" : "justify-start")}>
-          <p className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color, color: onColor } : undefined}>
+          <p dir="auto" className={cn("max-w-[85%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap", turn.speaker === "caller" ? "rounded-br-sm" : "rounded-bl-sm bg-zinc-100")} style={turn.speaker === "caller" ? { backgroundColor: color, color: onColor } : undefined}>
             {turn.text.trim()}
           </p>
         </div>

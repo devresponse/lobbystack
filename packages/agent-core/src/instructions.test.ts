@@ -86,7 +86,7 @@ describe("buildLiveInstructions", () => {
     expect(instructions).toContain("Delegate before giving an answer that depends on backend work.");
     expect(instructions).toContain("Do not guess the result while waiting.");
     expect(instructions).toContain("If the caller is frustrated, acknowledge it briefly and focus on the next helpful step.");
-    expect(instructions).toContain("Speak French unless the caller asks to switch");
+    expect(instructions).toContain("Speak French at the start of the call. When the caller asks to switch or clearly speaks another language, switch to their language and keep using it for the rest of the call, even when a backend result or note arrives in English.");
     expect(instructions).toContain("Backchannel policy: Use moderate backchannels. Acknowledge naturally without competing with the main response.");
     expect(instructions).toContain(`Open the call with this greeting as soon as you're told to start: "${demoSnapshot.greeting}" Say it once, at the start of the call only.`);
   });

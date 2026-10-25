@@ -104,6 +104,17 @@ export function readableOn(hex: string): string {
   return (luminance + 0.05) / 0.0597 > 1.05 / (luminance + 0.05) ? "#18181b" : "#ffffff";
 }
 
+/**
+ * The language the widget shows: the one its settings set, or else the first
+ * of the visitor's browser languages it's translated into, or else the
+ * business's. "Visitor's language" in the settings is the choice that sets none.
+ */
+export function widgetLocale(localeOverride: string | undefined, browserLanguages: readonly string[], businessLocale: string | undefined): InterfaceLocale | null {
+  return normalizeInterfaceLocale(localeOverride)
+    ?? browserLanguages.map((language) => normalizeInterfaceLocale(language)).find((locale) => locale !== null)
+    ?? normalizeInterfaceLocale(businessLocale);
+}
+
 function storageVisitorKey(widgetKey: string): string {
   return `lobbystack.widget.visitorId.${widgetKey}`;
 }
@@ -296,9 +307,9 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
 
   useEffect(() => {
     if (!configState) return;
-    const locale = configState.config?.localeOverride ?? configState.business?.defaultLocale ?? navigator.language.split("-")[0];
-    const supported = normalizeInterfaceLocale(locale);
-    if (supported) void i18n.changeLanguage(supported);
+    const browserLanguages = navigator.languages?.length ? navigator.languages : [navigator.language];
+    const locale = widgetLocale(configState.config?.localeOverride, browserLanguages, configState.business?.defaultLocale);
+    if (locale) void i18n.changeLanguage(locale);
   }, [configState]);
 
   useEffect(() => {

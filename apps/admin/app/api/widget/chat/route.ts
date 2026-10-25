@@ -26,7 +26,7 @@ export const maxDuration = 30;
 const ROUTE = "/api/widget/chat";
 const SAFE_CHAT_ERROR = "The chat could not be processed.";
 
-/** The language the receptionist replies in, for each language the widget shows. */
+/** The language the receptionist's replies start in, for each language the widget shows. */
 const REPLY_LANGUAGES: Record<InterfaceLocale, string> = {
   en: "English",
   fr: "French",
@@ -167,7 +167,10 @@ async function answerChat(request: Request) {
               // With live chat on, a visitor who asks for a person can get someone from the team here.
               ...(session.config.liveChat?.enabled ? { liveChat: { locale, onTeamRequested: () => { teamRequested = true; } } } : {}),
             },
-            extraInstructions: `Reply in ${REPLY_LANGUAGES[locale]} unless the visitor clearly asks to switch languages.`,
+            // The chat starts in the widget's language and then follows the
+            // visitor's, as a call follows the caller's. Documents and tool
+            // results are often in another language, so the rule holds after them too.
+            extraInstructions: `Reply in ${REPLY_LANGUAGES[locale]} until the visitor writes in another language or asks for one. Then reply in the visitor's language and keep using it for the rest of the chat, even when a document or tool result is in another language. Switch again only when the visitor does.`,
           };
           const agent = createReceptionistAgent(agentInput);
           const chatHistory = history.slice(-20);

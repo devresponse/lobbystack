@@ -1,6 +1,6 @@
 # Run the website widget
 
-The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `8280dab`.
+The website widget puts the receptionist on a business's own website: a chat, a "Say Allo!" button that starts a browser call, and, when the business turns it on, live chat with its team. One script tag adds it. This page covers how it works, how to switch it on, its limits, and what the fork changed. Checked against `main` at `f30fce3`.
 
 ## Know how it works
 
@@ -32,6 +32,12 @@ The call button shows only when the business has an active voice number, the bus
 - The keypad PIN and text-message codes are phone-only, so website callers who want to change an appointment get a message taken for the team.
 - Chat replies stay short and on topic, and are capped in length (fork PR #8).
 - Web addresses in chat become links (fork PR #21). Every bubble goes through `renderSafeMarkdown` (`apps/admin/src/lib/widget-markdown.ts`), which escapes all HTML first, then formats code, bold and `http(s)` links. HTML links, `mailto:`, `tel:` and addresses without a scheme stay text on purpose.
+
+## Know which language the chat uses
+
+- **The widget's words** are in English, French, Spanish or Serbian. **Settings** > **Website widget** > **Language** sets one of them. Left at "Visitor's language", the widget shows the first of the visitor's browser languages it has, and otherwise the business's **Default customer language** (`widgetLocale` in `apps/admin/src/components/widget/widget-chat-client.tsx`). Until fork PR #81 it always showed the business's language, English or French.
+- **The replies** start in the widget's language. When the visitor writes in another language, or asks for one, the receptionist answers in it and keeps it for the rest of the chat, even when the documents it answers from are in another language, until the visitor switches again (the chat's `extraInstructions` in `apps/admin/app/api/widget/chat/route.ts`). Until fork PR #81 it switched only when the visitor asked.
+- **"Say Allo!"** opens in the business's **Default customer language**, English or French, as a phone call does, and follows the caller from there ([calls](calls.md)).
 
 ## Hand a chat to the team
 
@@ -122,6 +128,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #45, #49, #52, #54 | The recorded greeting, clearer call refusals and higher limits, the greeting on the caller's first audio, and 30-minute calls with a polite ending. |
 | #79 | A failed reply shows an Error ID, and the admin logs and reports why ([above](#find-out-why-a-reply-failed)). A reply cut off by an error is no longer saved as if it were whole, and a request that fails its checks answers 400 instead of 500. |
 | #80 | A call's captions leave out the sounds GPT-Live's transcription marks in square brackets, such as "[tongue click]" or "[laughs]", and a caption that was only a sound goes. The saved transcript and the receptionist's agent leave them out too ([calls](calls.md#follow-a-call)). |
+| #81 | The chat answers in the language the visitor writes in and keeps it, and "Visitor's language" follows the visitor's browser ([above](#know-which-language-the-chat-uses)). |
 
 ## Know the gaps
 

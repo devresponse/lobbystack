@@ -5,12 +5,12 @@ import { createUIMessageStream, createUIMessageStreamResponse } from "ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 // The language the widget shows, which a test can set.
-const widgetLanguage = vi.hoisted(() => ({ current: "en" }));
-vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { get language() { return widgetLanguage.current; }, changeLanguage: vi.fn() }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
+const widgetLanguage = vi.hoisted(() => ({ current: "en", change: vi.fn() }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { get language() { return widgetLanguage.current; }, changeLanguage: widgetLanguage.change }, t: (key: string, options?: { id?: string; name?: string }) => [key, options?.id, options?.name].filter(Boolean).join(" ") }) }));
 vi.mock("@lobbystack/web-voice", () => ({ useWebVoiceCall: vi.fn() }));
 
 import { useWebVoiceCall } from "@lobbystack/web-voice";
-import { readableOn, threadEntries, WidgetChatClient } from "./widget-chat-client";
+import { readableOn, threadEntries, WidgetChatClient, widgetLocale } from "./widget-chat-client";
 
 const visitorId = "5ef3b4ef-720d-47a7-8320-e6f4707a64e2";
 const config = { key: "widget-key", business: { id: "business", name: "Acme", defaultLocale: "en" }, config: {}, billing: { chatAllowed: true, plan: "starter" }, snapshotPresent: true };
@@ -22,6 +22,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
   widgetLanguage.current = "en";
+  widgetLanguage.change.mockClear();
 });
 
 /** A response the test sends when it chooses. */
@@ -846,6 +847,39 @@ describe("widget reply language", () => {
 
     expect(await screen.findByText("Claro.")).toBeTruthy();
     expect(chatRequests).toEqual([expect.objectContaining({ visitorId, content: "¿Abren los domingos?", locale })]);
+    client.clear();
+  });
+});
+
+describe("widgetLocale", () => {
+  it("shows the language the widget's settings set, whatever the browser's", () => {
+    expect(widgetLocale("fr", ["es-MX", "en-US"], "en")).toBe("fr");
+  });
+
+  it("follows the visitor's browser when the settings set none, taking the first language the widget has", () => {
+    expect(widgetLocale(undefined, ["es-MX", "en-US"], "fr")).toBe("es");
+    expect(widgetLocale(undefined, ["de-DE", "sr-Latn-RS", "en"], "fr")).toBe("sr");
+  });
+
+  it("falls back to the business's language when the widget has none of the browser's", () => {
+    expect(widgetLocale(undefined, ["de-DE", "ja"], "fr")).toBe("fr");
+    expect(widgetLocale(undefined, [], "en")).toBe("en");
+  });
+
+  it("switches the widget to the visitor's browser language once its settings load", async () => {
+    const languages = vi.spyOn(navigator, "languages", "get").mockReturnValue(["es-MX", "en-US"]);
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, business: { ...config.business, defaultLocale: "fr" } })));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    await vi.waitFor(() => expect(widgetLanguage.change).toHaveBeenCalledWith("es"));
+    expect(widgetLanguage.change).not.toHaveBeenCalledWith("fr");
+    languages.mockRestore();
     client.clear();
   });
 });

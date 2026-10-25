@@ -82,8 +82,8 @@ it("opens the website widget's chat in the language its loader names, without sa
   expect(chat.headers.get("x-middleware-request-x-lobbystack-locale")).toBe("fr");
   expect(chat.headers.get("set-cookie")).toBeNull();
 
-  // An older loader names no language, and a language the chat doesn't offer
-  // is ignored: the chat starts in the visitor's.
+  // A widget whose settings set no language, or an older loader, names none,
+  // and a language the chat doesn't offer is ignored: the chat starts in the visitor's.
   for (const url of ["/embed/wk_live_key?color=%230f766e", "/embed/wk_live_key?locale=de"]) {
     const older = proxy(new NextRequest(`http://localhost:3210${url}`, { headers: { "accept-language": "es-MX" } }));
     expect(older.headers.get("x-middleware-request-x-lobbystack-locale"), url).toBe("es");

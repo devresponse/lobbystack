@@ -1,6 +1,6 @@
 # Follow logs, errors and alerts
 
-Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `da1f548`.
+Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`.
 
 ## Set the variables
 
@@ -24,6 +24,8 @@ Since fork PR #41, `withCallContext`, `logEvent`, `reportError` and `reportWarni
 - Outbox delivery failures log `outbox.dispatch_failed`. Calls add `live.call`, `live.delegation` and `tool.<name>` spans.
 - A missing Twilio price after 17 hours of rechecks is a warning, not an error (fork PR #44).
 - With AI traces on for a business, its traces show what the model was given and did on each turn ([calls](calls.md#trace-what-the-ai-was-given)).
+
+The website chat isn't a call, but since fork PR #79 its lines carry `businessId`, and those about one chat its `conversationId`: `widget.chat_reply` for each answer (`durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and token counts), `widget.chat_refused` with the `status` and `code`, and `widget.team_request` with its `outcome`. A failed answer is an `[admin] exception:` line, and a PostHog error, with the `errorId` the widget shows and a `category` that says why ([website widget](website-widget.md#find-out-why-a-reply-failed)).
 
 ## Alert on what matters
 

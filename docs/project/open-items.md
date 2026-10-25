@@ -12,6 +12,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 4. **Confirm `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`:** 1860 on the worker so a deploy doesn't cut calls, and 120 on the admin so it doesn't cut replies being written.
 5. **Check the settings the codebase review named:** `APP_BASE_URL` on the worker, `EMAIL_FROM` as a bare address, and the same `OTP_HASH_SECRET` on both services ([codebase review](../reviews/codebase-2026-10-18.md#check-the-deployment-settings-it-named)).
 6. **Set up alerts.** None is set up on the demo: an uptime check on `/api/health/ready`, PostHog error and log alerts, the billing alerts, and spending alerts at OpenAI and Twilio ([observability](../features/observability.md#alert-on-what-matters), [alerts](../operations/alerts.md)).
+7. **Find why the website chat doesn't answer.** On 2026-10-25 the demo's widget answered a message with "Your message couldn't be sent.": the AI's answer failed about 2.5 seconds in, before any text. Once fork PR #79 is live, send a message, then filter the admin's log with the Error ID the widget shows; its `category` and provider fields say why ([website widget](../features/website-widget.md#find-out-why-a-reply-failed)).
 
 ## Test these
 
@@ -55,6 +56,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - The v1 API's remaining gaps against the database ([API gaps](../reference/api-gaps.md)).
 - A dedicated n8n node ([API, CLI and integrations](../features/api-cli-integrations.md)).
 - An automatic check after each deploy.
+- The website chat's words when only the reply fails: it says the message couldn't be sent, though it was saved and the team alerted ([website widget](../features/website-widget.md#know-the-gaps)).
 
 ## Clean up what still points at the original
 

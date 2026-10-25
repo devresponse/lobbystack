@@ -815,6 +815,64 @@ describe("widget reply language", () => {
   });
 });
 
+describe("widget chat errors", () => {
+  const errorId = "3f2b6c1e-9a1d-4e5f-8b7a-2c3d4e5f6a7b";
+
+  async function sendTo(chat: () => Response) {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => {
+      const path = String(url);
+      if (path.includes("/api/widget/history")) return Response.json({ automationState: "ai_active", messages: [] });
+      if (path.includes("/api/widget/chat")) return chat();
+      if (path.includes("/api/widget/stream")) return new Response(null, { status: 401 });
+      return Response.json(config);
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+    const composer = await screen.findByRole("textbox", { name: "chat.composerPlaceholder" });
+    await vi.waitFor(() => expect((composer as HTMLInputElement).disabled).toBe(false));
+    fireEvent.change(composer, { target: { value: "Hi" } });
+    await act(async () => { fireEvent.submit(composer.closest("form")!); });
+    return client;
+  }
+
+  it("shows the Error ID of a reply the server couldn't give, so the business can look it up", async () => {
+    const client = await sendTo(() => createUIMessageStreamResponse({
+      stream: createUIMessageStream({
+        execute: ({ writer }) => {
+          writer.write({ type: "start", messageId: "a1" });
+          writer.write({ type: "text-start", id: "a1" });
+          writer.write({ type: "error", errorText: JSON.stringify({ error: "The chat could not be processed.", code: "chat_reply_failed", errorId }) });
+          writer.write({ type: "finish", finishReason: "error" });
+        },
+      }),
+    }));
+
+    expect(await screen.findByText(`chat.errorId ${errorId}`)).toBeTruthy();
+    expect(screen.getByText("chat.sendingFailed")).toBeTruthy();
+    client.clear();
+  });
+
+  it("shows the Error ID of a message the server couldn't take", async () => {
+    const client = await sendTo(() => Response.json({ error: "Request failed.", code: "chat_failed", errorId }, { status: 500 }));
+
+    expect(await screen.findByText(`chat.errorId ${errorId}`)).toBeTruthy();
+    client.clear();
+  });
+
+  it("names no Error ID for the month's chat limit", async () => {
+    const client = await sendTo(() => Response.json({ error: "This month's chat session limit has been reached.", code: "chat_ai_limit_reached" }, { status: 402 }));
+
+    expect(await screen.findByText("chat.limitReached")).toBeTruthy();
+    expect(screen.queryByText(/chat\.errorId/)).toBeNull();
+    client.clear();
+  });
+});
+
 describe("links in chat replies", () => {
   const reply = "Book online at https://acme.example/book. You can also use [our booking page](https://acme.example/book).";
   const expectedLinks = [

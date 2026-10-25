@@ -6,6 +6,7 @@
     "composerPlaceholder": "Unesite poruku...",
     "send": "Pošalji",
     "sendingFailed": "Vaša poruka nije poslata. Pokušajte ponovo.",
+    "errorId": "ID greške: {{id}}",
     "loadingTranscript": "Učitavanje razgovora...",
     "chatUnavailable": "Čet trenutno nije dostupan.",
     "emptyBody": "Unesite poruku.",

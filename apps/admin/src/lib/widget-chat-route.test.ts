@@ -1,3 +1,4 @@
+import { APICallError } from "ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
@@ -22,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   getWorkerDatabase: vi.fn(),
   createAgentModel: vi.fn(),
   createReceptionistAgent: vi.fn(),
+  reportServerError: vi.fn(async (..._args: unknown[]) => undefined),
 }));
 
 vi.mock("@lobbystack/domain", () => ({
@@ -54,7 +56,28 @@ vi.mock("@lobbystack/agent-core/agent", () => ({
 }));
 
 function agentStreaming(textStream: AsyncIterable<string>, finishReason = "stop") {
-  return { stream: vi.fn().mockResolvedValue({ textStream, totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve(finishReason) }) };
+  return { stream: vi.fn().mockResolvedValue({ textStream, totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve(finishReason), steps: Promise.resolve([]) }) };
+}
+
+/**
+ * An agent whose request to the model provider fails, as the SDK reports it:
+ * the error goes to onError, the text ends empty, and the result's promises
+ * reject.
+ */
+function agentFailingWith(error: unknown) {
+  return {
+    stream: vi.fn(async (options: { onError?: (event: { error: unknown }) => void }) => {
+      options.onError?.({ error });
+      const noOutput = Promise.reject(new Error("No output generated. Check the stream for errors."));
+      noOutput.catch(() => undefined);
+      return { textStream: (async function* () {})(), totalUsage: noOutput, finishReason: noOutput, steps: noOutput };
+    }),
+  };
+}
+
+/** The JSON lines logEvent printed at this level, by their message. */
+function logLines(spy: { mock: { calls: unknown[][] } }, message: string): Array<Record<string, unknown>> {
+  return spy.mock.calls.map(([line]) => { try { return JSON.parse(String(line)) as Record<string, unknown>; } catch { return {}; } }).filter((line) => line.message === message);
 }
 
 /** An agent whose reply streams word by word, each once its gate opens. */
@@ -72,6 +95,7 @@ function agentReplyingIn(words: string[], gates: Array<Promise<void>> = []) {
       })(),
       totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }),
       finishReason: Promise.resolve("stop"),
+      steps: Promise.resolve([]),
     })),
   };
 }
@@ -83,6 +107,10 @@ vi.mock("@/lib/api-helpers", () => ({
 
 vi.mock("@/lib/domain-context", () => ({
   createWorkerDomainContext: () => ({ db: {} }),
+}));
+
+vi.mock("@/lib/error-reporting", () => ({
+  reportServerError: mocks.reportServerError,
 }));
 
 vi.mock("@/lib/widget-access", () => ({
@@ -141,6 +169,11 @@ async function readSse(response: Response): Promise<string> {
   return await response.text();
 }
 
+/** The stream's parts, as the widget reads them. */
+function streamParts(body: string): Array<Record<string, unknown>> {
+  return body.split("\n").filter((line) => line.startsWith("data: ") && line !== "data: [DONE]").map((line) => JSON.parse(line.slice("data: ".length)) as Record<string, unknown>);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.resolveWidgetSessionAccess.mockResolvedValue({ ok: true, session });
@@ -161,6 +194,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("POST /api/widget/chat", () => {
@@ -334,7 +368,7 @@ describe("POST /api/widget/chat", () => {
     mocks.createReceptionistAgent.mockImplementation((input: { context: { liveChat?: { onTeamRequested?: () => void } } }) => ({
       stream: vi.fn(async () => {
         input.context.liveChat?.onTeamRequested?.();
-        return { textStream: (async function* () { yield "I've let the team know."; })(), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve("stop") };
+        return { textStream: (async function* () { yield "I've let the team know."; })(), totalUsage: Promise.resolve({ inputTokens: 1, outputTokens: 1, totalTokens: 2 }), finishReason: Promise.resolve("stop"), steps: Promise.resolve([]) };
       }),
     }));
 
@@ -397,8 +431,99 @@ describe("POST /api/widget/chat", () => {
       conversationId,
       isError: true,
       error: "generation_failed",
-      provider: "unknown",
-      model: "unknown",
+      provider: "test",
+      model: "test",
     })));
+  });
+
+  it("reports why the model provider refused a reply, under the Error ID the widget shows", async () => {
+    const refusal = new APICallError({
+      message: "Project does not have access to model gpt-6-luna.",
+      url: "https://api.openai.com/v1/responses",
+      requestBodyValues: { input: "Hi, I would like to book a checkup." },
+      statusCode: 403,
+      isRetryable: false,
+      data: { error: { message: "Project does not have access to model gpt-6-luna.", type: "invalid_request_error", param: null, code: "model_not_found" } },
+    });
+    mocks.createReceptionistAgent.mockReturnValue(agentFailingWith(refusal));
+
+    const body = await readSse(await POST(widgetRequest()));
+
+    // The widget gets the Error ID, never the provider's explanation.
+    const shown = JSON.parse(String(streamParts(body).find((part) => part.type === "error")?.errorText)) as { code: string; errorId: string };
+    expect(shown).toMatchObject({ code: "chat_reply_failed", errorId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
+    expect(body).not.toContain("does not have access");
+    expect(mocks.reportServerError).toHaveBeenCalledExactlyOnceWith(refusal, expect.objectContaining({
+      operation: "widget.chat_reply",
+      route: "/api/widget/chat",
+      errorId: shown.errorId,
+      conversationId,
+      stage: "generate",
+      category: "provider_auth",
+      providerErrorStatus: 403,
+      providerErrorCode: "model_not_found",
+      providerErrorKind: "invalid_request_error",
+      retryable: false,
+    }));
+    await vi.waitFor(() => expect(mocks.recordAiGenerationEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ isError: true, error: "provider_auth", provider: "test" })));
+    expect(savedReplies()).toEqual([]);
+  });
+
+  it("says why a reply came back without text", async () => {
+    mocks.createReceptionistAgent.mockReturnValue(agentStreaming((async function* () {})(), "length"));
+
+    await readSse(await POST(widgetRequest()));
+
+    expect(mocks.reportServerError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ name: "EmptyReplyError" }), expect.objectContaining({ operation: "widget.chat_reply", category: "output_limit", finishReason: "length", stage: "generate" }));
+    expect(savedReplies()).toEqual([]);
+  });
+
+  it("logs each reply's timing, steps and tools with the business, but not its text", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const steps = [{ text: "", toolCalls: [{ toolName: "searchKnowledge", input: { query: "checkup" } }], toolResults: [] }];
+    mocks.createReceptionistAgent.mockReturnValue({ stream: vi.fn().mockResolvedValue({ textStream: (async function* () { yield "We can book you in on Tuesday."; })(), totalUsage: Promise.resolve({ inputTokens: 5, outputTokens: 3, totalTokens: 8 }), finishReason: Promise.resolve("stop"), steps: Promise.resolve(steps) }) });
+
+    await readSse(await POST(widgetRequest()));
+
+    const [line] = logLines(info, "widget.chat_reply");
+    expect(line).toMatchObject({ level: "info", businessId, conversationId, modelSteps: 1, tools: ["searchKnowledge"], finishReason: "stop", inputTokens: 5, outputTokens: 3, teamRequested: false });
+    expect(line?.timeToFirstTokenMs).toEqual(expect.any(Number));
+    expect(JSON.stringify(line)).not.toContain("Tuesday");
+    expect(mocks.reportServerError).not.toHaveBeenCalled();
+  });
+
+  it("logs why a message got no reply", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.enforceWidgetRateLimits.mockResolvedValue({ allowed: false, status: 429, code: "widget_rate_limited", reason: "rate_limit_visitor_hour" });
+
+    await POST(widgetRequest());
+
+    expect(logLines(warn, "widget.chat_refused")).toEqual([expect.objectContaining({ level: "warn", businessId, status: 429, code: "widget_rate_limited", reason: "rate_limit_visitor_hour" })]);
+  });
+
+  it("answers a message that fails the schema with 400, naming the field but not its value", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const response = await POST(widgetRequest({ content: "x".repeat(4_001) }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "widget_chat_input_invalid" });
+    expect(logLines(warn, "widget.chat_refused")).toEqual([expect.objectContaining({ status: 400, code: "widget_chat_input_invalid", invalid: "content" })]);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("xxxx");
+    expect(mocks.appendMessage).not.toHaveBeenCalled();
+    expect(mocks.reportServerError).not.toHaveBeenCalled();
+  });
+
+  it("reports a failure before the reply starts, and gives the widget its Error ID", async () => {
+    const failure = new Error("connection terminated unexpectedly");
+    mocks.appendMessage.mockRejectedValue(failure);
+
+    const response = await POST(widgetRequest());
+
+    expect(response.status).toBe(500);
+    const body = await response.json() as { code: string; errorId: string };
+    expect(body).toMatchObject({ code: "chat_failed", errorId: expect.any(String) });
+    expect(response.headers.get("x-error-id")).toBe(body.errorId);
+    await vi.waitFor(() => expect(mocks.reportServerError).toHaveBeenCalledExactlyOnceWith(failure, { operation: "widget.chat", route: "/api/widget/chat", errorId: body.errorId }));
   });
 });

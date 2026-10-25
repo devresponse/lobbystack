@@ -59,22 +59,12 @@ LobbyStack uses these ports on your computer, so close anything else that uses t
 
 The fork is public, so you can download it without a GitHub account. If you made your own fork ([1.4](part-1-prepare.md#14-get-the-code)), put its owner's name in place of `devresponse` in the commands below, because releases push from this copy ([7.1](part-7-operations.md#71-release-a-new-version)).
 
-On a Mac or Linux:
-
 ```sh
 git clone https://github.com/devresponse/lobbystack.git
 cd lobbystack
 ```
 
-On Windows, the files must keep their Linux line endings, or the database setup script and the settings generator break:
-
-```powershell
-git clone --config core.autocrlf=input https://github.com/devresponse/lobbystack.git
-cd lobbystack
-git ls-files --eol docker/postgres/init/roles.sh .env.example
-```
-
-The last command should show `w/lf` for both files. If you already cloned without the setting, follow "Keep Linux line endings on Windows" in `docs/voice/local-debugging.md`. (To confirm on a Windows machine: the one-step `--config` clone.)
+The same two commands work on Windows. Git for Windows normally gives files Windows line endings, which break the database setup script, but the code's `.gitattributes` file tells Git to keep Linux line endings on every computer, so there's nothing to set. (Tested with Git set up the way Git for Windows sets it up, on Linux; not yet on a Windows machine.) If you cloned on Windows before fork PR #83, follow "Line endings on Windows" in `docs/voice/local-debugging.md`.
 
 Then download the code's packages and create your settings file:
 
@@ -84,7 +74,7 @@ pnpm env:generate
 ```
 
 - `pnpm install` takes about half a minute. A warning about "Ignored build scripts" is harmless.
-- `pnpm env:generate` writes a file named `.env` with new random passwords and secrets, and prints `Wrote .env with 15 generated secrets.` If it says 0, the line endings are wrong (Windows).
+- `pnpm env:generate` writes a file named `.env` with new random passwords and secrets, and prints `Wrote .env with 15 generated secrets.`
 - `.env` holds secrets. Never share it, paste it into a chat, or add it to Git. Git already ignores it.
 
 For website chat and browser test calls, create a second settings file named `.env.local` in the same folder, with your OpenAI key on one line:
@@ -205,13 +195,13 @@ pnpm build
 | Onboarding stops at the plan step: `Can't resolve '@lobbystack/shared/product-capabilities'` | The shared package isn't built, on a copy older than `7893d2e` | `pnpm --filter @lobbystack/shared build`, then reload the page |
 | Sign-in says "Incorrect email or password" although the password is right, and the terminal shows `Invalid origin` | The dashboard is open at an address other than `http://localhost:13000` | Use `http://localhost:13000` exactly |
 | The sign-up code never arrives | No email is set up | Sign in with the same email and password, or set up Mailpit ([2.7](#27-optional-extras)) |
-| `pnpm env:generate` says it generated 0 secrets | Windows line endings | Fix the line endings ([2.3](#23-get-the-code-and-create-your-settings-file)), then run `pnpm env:generate --force` and `docker compose down -v` |
+| `pnpm env:generate` says it generated 0 secrets | Windows line endings, in a clone made before fork PR #83 | `git pull`, then `pnpm env:generate --force` and `docker compose down -v` |
 | `.env already exists` | You already generated it | Keep it, or add `--force` and then run `docker compose down -v` |
 | `required variable BETTER_AUTH_SECRET is missing a value` | There's no `.env` | `pnpm env:generate` |
-| The apps can't sign in to the database: `password authentication failed` or `is not permitted to log in` | The database first started with Windows line endings or with other passwords | `docker compose down -v`, then start again |
+| The apps can't sign in to the database: `password authentication failed` or `is not permitted to log in` | The database first started with other passwords, or with Windows line endings in a clone made before fork PR #83 | `git pull` for the line endings, then `docker compose down -v` and start again |
 | A container keeps restarting with `must not use a placeholder value in production` (Way B) | `.env` was copied instead of generated | `pnpm env:generate --force`, then `docker compose down -v` |
 | `Ports are not available` | Another program uses the port, or Windows reserved it | Change the port in `.env`, along with the addresses that contain it |
 | `429 Too Many Requests` while downloading an image | Docker Hub's limit for downloads without an account | `docker login`, or try again later |
 | The worker stops with `listen EAFNOSUPPORT` | The computer has IPv6 switched off | Switch IPv6 back on |
 
-**Checked against:** `docs/voice/local-debugging.md`, `docker-compose.yml`, `.env.example`, `scripts/generate-env.mjs`, `scripts/dev.mjs`, `apps/admin/next.config.ts`, `apps/admin/tsconfig.json`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/lib/auth.ts`, `apps/worker/src/health.ts`.
+**Checked against:** `docs/voice/local-debugging.md`, `docker-compose.yml`, `.env.example`, `.gitattributes`, `docker/postgres/init/roles.sh`, `scripts/generate-env.mjs`, `scripts/dev.mjs`, `apps/admin/next.config.ts`, `apps/admin/tsconfig.json`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/lib/auth.ts`, `apps/worker/src/health.ts`.

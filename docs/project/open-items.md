@@ -20,6 +20,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - **A real call with a keypad PIN:** one that cancels a test appointment with the right PIN, then one with a wrong PIN three times ([caller authentication](../features/caller-authentication.md#know-what-is-untested)).
 - **`pnpm voice:eval` and `pnpm voice:call`,** which need an OpenAI key and haven't been run since fork PRs #13, #18, #45, #50, #52, #54 and #78 ([calls](../features/calls.md#know-what-hasnt-been-tried)); and `pnpm voice:eval --browser` for the widget's calls.
 - **Other languages on GPT-Live:** fork PR #78's Spanish callers, 3 runs each (`pnpm voice:eval --scenario spanish-switch --scenario spanish-only`), a French call over a phone line, and a call that opens in one of the languages fork PR #82 added, such as Japanese or Arabic. OpenAI doesn't publish GPT-Live's languages ([calls](../features/calls.md#know-which-language-a-call-uses), [voice platforms](../research/voice-platforms.md)).
+- **A new clone on a Windows machine,** with Git for Windows' default settings: `git ls-files --eol docker/postgres/init/roles.sh .env.example` should show `w/lf` for both, and the app should connect to the database after Postgres's first start. Fork PR #83 was tested only with Git set up that way on Linux ([line endings on Windows](../voice/local-debugging.md#line-endings-on-windows)).
 
 ## Decide these
 
@@ -70,7 +71,6 @@ The docs no longer link to the original project's sites, but some code and confi
 - The Zapier app (`integrations/zapier/`) connects to the original's dashboard and docs unless `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` are set; the CLI's onboarding help links to the original's docs.
 - `.railway/railway.ts` allows the original's site as a website-call origin; the fork's deployments don't use that file.
 - `apps/landing/`, `mintlify/` and `research/` are the original's site, help pages and articles, full of its links. The fork doesn't publish them.
-- A `.gitattributes` that keeps Linux line endings for shell scripts would spare Windows users the manual setting in [part 2 of the guide](../deployment/guide/part-2-local-development.md).
 
 ## Know what lives outside the repository
 

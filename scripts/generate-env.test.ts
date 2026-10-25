@@ -27,6 +27,13 @@ describe("generateEnv", () => {
     expect(output).toMatch(/^BETTER_AUTH_SECRET=[0-9a-f]{64}$/);
   });
 
+  it("reads Windows line endings and writes LF", () => {
+    const { output, generated } = generateEnv("# comment\r\nPOSTGRES_PASSWORD=replace-with-a-long-local-password\r\nPOSTGRES_PORT=15433\r\n", () => "pw");
+
+    expect(output).toBe("# comment\nPOSTGRES_PASSWORD=pw\nPOSTGRES_PORT=15433\n");
+    expect(generated).toEqual(["POSTGRES_PASSWORD"]);
+  });
+
   it("fills a generated password into DATABASE_URL", () => {
     const { output, generated } = generateEnv(
       "POSTGRES_PASSWORD=replace-with-a-long-local-password\nDATABASE_URL=postgres://postgres:replace-with-a-long-local-password@127.0.0.1:15433/lobbystack",

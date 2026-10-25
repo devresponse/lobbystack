@@ -195,7 +195,7 @@ function TranscriptTab({ detail }: { detail: Detail }) {
               <div className={cn("flex", caller ? "justify-start" : "justify-end")} key={segment.id}>
                 <div className={cn("max-w-[80%] px-4 py-2.5", caller ? "rounded-[16px_16px_16px_0] bg-muted" : "rounded-[16px_16px_0_16px] bg-primary/10 dark:bg-primary/20")}>
                   <p className={cn("type-meta mb-1", caller ? "text-muted-foreground" : "text-primary/80 dark:text-primary/60")}>{caller ? t("detail.transcript.caller") : t("detail.transcript.assistant")}</p>
-                  <p className="type-body ph-mask whitespace-pre-wrap">{segment.text}</p>
+                  <p dir="auto" className="type-body ph-mask whitespace-pre-wrap">{segment.text}</p>
                 </div>
               </div>
             );

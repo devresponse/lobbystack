@@ -355,7 +355,7 @@ When the receptionist can't book, it's told why, and tells the caller in its own
 | What you see | Why | What to do |
 | --- | --- | --- |
 | Calls open in English for a French business, or the other way round | Calls start with the greeting, in the greeting's own language | Write the **Greeting** in the **Default customer language** ([6.3](part-6-first-run.md#63-set-up-the-first-business)) |
-| Calls never open in Spanish or Serbian | **Default customer language** offers English and French only. The receptionist switches when a caller asks, or clearly speaks another language | Nothing |
+| Calls never open in Spanish or Serbian | **Default customer language** offers English and French only. The receptionist switches when a caller asks, or clearly speaks another language, and keeps answering in it for the rest of the call | Nothing |
 | A business set up from a Spanish or Serbian dashboard opens calls in English | Onboarding picks French only for a French dashboard | **AI settings** > **Default customer language** |
 | The website chat shows English or French to a visitor whose browser is in another language | The widget's words are in English, French, Spanish and Serbian only, so for any other browser language "Visitor's language" shows the business's. The replies still follow the language the visitor writes in ([website widget](../../features/website-widget.md#know-which-language-the-chat-uses)) | Nothing, or pick the language in **Settings** > **Website widget** |
 

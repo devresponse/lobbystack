@@ -116,7 +116,7 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   let replyEndMs = -1;
   const replies: string[] = [];
   const checks: boolean[] = [];
-  // Each hand-over after the opening question, by the tools the agent used.
+  // Each hand-over during the scenario, by the tools the agent used.
   const handOvers: string[] = [];
 
   const flushReply = () => {
@@ -210,9 +210,11 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     }, CHUNK_MS);
     await waitForReply(GREETING_WAIT_MS);
     callerSpoke = true;
-    await play(OPENING);
+    // The answer to a scenario's own opening is part of what it checks.
+    if (scenario.opening) scenarioStartMs = sessionMs;
+    await play(scenario.opening ?? OPENING);
     await waitForReply(20_000);
-    scenarioStartMs = sessionMs;
+    if (!scenario.opening) scenarioStartMs = sessionMs;
     for (const [index, line] of scenario.lines.entries()) {
       if (index > 0) await sleep(line.pauseMs ?? 0);
       // The call reached its time limit.
@@ -245,7 +247,7 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
 }
 
 const audio = new Map<string, Buffer>();
-for (const text of new Set([OPENING, ...scenarios.flatMap((scenario) => scenario.lines.map((line) => line.text))])) audio.set(text, await speak(text));
+for (const text of new Set(scenarios.flatMap((scenario) => [scenario.opening ?? OPENING, ...scenario.lines.map((line) => line.text)]))) audio.set(text, await speak(text));
 
 const jobs = Array.from({ length: Number(values.runs) }, () => scenarios).flat();
 const results: RunResult[] = [];

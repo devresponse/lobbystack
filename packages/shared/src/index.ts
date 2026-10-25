@@ -402,5 +402,6 @@ export { OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_TEMP
 export { canTextNumber, failedSmsProviderStatus, permanentSmsErrorCode, smsErrorCode, smsFailureReason, type SmsFailure, type SmsFailureReason, type SmsHoldReason } from "./smsReach";
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";
+export { withoutSoundTags } from "./transcript";
 
 export * from "./publicApi";

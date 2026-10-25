@@ -6,7 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport, type UIMessage } from "ai";
 import { useTranslation } from "react-i18next";
-import { normalizeInterfaceLocale, type InterfaceLocale } from "@lobbystack/shared";
+import { normalizeInterfaceLocale, withoutSoundTags, type InterfaceLocale } from "@lobbystack/shared";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -707,10 +707,25 @@ function VoiceButton({ className, businessSlug, visitorId, sessionToken, parentO
   );
 }
 
+// The captions leave out the sounds GPT-Live marks, such as "[tongue click]".
+// A turn that was only a sound goes, and the other speaker's words on either
+// side of it join up again.
+function captionTurns(turns: readonly WebVoiceTranscriptTurn[]): WebVoiceTranscriptTurn[] {
+  const shown: WebVoiceTranscriptTurn[] = [];
+  for (const turn of turns) {
+    const text = withoutSoundTags(turn.text);
+    if (!text.trim()) continue;
+    const last = shown.at(-1);
+    if (last?.speaker === turn.speaker) shown[shown.length - 1] = { ...last, text: last.text + text };
+    else shown.push({ ...turn, text });
+  }
+  return shown;
+}
+
 // Live captions of a widget voice call, in the chat thread. They stay after the
 // call ends, until the next call starts, and aren't kept on reload.
 function VoiceTranscript({ captions, color, onColor, t }: { captions: VoiceCaptions; color: string; onColor: string; t: (key: string) => string }) {
-  const turns = captions.turns.filter((turn) => turn.text.trim());
+  const turns = captionTurns(captions.turns);
   return (
     <section className="flex flex-col gap-3" aria-label={t("chat.voiceTranscript")}>
       <p className="flex items-center justify-center gap-2 text-xs font-medium text-zinc-500">

@@ -134,7 +134,7 @@ The browser can only close the session. It can't change instructions or answer d
 Once attached, the worker owns the call until OpenAI closes the session. It:
 
 - speaks the business greeting as soon as the session starts, or plays its recording once the caller's audio arrives
-- saves each caller and receptionist turn to the transcript
+- saves each caller and receptionist turn to the transcript, without the sounds GPT-Live's transcription marks in square brackets, such as `[tongue click]` or `[laughs]` (`withoutSoundTags` in `packages/shared/src/transcript.ts`, fork PR #80). A turn that was only sounds isn't saved, and the next delegated request doesn't see them either. The worker's own notes, `[pressed 1]`, `[pressed a key]` and `[typed a PIN]`, stay. Transcripts saved before then keep their tags.
 - transfers phone calls with a SIP REFER to the destination number, once GPT-Live has told the caller
 - hangs up after the receptionist's goodbye has played, when the agent ends the call
 - ends the call after 75 seconds without speech or keypad presses from either side, or at the duration limit. The limit is the minutes the call has reserved, and at most 30 minutes. When the admin sends no limit, as on an unlimited plan, the call stops at 30 minutes. A browser call's limit is 30 minutes, or less when `WEB_CALL_MAX_DURATION_MS` on the admin sets less or the plan has fewer minutes left. A request still being answered pauses the silence timer.

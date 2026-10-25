@@ -1,4 +1,4 @@
-import { CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, withoutSoundTags } from "@lobbystack/shared";
 import type { LanguageModelUsage } from "ai";
 import type OpenAI from "openai";
 import type { DelegationCreatedEvent } from "openai/resources/live/live";
@@ -465,6 +465,7 @@ export class LiveCallController {
   private socket: SidebandWS | undefined;
   private transcriptWaiters: Array<{ offsetMs: number; resolve: () => void }> = [];
   private emittedTurns = 0;
+  private savedTurns = 0;
   private silenceTimer: ReturnType<typeof setTimeout> | undefined;
   private durationTimer: ReturnType<typeof setTimeout> | undefined;
   private greetingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1344,12 +1345,16 @@ export class LiveCallController {
     this.silenceTimer = setTimeout(() => this.options.onTimeout?.("silence_timeout"), this.options.silenceTimeoutMs);
   }
 
-  // Report every turn except the one still in progress.
+  // Report every turn except the one still in progress, without the sounds
+  // GPT-Live marks, such as "[tongue click]". A turn that was only sounds isn't saved.
   private emitFinishedTurns(includeLast: boolean): void {
     const ready = includeLast ? this.turns.length : this.turns.length - 1;
     for (; this.emittedTurns < ready; this.emittedTurns += 1) {
       const turn = this.turns[this.emittedTurns]!;
-      this.options.onTurn?.({ sequence: this.emittedTurns + 1, speaker: turn.role === "caller" ? "caller" : "assistant", text: turn.text });
+      const text = withoutSoundTags(turn.text);
+      if (!text.trim()) continue;
+      this.savedTurns += 1;
+      this.options.onTurn?.({ sequence: this.savedTurns, speaker: turn.role === "caller" ? "caller" : "assistant", text });
     }
   }
 
@@ -1386,7 +1391,10 @@ export class LiveCallController {
   }
 
   private conversationText(): string {
-    return this.turns.map((turn) => `${turn.role === "caller" ? "Caller" : "Receptionist"}: ${turn.text.trim()}`).join("\n");
+    return this.turns.flatMap((turn) => {
+      const text = withoutSoundTags(turn.text).trim();
+      return text ? [`${turn.role === "caller" ? "Caller" : "Receptionist"}: ${text}`] : [];
+    }).join("\n");
   }
 
   private delegationPrompt(): string {

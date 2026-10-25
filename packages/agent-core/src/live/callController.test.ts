@@ -1629,6 +1629,34 @@ describe("LiveCallController keypad input", () => {
   });
 });
 
+describe("LiveCallController sounds in the transcript", () => {
+  it("leaves the sounds GPT-Live marks out of the saved turns and the next request, and keeps key presses", async () => {
+    fakeTimers();
+    const { socket, generate, turns } = setup();
+    // Once the business has loaded, a key press shows which key it was.
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("session.output_transcript.delta", { delta: "We're open Monday to Friday.", start_ms: 500, end_ms: 2_000 });
+    // A sound on its own, split across two deltas, between the receptionist's sentences.
+    socket.emit("session.input_transcript.delta", { delta: "[tongue", start_ms: 2_100, end_ms: 2_200 });
+    socket.emit("session.input_transcript.delta", { delta: " click ]", start_ms: 2_200, end_ms: 2_300 });
+    socket.emit("session.output_transcript.delta", { delta: " Anything else?", start_ms: 2_400, end_ms: 3_000 });
+    socket.emit("session.input_transcript.delta", { delta: "[tongue click ]No, can you connect [laughs] me to a person?", start_ms: 3_100, end_ms: 4_000 });
+    socket.emit("transport.dtmf.received", { type: "transport.dtmf.received", event: "1", event_id: "evt_1" });
+    socket.emit("session.delegation.created", { delegation: { id: "item_1" }, offset_ms: 4_100 });
+    await vi.advanceTimersByTimeAsync(300);
+    const prompt = generate.mock.calls[0]![0].prompt;
+    expect(prompt).toContain("Receptionist: We're open Monday to Friday.\nReceptionist: Anything else?\nCaller: No, can you connect me to a person? [pressed 1]");
+    expect(prompt).not.toMatch(/click|laughs/);
+
+    socket.emit("session.closed", { reason: "remote_hangup" });
+    expect(turns).toEqual([
+      { sequence: 1, speaker: "assistant", text: "We're open Monday to Friday." },
+      { sequence: 2, speaker: "assistant", text: " Anything else?" },
+      { sequence: 3, speaker: "caller", text: "No, can you connect me to a person? [pressed 1]" },
+    ]);
+  });
+});
+
 describe("LiveCallController keypad PIN", () => {
   const press = (socket: FakeSocket, keys: string) => {
     for (const key of keys) socket.emit("transport.dtmf.received", { type: "transport.dtmf.received", event: key, event_id: `evt_${key}` });

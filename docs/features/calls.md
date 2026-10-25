@@ -6,7 +6,7 @@ OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twili
 
 1. A phone call arrives at OpenAI through the SIP trunk, and OpenAI posts `realtime.call.incoming` to the admin's `/api/webhooks/openai/live`. A browser call asks the admin's `/api/voice/live/session`.
 2. The admin finds the business by the dialled number (or the widget key), checks the plan's minutes, loads the business's context snapshot, records the call and accepts it with the business's instructions.
-3. The admin hands the call to the worker at `/internal/live/attach`. The worker opens the session's control connection and runs the call: it answers GPT-Live's delegated requests with the agent core (`packages/agent-core`), takes keypad presses, enforces the time limit, and finishes the call with a transcript and a summary.
+3. The admin hands the call to the worker at `/internal/live/attach`. The worker opens the session's control connection and runs the call: it answers GPT-Live's delegated requests with the agent core (`packages/agent-core`), takes keypad presses, enforces the time limit, and finishes the call with a transcript and a summary. Since fork PR #80, the transcript leaves out the sounds GPT-Live's transcription marks in square brackets, such as `[tongue click]`, and keeps the worker's own notes, such as `[pressed 1]`.
 
 Only three admin routes must be reachable from the internet for calls and texts: `/api/webhooks/openai/live`, `/api/webhooks/twilio/sms` and `/api/webhooks/twilio/status`. The worker only connects out.
 

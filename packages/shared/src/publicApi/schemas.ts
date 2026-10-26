@@ -140,6 +140,7 @@ export const apiReceptionistSchema = z.object({
   transfer_number: z.string().nullable().describe("Where it transfers calls, in E.164 format. A number saved before that was required may be in another format. With no number, it never transfers."),
   booking_mode: z.enum(bookingModes).describe("instant: appointments are booked directly. request: the receptionist takes a request and the team confirms it. off: no booking."),
   appointment_change_policy: z.object(appointmentChangePolicyFields).describe("Whether callers can cancel or reschedule their own appointments, and how they prove it's theirs."),
+  recording_notice: z.boolean().describe("Whether calls say, right after the greeting and in the language they open in, that the caller is speaking with an AI assistant and the call is recorded and transcribed. On by default."),
   updated_at: timestamp,
 }).describe("How the receptionist answers, what it says about the business, and what it may do.");
 
@@ -156,6 +157,7 @@ export const apiReceptionistUpdateSchema = z.strictObject({
   transfer_number: e164.nullable().optional().describe("null removes it, which stops transfers."),
   booking_mode: z.enum(bookingModes).optional(),
   appointment_change_policy: z.strictObject(appointmentChangePolicyFields).optional().describe("Send all four fields."),
+  recording_notice: z.boolean().optional().describe("false stops calls from saying that the caller is speaking with an AI and the call is recorded and transcribed. Tell callers another way where the law asks for it."),
 }).refine((value) => value.summary === undefined || value.regenerate_summary === undefined, { message: "Send summary or regenerate_summary, not both.", path: ["regenerate_summary"] });
 
 export const apiRuleSchema = z.object({

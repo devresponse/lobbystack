@@ -112,6 +112,10 @@ function response(): ServerResponse {
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
+// What a call opens with for the snapshot most tests use: its greeting, then
+// the notice that the call is with an AI and recorded.
+const opening = "Hi You're speaking with an AI assistant, and this call is recorded and transcribed.";
+
 describe("createLiveCallHandler", () => {
   it("opens one sideband when two attaches for a session overlap", async () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
@@ -190,7 +194,7 @@ describe("createLiveCallHandler", () => {
     (controller.options.onTimeout as (reason: string) => void)("silence_timeout");
     expect(controller.wrapUp).toHaveBeenCalledWith("silence_timeout");
     expect(controller.endSession).not.toHaveBeenCalled();
-    await expect((controller.options.setup as Promise<{ language: string }>)).resolves.toMatchObject({ greeting: "Hi" });
+    await expect((controller.options.setup as Promise<{ language: string }>)).resolves.toMatchObject({ greeting: opening });
   });
 
   // GPT-Live said goodbye and handed the call over; the agent's endCall hangs up once the goodbye has played.
@@ -530,14 +534,34 @@ describe("re-attaching after a retried webhook delivery", () => {
     mocks.lastLiveCallSequence.mockResolvedValueOnce(0);
     const { setup, sequence } = await attach({ sessionId: "live_resume_new", resume: true });
     expect(sequence).toBe(1);
-    expect(setup).toMatchObject({ greeting: "Hi" });
+    expect(setup).toMatchObject({ greeting: opening });
   });
 
   it("makes no extra read on a first attach", async () => {
     const { setup, sequence } = await attach({ sessionId: "live_first" });
     expect(mocks.lastLiveCallSequence).not.toHaveBeenCalled();
     expect(sequence).toBe(1);
-    expect(setup).toMatchObject({ greeting: "Hi" });
+    expect(setup).toMatchObject({ greeting: opening });
+  });
+});
+
+describe("what a call opens with", () => {
+  async function openingFor(sessionId: string, snapshot: Record<string, unknown>) {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", ...snapshot });
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId, businessId: "biz_1", callId: "call_opening", channel: "voice" }), response());
+    return (await (mocks.controllers_.at(-1)!.options.setup as Promise<{ greeting?: string }>)).greeting;
+  }
+
+  it("is the greeting, then the notice in the language the call opens in", async () => {
+    await expect(openingFor("live_opening_fr", { greeting: "Bonjour, ici Plomberie Nord.", defaultLocale: "fr" })).resolves.toBe("Bonjour, ici Plomberie Nord. Vous parlez avec un assistant IA, et cet appel est enregistré et transcrit.");
+  });
+
+  it("is the greeting alone once the business turns the notice off", async () => {
+    await expect(openingFor("live_opening_off", { greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false })).resolves.toBe("Thanks for calling.");
   });
 });
 

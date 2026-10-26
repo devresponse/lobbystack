@@ -266,6 +266,10 @@
       "placeholder": "Hello, thank you for calling…",
       "hint": "The opening line your receptionist uses when answering a call or starting a conversation."
     },
+    "recordingNotice": {
+      "label": "Tell callers about AI and recording",
+      "hint": "Right after the greeting, calls say: “{{notice}}” Many places require telling callers that a call is recorded. Turn this off only if you tell them another way."
+    },
     "defaultLocale": {
       "label": "Default customer language",
       "placeholder": "Select a default language",

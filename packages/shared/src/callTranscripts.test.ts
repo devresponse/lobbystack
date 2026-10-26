@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { callTranscriptUnavailableReason, isCallTranscriptContent, isCallTranscriptRecipients, withoutCardAndIdNumbers } from "./callTranscripts";
+import { callOpening, callRecordingNotices, callTranscriptUnavailableReason, isCallTranscriptContent, isCallTranscriptRecipients, withoutCardAndIdNumbers } from "./callTranscripts";
+import { runtimeLocales } from "./locales";
 
 describe("the email after each call", () => {
   it("goes to owners and admins, everyone on the team, or nobody, as the business chooses", () => {
@@ -49,5 +50,28 @@ describe("card and ID numbers in the email after a call", () => {
 
   it("say what was taken out in the reader's language", () => {
     expect(withoutCardAndIdNumbers("4111111111111111 et 046 454 286", { card: "[numéro de carte retiré]", id: "[numéro d'identité retiré]" })).toBe("[numéro de carte retiré] et [numéro d'identité retiré]");
+  });
+});
+
+describe("what a call says when it opens", () => {
+  it("is the greeting, then that the caller is speaking with an AI and the call is recorded and transcribed", () => {
+    expect(callOpening({ greeting: " Thanks for calling Northside Plumbing. ", defaultLocale: "en" })).toBe("Thanks for calling Northside Plumbing. You're speaking with an AI assistant, and this call is recorded and transcribed.");
+    expect(callOpening({ greeting: "Merci d'avoir appelé Plomberie Nord.", defaultLocale: "fr", recordingNotice: true })).toBe("Merci d'avoir appelé Plomberie Nord. Vous parlez avec un assistant IA, et cet appel est enregistré et transcrit.");
+  });
+
+  it("is the greeting alone once the business turns the notice off", () => {
+    expect(callOpening({ greeting: "Thanks for calling Northside Plumbing.", defaultLocale: "en", recordingNotice: false })).toBe("Thanks for calling Northside Plumbing.");
+    expect(callOpening({ greeting: " ", defaultLocale: "en", recordingNotice: false })).toBe("");
+  });
+
+  // Without a greeting the call still says it, so no caller misses it.
+  it("is the notice alone when the business has no greeting", () => {
+    expect(callOpening({ greeting: "", defaultLocale: "es" })).toBe("Está hablando con un asistente de IA, y esta llamada se graba y se transcribe.");
+    expect(callOpening({ defaultLocale: "de" })).toBe(callRecordingNotices.de);
+  });
+
+  it("has the notice in every language a call can open in", () => {
+    expect(Object.keys(callRecordingNotices).sort()).toEqual([...runtimeLocales].sort());
+    for (const locale of runtimeLocales) expect(callRecordingNotices[locale].trim().length, locale).toBeGreaterThan(20);
   });
 });

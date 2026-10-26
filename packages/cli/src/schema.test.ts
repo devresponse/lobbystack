@@ -16,6 +16,7 @@ describe("request schemas as flags", () => {
     expect(fields.find((field) => field.name === "hours")).toMatchObject({ kind: "array", element: "object", description: expect.stringContaining("Replaces the whole week") });
     expect(objectFields(apiComponentSchemas.ServiceCreate)!.find((field) => field.name === "duration_minutes")).toMatchObject({ kind: "number", optional: false });
     expect(objectFields(apiComponentSchemas.BillingUpdate)).toEqual([expect.objectContaining({ name: "spending_cap_cents", kind: "number", nullable: true })]);
+    expect(objectFields(apiComponentSchemas.ReceptionistUpdate)!.find((field) => field.name === "recording_notice")).toMatchObject({ kind: "boolean", optional: true, nullable: false });
   });
 
   it("picks the option of a union that the fixed values name", () => {

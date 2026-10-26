@@ -50,6 +50,33 @@ describe("buildBusinessContextSnapshot", () => {
     ]);
     expect(snapshot.rules?.map((rule) => rule.id)).toEqual(["rule-1", "rule-2"]);
     expect(snapshot.contactChannels.phoneNumber).toBe("+14165550000");
+    // Calls say they're with an AI and recorded unless the business turned it off.
+    expect(snapshot.recordingNotice).toBe(true);
+  });
+
+  it("keeps a business's choice to have calls not say they're with an AI and recorded", () => {
+    const snapshot = buildBusinessContextSnapshot({
+      businessId: "biz-1",
+      version: "v1",
+      generatedAt: "2026-03-08T12:00:00.000Z",
+      displayName: "Maple Family Clinic",
+      timezone: "America/Toronto",
+      defaultLocale: "en",
+      businessType: "clinic",
+      greeting: "Hello",
+      recordingNotice: false,
+      tone: "warm",
+      bookingPolicy: "Only confirm after booking.",
+      summary: "General clinic",
+      hours: [],
+      closures: [],
+      services: [],
+      rules: [],
+      snippets: [],
+      transferPolicy: { mode: "never" },
+    });
+
+    expect(snapshot.recordingNotice).toBe(false);
   });
 
   it("caps rule count and text stored in snapshots", () => {

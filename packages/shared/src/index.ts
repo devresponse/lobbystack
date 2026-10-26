@@ -158,6 +158,12 @@ export type BusinessContextSnapshot = {
   /** Optional analytics consent captured at call start; absence is not consent. */
   telemetryEnabled?: boolean;
   greeting: string;
+  /**
+   * Whether calls say, right after the greeting, that the caller is speaking
+   * with an AI and the call is recorded and transcribed (callOpening). Absent
+   * in snapshots built before the switch, which keep it on.
+   */
+  recordingNotice?: boolean;
   voiceInstructions: string;
   smsInstructions: string;
   chatInstructions: string;

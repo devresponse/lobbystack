@@ -266,6 +266,10 @@
       "placeholder": "Hola, gracias por llamar…",
       "hint": "La frase inicial que usa su recepcionista al contestar una llamada o iniciar una conversación."
     },
+    "recordingNotice": {
+      "label": "Avisar sobre la IA y la grabación",
+      "hint": "Justo después del saludo, las llamadas dicen: «{{notice}}» En muchos lugares es obligatorio avisar que la llamada se graba. Desactive esta opción solo si avisa de otra forma."
+    },
     "defaultLocale": {
       "label": "Idioma predeterminado del cliente",
       "placeholder": "Seleccione un idioma predeterminado",

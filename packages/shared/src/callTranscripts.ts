@@ -1,3 +1,5 @@
+import type { RuntimeLocale } from "./locales";
+
 /** Who may get an email after each call, as each business chooses. */
 export const callTranscriptRecipientChoices = ["nobody", "owners_and_admins", "team"] as const;
 export type CallTranscriptRecipients = (typeof callTranscriptRecipientChoices)[number];
@@ -119,4 +121,37 @@ export function withoutCardAndIdNumbers(text: string, labels: { card: string; id
     from = part.end;
   }
   return `${result}${text.slice(from)}`;
+}
+
+/**
+ * What a call says right after the greeting, in the language it opens in,
+ * unless the business turns it off: that the caller is speaking with an AI,
+ * and that the call is recorded and transcribed. Calls keep OpenAI's
+ * recording, and the business reads the transcript and can have it emailed.
+ */
+export const callRecordingNotices: Record<RuntimeLocale, string> = {
+  en: "You're speaking with an AI assistant, and this call is recorded and transcribed.",
+  es: "Está hablando con un asistente de IA, y esta llamada se graba y se transcribe.",
+  fr: "Vous parlez avec un assistant IA, et cet appel est enregistré et transcrit.",
+  de: "Sie sprechen mit einem KI-Assistenten, und dieser Anruf wird aufgezeichnet und transkribiert.",
+  hi: "आप एक AI सहायक से बात कर रहे हैं, और यह कॉल रिकॉर्ड और ट्रांसक्राइब की जा रही है।",
+  ja: "こちらはAIアシスタントです。この通話は録音され、文字起こしされます。",
+  ko: "AI 어시스턴트와 통화하고 계시며, 이 통화는 녹음되고 텍스트로 기록됩니다.",
+  pt: "Você está falando com um assistente de IA, e esta chamada é gravada e transcrita.",
+  zh: "您正在与AI助理通话，本次通话将被录音并转写成文字。",
+  it: "Sta parlando con un assistente IA, e questa chiamata viene registrata e trascritta.",
+  uk: "Ви розмовляєте з ШІ-асистентом, і ця розмова записується та розшифровується.",
+  ru: "Вы разговариваете с ИИ-ассистентом, и этот звонок записывается и расшифровывается.",
+  ar: "أنت تتحدث مع مساعد يعمل بالذكاء الاصطناعي، ويتم تسجيل هذه المكالمة وتحويلها إلى نص.",
+};
+
+/**
+ * What a call opens with: the business greeting, then the notice in the
+ * language the call opens in. A snapshot built before the switch existed
+ * keeps the notice, which is on for every business until it's turned off.
+ */
+export function callOpening(snapshot: { greeting?: string | undefined; defaultLocale: RuntimeLocale; recordingNotice?: boolean | undefined }): string {
+  const greeting = snapshot.greeting?.trim() ?? "";
+  if (snapshot.recordingNotice === false) return greeting;
+  return [greeting, callRecordingNotices[snapshot.defaultLocale] ?? callRecordingNotices.en].filter(Boolean).join(" ");
 }

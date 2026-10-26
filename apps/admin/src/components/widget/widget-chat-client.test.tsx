@@ -613,14 +613,33 @@ describe("widget call button", () => {
     });
 
     const call = await screen.findByRole("button", { name: "chat.voiceStart" });
-    // Its own row in the header, after the row with the business name, as wide as the chat.
+    // Its own row in the header, after the row with the business name, as wide
+    // as the chat, with the line under it saying calls are with an AI and recorded.
     const header = call.closest("header");
-    expect(call.parentElement).toBe(header);
+    expect(call.parentElement?.parentElement).toBe(header);
+    expect(call.parentElement?.lastElementChild?.textContent).toBe("chat.voiceRecorded");
     expect(header?.querySelector("p")?.textContent).toBe("Acme");
     expect(call.className).toContain("w-full");
     expect(call.getAttribute("title")).toBe("chat.voiceButton");
     fireEvent.click(call);
     expect(startCall).toHaveBeenCalledTimes(1);
+    client.clear();
+  });
+
+  it("leaves out the line about AI and recording once the business turns the notice off", async () => {
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    Element.prototype.scrollTo = () => {};
+    vi.mocked(useWebVoiceCall).mockReturnValue({ status: "idle", errorKey: null, remoteAudioRef: { current: null }, transcript: [], startCall: vi.fn(), endCall: vi.fn() } as unknown as ReturnType<typeof useWebVoiceCall>);
+    vi.stubGlobal("fetch", vi.fn(async (url: URL | string) => String(url).includes("/api/widget/history") ? Response.json({ messages: [] }) : Response.json({ ...config, businessSlug: "acme", voiceEnabled: true, recordingNotice: false })));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><WidgetChatClient widgetKey="widget-key" /></QueryClientProvider>);
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { source: window, origin: "https://business.test", data: { type: "session", token: "token", parentOrigin: "https://business.test", visitorId } }));
+    });
+
+    expect(await screen.findByRole("button", { name: "chat.voiceStart" })).toBeTruthy();
+    expect(screen.queryByText("chat.voiceRecorded")).toBeNull();
     client.clear();
   });
 

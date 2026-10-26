@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 
 import { buildBrowserSessionConfig, buildPhoneSessionConfig, callerIsDone, createAgentModel, createReceptionistAgent, LIVE_VOICE, LiveCallController, liveDelegationEnvironment, recordGreeting, recordingMs, type CallControl, type LiveCallSummary } from "@lobbystack/agent-core";
-import { demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, demoSnapshot, type BusinessContextSnapshot } from "@lobbystack/shared";
 import OpenAI from "openai";
 import type { SidebandWS } from "openai/resources/live/sideband/ws";
 import { LiveWS } from "openai/resources/live/ws";
@@ -47,7 +47,7 @@ const scenarios = findScenarios(values.scenario);
 const snapshot: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 // Rendered once, as the worker does for the calls after the first.
-const greetingRecording = values["recorded-greeting"] ? await recordGreeting(client, snapshot.greeting, LIVE_VOICE) : undefined;
+const greetingRecording = values["recorded-greeting"] ? await recordGreeting(client, callOpening(snapshot), LIVE_VOICE) : undefined;
 const model = createAgentModel(liveDelegationEnvironment());
 if (!model) throw new Error("No delegation model: set OPENAI_API_KEY or the AI_CHAT_* variables.");
 
@@ -152,7 +152,7 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       client,
       sessionId: `eval_${scenario.name}`,
       phone: false,
-      setup: { agent, greeting: snapshot.greeting, ...(greetingRecording ? { greetingRecording: { audio: greetingRecording } } : {}), callerDone: async (conversation, abortSignal) => { const done = await callerIsDone(agentModel, conversation, abortSignal); checks.push(done); return done; } },
+      setup: { agent, greeting: callOpening(snapshot), ...(greetingRecording ? { greetingRecording: { audio: greetingRecording } } : {}), callerDone: async (conversation, abortSignal) => { const done = await callerIsDone(agentModel, conversation, abortSignal); checks.push(done); return done; } },
       connect: () => ws as unknown as SidebandWS,
       // As the worker does, the time limit ends the call with a goodbye.
       ...(scenario.limitMs ? { maxDurationMs: scenario.limitMs, onTimeout: (reason) => void controller.wrapUp(reason) } : {}),

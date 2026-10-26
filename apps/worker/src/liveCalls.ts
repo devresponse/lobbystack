@@ -20,7 +20,7 @@ import {
   type OpenLiveCall,
 } from "@lobbystack/domain";
 import { renewVoicePresenceGateway, updateVoicePresence } from "@lobbystack/jobs";
-import { MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
@@ -553,7 +553,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
       // way, so the greeting fallback must not fire. The greeting's words come
       // from the admin when it opened the call with them, so a snapshot this
       // worker cached earlier can't contradict them.
-      return { agent, callerDone: (conversation: string, abortSignal: AbortSignal) => inCall(callerDone, conversation, abortSignal), ...(phone && normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy).verificationMode === "passcode_required" ? { maskKeypad: true } : {}), ...(recovery || saved > 0 ? {} : { greeting: recorded?.text ?? snapshot.greeting }) };
+      return { agent, callerDone: (conversation: string, abortSignal: AbortSignal) => inCall(callerDone, conversation, abortSignal), ...(phone && normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy).verificationMode === "passcode_required" ? { maskKeypad: true } : {}), ...(recovery || saved > 0 ? {} : { greeting: recorded?.text ?? callOpening(snapshot) }) };
     });
     // The attach answers once the business has loaded, so the recording can
     // finish loading while the caller's browser connects.

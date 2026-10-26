@@ -366,6 +366,9 @@ export const receptionistProfiles = pgTable(
     transferNumber: text("transfer_number"),
     appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     bookingMode: varchar("booking_mode", { length: 16 }).default("instant").notNull(),
+    // Whether calls say, after the greeting, that the caller is speaking with
+    // an AI and the call is recorded and transcribed. See migration 0118.
+    recordingNotice: boolean("recording_notice").default(true).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("receptionist_profiles_business_unique").on(table.businessId)],

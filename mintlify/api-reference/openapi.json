@@ -20779,6 +20779,10 @@
             "additionalProperties": false,
             "description": "Whether callers can cancel or reschedule their own appointments, and how they prove it's theirs."
           },
+          "recording_notice": {
+            "type": "boolean",
+            "description": "Whether calls say, right after the greeting and in the language they open in, that the caller is speaking with an AI assistant and the call is recorded and transcribed. On by default."
+          },
           "updated_at": {
             "type": "string",
             "format": "date-time",
@@ -20798,6 +20802,7 @@
           "transfer_number",
           "booking_mode",
           "appointment_change_policy",
+          "recording_notice",
           "updated_at"
         ],
         "additionalProperties": false,
@@ -20934,6 +20939,10 @@
               "verification_mode"
             ],
             "additionalProperties": false
+          },
+          "recording_notice": {
+            "description": "false stops calls from saying that the caller is speaking with an AI and the call is recorded and transcribed. Tell callers another way where the law asks for it.",
+            "type": "boolean"
           }
         },
         "additionalProperties": false

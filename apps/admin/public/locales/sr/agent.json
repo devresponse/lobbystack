@@ -266,6 +266,10 @@
       "placeholder": "Dobar dan, hvala što ste nas pozvali…",
       "hint": "Prva rečenica koju recepcioner izgovori kada se javi na poziv ili započne razgovor."
     },
+    "recordingNotice": {
+      "label": "Obaveštenje o AI i snimanju",
+      "hint": "Odmah posle pozdrava, pozivi kažu: „{{notice}}“ Na mnogim mestima je obavezno reći pozivaocima da se poziv snima. Isključite ovo samo ako ih obaveštavate na drugi način."
+    },
     "defaultLocale": {
       "label": "Podrazumevani jezik za klijente",
       "placeholder": "Izaberite podrazumevani jezik",

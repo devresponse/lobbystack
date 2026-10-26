@@ -23,6 +23,7 @@
     "handoffActive": "Chat paused",
     "voiceButton": "Talk to us live",
     "voiceStart": "Say Allo!",
+    "voiceRecorded": "Calls are answered by an AI assistant, and they're recorded and transcribed.",
     "voiceConnected": "You are speaking with the receptionist.",
     "voiceEnded": "The voice connection ended. You can keep chatting below.",
     "voiceUnavailable": "Live voice is unavailable. Try again later.",

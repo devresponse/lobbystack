@@ -89,6 +89,9 @@ const DRAIN_POLL_MS = 100;
 const DRAIN_MARGIN_MS = WRAP_UP_MAX_MS + 5_000;
 // A failed transcript or finish write waits this long, then tries once more.
 const WRITE_RETRY_DELAY_MS = 1_000;
+// The summary job reads the transcript as soon as the call is finished, so
+// the finish waits this long for the last turns' writes, a retry included.
+const TURN_WRITES_WAIT_MS = 5_000;
 const PRESENCE_INTERVAL_MS = 10_000;
 // A live session sends events as soon as a sideband connects, so a re-attach
 // that hears nothing for this long has found the session gone.
@@ -220,6 +223,21 @@ function reportFailure(operation: string, ids: CallContext = {}) {
 }
 
 const callIds = (call: { sessionId: string; callId: string; businessId: string }): CallContext => ({ sessionId: call.sessionId, callId: call.callId, businessId: call.businessId });
+
+/**
+ * Waits up to TURN_WRITES_WAIT_MS for the call's turn writes still running,
+ * so the summary job reads the whole conversation. Past that, the call
+ * finishes anyway: a hung write must not leave it open.
+ */
+async function turnsSaved(writes: ReadonlySet<Promise<unknown>>): Promise<void> {
+  if (!writes.size) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = await Promise.race([
+    Promise.allSettled([...writes]).then(() => false),
+    new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(true), TURN_WRITES_WAIT_MS); }),
+  ]).finally(() => clearTimeout(timer));
+  if (timedOut) logEvent("warn", "live.transcript_save_slow", { pending: writes.size, note: "The call finished before its last turns were saved, so its summary may miss them." });
+}
 
 type InCall = ReturnType<typeof AsyncLocalStorage.snapshot>;
 
@@ -508,6 +526,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     };
     // In order, so a quick answer never lands before the referral it follows.
     let transferWrites = Promise.resolve();
+    // Turn writes still running, which the call's finish waits for.
+    const turnWrites = new Set<Promise<unknown>>();
 
     const business: Promise<LiveCallSetup> = Promise.all([snapshotLoad, savedTurns]).then(([snapshot, saved]) => {
       if (!snapshot) throw new Error("The business has no published snapshot.");
@@ -572,7 +592,11 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
       ...(topUp ? { topUp } : {}),
       onStarted: () => void markLiveCallMediaStarted(input.domain, call).catch(logFailure("live.media_start_unrecorded")),
       onGreeting: (greeting) => logEvent("info", "live.greeting", { ...greeting }),
-      onTurn: (turn) => void savedTurns.then((saved) => retryWrite(() => saveLiveCallTurn(input.domain, { ...call, ...turn, sequence: turn.sequence + saved }))).catch(reportFailure("live.transcript_save")),
+      onTurn: (turn) => {
+        const write = savedTurns.then((saved) => retryWrite(() => saveLiveCallTurn(input.domain, { ...call, ...turn, sequence: turn.sequence + saved }))).catch(reportFailure("live.transcript_save"));
+        turnWrites.add(write);
+        void write.finally(() => turnWrites.delete(write));
+      },
       onTimeout: (reason) => void wrapUp(reason),
       onTransfer: (state) => {
         // The call counts as transferred from the moment the REFER goes out,
@@ -618,7 +642,9 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         }
         setPresence(request, false);
         logEvent("info", "live.closed", { channel: request.channel, durationMs: summary.durationMs, billedSeconds: summary.billedSeconds, usageConfirmed: summary.usageConfirmed, closeReason: summary.closeReason, end, delegations: summary.delegations.length, outputAudio: summary.outputAudio, inputAudio: summary.inputAudio, lateAttach: summary.lateAttach, firstEventMs: summary.firstEventMs, limitWarningMs: summary.limitWarningMs, wrapUp: summary.wrapUp });
-        const pending = retryWrite(() => finish(summary)).catch(reportFailure("live.finish"));
+        // The controller hands over the last turns just before it closes, and
+        // finishing queues the summary job, so their writes come first.
+        const pending = turnsSaved(turnWrites).then(() => retryWrite(() => finish(summary))).catch(reportFailure("live.finish"));
         finishing.add(pending);
         // The lock outlives the finish, so a recovery job can't take an
         // ending call and finalize it with estimated seconds.

@@ -102,14 +102,14 @@ describe("enqueueJob job ids", () => {
     expect(options).not.toHaveProperty("delay");
   });
 
-  it("retries usage billing, Polar events, notifications and promo plan endings for hours instead of the queue's 15 seconds", async () => {
+  it("retries usage billing, Polar events, notifications, promo plan endings and call summaries for hours instead of the queue's 15 seconds", async () => {
     const { queue, add } = createQueueStub("critical");
 
-    for (const type of ["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "sms.send", "billing.createCheckout"] as const) await enqueueJob(queue, { type, payload: {}, idempotencyKey: type });
+    for (const type of ["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "conversation.finalizeSession", "sms.send", "billing.createCheckout"] as const) await enqueueJob(queue, { type, payload: {}, idempotencyKey: type });
 
     const options = add.mock.calls.map((call) => (call as unknown as [string, unknown, Record<string, unknown>])[2]);
-    for (const long of options.slice(0, 4)) expect(long).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
+    for (const long of options.slice(0, 5)) expect(long).toMatchObject({ attempts: 12, backoff: { type: "exponential", delay: 5_000 } });
     // Someone waits on a checkout's page, so it gives up as fast as the queue does.
-    for (const short of options.slice(4)) expect(short).not.toHaveProperty("attempts");
+    for (const short of options.slice(5)) expect(short).not.toHaveProperty("attempts");
   });
 });

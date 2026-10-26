@@ -17,7 +17,7 @@ GPT-Live doesn't answer the same way twice. Run each scenario at least 3 times, 
 
 ## Run the API eval
 
-The eval opens one GPT-Live session per run over a WebSocket, with the same instructions and greeting as a phone call. It drives the session with the production call controller, receptionist agent and caller check, and plays the caller's lines as speech. OpenAI's `gpt-4o-mini-tts` voices the caller, and the script passes that audio through 8 kHz μ-law first, so GPT-Live gets phone-quality audio.
+The eval opens one GPT-Live session per run over a WebSocket, with the same instructions and greeting as a phone call. Since fork PR #84 that greeting is the call's whole opening, with the notice that the call is with an AI and recorded, unless the snapshot has `recordingNotice: false`. It drives the session with the production call controller, receptionist agent and caller check, and plays the caller's lines as speech. OpenAI's `gpt-4o-mini-tts` voices the caller, and the script passes that audio through 8 kHz μ-law first, so GPT-Live gets phone-quality audio.
 
 Run it with an OpenAI API key:
 

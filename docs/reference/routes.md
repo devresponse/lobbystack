@@ -5,7 +5,7 @@ Every page and HTTP route in the LobbyStack code, written against **https://demo
 | | |
 |---|---|
 | Base URL | `https://demo.alloplace.com` |
-| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24 (section 16) |
+| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16) |
 | How it was made | Read from the code, including every entry file and the files it calls. No route was tried against the live site. |
 | What runs at the base URL | `apps/admin`: the dashboard, sign-in pages, public business pages, the website widget, every HTTP API and the MCP server |
 | Also listed | The worker's internal routes (section 14) and the marketing site's pages (section 15). Neither is served at demo.alloplace.com. |
@@ -42,7 +42,7 @@ This catalog was written in the project's notes and moved into the repository on
 | Public business page, widget chat window and loader | 2 pages, 1 route | 1 | 6 |
 | Website widget API | 6 | 7 | 6 |
 | Browser calls | 2 | 4 | 7 |
-| Dashboard API | 79 | 126 | 8 |
+| Dashboard API | 80 | 128 | 8 |
 | Public API (v1) | 71 (one catches unknown paths) | 99: 98 operations and the OpenAPI document | 9 |
 | MCP server | 1 | 3 (18 tools) | 10 |
 | OAuth discovery and redirects | 6 | 10 | 10 |
@@ -51,9 +51,9 @@ This catalog was written in the project's notes and moved into the repository on
 | Health and operations | 3 | 3 | 13 |
 | Worker (internal, not at the base URL) | 1 server | 4 | 14 |
 
-In all, `apps/admin` has 56 page files and 176 route files, which answer 262 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
+In all, `apps/admin` has 56 page files and 177 route files, which answer 264 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
 
-Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 176 route files, 56 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
+Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 177 route files, 56 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
 
 ## 2. How to read this catalog
 
@@ -218,7 +218,7 @@ Related files: `apps/admin/src/components/live-appointments-surface.tsx`, `apps/
 
 The receptionist's basic settings, the first page of the sidebar's agent group. Operators set how the AI receptionist greets callers, describes the business, transfers calls, books and changes appointments, and when the business is open.
 
-- `GET /agent`: Renders `LiveAgentBasicSettingsSurface` (`apps/admin/src/components/live-agent-basic-settings-surface.tsx`), the same component as `/agent/basic-settings`. It loads `GET /api/agent` (default caller language, time zone, receptionist profile) and `GET /api/hours`. Each setting saves on its own with `PATCH /api/agent`: greeting, business summary (typed, or `regenerateSummary`), `locale`, time zone, transfer number, booking mode and appointment change policy (cancel, reschedule, verification mode). Opening hours save with `PUT /api/hours`. Only business_owner and business_admin can edit (client check); both APIs require business_admin. An alert warns when instant booking has no opening hours.
+- `GET /agent`: Renders `LiveAgentBasicSettingsSurface` (`apps/admin/src/components/live-agent-basic-settings-surface.tsx`), the same component as `/agent/basic-settings`. It loads `GET /api/agent` (default caller language, time zone, receptionist profile) and `GET /api/hours`. Each setting saves on its own with `PATCH /api/agent`: greeting, whether calls say they're with an AI and recorded (`recordingNotice`, since fork PR #84), business summary (typed, or `regenerateSummary`), `locale`, time zone, transfer number, booking mode and appointment change policy (cancel, reschedule, verification mode). Opening hours save with `PUT /api/hours`. Only business_owner and business_admin can edit (client check); both APIs require business_admin. An alert warns when instant booking has no opening hours.
 
 Related files: `apps/admin/src/components/live-agent-basic-settings-surface.tsx`, `apps/admin/src/components/business-hours-section.tsx`, `apps/admin/app/api/agent/route.ts`, `apps/admin/app/api/hours/route.ts`.
 
@@ -226,7 +226,7 @@ Related files: `apps/admin/src/components/live-agent-basic-settings-surface.tsx`
 
 A second address for the receptionist's basic settings, rendering the same page as `/agent`. The dashboard's link to the opening-hours editor points here (`/agent/basic-settings#opening-hours`).
 
-- `GET /agent/basic-settings`: Renders `LiveAgentBasicSettingsSurface` (`apps/admin/src/components/live-agent-basic-settings-surface.tsx`), exactly like `GET /agent`. It loads `GET /api/agent` (default caller language, time zone, receptionist profile) and `GET /api/hours`. Each setting saves on its own with `PATCH /api/agent`: greeting, business summary (typed, or `regenerateSummary`), `locale`, time zone, transfer number, booking mode and appointment change policy (cancel, reschedule, verification mode). Opening hours save with `PUT /api/hours`. Only business_owner and business_admin can edit (client check); both APIs require business_admin. An alert warns when instant booking has no opening hours. Its button links here (`HOURS_EDITOR_HREF`).
+- `GET /agent/basic-settings`: Renders `LiveAgentBasicSettingsSurface` (`apps/admin/src/components/live-agent-basic-settings-surface.tsx`), exactly like `GET /agent`. It loads `GET /api/agent` (default caller language, time zone, receptionist profile) and `GET /api/hours`. Each setting saves on its own with `PATCH /api/agent`: greeting, whether calls say they're with an AI and recorded (`recordingNotice`, since fork PR #84), business summary (typed, or `regenerateSummary`), `locale`, time zone, transfer number, booking mode and appointment change policy (cancel, reschedule, verification mode). Opening hours save with `PUT /api/hours`. Only business_owner and business_admin can edit (client check); both APIs require business_admin. An alert warns when instant booking has no opening hours. Its button links here (`HOURS_EDITOR_HREF`).
 
 Related files: `apps/admin/src/components/live-agent-basic-settings-surface.tsx`, `apps/admin/src/components/business-hours-section.tsx`, `apps/admin/app/api/agent/route.ts`, `apps/admin/app/api/hours/route.ts`.
 
@@ -338,9 +338,9 @@ Related files: `apps/admin/src/components/replacement-locale-provider.tsx`, `app
 
 The Notifications tab: how the signed-in operator hears about events in this business, by email and SMS, event by event.
 
-- `GET /settings/notifications`: Renders `LiveNotificationSettingsSurface` (`apps/admin/src/components/live-notification-settings-surface.tsx`). It loads `GET /api/notification-preferences` with `businessId`: the user's own preferences for this business. Every switch or checkbox saves the whole object with `PUT /api/notification-preferences`. Rows cover voice messages and paused SMS, plus system issues (SMS failures, calendar sync, failed transfers, disabled webhooks); a channel's column shows only while that channel is on. Turning SMS on without a verified phone or recorded consent opens `SmsPhoneVerificationDialog` (`POST /api/account/phone-verification`, then `POST /api/account/phone-verification/check`). The SMS switch is disabled when no sender is configured.
+- `GET /settings/notifications`: Renders `LiveNotificationSettingsSurface` (`apps/admin/src/components/live-notification-settings-surface.tsx`). It loads `GET /api/notification-preferences` with `businessId`: the user's own preferences for this business. Every switch or checkbox saves the whole object with `PUT /api/notification-preferences`. Rows cover voice messages, paused SMS and, since fork PR #84, the email after each call (`callTranscript`: email only, named **Call summary** or **Call transcript** for what it holds, and showing why when the business doesn't send it to this person, who then can't tick it), plus system issues (SMS failures, calendar sync, failed transfers, disabled webhooks); a channel's column shows only while that channel is on. Owners and admins also get **Emails after each call** (`CallTranscriptSettingsCard`), which saves who can get it and what it holds with `PUT /api/call-transcript-settings`. Turning SMS on without a verified phone or recorded consent opens `SmsPhoneVerificationDialog` (`POST /api/account/phone-verification`, then `POST /api/account/phone-verification/check`). The SMS switch is disabled when no sender is configured.
 
-Related files: `apps/admin/src/components/live-notification-settings-surface.tsx`, `apps/admin/src/components/sms-phone-verification-dialog.tsx`, `apps/admin/app/api/notification-preferences/route.ts`.
+Related files: `apps/admin/src/components/live-notification-settings-surface.tsx`, `apps/admin/src/components/call-transcript-settings-card.tsx`, `apps/admin/src/components/sms-phone-verification-dialog.tsx`, `apps/admin/app/api/notification-preferences/route.ts`, `apps/admin/app/api/call-transcript-settings/route.ts`.
 
 **`apps/admin/app/(dashboard)/settings/api-keys/page.tsx`**
 
@@ -764,7 +764,7 @@ Related files: `apps/admin/src/lib/widget-access.ts`, `apps/admin/src/lib/widget
 
 Gives the widget iframe its settings once it has a session: the key's chat configuration, the business's name, language and greeting, plan allowances, and whether to show the call button.
 
-- `GET /api/widget/config`: Widget session token: `resolveWidgetSessionAccess` (`apps/admin/src/lib/widget-access.ts`) verifies the Bearer token's HMAC signature and expiry (401 `widget_session_invalid`), requires `X-Widget-Parent-Origin` equal to the token's origin (403 `widget_origin_denied`), reloads the key (403 `widget_disabled` unless active) and re-checks the origin against its websites or the published profile page. `enforceWidgetRateLimits` (`config`, 429/503). It reads `getCachedBusinessSnapshot`, `getWidgetChatAllowance` and `getWebVoiceBillingAllowance` in parallel and writes nothing. Answers 200 `{ key, business, config, billing, greeting, snapshotPresent, businessSlug, voiceEnabled }`; `voiceEnabled` needs a phone number, `LIVE_PROTOTYPE_ENABLED`, `OPENAI_API_KEY` and minutes left.
+- `GET /api/widget/config`: Widget session token: `resolveWidgetSessionAccess` (`apps/admin/src/lib/widget-access.ts`) verifies the Bearer token's HMAC signature and expiry (401 `widget_session_invalid`), requires `X-Widget-Parent-Origin` equal to the token's origin (403 `widget_origin_denied`), reloads the key (403 `widget_disabled` unless active) and re-checks the origin against its websites or the published profile page. `enforceWidgetRateLimits` (`config`, 429/503). It reads `getCachedBusinessSnapshot`, `getWidgetChatAllowance` and `getWebVoiceBillingAllowance` in parallel and writes nothing. Answers 200 `{ key, business, config, billing, greeting, snapshotPresent, businessSlug, voiceEnabled, recordingNotice }`; `voiceEnabled` needs a phone number, `LIVE_PROTOTYPE_ENABLED`, `OPENAI_API_KEY` and minutes left, and `recordingNotice` (fork PR #84) is false only when the business turned off the notice after a call's greeting, which hides the line under the call button.
 
 Related files: `apps/admin/src/lib/widget-access.ts`, `apps/admin/src/lib/widget-keys.ts`, `packages/domain/src/server/billing.ts`, `packages/domain/src/server/snapshotCache.ts`.
 
@@ -844,7 +844,7 @@ Related files: `apps/admin/src/lib/live-web-call.ts`, `apps/admin/src/lib/live-p
 
 ## 8. Dashboard API
 
-The routes the dashboard's own screens call: 125 method and path pairs in 78 route files. They take the sign-in cookie (section 2 covers which business they act on). They are internal to the app rather than a published contract; integrations should use the public API in section 9. Nothing under `mintlify/` documents these routes directly; the page docs in section 3 cover the screens that use them.
+The routes the dashboard's own screens call: 128 method and path pairs in 80 route files. They take the sign-in cookie (section 2 covers which business they act on). They are internal to the app rather than a published contract; integrations should use the public API in section 9. Nothing under `mintlify/` documents these routes directly; the page docs in section 3 cover the screens that use them.
 
 ### Account and preferences
 
@@ -859,7 +859,9 @@ The routes the dashboard's own screens call: 125 method and path pairs in 78 rou
 | GET | `https://demo.alloplace.com/api/preferences/appearance` | The business's product analytics switch, and whether you may change it | Member | `apps/admin/app/api/preferences/appearance/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/preferences/appearance` | Turn product analytics on or off for the business | Admin+ | `apps/admin/app/api/preferences/appearance/route.ts` |
 | GET | `https://demo.alloplace.com/api/notification-preferences` | Your alert settings for this business | Member | `apps/admin/app/api/notification-preferences/route.ts` |
-| PUT | `https://demo.alloplace.com/api/notification-preferences` | Change your alerts: email, SMS, per event, daily summary. SMS needs a verified phone and an alert sender. Needs `businessId`. | Member | `apps/admin/app/api/notification-preferences/route.ts` |
+| PUT | `https://demo.alloplace.com/api/notification-preferences` | Change your alerts: email, SMS, per event, daily summary. SMS needs a verified phone and an alert sender, and the email after each call needs the business to send it to you. Needs `businessId`. | Member | `apps/admin/app/api/notification-preferences/route.ts` |
+| GET | `https://demo.alloplace.com/api/call-transcript-settings` | Who on the team can get an email after each call, and what it holds | Member | `apps/admin/app/api/call-transcript-settings/route.ts` |
+| PUT | `https://demo.alloplace.com/api/call-transcript-settings` | Change who can get the email after each call (`recipients`), what it holds (`content`), or both | Admin+ | `apps/admin/app/api/call-transcript-settings/route.ts` |
 
 #### Entry files
 
@@ -910,10 +912,19 @@ Related files: `apps/admin/src/lib/deployment-mode.ts`, `apps/admin/src/componen
 
 Reads and saves the signed-in operator's own alert settings for one business (email, texts, per-event switches, daily summary) on the notification settings screen (`live-notification-settings-surface.tsx`).
 
-- `GET /api/notification-preferences`: Any member: `requireOperatorBusiness`, then `requireBusinessMembership` inside `getNotificationPreferences` (`packages/domain/src/server/notifications.ts`). `hasVerifiedPhone` (`apps/admin/src/lib/verified-phone.ts`) checks the user's phone through the auth database role. Changes nothing. Answers 200 with `emailEnabled`, `smsEnabled`, `smsConsent`, `eventPreferences`, `dailySummaryEnabled`, `dailySummarySendTime`, `canUseSms` and `smsUnavailableReason`; texts read as off until they can be sent.
-- `PUT /api/notification-preferences`: Any member, checked inside `setNotificationPreferences` (notifications.ts); the route runs `requireApiSession`. Needs `?businessId=` or `x-business-id` and boolean `emailEnabled` and `smsEnabled` (400); a daily summary needs an `HH:mm` time (400). Turning on any text first requires a verified phone and an alert SMS sender (400). Upserts the user's `operator_notification_preferences` row and, when `smsConsent` changes their consent, adds an `sms_consent_events` row. Answers 200 `{ ok: true }`.
+- `GET /api/notification-preferences`: Any member: `requireOperatorBusiness`, then `requireBusinessMembership` inside `getNotificationPreferences` (`packages/domain/src/server/notifications.ts`). `hasVerifiedPhone` (`apps/admin/src/lib/verified-phone.ts`) checks the user's phone through the auth database role. Changes nothing. Answers 200 with `emailEnabled`, `smsEnabled`, `smsConsent`, `eventPreferences`, `dailySummaryEnabled`, `dailySummarySendTime`, `canUseSms` and `smsUnavailableReason`; texts read as off until they can be sent. Since fork PR #84 it also answers `callTranscript`: whether the business sends this person the email after each call (`available`, `unavailableReason`), the business's `recipients` and `content`, and `canEdit` for business_admin or higher.
+- `PUT /api/notification-preferences`: Any member, checked inside `setNotificationPreferences` (notifications.ts); the route runs `requireApiSession`. Needs `?businessId=` or `x-business-id` and boolean `emailEnabled` and `smsEnabled` (400); a daily summary needs an `HH:mm` time (400). Turning on any text first requires a verified phone and an alert SMS sender (400). Turning on the email after each call answers 400 when the business doesn't send it to this person, unless it was on already, and its text switch is always saved off. Upserts the user's `operator_notification_preferences` row and, when `smsConsent` changes their consent, adds an `sms_consent_events` row. Answers 200 `{ ok: true }`.
 
 Related files: `packages/domain/src/server/notifications.ts`, `apps/admin/src/lib/verified-phone.ts`, `apps/admin/src/components/live-notification-settings-surface.tsx`.
+
+**`apps/admin/app/api/call-transcript-settings/route.ts`**
+
+Reads and saves the business's choices for the email after each call (fork PR #84), which the **Emails after each call** card on the notification settings screen shows owners and admins.
+
+- `GET /api/call-transcript-settings`: Any member: `withOperatorTransaction` with no `minimumRole`, then `requireBusinessMembership`. `loadCallTranscriptSettingsInTransaction` (`packages/domain/src/server/callTranscriptEmails.ts`) reads `businesses.call_transcript_recipients` and `call_transcript_content` (404 for a missing business). Changes nothing. Answers 200 `{ recipients, content, canEdit }`, with `canEdit` true for business_admin or higher.
+- `PUT /api/call-transcript-settings`: Requires business_admin or higher, through `minimumRole` on `withOperatorTransaction`. Takes `recipients` (`nobody`, `owners_and_admins` or `team`), `content` (`summary` or `transcript`), or both, and nothing else (400 `call_transcript_settings_invalid`). `saveCallTranscriptSettingsInTransaction` updates `businesses` and audits `call_transcript_settings.updated` when something changed. Answers 200 `{ recipients, content, canEdit: true }`.
+
+Related files: `packages/domain/src/server/callTranscriptEmails.ts`, `packages/shared/src/callTranscripts.ts`, `apps/admin/src/components/call-transcript-settings-card.tsx`.
 
 ### Businesses and team
 
@@ -1175,10 +1186,10 @@ Related files: `packages/domain/src/server/booking.ts`, `apps/admin/src/componen
 
 **`apps/admin/app/api/agent/route.ts`**
 
-Reads and saves the receptionist's basic settings (greeting, tone, summary, instructions, transfer, booking mode, language and time zone) for the AI basic settings screen and the onboarding greeting step.
+Reads and saves the receptionist's basic settings (greeting, whether calls say they're with an AI and recorded, tone, summary, instructions, transfer, booking mode, language and time zone) for the AI basic settings screen and the onboarding greeting step.
 
 - `GET /api/agent`: Any member: `withOperatorTransaction` with no `minimumRole`. Reads the business's `id`, `name`, `timezone` and `defaultLocale` and its `receptionist_profiles` row. Changes nothing. Answers 200 `{ business, profile }`, each null when missing.
-- `PATCH /api/agent`: Requires business_admin or higher, through `minimumRole` on `withOperatorTransaction`. `readReceptionistSettingsChange` (`packages/domain/src/server/receptionistProfile.ts`) checks the body and answers 400 naming the first bad field; a `locale` must be one of the 13 languages calls open in (`runtimeLocales`, since fork PR #82). A missing business answers 404. A `locale` or `timezone` goes to `updateBusinessInTransaction` (tenancy.ts), which updates `businesses` and staff time zones and queues `snapshot.refresh` (400 `invalid_timezone`). `saveReceptionistProfileInTransaction` upserts the profile and queues `snapshot.refresh`, plus `business.generateSummary` when `regenerateSummary` is true. Answers 200 `{ profile }`.
+- `PATCH /api/agent`: Requires business_admin or higher, through `minimumRole` on `withOperatorTransaction`. `readReceptionistSettingsChange` (`packages/domain/src/server/receptionistProfile.ts`) checks the body and answers 400 naming the first bad field; a `locale` must be one of the 13 languages calls open in (`runtimeLocales`, since fork PR #82), and `recordingNotice` true or false (since fork PR #84). A missing business answers 404. A `locale` or `timezone` goes to `updateBusinessInTransaction` (tenancy.ts), which updates `businesses` and staff time zones and queues `snapshot.refresh` (400 `invalid_timezone`). `saveReceptionistProfileInTransaction` upserts the profile and queues `snapshot.refresh`, plus `business.generateSummary` when `regenerateSummary` is true. Answers 200 `{ profile }`.
 
 Related files: `packages/domain/src/server/receptionistProfile.ts`, `packages/domain/src/server/tenancy.ts`, `apps/admin/src/components/live-agent-basic-settings-surface.tsx`.
 
@@ -1838,8 +1849,8 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 
 Public API (v1) endpoint for the business record: name, time zone, caller language, website, type and weekly hours. Integrations and the `lobbystack` CLI (`business get`, `business update`, `business use`, `hours get`, `hours set`, `lobbystack onboard`) read and change it.
 
-- `GET /api/v1/business`: Needs `business:read`. `v1.getBusiness` calls `getBusinessForApi` (`packages/domain/src/server/publicApi/operations.ts`), whose `loadBusinessResource` (`packages/domain/src/server/publicApi/resources.ts`) reads `businesses`, the receptionist's booking mode and `business_hours`, and resolves the onboarding stage the dashboard shows. Answers 200 `{ data }` with the business, or 404 if its row is gone.
-- `PATCH /api/v1/business`: Needs `business:write`. `readApiBody` checks `apiBusinessUpdateSchema`, whose `locale` takes the 13 languages calls open in since fork PR #82. `updateBusinessForApi` answers 400 for an empty body or a time zone that isn't IANA. `updateBusinessInTransaction` (`packages/domain/src/server/tenancy.ts`) updates `businesses` and, for a new time zone, the `staff` rows. `hours` replace the week through `replaceBusinessHoursInTransaction` (`packages/domain/src/server/catalog.ts`), which sets `hours_source` to operator and rewrites `business_hours` (bad windows are 400). Each queues a `snapshot.refresh` outbox message. Audits `api.business.updated` and answers 200 `{ data }`. POST, PUT and DELETE get 405 `method_not_allowed`, without a key check.
+- `GET /api/v1/business`: Needs `business:read`. `v1.getBusiness` calls `getBusinessForApi` (`packages/domain/src/server/publicApi/operations.ts`), whose `loadBusinessResource` (`packages/domain/src/server/publicApi/resources.ts`) reads `businesses`, the receptionist's booking mode and `business_hours`, and resolves the onboarding stage the dashboard shows. Since fork PR #84 the business carries `call_transcript_recipients` and `call_transcript_content`, who on the team can get the email after each call and what it holds. Answers 200 `{ data }` with the business, or 404 if its row is gone.
+- `PATCH /api/v1/business`: Needs `business:write`. `readApiBody` checks `apiBusinessUpdateSchema`, whose `locale` takes the 13 languages calls open in since fork PR #82. `updateBusinessForApi` answers 400 for an empty body or a time zone that isn't IANA. `updateBusinessInTransaction` (`packages/domain/src/server/tenancy.ts`) updates `businesses` and, for a new time zone, the `staff` rows; `ai_traces_enabled`, `call_transcript_recipients` and `call_transcript_content` are written to `businesses` directly, with no snapshot refresh, since they're read when used. `hours` replace the week through `replaceBusinessHoursInTransaction` (`packages/domain/src/server/catalog.ts`), which sets `hours_source` to operator and rewrites `business_hours` (bad windows are 400). Each queues a `snapshot.refresh` outbox message. Audits `api.business.updated` and answers 200 `{ data }`. POST, PUT and DELETE get 405 `method_not_allowed`, without a key check.
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/tenancy.ts`, `packages/domain/src/server/catalog.ts`.
 
@@ -1914,7 +1925,7 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 
 Public API (v1) endpoint for the receptionist settings: greeting, tone, summary, booking policy, channel instructions, call transfer, booking mode and appointment change policy. The `lobbystack` CLI uses it in `receptionist get`, `receptionist set` and `lobbystack onboard`.
 
-- `GET /api/v1/receptionist`: Needs `business:read`. `getReceptionistForApi` (`packages/domain/src/server/publicApi/operations.ts`) reads the business and its `receptionist_profiles` row; a business without one shows `defaultReceptionistProfile` (`packages/domain/src/server/receptionistProfile.ts`). `serializeReceptionist` reports the transfer mode, booking mode and change policy as calls use them. Answers 200 `{ data }`, or 404 if the business is gone.
+- `GET /api/v1/receptionist`: Needs `business:read`. `getReceptionistForApi` (`packages/domain/src/server/publicApi/operations.ts`) reads the business and its `receptionist_profiles` row; a business without one shows `defaultReceptionistProfile` (`packages/domain/src/server/receptionistProfile.ts`). `serializeReceptionist` reports the transfer mode, booking mode and change policy as calls use them, and since fork PR #84 `recording_notice`, whether calls say after the greeting that they're with an AI and recorded. Answers 200 `{ data }`, or 404 if the business is gone.
 - `PATCH /api/v1/receptionist`: Needs `business:write`. `readApiBody` checks `apiReceptionistUpdateSchema` (`summary` and `regenerate_summary` can't both be sent). `updateReceptionistForApi` answers 400 for an empty body, locks the profile row and drops unchanged fields; with nothing left and no regeneration it returns the current settings. Otherwise `saveReceptionistProfileInTransaction` upserts `receptionist_profiles` (a sent summary becomes `operator`), queues `snapshot.refresh` and, with `regenerate_summary`, `business.generateSummary`. Audits `api.receptionist.updated` and answers 200 `{ data }`. POST, PUT and DELETE get 405 `method_not_allowed`, without a key check.
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/receptionistProfile.ts`, `packages/domain/src/server/publicApi/resources.ts`.
@@ -2306,8 +2317,8 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 
 Reads and changes the email and text alerts that the key's acting account gets about the business, for API integrations and the CLI (`lobbystack alerts get` and `set`). Each team member has their own settings.
 
-- `GET /api/v1/notification-preferences`: Needs `business:read`. `resolveActingUserId` finds the acting account: a platform key's owner, or a per-business key's creator while business_owner or business_admin (else 403 `key_owner_inactive`). `hasVerifiedPhone` (`apps/admin/src/lib/verified-phone.ts`) reads its phone status from the auth database. `getNotificationPreferencesForApi` (`packages/domain/src/server/publicApi/operations.ts`) runs as that account on the app database role: 409 if it isn't on the team, else it reads `operator_notification_preferences`, showing texts off until they can be sent. Answers 200 `{ data }`.
-- `PATCH /api/v1/notification-preferences`: Needs `business:write`. Body: `apiNotificationPreferencesUpdateSchema`; the acting account is resolved as for GET. `updateNotificationPreferencesForApi` answers 400 for an empty body or a daily summary without `send_time`, and 409 for turning a text on while `sms.available` is false. Unchanged settings come back as they are; otherwise `saveNotificationPreferencesInTransaction` (`packages/domain/src/server/notifications.ts`) upserts the row and an audit row lists the fields. Answers 200 `{ data }`. POST, PUT and DELETE answer 405 with `Allow: GET, PATCH, HEAD, OPTIONS`.
+- `GET /api/v1/notification-preferences`: Needs `business:read`. `resolveActingUserId` finds the acting account: a platform key's owner, or a per-business key's creator while business_owner or business_admin (else 403 `key_owner_inactive`). `hasVerifiedPhone` (`apps/admin/src/lib/verified-phone.ts`) reads its phone status from the auth database. `getNotificationPreferencesForApi` (`packages/domain/src/server/publicApi/operations.ts`) runs as that account on the app database role: 409 if it isn't on the team, else it reads `operator_notification_preferences`, showing texts off until they can be sent. Since fork PR #84 the answer has the `call_transcript` event and `call_transcript` (`available`, `unavailable_reason`, `content`), whether the business sends this account the email after each call. Answers 200 `{ data }`.
+- `PATCH /api/v1/notification-preferences`: Needs `business:write`. Body: `apiNotificationPreferencesUpdateSchema`; the acting account is resolved as for GET. `updateNotificationPreferencesForApi` answers 400 for an empty body or a daily summary without `send_time`, and 409 for turning a text on while `sms.available` is false, or for turning on the email after each call while `call_transcript.available` is false and it was off; `events.call_transcript.sms: true` is 400. Unchanged settings come back as they are; otherwise `saveNotificationPreferencesInTransaction` (`packages/domain/src/server/notifications.ts`) upserts the row and an audit row lists the fields. Answers 200 `{ data }`. POST, PUT and DELETE answer 405 with `Allow: GET, PATCH, HEAD, OPTIONS`.
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/notifications.ts`, `apps/admin/src/lib/verified-phone.ts`.
 

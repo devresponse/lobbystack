@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { billingPlanSlugs, cloudBillingPlanSlugs, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
+import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
 import { PUBLIC_PROFILE_LIMITS, publicProfileTextFields } from "../publicProfile";
 import { appointmentChangeVerificationModes, bookingModes, CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_LOCK_ATTEMPTS, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, isContactPasscode, isGuessableContactPasscode, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH, RULE_CONTENT_CALL_MAX_LENGTH, RULE_TITLE_MAX_LENGTH, RULES_MAX, transferModes } from "../receptionist";
@@ -82,6 +83,9 @@ export const apiMeSchema = z.object({
 const businessHoursSources = ["none", "generated", "operator"] as const;
 const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 
+const callTranscriptRecipients = z.enum(callTranscriptRecipientChoices);
+const callTranscriptContent = z.enum(callTranscriptContentChoices);
+
 export const apiBusinessSchema = z.object({
   id,
   name: z.string(),
@@ -95,6 +99,8 @@ export const apiBusinessSchema = z.object({
   hours: z.array(apiHoursWindowSchema),
   hours_source: z.enum(businessHoursSources).describe("Who set the hours. operator: a person, in the dashboard or with PATCH /business, and AI leaves them alone. generated: AI found them in the business's knowledge, and updates them when that knowledge changes. none: not recorded. AI fills in hours it finds only while the business has none."),
   ai_traces_enabled: z.boolean().describe("Whether each AI turn on calls and website chats keeps a debug trace, read with GET /ai-traces. Off by default."),
+  call_transcript_recipients: callTranscriptRecipients.describe("Who on the team can get an email after each call the caller spoke on. nobody: no one. owners_and_admins: owners and admins only, the default. team: everyone on the team. Each person also turns it on for themselves: the call_transcript event in GET /notification-preferences."),
+  call_transcript_content: callTranscriptContent.describe("What that email holds. summary: the call's summary and a link to it, the default. transcript: the summary and the whole conversation. Card and ID numbers are taken out of it either way."),
   created_at: timestamp,
   updated_at: timestamp,
 });
@@ -107,6 +113,8 @@ export const apiBusinessUpdateSchema = z.strictObject({
   business_type: z.string().trim().min(1).max(64).optional().describe("What kind of business it is."),
   hours: z.array(apiHoursWindowSchema).max(28).optional().describe("Replaces the whole week. Omit a day to close it. Send two windows for a day with a break. Windows on the same day can't overlap. The hours then count as a person's, with hours_source operator, so AI stops changing them."),
   ai_traces_enabled: z.boolean().optional().describe("true keeps a debug trace of each AI turn from now on, for the ai_traces retention period. Traces hold what callers and visitors said. false stops new ones; existing ones expire as usual."),
+  call_transcript_recipients: callTranscriptRecipients.optional().describe("Who on the team can get an email after each call. People it leaves out stop getting it from the next call, and their own setting stays as it was."),
+  call_transcript_content: callTranscriptContent.optional().describe("transcript sends the whole conversation, and copies stay in people's mailboxes after the call's transcript expires. summary sends the summary and a link."),
 });
 
 const appointmentChangePolicyFields = {
@@ -637,6 +645,7 @@ const notificationEventDescriptions = {
   website_chat: "A visitor wrote through the website chat widget. At most one alert per chat a day.",
   website_live_chat: "A visitor in the website chat asked to talk with a person. Someone on the team has 3 minutes to reply from Messages before the receptionist offers to take a message.",
   webhook_disabled: "Events stopped going to a webhook endpoint after its deliveries failed for about a day.",
+  call_transcript: "After each call the caller spoke on, an email with the call's summary, and the whole conversation when the business's call_transcript_content is transcript. It starts off, goes by email only, so sms is always false, and goes out only while call_transcript.available is true.",
 } as const;
 export type ApiNotificationEvent = keyof typeof notificationEventDescriptions;
 export const apiNotificationEvents = Object.keys(notificationEventDescriptions) as ApiNotificationEvent[];
@@ -659,6 +668,11 @@ export const apiNotificationPreferencesSchema = z.object({
     available: z.boolean().describe("true when texts can be turned on."),
     unavailable_reason: z.enum(["sender_missing", "phone_unverified", "consent_required"]).nullable().describe("sender_missing: the deployment has no number to send alerts from. phone_unverified: the account has no verified mobile number. consent_required: the account hasn't agreed to alert texts. The account's owner fixes the last two in the dashboard's notification settings."),
   }),
+  call_transcript: z.object({
+    available: z.boolean().describe("true when the business sends the email after each call to this account."),
+    unavailable_reason: z.enum(["turned_off", "owners_and_admins_only"]).nullable().describe("turned_off: the business's call_transcript_recipients is nobody. owners_and_admins_only: the account is on the team with another role. events.call_transcript keeps what the account chose meanwhile."),
+    content: callTranscriptContent.describe("What the email holds, the business's call_transcript_content."),
+  }).describe("Whether the email after each call reaches this account."),
 }).describe("The alerts the account the key acts as gets about this business. Each person on the team has their own.");
 
 export const apiNotificationPreferencesUpdateSchema = z.strictObject({

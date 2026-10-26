@@ -229,7 +229,7 @@ describe("phone numbers", () => {
 });
 
 describe("notification preferences", () => {
-  const preferences: NotificationPreferences = { emailEnabled: true, smsEnabled: false, smsConsent: false, eventPreferences: { ...defaultOperatorNotificationEventPreferences(), voiceMessage: { email: false, sms: false } }, dailySummaryEnabled: true, dailySummarySendTime: "08:30", canUseSms: true, smsUnavailableReason: null };
+  const preferences: NotificationPreferences = { emailEnabled: true, smsEnabled: false, smsConsent: false, eventPreferences: { ...defaultOperatorNotificationEventPreferences(), voiceMessage: { email: false, sms: false } }, dailySummaryEnabled: true, dailySummarySendTime: "08:30", canUseSms: true, smsUnavailableReason: null, callTranscript: { available: true, unavailableReason: null, recipients: "owners_and_admins", content: "summary", canEdit: true } };
 
   it("names each alert the dashboard shows, and says why texts are off", () => {
     const settings = serializeNotificationPreferences(preferences);
@@ -240,7 +240,17 @@ describe("notification preferences", () => {
     expect(serializeNotificationPreferences({ ...preferences, smsConsent: true, canUseSms: false, smsUnavailableReason: "sender_missing" }).sms).toEqual({ available: false, unavailable_reason: "sender_missing" });
     // Each API name is one of the dashboard's events, and every event it shows has one.
     expect(Object.values(notificationEventKeys).every((key) => (operatorNotificationEventKeys as readonly string[]).includes(key))).toBe(true);
-    expect(new Set(Object.values(notificationEventKeys))).toEqual(new Set(["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "widgetChat", "liveChatRequest", "webhookDisabled"]));
+    expect(new Set(Object.values(notificationEventKeys))).toEqual(new Set(["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "widgetChat", "liveChatRequest", "webhookDisabled", "callTranscript"]));
+  });
+
+  it("says whether the email after each call reaches the account, which starts off", () => {
+    const settings = serializeNotificationPreferences(preferences);
+    expect(settings.events.call_transcript).toEqual({ email: false, sms: false });
+    expect(settings.call_transcript).toEqual({ available: true, unavailable_reason: null, content: "summary" });
+    const left = serializeNotificationPreferences({ ...preferences, eventPreferences: { ...preferences.eventPreferences, callTranscript: { email: true, sms: false } }, callTranscript: { available: false, unavailableReason: "owners_and_admins_only", recipients: "owners_and_admins", content: "transcript", canEdit: false } });
+    expect(apiNotificationPreferencesSchema.parse(left)).toEqual(left);
+    // What the person chose stays, and available says it doesn't go out.
+    expect(left).toMatchObject({ events: { call_transcript: { email: true, sms: false } }, call_transcript: { available: false, unavailable_reason: "owners_and_admins_only", content: "transcript" } });
   });
 });
 

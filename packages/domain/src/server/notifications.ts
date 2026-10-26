@@ -1,11 +1,11 @@
-import { MAX_PHONE_CALL_MS, OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_VERSION, canTextNumber, intlLocale, normalizeInterfaceLocale, type InterfaceLocale } from "@lobbystack/shared";
+import { MAX_PHONE_CALL_MS, OPERATOR_SMS_ACCEPTED_DISCLOSURE_VERSIONS, OPERATOR_SMS_DISCLOSURE_VERSION, callTranscriptUnavailableReason, canTextNumber, intlLocale, normalizeInterfaceLocale, type CallTranscriptContent, type CallTranscriptRecipients, type CallTranscriptUnavailableReason, type InterfaceLocale } from "@lobbystack/shared";
 import { and, eq, gte, inArray, isNull, lte, lt, or, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 import { isTerminalTwilioMessageStatus, mapTwilioStatusToNotificationStatus, shouldApplyNotificationStatusTransition } from "@lobbystack/shared";
 
-import { appointments, businesses, contacts, enqueueOutbox, notifications, operatorNotificationDeliveries, outboxMessages, operatorNotificationPreferences, services, smsConsentEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { appointments, businessMemberships, businesses, contacts, enqueueOutbox, notifications, operatorNotificationDeliveries, outboxMessages, operatorNotificationPreferences, services, smsConsentEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
-import { requireBusinessMembership } from "../authz";
+import { hasMinimumRole, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
 import { resolveSmsSender } from "./smsSender";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction } from "./usage";
@@ -374,7 +374,9 @@ function assertDailySummary(input: { dailySummaryEnabled?: boolean; dailySummary
  * Saves one person's alerts for a business, in a transaction acting as them.
  * Texts need their consent, given with this change or before it.
  */
-export async function saveNotificationPreferencesInTransaction(tx: DatabaseTransaction, input: NotificationPreferencesChange): Promise<void> {
+export async function saveNotificationPreferencesInTransaction(tx: DatabaseTransaction, change: NotificationPreferencesChange): Promise<void> {
+  // The email after each call never goes out as a text.
+  const input = { ...change, eventPreferences: { ...change.eventPreferences, callTranscript: { email: change.eventPreferences.callTranscript?.email === true, sms: false } } };
   assertDailySummary(input);
   const currentUser = (await tx.select({ phone: users.phone }).from(users).where(eq(users.id, input.userId)).limit(1))[0];
   const previous = (await tx.select({ smsEnabled: operatorNotificationPreferences.smsEnabled, eventPreferences: operatorNotificationPreferences.eventPreferences, smsConsentGrantedAt: operatorNotificationPreferences.smsConsentGrantedAt, smsConsentRevokedAt: operatorNotificationPreferences.smsConsentRevokedAt, smsConsentDisclosureVersion: operatorNotificationPreferences.smsConsentDisclosureVersion, smsConsentPhone: operatorNotificationPreferences.smsConsentPhone }).from(operatorNotificationPreferences).where(and(eq(operatorNotificationPreferences.businessId, input.businessId), eq(operatorNotificationPreferences.userId, input.userId))).limit(1))[0];
@@ -403,12 +405,17 @@ export async function saveNotificationPreferencesInTransaction(tx: DatabaseTrans
   if (consentChanged && consentNow && currentUser?.phone) await tx.insert(smsConsentEvents).values({ businessId: input.businessId, phone: currentUser.phone, recipientType: "operator", action: input.smsConsent ? "operator_alert_consent_granted" : "operator_alert_consent_revoked", source: "operator_settings" });
 }
 
-export const operatorNotificationEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "liveChatRequest", "webhookDisabled"] as const;
+/** The alerts: each tells the team something happened, and the daily summary counts them. */
+export const operatorAlertEventKeys = ["voiceMessage", "pausedSms", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "widgetChat", "liveChatRequest", "webhookDisabled"] as const;
+export type OperatorAlertEventKey = (typeof operatorAlertEventKeys)[number];
+/** Everything a person turns on or off for themselves: the alerts, and the email after each call (callTranscripts.ts). */
+export const operatorNotificationEventKeys = [...operatorAlertEventKeys, "callTranscript"] as const;
 export type OperatorNotificationEventKey = (typeof operatorNotificationEventKeys)[number];
 export type OperatorNotificationEventPreferences = Record<OperatorNotificationEventKey, { email: boolean; sms: boolean }>;
 
+/** Alerts go out by email until someone turns them off. The email after each call starts off, and never goes out as a text. */
 export function defaultOperatorNotificationEventPreferences(): OperatorNotificationEventPreferences {
-  return Object.fromEntries(operatorNotificationEventKeys.map((key) => [key, { email: true, sms: false }])) as OperatorNotificationEventPreferences;
+  return { ...Object.fromEntries(operatorAlertEventKeys.map((key) => [key, { email: true, sms: false }])), callTranscript: { email: false, sms: false } } as OperatorNotificationEventPreferences;
 }
 
 /** Event preferences from a request body: an event without both switches keeps its default. */
@@ -417,12 +424,12 @@ export function normalizeOperatorNotificationEventPreferences(value: unknown): O
   const raw = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
   return Object.fromEntries(operatorNotificationEventKeys.map((key) => {
     const event = raw[key] as { email?: unknown; sms?: unknown } | null | undefined;
-    return [key, typeof event === "object" && event !== null && typeof event.email === "boolean" && typeof event.sms === "boolean" ? { email: event.email, sms: event.sms } : defaults[key]];
+    return [key, typeof event === "object" && event !== null && typeof event.email === "boolean" && typeof event.sms === "boolean" ? { email: event.email, sms: key === "callTranscript" ? false : event.sms } : defaults[key]];
   })) as OperatorNotificationEventPreferences;
 }
 
 const dailySummaryTimePattern = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-const dailySummaryLabels: Record<OperatorNotificationEventKey, string> = {
+const dailySummaryLabels: Record<OperatorAlertEventKey, string> = {
   voiceMessage: "Voice messages",
   pausedSms: "Paused SMS",
   smsFailed: "Failed SMS",
@@ -441,8 +448,8 @@ function assertDailySummaryTime(value: string | null | undefined): void {
 }
 
 /** The day's alert counts: one line for a text, and a list with the day written out for an email. */
-function buildDailySummary(input: { businessName: string; day: DateTime; counts: Record<OperatorNotificationEventKey, number>; total: number }): { subject: string; body: string; emailBody: string } {
-  const lines = operatorNotificationEventKeys
+function buildDailySummary(input: { businessName: string; day: DateTime; counts: Record<OperatorAlertEventKey, number>; total: number }): { subject: string; body: string; emailBody: string } {
+  const lines = operatorAlertEventKeys
     .filter((key) => input.counts[key] > 0)
     .map((key) => `${dailySummaryLabels[key]}: ${input.counts[key]}`);
   const alerts = `${input.total} alert${input.total === 1 ? "" : "s"}`;
@@ -455,7 +462,18 @@ function buildDailySummary(input: { businessName: string; day: DateTime; counts:
   };
 }
 
-export type NotificationPreferences = { emailEnabled: boolean; smsEnabled: boolean; smsConsent: boolean; eventPreferences: OperatorNotificationEventPreferences; dailySummaryEnabled: boolean; dailySummarySendTime: string | null; canUseSms: boolean; smsUnavailableReason: "phone_unverified" | "sender_missing" | null };
+export type NotificationPreferences = {
+  emailEnabled: boolean;
+  smsEnabled: boolean;
+  smsConsent: boolean;
+  eventPreferences: OperatorNotificationEventPreferences;
+  dailySummaryEnabled: boolean;
+  dailySummarySendTime: string | null;
+  canUseSms: boolean;
+  smsUnavailableReason: "phone_unverified" | "sender_missing" | null;
+  /** Whether the business sends this person the email after each call, what it holds, and whether this person can change that. */
+  callTranscript: { available: boolean; unavailableReason: CallTranscriptUnavailableReason | null; recipients: CallTranscriptRecipients; content: CallTranscriptContent; canEdit: boolean };
+};
 
 export async function getNotificationPreferences(context: DomainContext, input: { userId: string; businessId: string; phoneVerified?: boolean }): Promise<NotificationPreferences> {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
@@ -474,7 +492,11 @@ export async function loadSavedNotificationPreferencesInTransaction(tx: Database
   return { emailEnabled: row?.emailEnabled ?? true, smsEnabled: row?.smsEnabled ?? false, eventPreferences: normalizeOperatorNotificationEventPreferences(row?.eventPreferences), dailySummaryEnabled: row?.dailySummaryEnabled ?? false, dailySummarySendTime: row?.dailySummarySendTime ?? null };
 }
 
-/** One person's alerts for a business, as they apply: texts read as off until they can be sent. */
+/**
+ * One person's alerts for a business, as they apply: texts read as off until
+ * they can be sent. The email after each call reads as the person chose it,
+ * and callTranscript says whether the business sends it to them.
+ */
 export async function loadNotificationPreferencesInTransaction(tx: DatabaseTransaction, input: { userId: string; businessId: string; phoneVerified?: boolean }): Promise<NotificationPreferences> {
   const row = (await tx.select().from(operatorNotificationPreferences).where(and(eq(operatorNotificationPreferences.businessId, input.businessId), eq(operatorNotificationPreferences.userId, input.userId))).limit(1))[0];
   const phone = (await tx.select({ phone: users.phone }).from(users).where(eq(users.id, input.userId)).limit(1))[0]?.phone;
@@ -487,7 +509,18 @@ export async function loadNotificationPreferencesInTransaction(tx: DatabaseTrans
   const canSendSms = canUseSms && smsConsent;
   const storedEvents = { ...defaultOperatorNotificationEventPreferences(), ...row?.eventPreferences } as OperatorNotificationEventPreferences;
   const eventPreferences = canSendSms ? storedEvents : Object.fromEntries(Object.entries(storedEvents).map(([key, value]) => [key, { ...value, sms: false }])) as OperatorNotificationEventPreferences;
-  return { emailEnabled: row?.emailEnabled ?? true, smsEnabled: canSendSms && Boolean(row?.smsEnabled), smsConsent, eventPreferences, dailySummaryEnabled: row?.dailySummaryEnabled ?? false, dailySummarySendTime: row?.dailySummarySendTime ?? null, ...channelState };
+  const callTranscript = await loadCallTranscriptAvailabilityInTransaction(tx, input);
+  eventPreferences.callTranscript = { email: storedEvents.callTranscript.email === true, sms: false };
+  return { emailEnabled: row?.emailEnabled ?? true, smsEnabled: canSendSms && Boolean(row?.smsEnabled), smsConsent, eventPreferences, dailySummaryEnabled: row?.dailySummaryEnabled ?? false, dailySummarySendTime: row?.dailySummarySendTime ?? null, ...channelState, callTranscript };
+}
+
+/** Whether the business sends this person the email after each call, from their role and the business's choice. */
+async function loadCallTranscriptAvailabilityInTransaction(tx: DatabaseTransaction, input: { userId: string; businessId: string }): Promise<NotificationPreferences["callTranscript"]> {
+  const policy = (await tx.select({ recipients: businesses.callTranscriptRecipients, content: businesses.callTranscriptContent }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
+  const membership = (await tx.select({ role: businessMemberships.role }).from(businessMemberships).where(and(eq(businessMemberships.businessId, input.businessId), eq(businessMemberships.userId, input.userId), eq(businessMemberships.status, "active"))).limit(1))[0];
+  const recipients = policy?.recipients ?? "nobody";
+  const unavailableReason = callTranscriptUnavailableReason(recipients, membership?.role ?? "");
+  return { available: unavailableReason === null, unavailableReason, recipients, content: policy?.content ?? "summary", canEdit: hasMinimumRole(membership?.role ?? "", "business_admin") };
 }
 
 export async function queueDailyOperatorSummaries(context: DomainContext, input: { businessId: string; now?: Date }): Promise<{ eligible: number; queued: number }> {
@@ -518,16 +551,16 @@ export async function queueDailyOperatorSummaries(context: DomainContext, input:
         .where(and(
           eq(operatorNotificationDeliveries.businessId, input.businessId),
           eq(operatorNotificationDeliveries.userId, preference.userId),
-          inArray(operatorNotificationDeliveries.eventKind, operatorNotificationEventKeys),
+          inArray(operatorNotificationDeliveries.eventKind, operatorAlertEventKeys),
           gte(operatorNotificationDeliveries.createdAt, previousDayStart.toJSDate()),
           lt(operatorNotificationDeliveries.createdAt, currentDayStart.toJSDate()),
         ));
-      const uniqueAlerts = new Map<string, OperatorNotificationEventKey>();
+      const uniqueAlerts = new Map<string, OperatorAlertEventKey>();
       for (const alert of alerts) {
-        if (operatorNotificationEventKeys.includes(alert.eventKind as OperatorNotificationEventKey)) uniqueAlerts.set(alert.eventKey, alert.eventKind as OperatorNotificationEventKey);
+        if (operatorAlertEventKeys.includes(alert.eventKind as OperatorAlertEventKey)) uniqueAlerts.set(alert.eventKey, alert.eventKind as OperatorAlertEventKey);
       }
       if (uniqueAlerts.size === 0) continue;
-      const counts = Object.fromEntries(operatorNotificationEventKeys.map((key) => [key, 0])) as Record<OperatorNotificationEventKey, number>;
+      const counts = Object.fromEntries(operatorAlertEventKeys.map((key) => [key, 0])) as Record<OperatorAlertEventKey, number>;
       for (const eventKind of uniqueAlerts.values()) counts[eventKind] += 1;
       const message = buildDailySummary({ businessName: business.name, day: previousDayStart, counts, total: uniqueAlerts.size });
       const smsConsent = hasOperatorSmsConsent(preference, preference.phone);
@@ -558,11 +591,11 @@ export async function queueDailyOperatorSummaries(context: DomainContext, input:
   });
 }
 
-export async function queueOperatorAlert(context: DomainContext, input: { businessId: string; eventKind: OperatorNotificationEventKey; eventKey: string; subject: string; body: string }): Promise<string[]> {
+export async function queueOperatorAlert(context: DomainContext, input: { businessId: string; eventKind: OperatorAlertEventKey; eventKey: string; subject: string; body: string }): Promise<string[]> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => await queueOperatorAlertInTransaction(tx, input));
 }
 
-export async function queueOperatorAlertInTransaction(tx: DatabaseTransaction, input: { businessId: string; eventKind: OperatorNotificationEventKey; eventKey: string; subject: string; body: string }): Promise<string[]> {
+export async function queueOperatorAlertInTransaction(tx: DatabaseTransaction, input: { businessId: string; eventKind: OperatorAlertEventKey; eventKey: string; subject: string; body: string }): Promise<string[]> {
   type Recipient = { userId: string; email: string; phone: string | null; preferences: OperatorNotificationEventPreferences | null; emailEnabled: boolean; smsEnabled: boolean; smsConsentGrantedAt: Date | null; smsConsentRevokedAt: Date | null; smsConsentDisclosureVersion: string | null; smsConsentPhone: string | null };
   const result = await tx.execute(sql`SELECT user_id AS "userId", email, phone, event_preferences AS preferences, email_enabled AS "emailEnabled", sms_enabled AS "smsEnabled", sms_consent_granted_at AS "smsConsentGrantedAt", sms_consent_revoked_at AS "smsConsentRevokedAt", sms_consent_disclosure_version AS "smsConsentDisclosureVersion", sms_consent_phone AS "smsConsentPhone" FROM app.resolve_operator_notification_recipients(${input.businessId}::uuid)`);
   const recipients = result.rows as Recipient[];
@@ -619,6 +652,11 @@ export async function markOperatorNotificationSent(context: DomainContext, input
 
 export async function markOperatorNotificationSkipped(context: DomainContext, input: { businessId: string; deliveryId: string; error?: string }): Promise<void> {
   await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => { await tx.update(operatorNotificationDeliveries).set({ status: "skipped", lastError: input.error ?? null, updatedAt: new Date() }).where(and(eq(operatorNotificationDeliveries.id, input.deliveryId), eq(operatorNotificationDeliveries.businessId, input.businessId), eq(operatorNotificationDeliveries.status, "processing"))); });
+}
+
+/** A send the provider refused for good, so it isn't tried again. */
+export async function markOperatorNotificationFailed(context: DomainContext, input: { businessId: string; deliveryId: string; error: string }): Promise<void> {
+  await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => { await tx.update(operatorNotificationDeliveries).set({ status: "failed", lastError: input.error, updatedAt: new Date() }).where(and(eq(operatorNotificationDeliveries.id, input.deliveryId), eq(operatorNotificationDeliveries.businessId, input.businessId), eq(operatorNotificationDeliveries.status, "processing"))); });
 }
 
 export async function updateOperatorNotificationDeliveryStatus(context: DomainContext, input: { businessId: string; deliveryId: string; providerMessageId: string; providerStatus: string; providerPrice?: number; providerPriceUnit?: string; providerCostUsd?: number; providerNumSegments?: number }): Promise<boolean> {

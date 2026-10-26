@@ -1045,7 +1045,41 @@
       "webhookDisabled": {
         "title": "Webhook endpoint turned off",
         "description": "When {{appName}} stops sending events to a webhook endpoint because every delivery failed for about a day."
+      },
+      "callTranscript": {
+        "summary": {
+          "title": "Call summary",
+          "description": "After each call the caller spoke on, an email with what happened and a link to the call."
+        },
+        "transcript": {
+          "title": "Call transcript",
+          "description": "After each call the caller spoke on, an email with what happened and the whole conversation."
+        },
+        "emailOnly": "Email only",
+        "unavailable": {
+          "turned_off": "Your business turned these emails off.",
+          "owners_and_admins_only": "Your business sends these to owners and admins only."
+        }
       }
+    },
+    "callTranscripts": {
+      "title": "Emails after each call",
+      "description": "Choose who on your team can get an email after each call, and what it holds. Each person turns it on for themselves under Communication.",
+      "recipients": {
+        "title": "Who can get them",
+        "description": "People you leave out stop getting them from the next call.",
+        "owners_and_admins": "Owners and admins",
+        "team": "Everyone on the team",
+        "nobody": "Nobody"
+      },
+      "content": {
+        "title": "What they hold",
+        "summary": "Summary and a link",
+        "transcript": "Summary and the whole conversation",
+        "summaryDescription": "The call's summary and a link to it. The conversation stays in the dashboard, behind sign-in.",
+        "transcriptDescription": "The summary and every turn, without card or ID numbers. Copies stay in people's mailboxes after the dashboard deletes the transcript, even when they leave the team."
+      },
+      "saveFailed": "The settings for emails after each call were not saved."
     },
     "systemIssues": {
       "title": "System issues"

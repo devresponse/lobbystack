@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { SmtpEmailProvider } from "./smtp";
+import { permanentSmtpRefusal, SmtpEmailProvider, type CallTranscriptEmail } from "./smtp";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -111,6 +111,33 @@ describe("SMTP delivery", () => {
     expect(html).toContain("<title>Verify &lt;email&gt;</title>");
     expect(html).toContain(">12&lt;345</p>");
     expect(html).not.toContain(">12<345</p>");
+  });
+  it("sends the email after a call with replies going to the owner, and a long call's file attached", async () => {
+    const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });
+    const provider = new SmtpEmailProvider({ host: "localhost", port: 1025, secure: false, username: "", password: "", from: "no-reply@example.test", replyTo: "support@example.test" }, { sendMail } as never);
+    const call: CallTranscriptEmail = { locale: "en", businessName: "Maple Dental", timeZone: "America/Toronto", channel: "phone", callerName: "Jane Doe", callerPhone: "+14165550134", startedAt: "2026-10-26T19:42:10.000Z", durationSeconds: 3600, outcome: { kind: "none" }, callUrl: "https://app.example.test/calls/c1", settingsUrl: "https://app.example.test/settings/notifications", turns: Array.from({ length: 900 }, (_, index) => ({ speaker: "caller" as const, text: `Turn ${index}, about as long as what a person says in one go.`, atSeconds: index * 4 })) };
+    await provider.sendTemplate({ template: "call_transcript", appName: "AlloPlace", to: "admin@example.test", subject: "Call transcript: Jane Doe, 60 min", variables: {}, callTranscript: call, replyTo: "owner@example.test", idempotencyKey: "operator-notification:d1" });
+    await provider.sendTemplate({ template: "call_transcript", appName: "AlloPlace", to: "admin@example.test", subject: "Call summary: Jane Doe, 60 min", variables: {}, callTranscript: { ...call, turns: null }, replyTo: "owner@example.test" });
+    const [transcript, summary] = sendMail.mock.calls.map((sent) => sent[0]);
+    expect(transcript).toMatchObject({ from: "no-reply@example.test", replyTo: "owner@example.test", to: "admin@example.test", subject: "Call transcript: Jane Doe, 60 min" });
+    expect(transcript.attachments).toEqual([expect.objectContaining({ filename: "call-2026-10-26.txt", contentType: "text/plain; charset=utf-8" })]);
+    expect(transcript.html).toContain("Turn 0,");
+    expect(summary.attachments).toBeUndefined();
+    expect(summary.text).not.toContain("Turn 0,");
+    await expect(provider.sendTemplate({ template: "call_transcript", appName: "AlloPlace", to: "admin@example.test", subject: "Call", variables: {} })).rejects.toThrow("A call_transcript email needs its call.");
+  });
+
+  it("knows a mail server's refusal for good from one that clears up", () => {
+    const refusal = (code: string, responseCode?: number) => Object.assign(new Error("refused"), { code, ...(responseCode ? { responseCode } : {}) });
+    expect(permanentSmtpRefusal(refusal("EENVELOPE", 550))).toBe(550);
+    expect(permanentSmtpRefusal(refusal("EMESSAGE", 554))).toBe(554);
+    // A full mailbox or a busy server answers 4xx, and a sign-in or a connection can be fixed.
+    expect(permanentSmtpRefusal(refusal("EENVELOPE", 452))).toBeUndefined();
+    expect(permanentSmtpRefusal(refusal("EAUTH", 535))).toBeUndefined();
+    expect(permanentSmtpRefusal(refusal("ECONNECTION"))).toBeUndefined();
+    expect(permanentSmtpRefusal(refusal("EENVELOPE"))).toBeUndefined();
+    expect(permanentSmtpRefusal("550")).toBeUndefined();
+    expect(permanentSmtpRefusal(null)).toBeUndefined();
   });
   it("uses a stable privacy-safe Message-ID for retries", async () => {
     const sendMail = vi.fn().mockResolvedValue({ messageId: "provider-id" });

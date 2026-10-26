@@ -14,16 +14,18 @@ afterEach(async () => {
   await new Promise(resolve => setTimeout(resolve, 60));
   clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals();
 });
-function setup(reason: "phone_unverified" | "sender_missing" | null = null, widgetOnly = false, smsConsent = false) {
+type CallTranscriptState = { available: boolean; unavailableReason: "turned_off" | "owners_and_admins_only" | null; recipients: "nobody" | "owners_and_admins" | "team"; content: "summary" | "transcript"; canEdit: boolean };
+function setup(reason: "phone_unverified" | "sender_missing" | null = null, widgetOnly = false, smsConsent = false, callTranscript?: CallTranscriptState) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business-1", active: true }] });
-  let preferences = { emailEnabled: true, smsEnabled: false, smsConsent, canUseSms: reason === null, smsUnavailableReason: reason, eventPreferences: Object.fromEntries(["voiceMessage", "pausedSms", "widgetChat", "liveChatRequest", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "webhookDisabled"].map(key => [key, { email: true, sms: false }])), dailySummaryEnabled: false, dailySummarySendTime: null };
+  let preferences = { emailEnabled: true, smsEnabled: false, smsConsent, canUseSms: reason === null, smsUnavailableReason: reason, eventPreferences: { ...Object.fromEntries(["voiceMessage", "pausedSms", "widgetChat", "liveChatRequest", "smsFailed", "calendarSync", "transferFailed", "aiReplyFailed", "webhookDisabled"].map(key => [key, { email: true, sms: false }])), callTranscript: { email: false, sms: false } }, dailySummaryEnabled: false, dailySummarySendTime: null, ...(callTranscript ? { callTranscript } : {}) };
   client.setQueryData(["notification-preferences", "business-1"], preferences);
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     // The server records consent and turns SMS on when it approves the code.
     if (url.startsWith("/api/account/phone-verification/check")) { preferences = { ...preferences, smsEnabled: true, smsConsent: true, canUseSms: true, smsUnavailableReason: null }; return Response.json({ approved: true, status: "approved" }); }
     if (url.startsWith("/api/account/phone-verification") && init?.method === "POST") return Response.json({ attemptId: "attempt-1", phoneE164: "+14165550123" }, { status: 202 });
     if (url.startsWith("/api/account/phone-verification")) return Response.json({ attempt: { id: "attempt-1", status: "sent" } });
+    if (url.startsWith("/api/call-transcript-settings") && init?.method === "PUT") { preferences = { ...preferences, callTranscript: { ...preferences.callTranscript!, ...JSON.parse(String(init.body)) } }; return Response.json({ ...preferences.callTranscript, canEdit: true }); }
     if (init?.method === "PUT") { preferences = { ...preferences, ...JSON.parse(String(init.body)) }; return Response.json({ ok: true }); }
     return Response.json(preferences);
   });
@@ -103,5 +105,44 @@ describe("original notification controls", () => {
     const mutation = fetchMock.mock.calls.find(([, init]) => init?.method === "PUT");
     expect(JSON.parse(String(mutation?.[1]?.body))).toMatchObject({ smsEnabled: true, smsConsent: true });
     await waitFor(() => expect(screen.getByRole("switch", { name: "notifications.sources.sms.title" }).getAttribute("aria-checked")).toBe("true"));
+  });
+});
+describe("the email after each call", () => {
+  const owner: CallTranscriptState = { available: true, unavailableReason: null, recipients: "owners_and_admins", content: "summary", canEdit: true };
+  it("is off until the person turns it on, by email only", async () => {
+    const fetchMock = setup(null, false, true, owner);
+    const email = await screen.findByRole("checkbox", { name: "notifications.sources.email.title - notifications.events.callTranscript.summary.title" });
+    expect(email.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText("notifications.events.callTranscript.summary.description")).toBeTruthy();
+    await userEvent.click(email);
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url.startsWith("/api/notification-preferences") && init?.method === "PUT")).toBe(true));
+    const save = fetchMock.mock.calls.find(([url, init]) => url.startsWith("/api/notification-preferences") && init?.method === "PUT");
+    expect(JSON.parse(String(save?.[1]?.body)).eventPreferences.callTranscript).toEqual({ email: true, sms: false });
+  });
+  it("lets an owner choose who gets it and what it holds", async () => {
+    const fetchMock = setup(null, false, false, owner);
+    expect(await screen.findByText("notifications.callTranscripts.title")).toBeTruthy();
+    expect(screen.getByText("notifications.callTranscripts.content.summaryDescription")).toBeTruthy();
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "notifications.callTranscripts.content.title" }), "transcript");
+    await waitFor(() => expect(fetchMock.mock.calls.some(([url, init]) => url.startsWith("/api/call-transcript-settings") && init?.method === "PUT")).toBe(true));
+    const change = fetchMock.mock.calls.find(([url, init]) => url.startsWith("/api/call-transcript-settings") && init?.method === "PUT");
+    expect(change?.[0]).toBe("/api/call-transcript-settings?businessId=business-1");
+    expect(JSON.parse(String(change?.[1]?.body))).toEqual({ content: "transcript" });
+    // The row above is named again for what the email now holds.
+    expect(await screen.findByText("notifications.events.callTranscript.transcript.title")).toBeTruthy();
+    expect(screen.getByText("notifications.callTranscripts.content.transcriptDescription")).toBeTruthy();
+  });
+  it("tells someone the business leaves out why, and shows them no choices", async () => {
+    setup(null, false, false, { available: false, unavailableReason: "owners_and_admins_only", recipients: "owners_and_admins", content: "summary", canEdit: false });
+    const email = await screen.findByRole("checkbox", { name: "notifications.sources.email.title - notifications.events.callTranscript.summary.title" });
+    expect(email.hasAttribute("disabled") || email.hasAttribute("data-disabled")).toBe(true);
+    expect(screen.getByText("notifications.events.callTranscript.unavailable.owners_and_admins_only")).toBeTruthy();
+    expect(screen.queryByText("notifications.callTranscripts.title")).toBeNull();
+  });
+  it("stays out of the website widget's notification settings", async () => {
+    setup(null, true, false, owner);
+    expect(await screen.findByText("notifications.events.widgetChat.title")).toBeTruthy();
+    expect(screen.queryByText("notifications.events.callTranscript.summary.title")).toBeNull();
+    expect(screen.queryByText("notifications.callTranscripts.title")).toBeNull();
   });
 });

@@ -398,5 +398,6 @@ export { canTextNumber, failedSmsProviderStatus, permanentSmsErrorCode, smsError
 
 export { DASHBOARD_TEST_CALL_WIDGET_ID, PROSPECT_DEMO_WIDGET_ID } from "./testCall";
 export { withoutSoundTags } from "./transcript";
+export * from "./callTranscripts";
 
 export * from "./publicApi";

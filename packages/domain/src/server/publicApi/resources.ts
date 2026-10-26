@@ -138,6 +138,8 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
     }),
     hours_source: business.hoursSource === "generated" || business.hoursSource === "operator" ? business.hoursSource : "none",
     ai_traces_enabled: business.aiTracesEnabled,
+    call_transcript_recipients: business.callTranscriptRecipients,
+    call_transcript_content: business.callTranscriptContent,
     created_at: iso(business.createdAt),
     updated_at: iso(business.updatedAt),
   };
@@ -682,6 +684,7 @@ export const notificationEventKeys = {
   website_chat: "widgetChat",
   website_live_chat: "liveChatRequest",
   webhook_disabled: "webhookDisabled",
+  call_transcript: "callTranscript",
 } as const satisfies Record<ApiNotificationEvent, OperatorNotificationEventKey>;
 
 export function serializeNotificationPreferences(preferences: NotificationPreferences): ApiNotificationPreferences {
@@ -697,6 +700,7 @@ export function serializeNotificationPreferences(preferences: NotificationPrefer
     events,
     daily_summary: { enabled: preferences.dailySummaryEnabled, send_time: preferences.dailySummarySendTime },
     sms: { available: unavailable === null, unavailable_reason: unavailable },
+    call_transcript: { available: preferences.callTranscript.available, unavailable_reason: preferences.callTranscript.unavailableReason, content: preferences.callTranscript.content },
   };
 }
 

@@ -302,6 +302,27 @@ describe("emails after a call", () => {
     expect(text).not.toContain("0:04 Assistant:");
   });
 
+  it("take card and ID numbers out of the turns and the summary, in the reader's language", () => {
+    const said = call({
+      outcome: { kind: "summary", summary: "Paid with 4111 1111 1111 1111." },
+      turns: [
+        { speaker: "caller", text: "My card is 4111 1111 1111 1111 and my SIN is 046 454 286.", atSeconds: 3 },
+        { speaker: "assistant", text: "Thanks. Call us back at 416 555 0134.", atSeconds: 9 },
+      ],
+    });
+    const { text, html } = send(said);
+    expect(text).toContain("Summary: Paid with [card number removed].");
+    expect(text).toContain("0:03 Caller: My card is [card number removed] and my SIN is [ID number removed].");
+    expect(text).toContain("0:09 Assistant: Thanks. Call us back at 416 555 0134.");
+    expect(`${text}${html}`).not.toMatch(/4111|046 454/);
+    expect(send({ ...said, locale: "fr" }).text).toContain("Appelant : My card is [numéro de carte retiré] and my SIN is [numéro d'identité retiré].");
+    // A long call's attached file leaves them out too.
+    const turns = Array.from({ length: 900 }, (_, index) => ({ speaker: "caller" as const, text: `Turn ${index}: 5555 5555 5555 4444`, atSeconds: index }));
+    const { attachments } = send(call({ turns }));
+    expect(attachments?.[0]?.content).toContain("Turn 899: [card number removed]");
+    expect(attachments?.[0]?.content).not.toContain("4444");
+  });
+
   it("stop a long call's turns before Gmail clips the email, and attach the whole conversation", () => {
     const turns = Array.from({ length: 900 }, (_, index) => ({ speaker: index % 2 ? "caller" as const : "assistant" as const, text: `Turn ${index}, about as long as what a person says in one go.`, atSeconds: index * 4 }));
     // 10:30 PM in Toronto, the day before UTC's.

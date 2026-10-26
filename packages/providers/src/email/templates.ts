@@ -1,4 +1,4 @@
-import { intlLocale, normalizeInterfaceLocale, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
+import { intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
 export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript";
 
@@ -622,6 +622,8 @@ type CallEmailCopy = {
   summaryOnly: string;
   transcript: string;
   speakers: Record<CallTranscriptTurn["speaker"], string>;
+  /** What stands in for a card or ID number someone said. */
+  removed: { card: string; id: string };
   cut: string;
   reason: { gets: (app: string, business: string) => string; copy: string; stop: string; settings: string };
   outcome: {
@@ -650,6 +652,7 @@ const CALL_EMAIL_COPY: Record<InterfaceLocale, CallEmailCopy> = {
     summaryOnly: "Open the call to read the whole conversation.",
     transcript: "Transcript",
     speakers: { caller: "Caller", assistant: "Assistant" },
+    removed: { card: "[card number removed]", id: "[ID number removed]" },
     cut: "The transcript stops here because it's long. The whole conversation is in the attached file and on the call's page.",
     reason: { gets: (app, business) => `You're receiving this email because your ${app} account gets an email after each call at ${business}.`, copy: "This copy stays in your mailbox after the dashboard deletes the transcript.", stop: "To stop these emails, go to", settings: "Settings > Notifications" },
     outcome: {
@@ -688,6 +691,7 @@ const CALL_EMAIL_COPY: Record<InterfaceLocale, CallEmailCopy> = {
     summaryOnly: "Ouvrez l'appel pour lire toute la conversation.",
     transcript: "Transcription",
     speakers: { caller: "Appelant", assistant: "Assistant" },
+    removed: { card: "[numéro de carte retiré]", id: "[numéro d'identité retiré]" },
     cut: "La transcription s'arrête ici parce qu'elle est longue. La conversation complète se trouve dans le fichier joint et sur la page de l'appel.",
     reason: { gets: (app, business) => `Vous recevez ce courriel parce que votre compte ${app} reçoit un courriel après chaque appel chez ${business}.`, copy: "Cette copie reste dans votre boîte de réception même après la suppression de la transcription dans le tableau de bord.", stop: "Pour ne plus recevoir ces courriels, allez dans", settings: "Réglages > Notifications" },
     outcome: {
@@ -726,6 +730,7 @@ const CALL_EMAIL_COPY: Record<InterfaceLocale, CallEmailCopy> = {
     summaryOnly: "Abra la llamada para leer toda la conversación.",
     transcript: "Transcripción",
     speakers: { caller: "Cliente", assistant: "Asistente" },
+    removed: { card: "[número de tarjeta eliminado]", id: "[número de identificación eliminado]" },
     cut: "La transcripción se detiene aquí porque es larga. La conversación completa está en el archivo adjunto y en la página de la llamada.",
     reason: { gets: (app, business) => `Recibe este correo porque su cuenta de ${app} recibe un correo después de cada llamada a ${business}.`, copy: "Esta copia se queda en su buzón aunque el panel elimine la transcripción.", stop: "Para dejar de recibir estos correos, vaya a", settings: "Configuración > Notificaciones" },
     outcome: {
@@ -764,6 +769,7 @@ const CALL_EMAIL_COPY: Record<InterfaceLocale, CallEmailCopy> = {
     summaryOnly: "Otvorite poziv da biste pročitali ceo razgovor.",
     transcript: "Transkript",
     speakers: { caller: "Pozivalac", assistant: "Asistent" },
+    removed: { card: "[broj kartice uklonjen]", id: "[identifikacioni broj uklonjen]" },
     cut: "Transkript se ovde prekida jer je dugačak. Ceo razgovor je u priloženoj datoteci i na stranici poziva.",
     reason: { gets: (app, business) => `Ovaj imejl ste dobili jer Vaš ${app} nalog dobija imejl posle svakog poziva upućenog firmi ${business}.`, copy: "Ova kopija ostaje u Vašem sandučetu i kada kontrolna tabla obriše transkript.", stop: "Da ne biste više dobijali ove imejlove, otvorite", settings: "Podešavanja > Obaveštenja" },
     outcome: {
@@ -852,7 +858,7 @@ function outcomeSentence(email: CallTranscriptEmail): string {
     case "message_taking":
       return copy.messageTaken;
     case "summary":
-      return outcome.summary || copy.none;
+      return outcome.summary ? withoutCardAndIdNumbers(outcome.summary, CALL_EMAIL_COPY[email.locale].removed) : copy.none;
     case "disposition":
       return dispositionSentence(outcome.disposition, copy);
     default:
@@ -913,7 +919,7 @@ function callTranscript(app: string, email: CallTranscriptEmail): { content: Ema
     { label: copy.labels.call, value: copy.channels[email.channel] },
     { label: copy.labels.summary, value: outcomeSentence(email) },
   ];
-  const lines = (email.turns ?? []).map((turn) => ({ at: turnTime(turn.atSeconds), speaker: copy.speakers[turn.speaker], text: turn.text.trim() })).filter((line) => line.text);
+  const lines = (email.turns ?? []).map((turn) => ({ at: turnTime(turn.atSeconds), speaker: copy.speakers[turn.speaker], text: withoutCardAndIdNumbers(turn.text.trim(), copy.removed) })).filter((line) => line.text);
   const shown = withinBudget(lines, email.locale);
   const cut = shown.length < lines.length;
   const blocks: Block[] = [{ kind: "facts", rows: facts }];

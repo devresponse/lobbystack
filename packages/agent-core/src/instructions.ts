@@ -1,4 +1,4 @@
-import { canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { countKnowledgeTokens } from "@lobbystack/domain";
 import { DateTime } from "luxon";
 
@@ -297,7 +297,7 @@ export function buildLiveInstructions(snapshot: BusinessContextSnapshot, now: Da
     // On its own this line doesn't make GPT-Live greet; the command in the
     // session's starting history does (live/session.ts). Alongside it, API
     // tests greeted 8 times out of 8 with the line and 11 out of 12 without.
-    `Open the call with this greeting as soon as you're told to start: "${snapshot.greeting}" Say it once, at the start of the call only.`,
+    `Open the call with this greeting as soon as you're told to start: "${callOpening(snapshot)}" Say it once, at the start of the call only.`,
     snapshot.voiceInstructions?.trim() ?? "",
     "Speak warmly and naturally, at an unhurried pace. Be clear and direct, not overly cheerful. Keep replies short and conversational.",
     "If the caller is frustrated, acknowledge it briefly and focus on the next helpful step. If the caller sounds unsure, ask one simple question to find out what they need.",

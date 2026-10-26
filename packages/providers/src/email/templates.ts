@@ -1,14 +1,19 @@
-import { intlLocale, normalizeInterfaceLocale, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
+import { intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
-export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending";
+export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript";
 
 type Link = { label: string; url: string };
+
+/** One turn of a call as an email shows it: the time from the call's start, who spoke and what they said. */
+type TranscriptLine = { at: string; speaker: string; text: string };
 
 type Block =
   | { kind: "paragraph"; text: string; link?: Link | undefined }
   | { kind: "button"; label: string; url: string }
   | { kind: "code"; code: string }
-  | { kind: "quote"; text: string };
+  | { kind: "quote"; text: string }
+  | { kind: "facts"; rows: Array<{ label: string; value: string }> }
+  | { kind: "transcript"; title: string; lines: TranscriptLine[] };
 
 /**
  * An email laid out once and written out twice: as plain text with a blank
@@ -25,12 +30,19 @@ export type RenderEmailInput = {
   /** The deployment's name, which the email calls the app by (see docs/branding.md). */
   appName: string;
   logo?: BrandImage | undefined;
+  /** The call a call_transcript email is about. */
+  callTranscript?: CallTranscriptEmail | undefined;
 };
 
-/** The plain text every email has, and the HTML that all but the personal and internal ones add. */
-export function renderEmail(input: RenderEmailInput): { text: string; html?: string } {
+/** The plain text every email has, the HTML that all but the personal and internal ones add, and the files a long call's email carries. */
+export function renderEmail(input: RenderEmailInput): { text: string; html?: string; attachments?: EmailAttachment[] } {
   if (input.template === "onboarding_followup") return { text: onboardingFollowupBody(input.variables, input.appName) };
   if (input.template === "feedback_submission") return { text: feedbackBody(input.variables, input.appName) };
+  if (input.template === "call_transcript") {
+    if (!input.callTranscript) throw new Error("A call_transcript email needs its call.");
+    const { content, attachment } = callTranscript(input.appName, input.callTranscript);
+    return { text: renderText(content), html: renderHtml(content, { appName: input.appName, logo: input.logo, title: input.subject, styles: TRANSCRIPT_STYLES }), ...(attachment ? { attachments: [attachment] } : {}) };
+  }
   const content = emailContent(input);
   return { text: renderText(content), html: renderHtml(content, { appName: input.appName, logo: input.logo, title: input.subject }) };
 }
@@ -557,6 +569,396 @@ function operatorAlert({ app, heading }: { app: string; heading: string }, varia
   return { locale: "en", eyebrow: business && !heading.includes(business) ? business : undefined, heading, blocks, reason };
 }
 
+/** What the call's page shows as its summary: a booking, a message, the receptionist's summary or how the call ended. */
+export type CallTranscriptOutcome =
+  | { kind: "booked"; serviceName: string | null; startsAt: string }
+  | { kind: "booking_in_progress"; serviceName: string | null; startsAt: string | null }
+  | { kind: "message_taking"; summary?: string }
+  | { kind: "summary"; summary: string }
+  | { kind: "disposition"; disposition: string }
+  | { kind: "none" };
+
+/** One turn of the conversation, with the seconds from the call's start to about when it began. */
+export type CallTranscriptTurn = { speaker: "caller" | "assistant"; text: string; atSeconds: number };
+
+/**
+ * The email someone on a business's team gets after a call, which the worker
+ * builds as it sends it. Its own words are in the reader's dashboard language;
+ * the summary stays in the business's and the turns in whatever was spoken.
+ */
+export type CallTranscriptEmail = {
+  locale: InterfaceLocale;
+  businessName: string;
+  /** The business's time zone, which the call's start is written in. */
+  timeZone: string;
+  channel: "phone" | "website" | "test";
+  callerName: string | null;
+  callerPhone: string | null;
+  startedAt: string;
+  durationSeconds: number | null;
+  outcome: CallTranscriptOutcome;
+  callUrl: string;
+  settingsUrl: string;
+  /** Every turn, when the business sends the whole conversation; null for the summary and a link. */
+  turns: CallTranscriptTurn[] | null;
+};
+
+/** A file sent with an email. */
+export type EmailAttachment = { filename: string; content: string; contentType: string };
+
+// Gmail hides an email's HTML past about 102 KB behind "View entire message".
+// A long call's turns stop at this many bytes of HTML, and the whole
+// conversation goes in a text file.
+const TRANSCRIPT_HTML_BUDGET = 80_000;
+
+type CallEmailCopy = {
+  subject: { transcript: string; summary: string; testTranscript: string; testSummary: string };
+  who: { visitor: string; unknown: string };
+  heading: { named: (name: string) => string; visitor: string; unknown: string; test: string };
+  labels: { when: string; length: string; caller: string; call: string; summary: string };
+  channels: Record<CallTranscriptEmail["channel"], string>;
+  notGiven: string;
+  button: string;
+  summaryOnly: string;
+  transcript: string;
+  speakers: Record<CallTranscriptTurn["speaker"], string>;
+  /** What stands in for a card or ID number someone said. */
+  removed: { card: string; id: string };
+  cut: string;
+  reason: { gets: (app: string, business: string) => string; copy: string; stop: string; settings: string };
+  outcome: {
+    booked: (service: string, at: string) => string;
+    scheduling: string;
+    schedulingWith: (service: string) => string;
+    schedulingWithAt: (service: string, at: string) => string;
+    messageTaken: string;
+    genericService: string;
+    unspecifiedTime: string;
+    none: string;
+    dispositions: Record<"contactBlocked" | "abuse" | "spam" | "transferCompleted" | "transferBusy" | "transferFailed" | "voicemail" | "busy" | "noAnswer" | "technicalIssue" | "canceled" | "completed", string>;
+  };
+};
+
+// The outcome sentences are the call page's (apps/admin/public/locales/*/calls.json).
+const CALL_EMAIL_COPY: Record<InterfaceLocale, CallEmailCopy> = {
+  en: {
+    subject: { transcript: "Call transcript", summary: "Call summary", testTranscript: "Test call transcript", testSummary: "Test call summary" },
+    who: { visitor: "website visitor", unknown: "unknown caller" },
+    heading: { named: (name) => `Call with ${name}`, visitor: "Website call with a visitor", unknown: "Call from an unknown caller", test: "Test call from the dashboard" },
+    labels: { when: "When", length: "Length", caller: "Caller", call: "Call", summary: "Summary" },
+    channels: { phone: "Phone call", website: "Website call", test: "Dashboard test call" },
+    notGiven: "Not given",
+    button: "Open the call",
+    summaryOnly: "Open the call to read the whole conversation.",
+    transcript: "Transcript",
+    speakers: { caller: "Caller", assistant: "Assistant" },
+    removed: { card: "[card number removed]", id: "[ID number removed]" },
+    cut: "The transcript stops here because it's long. The whole conversation is in the attached file and on the call's page.",
+    reason: { gets: (app, business) => `You're receiving this email because your ${app} account gets an email after each call at ${business}.`, copy: "This copy stays in your mailbox after the dashboard deletes the transcript.", stop: "To stop these emails, go to", settings: "Settings > Notifications" },
+    outcome: {
+      booked: (service, at) => `Caller booked ${service} for ${at}.`,
+      scheduling: "Caller started scheduling, but no appointment was confirmed.",
+      schedulingWith: (service) => `Caller discussed scheduling ${service}, but no appointment was confirmed.`,
+      schedulingWithAt: (service, at) => `Caller discussed scheduling ${service} for ${at}, but no appointment was confirmed.`,
+      messageTaken: "Caller left a message for follow-up.",
+      genericService: "an appointment",
+      unspecifiedTime: "an unspecified time",
+      none: "Caller asked questions, but no final outcome was captured yet.",
+      dispositions: {
+        contactBlocked: "Call was blocked before the assistant answered.",
+        abuse: "AI ended this as an abusive call.",
+        spam: "AI ended this as a spam call.",
+        transferCompleted: "Call was transferred successfully.",
+        transferBusy: "Transfer was attempted, but the destination line was busy.",
+        transferFailed: "Transfer was attempted, but it did not complete successfully.",
+        voicemail: "Call ended in voicemail or message capture.",
+        busy: "Call ended because the line was busy.",
+        noAnswer: "Call ended without an answer.",
+        technicalIssue: "Call ended because of a technical issue before a final outcome was captured.",
+        canceled: "Call was canceled before a final outcome was captured.",
+        completed: "Call completed, but no booking outcome was captured.",
+      },
+    },
+  },
+  fr: {
+    subject: { transcript: "Transcription d'appel", summary: "Résumé d'appel", testTranscript: "Transcription de l'appel test", testSummary: "Résumé de l'appel test" },
+    who: { visitor: "visiteur du site web", unknown: "appelant inconnu" },
+    heading: { named: (name) => `Appel avec ${name}`, visitor: "Appel d'un visiteur du site web", unknown: "Appel d'un appelant inconnu", test: "Appel test depuis le tableau de bord" },
+    labels: { when: "Date", length: "Durée", caller: "Appelant", call: "Appel", summary: "Résumé" },
+    channels: { phone: "Appel téléphonique", website: "Appel depuis le site web", test: "Appel test du tableau de bord" },
+    notGiven: "Non indiqué",
+    button: "Ouvrir l'appel",
+    summaryOnly: "Ouvrez l'appel pour lire toute la conversation.",
+    transcript: "Transcription",
+    speakers: { caller: "Appelant", assistant: "Assistant" },
+    removed: { card: "[numéro de carte retiré]", id: "[numéro d'identité retiré]" },
+    cut: "La transcription s'arrête ici parce qu'elle est longue. La conversation complète se trouve dans le fichier joint et sur la page de l'appel.",
+    reason: { gets: (app, business) => `Vous recevez ce courriel parce que votre compte ${app} reçoit un courriel après chaque appel chez ${business}.`, copy: "Cette copie reste dans votre boîte de réception même après la suppression de la transcription dans le tableau de bord.", stop: "Pour ne plus recevoir ces courriels, allez dans", settings: "Réglages > Notifications" },
+    outcome: {
+      booked: (service, at) => `L'appelant a réservé ${service} pour le ${at}.`,
+      scheduling: "L'appelant a commencé la prise de rendez-vous, mais aucun rendez-vous n'a été confirmé.",
+      schedulingWith: (service) => `L'appelant a discuté de la planification de ${service}, mais aucun rendez-vous n'a été confirmé.`,
+      schedulingWithAt: (service, at) => `L'appelant a discuté de la planification de ${service} pour le ${at}, mais aucun rendez-vous n'a été confirmé.`,
+      messageTaken: "L'appelant a laissé un message pour suivi.",
+      genericService: "un rendez-vous",
+      unspecifiedTime: "une heure non précisée",
+      none: "L'appelant a posé des questions, mais aucun résultat final n'a encore été capturé.",
+      dispositions: {
+        contactBlocked: "L'appel a été bloqué avant que l'assistant réponde.",
+        abuse: "L'IA a mis fin à cet appel pour comportement abusif.",
+        spam: "L'IA a mis fin à cet appel comme appel indésirable.",
+        transferCompleted: "L'appel a été transféré avec succès.",
+        transferBusy: "Un transfert a été tenté, mais la ligne de destination était occupée.",
+        transferFailed: "Un transfert a été tenté, mais il n'a pas abouti.",
+        voicemail: "L'appel s'est terminé par une boîte vocale ou une prise de message.",
+        busy: "L'appel s'est terminé parce que la ligne était occupée.",
+        noAnswer: "L'appel s'est terminé sans réponse.",
+        technicalIssue: "L'appel s'est terminé à cause d'un problème technique avant qu'un résultat final ne soit capturé.",
+        canceled: "L'appel a été annulé avant qu'un résultat final ne soit capturé.",
+        completed: "L'appel s'est terminé, mais aucun résultat de réservation n'a été capturé.",
+      },
+    },
+  },
+  es: {
+    subject: { transcript: "Transcripción de llamada", summary: "Resumen de llamada", testTranscript: "Transcripción de la llamada de prueba", testSummary: "Resumen de la llamada de prueba" },
+    who: { visitor: "visitante del sitio web", unknown: "cliente sin identificar" },
+    heading: { named: (name) => `Llamada con ${name}`, visitor: "Llamada de un visitante del sitio web", unknown: "Llamada de un cliente sin identificar", test: "Llamada de prueba desde el panel" },
+    labels: { when: "Fecha", length: "Duración", caller: "Cliente", call: "Llamada", summary: "Resumen" },
+    channels: { phone: "Llamada telefónica", website: "Llamada desde el sitio web", test: "Llamada de prueba del panel" },
+    notGiven: "No indicado",
+    button: "Abrir la llamada",
+    summaryOnly: "Abra la llamada para leer toda la conversación.",
+    transcript: "Transcripción",
+    speakers: { caller: "Cliente", assistant: "Asistente" },
+    removed: { card: "[número de tarjeta eliminado]", id: "[número de identificación eliminado]" },
+    cut: "La transcripción se detiene aquí porque es larga. La conversación completa está en el archivo adjunto y en la página de la llamada.",
+    reason: { gets: (app, business) => `Recibe este correo porque su cuenta de ${app} recibe un correo después de cada llamada a ${business}.`, copy: "Esta copia se queda en su buzón aunque el panel elimine la transcripción.", stop: "Para dejar de recibir estos correos, vaya a", settings: "Configuración > Notificaciones" },
+    outcome: {
+      booked: (service, at) => `El cliente reservó ${service} para el ${at}.`,
+      scheduling: "El cliente empezó a pedir una cita, pero no se confirmó ninguna.",
+      schedulingWith: (service) => `El cliente habló de reservar ${service}, pero no se confirmó ninguna cita.`,
+      schedulingWithAt: (service, at) => `El cliente habló de reservar ${service} para el ${at}, pero no se confirmó ninguna cita.`,
+      messageTaken: "El cliente dejó un mensaje para que le devuelvan la llamada.",
+      genericService: "una cita",
+      unspecifiedTime: "una hora sin especificar",
+      none: "El cliente hizo preguntas, pero aún no se ha registrado un resultado final.",
+      dispositions: {
+        contactBlocked: "La llamada se bloqueó antes de que respondiera el asistente.",
+        abuse: "La IA finalizó la llamada por comportamiento abusivo.",
+        spam: "La IA finalizó la llamada por ser spam.",
+        transferCompleted: "La llamada se transfirió correctamente.",
+        transferBusy: "Se intentó transferir la llamada, pero la línea de destino estaba ocupada.",
+        transferFailed: "Se intentó transferir la llamada, pero no se completó.",
+        voicemail: "La llamada terminó en el buzón de voz o con un mensaje.",
+        busy: "La llamada terminó porque la línea estaba ocupada.",
+        noAnswer: "La llamada terminó sin respuesta.",
+        technicalIssue: "La llamada terminó por un problema técnico antes de registrar un resultado final.",
+        canceled: "La llamada se canceló antes de registrar un resultado final.",
+        completed: "La llamada terminó, pero no se registró ninguna reserva.",
+      },
+    },
+  },
+  sr: {
+    subject: { transcript: "Transkript poziva", summary: "Rezime poziva", testTranscript: "Transkript probnog poziva", testSummary: "Rezime probnog poziva" },
+    who: { visitor: "posetilac sajta", unknown: "nepoznat pozivalac" },
+    heading: { named: (name) => `Poziv: ${name}`, visitor: "Poziv posetioca sajta", unknown: "Poziv nepoznatog pozivaoca", test: "Probni poziv iz kontrolne table" },
+    labels: { when: "Vreme", length: "Trajanje", caller: "Pozivalac", call: "Poziv", summary: "Rezime" },
+    channels: { phone: "Telefonski poziv", website: "Poziv sa sajta", test: "Probni poziv iz kontrolne table" },
+    notGiven: "Nije navedeno",
+    button: "Otvori poziv",
+    summaryOnly: "Otvorite poziv da biste pročitali ceo razgovor.",
+    transcript: "Transkript",
+    speakers: { caller: "Pozivalac", assistant: "Asistent" },
+    removed: { card: "[broj kartice uklonjen]", id: "[identifikacioni broj uklonjen]" },
+    cut: "Transkript se ovde prekida jer je dugačak. Ceo razgovor je u priloženoj datoteci i na stranici poziva.",
+    reason: { gets: (app, business) => `Ovaj imejl ste dobili jer Vaš ${app} nalog dobija imejl posle svakog poziva upućenog firmi ${business}.`, copy: "Ova kopija ostaje u Vašem sandučetu i kada kontrolna tabla obriše transkript.", stop: "Da ne biste više dobijali ove imejlove, otvorite", settings: "Podešavanja > Obaveštenja" },
+    outcome: {
+      booked: (service, at) => `Pozivalac je zakazao: ${service}, za ${at}.`,
+      scheduling: "Pozivalac je započeo zakazivanje, ali nijedan termin nije potvrđen.",
+      schedulingWith: (service) => `Pozivalac je razgovarao o zakazivanju (${service}), ali nijedan termin nije potvrđen.`,
+      schedulingWithAt: (service, at) => `Pozivalac je razgovarao o zakazivanju (${service}) za ${at}, ali nijedan termin nije potvrđen.`,
+      messageTaken: "Pozivalac je ostavio poruku za povratni kontakt.",
+      genericService: "termin",
+      unspecifiedTime: "neodređeno vreme",
+      none: "Pozivalac je postavljao pitanja, ali konačan ishod još nije zabeležen.",
+      dispositions: {
+        contactBlocked: "Poziv je blokiran pre nego što se asistent javio.",
+        abuse: "AI je prekinuo ovaj poziv kao uvredljiv.",
+        spam: "AI je prekinuo ovaj poziv kao neželjen.",
+        transferCompleted: "Poziv je uspešno preusmeren.",
+        transferBusy: "Pokušano je preusmeravanje, ali je odredišna linija bila zauzeta.",
+        transferFailed: "Pokušano je preusmeravanje, ali nije uspešno završeno.",
+        voicemail: "Poziv se završio govornom poštom ili ostavljenom porukom.",
+        busy: "Poziv je završen jer je linija bila zauzeta.",
+        noAnswer: "Poziv je završen bez odgovora.",
+        technicalIssue: "Poziv je završen zbog tehničkog problema pre nego što je zabeležen konačan ishod.",
+        canceled: "Poziv je otkazan pre nego što je zabeležen konačan ishod.",
+        completed: "Poziv je završen, ali ishod zakazivanja nije zabeležen.",
+      },
+    },
+  },
+};
+
+/** A caller's name as one short line, since it comes from the call. */
+function callerName(email: CallTranscriptEmail): string | null {
+  const name = email.callerName?.replace(/\s+/g, " ").trim().slice(0, 80);
+  return name || null;
+}
+
+/** "4 min" or "45 sec", for the subject; null when the length isn't known. */
+function shortLength(seconds: number | null, locale: InterfaceLocale): string | null {
+  if (seconds === null || !Number.isFinite(seconds)) return null;
+  const tag = intlLocale(locale);
+  if (seconds < 60) return new Intl.NumberFormat(tag, { style: "unit", unit: "second", unitDisplay: "short" }).format(Math.max(0, Math.round(seconds)));
+  return new Intl.NumberFormat(tag, { style: "unit", unit: "minute", unitDisplay: "short" }).format(Math.round(seconds / 60));
+}
+
+/** "4 min 12 sec", for the facts. */
+function fullLength(seconds: number, locale: InterfaceLocale): string {
+  const tag = intlLocale(locale);
+  const whole = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(whole / 60);
+  const rest = whole % 60;
+  const parts = [
+    ...(minutes > 0 ? [new Intl.NumberFormat(tag, { style: "unit", unit: "minute", unitDisplay: "short" }).format(minutes)] : []),
+    ...(rest > 0 || minutes === 0 ? [new Intl.NumberFormat(tag, { style: "unit", unit: "second", unitDisplay: "short" }).format(rest)] : []),
+  ];
+  return parts.join(" ");
+}
+
+/** A moment in the business's time zone, in the reader's language. Serbian gets digits, since a month's name would need declining. */
+function formatMoment(iso: string, locale: InterfaceLocale, timeZone: string, options: Intl.DateTimeFormatOptions): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  try {
+    return new Intl.DateTimeFormat(intlLocale(locale), { ...options, timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(intlLocale(locale), { ...options, timeZone: "UTC" }).format(date);
+  }
+}
+
+function callStart(email: CallTranscriptEmail): string {
+  const options: Intl.DateTimeFormatOptions = email.locale === "sr"
+    ? { year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }
+    : { weekday: "short", year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" };
+  return formatMoment(email.startedAt, email.locale, email.timeZone, options);
+}
+
+/** The call page's summary line (apps/admin/src/lib/call-outcome.ts), with times in the business's time zone. */
+function outcomeSentence(email: CallTranscriptEmail): string {
+  const copy = CALL_EMAIL_COPY[email.locale].outcome;
+  const outcome = email.outcome;
+  const at = (iso: string) => formatMoment(iso, email.locale, email.timeZone, { dateStyle: "medium", timeStyle: "short" });
+  switch (outcome.kind) {
+    case "booked":
+      return copy.booked(outcome.serviceName ?? copy.genericService, outcome.startsAt ? at(outcome.startsAt) : copy.unspecifiedTime);
+    case "booking_in_progress":
+      if (outcome.serviceName && outcome.startsAt) return copy.schedulingWithAt(outcome.serviceName, at(outcome.startsAt));
+      return outcome.serviceName ? copy.schedulingWith(outcome.serviceName) : copy.scheduling;
+    case "message_taking":
+      return copy.messageTaken;
+    case "summary":
+      return outcome.summary ? withoutCardAndIdNumbers(outcome.summary, CALL_EMAIL_COPY[email.locale].removed) : copy.none;
+    case "disposition":
+      return dispositionSentence(outcome.disposition, copy);
+    default:
+      return copy.none;
+  }
+}
+
+function dispositionSentence(disposition: string, copy: CallEmailCopy["outcome"]): string {
+  const value = disposition.trim().toLowerCase();
+  const kinds: Array<[(value: string) => boolean, keyof CallEmailCopy["outcome"]["dispositions"]]> = [
+    [(v) => v.includes("blocked_contact"), "contactBlocked"],
+    [(v) => v.includes("abuse"), "abuse"],
+    [(v) => v.includes("spam"), "spam"],
+    [(v) => v.includes("transfer_completed"), "transferCompleted"],
+    [(v) => v.includes("transfer_busy"), "transferBusy"],
+    [(v) => v.includes("transfer_"), "transferFailed"],
+    [(v) => v.includes("voicemail"), "voicemail"],
+    [(v) => v.includes("busy"), "busy"],
+    [(v) => v.includes("no_answer") || v.includes("missed"), "noAnswer"],
+    [(v) => v.includes("failed"), "technicalIssue"],
+    [(v) => v.includes("canceled") || v.includes("cancelled"), "canceled"],
+    [(v) => v.includes("completed"), "completed"],
+  ];
+  const kind = kinds.find(([matches]) => matches(value))?.[1];
+  return kind ? copy.dispositions[kind] : copy.none;
+}
+
+/** "Call transcript: Jane Doe, 4 min", with no phone number: subjects show on lock screens and in mail logs. */
+export function callTranscriptSubject(email: CallTranscriptEmail): string {
+  const copy = CALL_EMAIL_COPY[email.locale];
+  const transcript = email.turns !== null;
+  const length = shortLength(email.durationSeconds, email.locale);
+  const colon = email.locale === "fr" ? " :" : ":";
+  if (email.channel === "test") {
+    const subject = transcript ? copy.subject.testTranscript : copy.subject.testSummary;
+    return length ? `${subject}${colon} ${length}` : subject;
+  }
+  const who = callerName(email) ?? (email.channel === "website" ? copy.who.visitor : copy.who.unknown);
+  return `${transcript ? copy.subject.transcript : copy.subject.summary}${colon} ${length ? `${who}, ${length}` : who}`;
+}
+
+/** m:ss from the call's start. */
+function turnTime(seconds: number): string {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
+}
+
+function callTranscript(app: string, email: CallTranscriptEmail): { content: EmailContent; attachment?: EmailAttachment } {
+  const copy = CALL_EMAIL_COPY[email.locale];
+  const name = callerName(email);
+  const heading = email.channel === "test" ? copy.heading.test : name ? copy.heading.named(name) : email.channel === "website" ? copy.heading.visitor : copy.heading.unknown;
+  const caller = [name, email.callerPhone?.trim()].filter(Boolean).join(", ") || copy.notGiven;
+  const facts: Array<{ label: string; value: string }> = [
+    { label: copy.labels.when, value: callStart(email) },
+    ...(email.durationSeconds !== null && Number.isFinite(email.durationSeconds) ? [{ label: copy.labels.length, value: fullLength(email.durationSeconds, email.locale) }] : []),
+    // The person who made a test call knows who called.
+    ...(email.channel === "test" ? [] : [{ label: copy.labels.caller, value: caller }]),
+    { label: copy.labels.call, value: copy.channels[email.channel] },
+    { label: copy.labels.summary, value: outcomeSentence(email) },
+  ];
+  const lines = (email.turns ?? []).map((turn) => ({ at: turnTime(turn.atSeconds), speaker: copy.speakers[turn.speaker], text: withoutCardAndIdNumbers(turn.text.trim(), copy.removed) })).filter((line) => line.text);
+  const shown = withinBudget(lines, email.locale);
+  const cut = shown.length < lines.length;
+  const blocks: Block[] = [{ kind: "facts", rows: facts }];
+  if (email.turns === null) {
+    blocks.push({ kind: "paragraph", text: copy.summaryOnly }, { kind: "button", label: copy.button, url: email.callUrl });
+  } else {
+    blocks.push({ kind: "button", label: copy.button, url: email.callUrl }, { kind: "transcript", title: copy.transcript, lines: shown });
+    if (cut) blocks.push({ kind: "paragraph", text: copy.cut });
+  }
+  const reason = [copy.reason.gets(app, email.businessName), ...(email.turns !== null ? [copy.reason.copy] : []), copy.reason.stop].join(" ");
+  const content: EmailContent = { locale: email.locale, eyebrow: email.businessName, heading, blocks, reason: { text: reason, link: { label: copy.reason.settings, url: email.settingsUrl } } };
+  if (!cut) return { content };
+  // The whole conversation, as the email's plain text would show it.
+  const file = renderText({ locale: email.locale, eyebrow: email.businessName, heading, blocks: [{ kind: "facts", rows: facts }, { kind: "transcript", title: copy.transcript, lines }] });
+  return { content, attachment: { filename: `call-${callDay(email)}.txt`, content: `${file}\n`, contentType: "text/plain; charset=utf-8" } };
+}
+
+/** The call's day in the business's time zone, as 2026-10-26. */
+function callDay(email: CallTranscriptEmail): string {
+  const options: Intl.DateTimeFormatOptions = { year: "numeric", month: "2-digit", day: "2-digit" };
+  const date = new Date(email.startedAt);
+  try {
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: email.timeZone }).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: "UTC" }).format(date);
+  }
+}
+
+/** The turns that fit the HTML budget, all of them for any call but a long one. */
+function withinBudget(lines: TranscriptLine[], locale: InterfaceLocale): TranscriptLine[] {
+  const encoder = new TextEncoder();
+  let bytes = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    bytes += encoder.encode(transcriptLineHtml(lines[index]!, locale)).length;
+    if (bytes > TRANSCRIPT_HTML_BUDGET) return lines.slice(0, index);
+  }
+  return lines;
+}
+
 // The two helpers below loop instead of using regular expressions, which
 // backtrack on long runs of slashes or blank space in a message.
 
@@ -686,6 +1088,8 @@ function renderText(content: EmailContent): string {
     if (block.kind === "paragraph") parts.push(linked(block.text, block.link));
     else if (block.kind === "button") parts.push(`${block.label}${colon}\n${block.url}`);
     else if (block.kind === "code") parts.push(block.code);
+    else if (block.kind === "facts") parts.push(block.rows.map((row) => `${row.label}${colon} ${row.value}`).join("\n"));
+    else if (block.kind === "transcript") parts.push(block.title, ...block.lines.map((line) => `${line.at} ${line.speaker}${colon} ${line.text}`));
     else parts.push(block.text.split("\n").map((line) => `> ${line}`).join("\n"));
   }
   if (content.reason) parts.push(linked(content.reason.text, content.reason.link));
@@ -703,9 +1107,19 @@ const STYLE = {
   quote: "margin:0 0 16px;padding:12px 16px;border-left:4px solid #D1D5DB;background-color:#F9FAFB;font-size:16px;line-height:1.6;color:#3D3D3D;",
   reason: "margin:16px 0 0;padding-top:24px;border-top:1px solid #E5E7EB;font-size:13px;line-height:1.6;color:#6B7280;",
   reasonLink: "color:#6B7280;text-decoration:underline;",
+  facts: "margin:0 0 24px;border-collapse:collapse;",
+  factLabel: "padding:6px 16px 6px 0;font-size:14px;line-height:1.5;color:#6B7280;vertical-align:top;white-space:nowrap;",
+  factValue: "padding:6px 0;font-size:15px;line-height:1.5;color:#0B0B0D;vertical-align:top;",
+  transcriptTitle: "margin:8px 0 16px;font-size:18px;font-weight:600;line-height:1.3;color:#0B0B0D;",
 };
 
-function blockHtml(block: Block): string {
+// A long call has hundreds of turns, so each takes a short class instead of
+// inline styles to keep the email under Gmail's clipping size. A mail app
+// that drops these still shows each turn, with its speaker in bold.
+const TRANSCRIPT_STYLES = `.t { margin: 0 0 12px; font-size: 15px; line-height: 1.55; color: #3D3D3D; }
+      .t i { font-style: normal; font-size: 13px; color: #6B7280; }`;
+
+function blockHtml(block: Block, locale: InterfaceLocale): string {
   switch (block.kind) {
     case "paragraph":
       return `<p style="${STYLE.paragraph}">${paragraphHtml(block.text, block.link, STYLE.link)}</p>`;
@@ -716,7 +1130,18 @@ function blockHtml(block: Block): string {
       return `<p style="${STYLE.code}">${escapeHtml(block.code)}</p>`;
     case "quote":
       return `<p style="${STYLE.quote}">${textHtml(block.text)}</p>`;
+    case "facts":
+      // The summary may be in a right-to-left language, so each value takes its own direction.
+      return `<table role="presentation" border="0" cellspacing="0" cellpadding="0" style="${STYLE.facts}">${block.rows.map((row) => `<tr><td style="${STYLE.factLabel}">${escapeHtml(row.label)}</td><td dir="auto" style="${STYLE.factValue}">${textHtml(row.value)}</td></tr>`).join("")}</table>`;
+    case "transcript":
+      return `<h2 style="${STYLE.transcriptTitle}">${escapeHtml(block.title)}</h2>${block.lines.map((line) => transcriptLineHtml(line, locale)).join("")}`;
   }
+}
+
+/** One turn, its words in their own direction, as the call page shows them. */
+function transcriptLineHtml(line: TranscriptLine, locale: InterfaceLocale): string {
+  // French puts a space before a colon.
+  return `<p class="t"><i>${escapeHtml(line.at)}</i> <b>${escapeHtml(line.speaker)}${locale === "fr" ? "&nbsp;:" : ":"}</b> <span dir="auto">${textHtml(line.text)}</span></p>`;
 }
 
 function paragraphHtml(text: string, link: Link | undefined, linkStyle: string): string {
@@ -727,7 +1152,7 @@ function textHtml(text: string): string {
   return escapeHtml(text).replaceAll("\n", "<br />");
 }
 
-function renderHtml(content: EmailContent, { appName, logo, title }: { appName: string; logo: BrandImage | undefined; title: string }): string {
+function renderHtml(content: EmailContent, { appName, logo, title, styles }: { appName: string; logo: BrandImage | undefined; title: string; styles?: string }): string {
   // The deployment's name as a wordmark, under the brand's PNG email logo when
   // it has one: mail clients such as Gmail and Outlook don't show SVG, and
   // some hide remote images until asked, so the name stays in text and the
@@ -740,7 +1165,7 @@ function renderHtml(content: EmailContent, { appName, logo, title }: { appName: 
   const body = [
     content.eyebrow ? `<p style="${STYLE.eyebrow}">${escapeHtml(content.eyebrow)}</p>` : "",
     `<h1 style="${STYLE.heading}">${escapeHtml(content.heading)}</h1>`,
-    ...content.blocks.map(blockHtml),
+    ...content.blocks.map((block) => blockHtml(block, content.locale)),
     content.reason ? `<p style="${STYLE.reason}">${paragraphHtml(content.reason.text, content.reason.link, STYLE.reasonLink)}</p>` : "",
   ].join("");
 
@@ -756,7 +1181,7 @@ function renderHtml(content: EmailContent, { appName, logo, title }: { appName: 
       :root { color-scheme: light; }
       @media only screen and (max-width: 620px) {
         .email-container { width: 100% !important; padding: 32px 20px !important; }
-      }
+      }${styles ? `\n      ${styles}` : ""}
     </style>
   </head>
   <body style="margin:0;padding:0;background-color:#F3F4F6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">

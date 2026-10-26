@@ -112,6 +112,10 @@ function response(): ServerResponse {
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
+// What a call opens with for the snapshot most tests use: its greeting, then
+// the notice that the call is with an AI and recorded.
+const opening = "Hi You're speaking with an AI assistant, and this call is recorded and transcribed.";
+
 describe("createLiveCallHandler", () => {
   it("opens one sideband when two attaches for a session overlap", async () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
@@ -190,7 +194,7 @@ describe("createLiveCallHandler", () => {
     (controller.options.onTimeout as (reason: string) => void)("silence_timeout");
     expect(controller.wrapUp).toHaveBeenCalledWith("silence_timeout");
     expect(controller.endSession).not.toHaveBeenCalled();
-    await expect((controller.options.setup as Promise<{ language: string }>)).resolves.toMatchObject({ greeting: "Hi" });
+    await expect((controller.options.setup as Promise<{ language: string }>)).resolves.toMatchObject({ greeting: opening });
   });
 
   // GPT-Live said goodbye and handed the call over; the agent's endCall hangs up once the goodbye has played.
@@ -443,7 +447,8 @@ describe("createLiveCallHandler", () => {
     try {
       (controller.options.onTurn as (turn: unknown) => void)({ sequence: 1, speaker: "caller", text: "Bye!" });
       (controller.options.onClose as (summary: unknown) => void)({ sessionId: "live_retry", durationMs: 20_000, delegations: [], usageConfirmed: true, billedSeconds: 20, closeReason: "remote_hangup" });
-      await vi.advanceTimersByTimeAsync(1_000);
+      // The turn's retry after a second, then the finish and its own retry.
+      await vi.advanceTimersByTimeAsync(2_000);
     } finally {
       vi.useRealTimers();
       vi.mocked(console.info).mockRestore();
@@ -451,6 +456,53 @@ describe("createLiveCallHandler", () => {
     expect(mocks.saveLiveCallTurn).toHaveBeenCalledTimes(2);
     expect(mocks.finishLiveCall).toHaveBeenCalledTimes(2);
     expect(mocks.finishLiveCall).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ callId: "call_retry", seconds: 20, end: "caller_hung_up" }));
+  });
+
+  it("finishes the call only once its last turns are saved", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId: "live_last_turn", businessId: "biz_1", callId: "call_last_turn", channel: "voice" }), response());
+    const controller = mocks.controllers_.at(-1)!;
+    mocks.finishLiveCall.mockClear();
+    // A slow write of the caller's last words, under load.
+    let saved!: () => void;
+    mocks.saveLiveCallTurn.mockImplementationOnce(() => new Promise((resolve) => { saved = () => resolve(undefined); }));
+    (controller.options.onTurn as (turn: unknown) => void)({ sequence: 4, speaker: "caller", text: "Thanks, bye!" });
+    (controller.options.onClose as (summary: unknown) => void)({ sessionId: "live_last_turn", durationMs: 20_000, delegations: [], usageConfirmed: true, billedSeconds: 20, closeReason: "remote_hangup" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    // Finishing queues the summary job, which would read the transcript without them.
+    expect(mocks.finishLiveCall).not.toHaveBeenCalled();
+    saved();
+    await vi.waitFor(() => expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_last_turn", end: "caller_hung_up" })));
+  });
+
+  it("finishes the call after 5 seconds when a turn's write hangs", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId: "live_hung_turn", businessId: "biz_1", callId: "call_hung_turn", channel: "voice" }), response());
+    const controller = mocks.controllers_.at(-1)!;
+    mocks.finishLiveCall.mockClear();
+    mocks.saveLiveCallTurn.mockImplementationOnce(() => new Promise(() => undefined));
+    vi.useFakeTimers();
+    try {
+      (controller.options.onTurn as (turn: unknown) => void)({ sequence: 2, speaker: "caller", text: "Hello?" });
+      (controller.options.onClose as (summary: unknown) => void)({ sessionId: "live_hung_turn", durationMs: 20_000, delegations: [], usageConfirmed: true, billedSeconds: 20, closeReason: "remote_hangup" });
+      await vi.advanceTimersByTimeAsync(4_900);
+      expect(mocks.finishLiveCall).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(100);
+    } finally {
+      vi.useRealTimers();
+    }
+    await vi.waitFor(() => expect(mocks.finishLiveCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ callId: "call_hung_turn" })));
+    expect(logLines(warn)).toContainEqual(expect.objectContaining({ message: "live.transcript_save_slow", pending: 1 }));
+    warn.mockRestore();
   });
 });
 
@@ -482,14 +534,34 @@ describe("re-attaching after a retried webhook delivery", () => {
     mocks.lastLiveCallSequence.mockResolvedValueOnce(0);
     const { setup, sequence } = await attach({ sessionId: "live_resume_new", resume: true });
     expect(sequence).toBe(1);
-    expect(setup).toMatchObject({ greeting: "Hi" });
+    expect(setup).toMatchObject({ greeting: opening });
   });
 
   it("makes no extra read on a first attach", async () => {
     const { setup, sequence } = await attach({ sessionId: "live_first" });
     expect(mocks.lastLiveCallSequence).not.toHaveBeenCalled();
     expect(sequence).toBe(1);
-    expect(setup).toMatchObject({ greeting: "Hi" });
+    expect(setup).toMatchObject({ greeting: opening });
+  });
+});
+
+describe("what a call opens with", () => {
+  async function openingFor(sessionId: string, snapshot: Record<string, unknown>) {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", ...snapshot });
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId, businessId: "biz_1", callId: "call_opening", channel: "voice" }), response());
+    return (await (mocks.controllers_.at(-1)!.options.setup as Promise<{ greeting?: string }>)).greeting;
+  }
+
+  it("is the greeting, then the notice in the language the call opens in", async () => {
+    await expect(openingFor("live_opening_fr", { greeting: "Bonjour, ici Plomberie Nord.", defaultLocale: "fr" })).resolves.toBe("Bonjour, ici Plomberie Nord. Vous parlez avec un assistant IA, et cet appel est enregistré et transcrit.");
+  });
+
+  it("is the greeting alone once the business turns the notice off", async () => {
+    await expect(openingFor("live_opening_off", { greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false })).resolves.toBe("Thanks for calling.");
   });
 });
 

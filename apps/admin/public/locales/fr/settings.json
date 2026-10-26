@@ -1056,7 +1056,41 @@
       "webhookDisabled": {
         "title": "Point de terminaison webhook désactivé",
         "description": "Quand {{appName}} cesse d'envoyer des événements à un point de terminaison webhook parce que toutes les livraisons ont échoué pendant environ une journée."
+      },
+      "callTranscript": {
+        "summary": {
+          "title": "Résumé d'appel",
+          "description": "Après chaque appel où l'appelant a parlé, un courriel avec ce qui s'est passé et un lien vers l'appel."
+        },
+        "transcript": {
+          "title": "Transcription d'appel",
+          "description": "Après chaque appel où l'appelant a parlé, un courriel avec ce qui s'est passé et toute la conversation."
+        },
+        "emailOnly": "Par courriel seulement",
+        "unavailable": {
+          "turned_off": "Votre entreprise a désactivé ces courriels.",
+          "owners_and_admins_only": "Votre entreprise envoie ces courriels aux propriétaires et aux administrateurs seulement."
+        }
       }
+    },
+    "callTranscripts": {
+      "title": "Courriels après chaque appel",
+      "description": "Choisissez qui, dans votre équipe, peut recevoir un courriel après chaque appel, et ce qu'il contient. Chaque personne l'active pour elle-même dans Communication.",
+      "recipients": {
+        "title": "Qui peut les recevoir",
+        "description": "Les personnes que vous excluez ne les reçoivent plus à partir du prochain appel.",
+        "owners_and_admins": "Propriétaires et administrateurs",
+        "team": "Toute l'équipe",
+        "nobody": "Personne"
+      },
+      "content": {
+        "title": "Ce qu'ils contiennent",
+        "summary": "Résumé et lien",
+        "transcript": "Résumé et conversation complète",
+        "summaryDescription": "Le résumé de l'appel et un lien vers celui-ci. La conversation reste dans le tableau de bord, après connexion.",
+        "transcriptDescription": "Le résumé et chaque échange, sans numéros de carte ni d'identité. Les copies restent dans les boîtes de réception après la suppression de la transcription dans le tableau de bord, même quand la personne quitte l'équipe."
+      },
+      "saveFailed": "Les réglages des courriels après chaque appel n'ont pas été enregistrés."
     },
     "systemIssues": {
       "title": "Problèmes système"

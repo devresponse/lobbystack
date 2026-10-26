@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { invitationSubject, promoEndingSubject, renderEmail, type RenderEmailInput, type TemplateName } from "./templates";
+import { callTranscriptSubject, invitationSubject, promoEndingSubject, renderEmail, type CallTranscriptEmail, type RenderEmailInput, type TemplateName } from "./templates";
 
 const base = "https://app.example.test";
 const locales = ["en", "fr", "es", "sr"] as const;
@@ -195,6 +195,165 @@ describe("promo endings", () => {
 
   it("fall back to UTC for a time zone the runtime doesn't know", () => {
     expect(promoEndingSubject(ending({ timeZone: "Mars/Olympus" }))).toBe("Your Salons half off plan ends on November 1, 2026");
+  });
+});
+
+describe("emails after a call", () => {
+  const call = (change: Partial<CallTranscriptEmail> = {}): CallTranscriptEmail => ({
+    locale: "en",
+    businessName: "Maple Dental",
+    timeZone: "America/Toronto",
+    channel: "phone",
+    callerName: "Jane Doe",
+    callerPhone: "+14165550134",
+    startedAt: "2026-10-26T19:42:10.000Z",
+    durationSeconds: 252,
+    outcome: { kind: "booked", serviceName: "Cleaning", startsAt: "2026-10-30T14:00:00.000Z" },
+    callUrl: `${base}/calls/c1`,
+    settingsUrl: `${base}/settings/notifications`,
+    turns: [
+      { speaker: "assistant", text: "Thanks for calling Maple Dental, how can I help?", atSeconds: 0 },
+      { speaker: "caller", text: "Hi, I'd like a cleaning on Friday.", atSeconds: 4.6 },
+      { speaker: "assistant", text: "Friday at 10 works. Booked!", atSeconds: 69 },
+    ],
+    ...change,
+  });
+  const send = (email: CallTranscriptEmail) => render({ template: "call_transcript", subject: callTranscriptSubject(email), to: "owner@example.test", variables: {}, callTranscript: email });
+  const line = (text: string, start: string) => text.split("\n").find((row) => row.startsWith(start));
+
+  it("say who called, when, for how long and how it went, then give every turn", () => {
+    const { text, html, attachments } = send(call());
+    expect(text).toBe([
+      "Maple Dental\nCall with Jane Doe",
+      "When: Mon, Oct 26, 2026, 3:42 PM EDT\nLength: 4 min 12 sec\nCaller: Jane Doe, +14165550134\nCall: Phone call\nSummary: Caller booked Cleaning for Oct 30, 2026, 10:00 AM.",
+      `Open the call:\n${base}/calls/c1`,
+      "Transcript",
+      "0:00 Assistant: Thanks for calling Maple Dental, how can I help?",
+      "0:04 Caller: Hi, I'd like a cleaning on Friday.",
+      "1:09 Assistant: Friday at 10 works. Booked!",
+      `You're receiving this email because your AlloPlace account gets an email after each call at Maple Dental. This copy stays in your mailbox after the dashboard deletes the transcript. To stop these emails, go to Settings > Notifications:\n${base}/settings/notifications`,
+    ].join("\n\n"));
+    expect(html).toContain(`<a href="${base}/calls/c1"`);
+    expect(html).toContain('<p class="t"><i>0:04</i> <b>Caller:</b> <span dir="auto">Hi, I&#39;d like a cleaning on Friday.</span></p>');
+    expect(attachments).toBeUndefined();
+  });
+
+  it("hold the summary and a link when the business doesn't send the whole conversation", () => {
+    const { text, html } = send(call({ turns: null }));
+    expect(text).toContain([
+      "Summary: Caller booked Cleaning for Oct 30, 2026, 10:00 AM.",
+      "Open the call to read the whole conversation.",
+      `Open the call:\n${base}/calls/c1`,
+      `You're receiving this email because your AlloPlace account gets an email after each call at Maple Dental. To stop these emails, go to Settings > Notifications:\n${base}/settings/notifications`,
+    ].join("\n\n"));
+    expect(text).not.toContain("Thanks for calling");
+    expect(html).not.toContain('class="t"');
+  });
+
+  it("have a subject with who called and for how long, but never their number", () => {
+    expect(callTranscriptSubject(call())).toBe("Call transcript: Jane Doe, 4 min");
+    expect(callTranscriptSubject(call({ turns: null }))).toBe("Call summary: Jane Doe, 4 min");
+    expect(callTranscriptSubject(call({ callerName: null }))).toBe("Call transcript: unknown caller, 4 min");
+    expect(callTranscriptSubject(call({ channel: "website", callerName: "  ", durationSeconds: 45 }))).toBe("Call transcript: website visitor, 45 sec");
+    expect(callTranscriptSubject(call({ callerName: "Jane\n  Doe", durationSeconds: null }))).toBe("Call transcript: Jane Doe");
+    expect(callTranscriptSubject(call({ channel: "test", durationSeconds: 45 }))).toBe("Test call transcript: 45 sec");
+    expect(callTranscriptSubject(call({ channel: "test", turns: null, durationSeconds: null }))).toBe("Test call summary");
+    // French keeps a number with its unit.
+    expect(callTranscriptSubject(call({ locale: "fr" }))).toBe("Transcription d'appel : Jane Doe, 4\u00a0min");
+    expect(callTranscriptSubject(call({ locale: "es", turns: null }))).toBe("Resumen de llamada: Jane Doe, 4 min");
+    expect(callTranscriptSubject(call({ locale: "sr", channel: "test", durationSeconds: 45 }))).toBe("Transkript probnog poziva: 45 sek");
+  });
+
+  it.each(locales)("read in the reader's language, with why it was sent and where to stop it, in %s", (locale) => {
+    const { text, html } = send(call({ locale }));
+    const reason = text.split("\n\n").at(-1);
+    expect(reason?.startsWith(reasonOpeners[locale])).toBe(true);
+    expect(reason?.endsWith(`\n${base}/settings/notifications`)).toBe(true);
+    expect(html).toContain(`<html lang="${htmlLang[locale]}">`);
+    expect(html).toContain(`<a href="${base}/settings/notifications"`);
+    if (locale === "sr") expect(`${text}${html}`).not.toMatch(/[Ѐ-ӿ]/);
+  });
+
+  it("put a space before each colon in French", () => {
+    const { text, html } = send(call({ locale: "fr" }));
+    expect(text).toContain("\nAppelant : Jane Doe, +14165550134\n");
+    expect(text).toContain("\n\n0:04 Appelant : Hi, I'd like a cleaning on Friday.\n\n");
+    expect(html).toContain("<b>Appelant&nbsp;:</b>");
+  });
+
+  it("escape what was said and let each turn keep its own direction", () => {
+    const { text, html } = send(call({
+      callerName: "<b>Jane</b>",
+      outcome: { kind: "summary", summary: "<script>alert(1)</script>" },
+      turns: [
+        { speaker: "caller", text: 'Call me <a href="https://example.test/x">here</a>\nor at noon', atSeconds: 3 },
+        { speaker: "assistant", text: "   ", atSeconds: 4 },
+        { speaker: "caller", text: "مرحبا", atSeconds: 5 },
+      ],
+    }));
+    expect(html).not.toContain("<b>Jane</b>");
+    expect(html).toContain("Call with &lt;b&gt;Jane&lt;/b&gt;");
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain('<a href="https://example.test/x">');
+    expect(html).toContain('<span dir="auto">Call me &lt;a href=&quot;https://example.test/x&quot;&gt;here&lt;/a&gt;<br />or at noon</span>');
+    expect(html).toContain('<span dir="auto">مرحبا</span>');
+    expect(html).toContain('<td dir="auto"');
+    // A turn with no words isn't one.
+    expect(text).not.toContain("0:04 Assistant:");
+  });
+
+  it("take card and ID numbers out of the turns and the summary, in the reader's language", () => {
+    const said = call({
+      outcome: { kind: "summary", summary: "Paid with 4111 1111 1111 1111." },
+      turns: [
+        { speaker: "caller", text: "My card is 4111 1111 1111 1111 and my SIN is 046 454 286.", atSeconds: 3 },
+        { speaker: "assistant", text: "Thanks. Call us back at 416 555 0134.", atSeconds: 9 },
+      ],
+    });
+    const { text, html } = send(said);
+    expect(text).toContain("Summary: Paid with [card number removed].");
+    expect(text).toContain("0:03 Caller: My card is [card number removed] and my SIN is [ID number removed].");
+    expect(text).toContain("0:09 Assistant: Thanks. Call us back at 416 555 0134.");
+    expect(`${text}${html}`).not.toMatch(/4111|046 454/);
+    expect(send({ ...said, locale: "fr" }).text).toContain("Appelant : My card is [numéro de carte retiré] and my SIN is [numéro d'identité retiré].");
+    // A long call's attached file leaves them out too.
+    const turns = Array.from({ length: 900 }, (_, index) => ({ speaker: "caller" as const, text: `Turn ${index}: 5555 5555 5555 4444`, atSeconds: index }));
+    const { attachments } = send(call({ turns }));
+    expect(attachments?.[0]?.content).toContain("Turn 899: [card number removed]");
+    expect(attachments?.[0]?.content).not.toContain("4444");
+  });
+
+  it("stop a long call's turns before Gmail clips the email, and attach the whole conversation", () => {
+    const turns = Array.from({ length: 900 }, (_, index) => ({ speaker: index % 2 ? "caller" as const : "assistant" as const, text: `Turn ${index}, about as long as what a person says in one go.`, atSeconds: index * 4 }));
+    // 10:30 PM in Toronto, the day before UTC's.
+    const { text, html = "", attachments } = send(call({ turns, startedAt: "2026-10-27T02:30:00.000Z" }));
+    expect(new TextEncoder().encode(html).length).toBeLessThan(102_000);
+    expect(text).toContain("\n\nThe transcript stops here because it's long. The whole conversation is in the attached file and on the call's page.\n\n");
+    expect(text).not.toContain("Turn 899,");
+    expect(attachments).toEqual([{ filename: "call-2026-10-26.txt", content: expect.stringContaining("\n\n59:56 Caller: Turn 899, about as long as what a person says in one go.\n"), contentType: "text/plain; charset=utf-8" }]);
+    expect(attachments?.[0]?.content).toMatch(/^Maple Dental\nCall with Jane Doe\n\nWhen: Mon, Oct 26, 2026, 10:30 PM EDT\n/);
+  });
+
+  it("leave out who called on a test call, and a length the call didn't record", () => {
+    expect(send(call({ channel: "test", durationSeconds: null })).text).toMatch(/^Maple Dental\nTest call from the dashboard\n\nWhen: [^\n]+\nCall: Dashboard test call\nSummary: [^\n]+\n\n/);
+    expect(line(send(call({ channel: "website", callerName: null, callerPhone: null })).text, "Caller: ")).toBe("Caller: Not given");
+  });
+
+  it("say how the call went as its page does", () => {
+    const summary = (outcome: CallTranscriptEmail["outcome"]) => line(send(call({ outcome, turns: null })).text, "Summary: ");
+    expect(summary({ kind: "summary", summary: "Asked about Saturday hours." })).toBe("Summary: Asked about Saturday hours.");
+    expect(summary({ kind: "message_taking" })).toBe("Summary: Caller left a message for follow-up.");
+    expect(summary({ kind: "booking_in_progress", serviceName: "Cleaning", startsAt: null })).toBe("Summary: Caller discussed scheduling Cleaning, but no appointment was confirmed.");
+    expect(summary({ kind: "booking_in_progress", serviceName: null, startsAt: null })).toBe("Summary: Caller started scheduling, but no appointment was confirmed.");
+    expect(summary({ kind: "disposition", disposition: "transfer_busy" })).toBe("Summary: Transfer was attempted, but the destination line was busy.");
+    expect(summary({ kind: "disposition", disposition: "blocked_contact" })).toBe("Summary: Call was blocked before the assistant answered.");
+    expect(summary({ kind: "none" })).toBe("Summary: Caller asked questions, but no final outcome was captured yet.");
+  });
+
+  it("write the call's start in the business's time zone, or in UTC for one the runtime doesn't know", () => {
+    expect(line(send(call({ timeZone: "Europe/Belgrade" })).text, "When: ")).toBe("When: Mon, Oct 26, 2026, 8:42 PM GMT+1");
+    expect(line(send(call({ timeZone: "Mars/Olympus" })).text, "When: ")).toBe("When: Mon, Oct 26, 2026, 7:42 PM UTC");
+    expect(line(send(call({ locale: "sr", timeZone: "Europe/Belgrade" })).text, "Vreme: ")).toBe("Vreme: 26. 10. 2026. 20:42 CET");
   });
 });
 

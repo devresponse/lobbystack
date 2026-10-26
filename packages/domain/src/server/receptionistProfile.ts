@@ -29,6 +29,8 @@ export type ReceptionistProfilePatch = {
   transferNumber?: string | null;
   appointmentChangePolicy?: AppointmentChangePolicy;
   bookingMode?: BookingMode;
+  /** Whether calls say, after the greeting, that the caller is speaking with an AI and the call is recorded and transcribed. */
+  recordingNotice?: boolean;
 };
 
 export type ReceptionistSettingsChange = {
@@ -85,7 +87,9 @@ export function readReceptionistSettingsChange(body: unknown): ReceptionistSetti
   const policy = appointmentPolicy(input.appointmentChangePolicy);
   const bookingMode = input.bookingMode;
   if (bookingMode !== undefined && !(bookingModes as readonly unknown[]).includes(bookingMode)) throw invalid("bookingMode is invalid.");
-  const patch = { ...fields, ...(policy !== undefined ? { appointmentChangePolicy: policy } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}) } as ReceptionistProfilePatch;
+  const recordingNotice = input.recordingNotice;
+  if (recordingNotice !== undefined && typeof recordingNotice !== "boolean") throw invalid("recordingNotice must be true or false.");
+  const patch = { ...fields, ...(policy !== undefined ? { appointmentChangePolicy: policy } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}), ...(recordingNotice !== undefined ? { recordingNotice } : {}) } as ReceptionistProfilePatch;
 
   const locale = input.locale;
   if (locale !== undefined && !isRuntimeLocale(locale)) throw invalid("locale is invalid.");
@@ -113,6 +117,7 @@ export function defaultReceptionistProfile(businessName: string) {
     transferNumber: null,
     appointmentChangePolicy: defaultAppointmentChangePolicy,
     bookingMode: "instant" as const,
+    recordingNotice: true,
   };
 }
 
@@ -143,6 +148,7 @@ export async function saveReceptionistProfileInTransaction(
     ...(patch.transferNumber !== undefined ? { transferNumber: patch.transferNumber } : {}),
     appointmentChangePolicy: patch.appointmentChangePolicy ?? defaults.appointmentChangePolicy,
     ...(patch.bookingMode !== undefined ? { bookingMode: patch.bookingMode } : {}),
+    ...(patch.recordingNotice !== undefined ? { recordingNotice: patch.recordingNotice } : {}),
   }).onConflictDoUpdate({
     target: receptionistProfiles.businessId,
     set: { ...patch, ...(patch.summary !== undefined ? { summarySource: "operator" as const } : {}), ...(input.regenerateSummary ? { summarySource: "generated" as const } : {}), updatedAt: new Date() },

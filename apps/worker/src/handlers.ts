@@ -9,7 +9,8 @@ import { currentBrand, getPolarMeteredUsagePayload, normalizeInterfaceLocale, pe
 import { appointments, calls, contacts, enqueueOutbox, knowledgeChunks, knowledgeDocuments, messages, notifications, phoneNumbers, storageObjects, websiteIngestionJobs, withBusinessTransaction, type Database } from "@lobbystack/db";
 import { enqueueKnowledgeDerivedRefresh, loadBusinessHoursInput, loadBusinessSummaryInput, markBusinessHoursChecked, resetGeneratedBusinessSummary, saveGeneratedBusinessHours, saveGeneratedBusinessSummary } from "@lobbystack/domain";
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimBillingSubscription, claimBillingUsageSync, claimNotificationDelivery, confirmBillingUsageSync, claimSmsDelivery, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteExpiredObjectsForBusiness, deleteSentProductEventsBefore, enqueueBillingUsageSync, expireProspectDemos, finalizeConversationSession, loadCallSummaryInput, generateAffiliatePayoutRun, indexCrawledWebsitePage, indexDocumentText, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, loadSmsDeliveryTarget, readPolarProductLinks, releaseBillingCheckoutRequest, releaseBillingSubscription, type PolarProductLinks, markAppointmentChangeOtpSent, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markCalendarConnectionSync, markKnowledgeDocumentFailed, markNotificationSent, cancelRetiredPhoneVerificationSend, markProductEventsSent, reconcileBillingProviderEvent, reconcileResendProviderEvent, recordAiGenerationEvent, recordCallProviderPricing, loadLiveCallForPricing, recordProductEvent, recordSmsProviderPricing, refreshBusinessSnapshot, releaseAppointmentChangeOtp, releaseSmsDelivery, markSmsFailed, resolveNotificationDelivery, runPrivacyRetentionSweep, setTransferState, transitionProcessingNotification, updateAppointmentSyncState, updateNotificationDeliveryStatus, updateOperatorNotificationDeliveryStatus, upsertBusyBlocks, markSmsSent, chunkText, upsertWebsiteDocument, queueOnboardingFollowupEmail, type DurableAiUsage, type GeneratedCallSummary, type OnboardingFollowupSender } from "@lobbystack/domain";
-import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
+import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationFailed, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
+import { CALL_TRANSCRIPT_EVENT, loadCallTranscriptEmail } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
 import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
@@ -19,7 +20,7 @@ import { runDailyBillingVerify, sweepBillingWork, type BillingSweepOutcome, type
 import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
-import { invitationSubject, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import { callTranscriptSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import { PolarRequestError, type PolarCustomer, type PolarProrationBehavior, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
@@ -883,6 +884,15 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
               }
             }
             providerMessageId = (await sender.sendSms({ to: delivery.destination, from: delivery.sender, body: delivery.body, ...twilioStatusCallbackOption({ operatorDeliveryId: delivery.id }) })).providerMessageId;
+          } else if (delivery.eventKind === CALL_TRANSCRIPT_EVENT) {
+            if (!dependencies.email) throw new Error("Operator email delivery is not configured.");
+            // The email after a call is written now, from the call as it stands, in the reader's language.
+            const call = await loadCallTranscriptEmail(dependencies.domain, { businessId, deliveryId: delivery.id, appUrl: process.env.APP_BASE_URL ?? "http://localhost:3000" });
+            if ("skip" in call) {
+              await markOperatorNotificationSkipped(dependencies.domain, { businessId, deliveryId: delivery.id, error: call.skip });
+              return { status: "skipped", entityId: delivery.id };
+            }
+            providerMessageId = (await dependencies.email.sendTemplate({ template: "call_transcript", to: call.to, subject: callTranscriptSubject(call.email), variables: {}, callTranscript: call.email, replyTo: call.replyTo, appName: await deploymentAppName(dependencies.domain.db), idempotencyKey: `operator-notification:${delivery.id}` })).messageId;
           } else {
             if (!dependencies.email) throw new Error("Operator email delivery is not configured.");
             // The email says which business and alert it's about, and links to where to act on it.
@@ -899,6 +909,12 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           if (permanentCode) {
             // Twilio rejects this destination on every attempt, so don't retry.
             await markOperatorNotificationSkipped(dependencies.domain, { businessId, deliveryId: delivery.id, error: `Twilio error ${permanentCode}.` });
+            return { status: "skipped", entityId: delivery.id };
+          }
+          const refusal = delivery.channel === "email" ? permanentSmtpRefusal(error) : undefined;
+          if (refusal) {
+            // The mail server refuses this address or this email on every attempt, so don't retry for hours.
+            await markOperatorNotificationFailed(dependencies.domain, { businessId, deliveryId: delivery.id, error: `The mail server refused it with ${refusal}.` });
             return { status: "skipped", entityId: delivery.id };
           }
           await releaseOperatorNotificationDelivery(dependencies.domain, { businessId, deliveryId: delivery.id, error: "Provider delivery failed." });

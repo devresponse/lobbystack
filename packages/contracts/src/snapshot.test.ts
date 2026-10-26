@@ -17,6 +17,11 @@ describe("voice policy snapshot contract", () => {
   it("keeps the booking mode so browser calls don't offer bookings the backend won't make", () => {
     expect(snapshotSchema.parse({ ...snapshot, bookingMode: "request" }).bookingMode).toBe("request");
   });
+  it("keeps the switch for what calls say about AI and recording, so a call doesn't say it once turned off", () => {
+    expect(snapshotSchema.parse({ ...snapshot, recordingNotice: false }).recordingNotice).toBe(false);
+    // Snapshots built before the switch have none, and their calls say it.
+    expect(snapshotSchema.parse(snapshot)).not.toHaveProperty("recordingNotice");
+  });
   it("rejects unknown transfer and appointment verification modes", () => {
     expect(snapshotSchema.safeParse({ ...snapshot, transferPolicy: { mode: "unknown" } }).success).toBe(false);
     expect(snapshotSchema.safeParse({ ...snapshot, appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode: "skip" } }).success).toBe(false);

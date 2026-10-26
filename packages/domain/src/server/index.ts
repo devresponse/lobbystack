@@ -17,6 +17,7 @@ export * from "./booking";
 export * from "./businessHours";
 export * from "./businessSummary";
 export * from "./calendar";
+export * from "./callTranscriptEmails";
 export * from "./catalog";
 export * from "./compliance";
 export * from "./contacts";

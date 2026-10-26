@@ -215,6 +215,44 @@ describe("AgentBasicSettingsPage saves", () => {
     client.clear();
   });
 
+  // A profile saved before the switch existed has no value, and calls say the notice.
+  it("shows the switch for what calls say about AI and recording on, saves it off, and turns it back when the save fails", async () => {
+    const patches: Array<{ recordingNotice?: boolean }> = [];
+    let saved: boolean | undefined;
+    let failSave = false;
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        const patch = JSON.parse(String(init.body)) as { recordingNotice?: boolean };
+        patches.push(patch);
+        if (failSave) return Response.json({ error: "Receptionist profile could not be saved." }, { status: 500 });
+        saved = patch.recordingNotice;
+        return Response.json({ profile: {} });
+      }
+      return Response.json({
+        business: { defaultLocale: "en" },
+        profile: { greeting: "Thanks for calling.", summary: "Clinic", summarySource: "operator", transferNumber: null, transferMode: "on_request", appointmentChangePolicy: null, bookingMode: "instant", ...(saved === undefined ? {} : { recordingNotice: saved }) },
+      });
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><AgentBasicSettingsPage businessId="business" canManageTenant /></QueryClientProvider>);
+
+    const user = userEvent.setup();
+    const notice = await screen.findByRole("switch", { name: "agent:fields.recordingNotice.label" });
+    await waitFor(() => expect(notice.hasAttribute("disabled")).toBe(false));
+    expect(notice.getAttribute("aria-checked")).toBe("true");
+    await user.click(notice);
+    await waitFor(() => expect(patches).toEqual([{ businessId: "business", recordingNotice: false }]));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "agent:fields.recordingNotice.label" }).getAttribute("aria-checked")).toBe("false"));
+
+    failSave = true;
+    await waitFor(() => expect(screen.getByRole("switch", { name: "agent:fields.recordingNotice.label" }).hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getByRole("switch", { name: "agent:fields.recordingNotice.label" }));
+    await waitFor(() => expect(patches).toHaveLength(2));
+    expect(patches[1]).toEqual({ businessId: "business", recordingNotice: true });
+    await waitFor(() => expect(screen.getByRole("switch", { name: "agent:fields.recordingNotice.label" }).getAttribute("aria-checked")).toBe("false"));
+    client.clear();
+  });
+
   it("keeps showing operator-only checks set through the API", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => Response.json({
       business: { defaultLocale: "en" },

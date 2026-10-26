@@ -145,6 +145,10 @@ export const businesses = pgTable(
     telemetryEnabled: boolean("telemetry_enabled").default(true).notNull(),
     // Keep a debug trace of each AI turn (what the model was given and did), see ADR 0009.
     aiTracesEnabled: boolean("ai_traces_enabled").default(false).notNull(),
+    // Who may get an email after each call, and whether it holds the whole
+    // transcript or only the summary and a link. See migration 0117.
+    callTranscriptRecipients: varchar("call_transcript_recipients", { length: 32 }).$type<"nobody" | "owners_and_admins" | "team">().default("owners_and_admins").notNull(),
+    callTranscriptContent: varchar("call_transcript_content", { length: 32 }).$type<"summary" | "transcript">().default("summary").notNull(),
     // Who set the opening hours: none yet, AI from the knowledge sources, or a person.
     hoursSource: varchar("hours_source", { length: 16 }).$type<"none" | "generated" | "operator">().default("none").notNull(),
     hoursFingerprint: varchar("hours_fingerprint", { length: 64 }),
@@ -362,6 +366,9 @@ export const receptionistProfiles = pgTable(
     transferNumber: text("transfer_number"),
     appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     bookingMode: varchar("booking_mode", { length: 16 }).default("instant").notNull(),
+    // Whether calls say, after the greeting, that the caller is speaking with
+    // an AI and the call is recorded and transcribed. See migration 0118.
+    recordingNotice: boolean("recording_notice").default(true).notNull(),
     ...timestamps,
   },
   (table) => [uniqueIndex("receptionist_profiles_business_unique").on(table.businessId)],

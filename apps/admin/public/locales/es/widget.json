@@ -23,6 +23,7 @@
     "handoffActive": "Chat en pausa",
     "voiceButton": "Hable con nosotros",
     "voiceStart": "¡Diga Allo!",
+    "voiceRecorded": "Las llamadas las atiende un asistente de IA, y se graban y se transcriben.",
     "voiceConnected": "Está hablando con la recepcionista.",
     "voiceEnded": "La llamada de voz terminó. Puede seguir escribiendo abajo.",
     "voiceUnavailable": "La voz en vivo no está disponible. Inténtelo más tarde.",

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   registerWidgetVisitor: vi.fn(),
   touchWidgetKeyLastUsed: vi.fn(),
   voiceAllowed: true,
+  recordingNotice: undefined as boolean | undefined,
 }));
 
 vi.mock("@/lib/widget-access", () => ({
@@ -20,7 +21,7 @@ vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash", touchWidge
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/api-helpers", () => ({ asApiResponse: (error: unknown) => { throw error; } }));
 vi.mock("@lobbystack/domain", () => ({
-  getCachedBusinessSnapshot: async () => ({ greeting: "Hi! How can we help?", contactChannels: { phoneNumber: "+15145550100" } }),
+  getCachedBusinessSnapshot: async () => ({ greeting: "Hi! How can we help?", contactChannels: { phoneNumber: "+15145550100" }, ...(mocks.recordingNotice !== undefined ? { recordingNotice: mocks.recordingNotice } : {}) }),
   getWidgetChatAllowance: async () => ({ allowed: true, plan: "scale" }),
   getWebVoiceBillingAllowance: async () => ({ allowed: mocks.voiceAllowed }),
   registerWidgetVisitor: mocks.registerWidgetVisitor,
@@ -32,6 +33,7 @@ beforeEach(() => {
   mocks.registerWidgetVisitor.mockReset();
   mocks.touchWidgetKeyLastUsed.mockReset();
   mocks.voiceAllowed = true;
+  mocks.recordingNotice = undefined;
   vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
   vi.stubEnv("OPENAI_API_KEY", "sk-test");
 });
@@ -39,7 +41,7 @@ afterEach(() => { vi.unstubAllEnvs(); });
 
 async function config() {
   const response = await GET(new Request("http://localhost/api/widget/config", { headers: { authorization: "Bearer token" } }));
-  return await response.json() as { voiceEnabled: boolean; billing: { voiceAllowed: boolean } };
+  return await response.json() as { voiceEnabled: boolean; recordingNotice: boolean; billing: { voiceAllowed: boolean } };
 }
 
 describe("GET /api/widget/config", () => {
@@ -55,6 +57,7 @@ describe("GET /api/widget/config", () => {
       snapshotPresent: true,
       businessSlug: "acme-dental",
       voiceEnabled: true,
+      recordingNotice: true,
     });
     expect(mocks.registerWidgetVisitor).not.toHaveBeenCalled();
     expect(mocks.touchWidgetKeyLastUsed).not.toHaveBeenCalled();
@@ -72,5 +75,14 @@ describe("GET /api/widget/config", () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
     vi.stubEnv("OPENAI_API_KEY", "");
     expect((await config()).voiceEnabled).toBe(false);
+  });
+
+  // A snapshot from before the switch has none, and its calls say the notice.
+  it("says whether calls tell the caller they're with an AI and recorded", async () => {
+    expect((await config()).recordingNotice).toBe(true);
+    mocks.recordingNotice = false;
+    expect((await config()).recordingNotice).toBe(false);
+    mocks.recordingNotice = true;
+    expect((await config()).recordingNotice).toBe(true);
   });
 });

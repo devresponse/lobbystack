@@ -1056,7 +1056,41 @@
       "webhookDisabled": {
         "title": "Endpoint de webhook desactivado",
         "description": "Cuando {{appName}} deja de enviar eventos a un endpoint de webhook porque todas las entregas fallaron durante aproximadamente un día."
+      },
+      "callTranscript": {
+        "summary": {
+          "title": "Resumen de llamada",
+          "description": "Después de cada llamada en la que habló el cliente, un correo con lo que pasó y un enlace a la llamada."
+        },
+        "transcript": {
+          "title": "Transcripción de llamada",
+          "description": "Después de cada llamada en la que habló el cliente, un correo con lo que pasó y toda la conversación."
+        },
+        "emailOnly": "Solo por correo electrónico",
+        "unavailable": {
+          "turned_off": "Su negocio desactivó estos correos.",
+          "owners_and_admins_only": "Su negocio envía estos correos solo a propietarios y administradores."
+        }
       }
+    },
+    "callTranscripts": {
+      "title": "Correos después de cada llamada",
+      "description": "Elija quién de su equipo puede recibir un correo después de cada llamada y qué contiene. Cada persona lo activa para sí misma en Comunicación.",
+      "recipients": {
+        "title": "Quién puede recibirlos",
+        "description": "Las personas que deje fuera dejan de recibirlos a partir de la próxima llamada.",
+        "owners_and_admins": "Propietarios y administradores",
+        "team": "Todo el equipo",
+        "nobody": "Nadie"
+      },
+      "content": {
+        "title": "Qué contienen",
+        "summary": "Resumen y enlace",
+        "transcript": "Resumen y conversación completa",
+        "summaryDescription": "El resumen de la llamada y un enlace a ella. La conversación queda en el panel, tras iniciar sesión.",
+        "transcriptDescription": "El resumen y cada turno, sin números de tarjeta ni de identificación. Las copias se quedan en los buzones aunque el panel elimine la transcripción, incluso si la persona deja el equipo."
+      },
+      "saveFailed": "No se guardó la configuración de los correos después de cada llamada."
     },
     "systemIssues": {
       "title": "Problemas del sistema"

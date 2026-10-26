@@ -138,6 +138,8 @@ export async function loadBusinessResource(tx: DatabaseTransaction, businessId: 
     }),
     hours_source: business.hoursSource === "generated" || business.hoursSource === "operator" ? business.hoursSource : "none",
     ai_traces_enabled: business.aiTracesEnabled,
+    call_transcript_recipients: business.callTranscriptRecipients,
+    call_transcript_content: business.callTranscriptContent,
     created_at: iso(business.createdAt),
     updated_at: iso(business.updatedAt),
   };
@@ -682,6 +684,7 @@ export const notificationEventKeys = {
   website_chat: "widgetChat",
   website_live_chat: "liveChatRequest",
   webhook_disabled: "webhookDisabled",
+  call_transcript: "callTranscript",
 } as const satisfies Record<ApiNotificationEvent, OperatorNotificationEventKey>;
 
 export function serializeNotificationPreferences(preferences: NotificationPreferences): ApiNotificationPreferences {
@@ -697,6 +700,7 @@ export function serializeNotificationPreferences(preferences: NotificationPrefer
     events,
     daily_summary: { enabled: preferences.dailySummaryEnabled, send_time: preferences.dailySummarySendTime },
     sms: { available: unavailable === null, unavailable_reason: unavailable },
+    call_transcript: { available: preferences.callTranscript.available, unavailable_reason: preferences.callTranscript.unavailableReason, content: preferences.callTranscript.content },
   };
 }
 
@@ -722,7 +726,7 @@ export function serializeCalendarConnection(row: { id: string; provider: string;
 
 const summarySources = ["placeholder", "generated", "operator"] as const;
 
-type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "greeting" | "tone" | "summary" | "summarySource" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "appointmentChangePolicy" | "bookingMode" | "updatedAt">;
+type ReceptionistRow = Pick<typeof receptionistProfiles.$inferSelect, "greeting" | "tone" | "summary" | "summarySource" | "bookingPolicy" | "voiceInstructions" | "smsInstructions" | "chatInstructions" | "transferMode" | "transferNumber" | "appointmentChangePolicy" | "bookingMode" | "recordingNotice" | "updatedAt">;
 
 /** Shows the settings as calls use them: a transfer mode, booking mode or policy calls don't know reads as what they fall back to. */
 export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
@@ -740,6 +744,7 @@ export function serializeReceptionist(row: ReceptionistRow): ApiReceptionist {
     transfer_number: row.transferNumber,
     booking_mode: normalizeBookingMode(row.bookingMode),
     appointment_change_policy: { enabled: policy.enabled, allow_cancel: policy.allowCancel, allow_reschedule: policy.allowReschedule, verification_mode: policy.verificationMode },
+    recording_notice: row.recordingNotice,
     updated_at: iso(row.updatedAt),
   };
 }

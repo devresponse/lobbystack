@@ -22,6 +22,7 @@ type SnapshotBuilderInput = {
   businessType: BusinessContextSnapshot["businessType"];
   telemetryEnabled?: boolean;
   greeting: string;
+  recordingNotice?: boolean;
   tone: string;
   bookingPolicy: string;
   voiceInstructions?: string;
@@ -67,6 +68,7 @@ export function buildBusinessContextSnapshot(
     businessType: input.businessType,
     ...(input.telemetryEnabled !== undefined ? { telemetryEnabled: input.telemetryEnabled } : {}),
     greeting: input.greeting,
+    recordingNotice: input.recordingNotice ?? true,
     voiceInstructions:
       input.voiceInstructions ??
       `${commonConstraints} Speak in a ${input.tone} tone. Keep answers concise and helpful.`,

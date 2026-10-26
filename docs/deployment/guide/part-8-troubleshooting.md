@@ -1,6 +1,6 @@
 # Part 8. Troubleshooting
 
-**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [8.6](#86-calls-from-the-browser)'s limits on website calls and its lines on the recorded greeting were updated the same day for fork PR #52 (`3202c18`), and its browser call length on 2026-10-20 for fork PR #54 (`9b66d01`). [8.5](#85-phone-calls)'s spending cap and [8.7](#87-the-website-chat)'s chat limit were updated on 2026-10-23 for fork PR #68 (`de62667`), and [8.4](#84-the-dashboard)'s limits on checkouts and the billing portal were added on 2026-10-24 for fork PR #74 (`7d20322`), and its message for a plan change that waits for another the same day for fork PR #75 (`24e211d`). [8.1](#81-where-to-find-the-reason)'s refusals and [8.7](#87-the-website-chat)'s chat answers were updated on 2026-10-25 for fork PR #79, and [8.10](#810-language)'s website chat row the same day for fork PR #81, and its opening-language rows for fork PR #82. The fix in [8.12](#812-a-business-on-the-free-plan-by-mistake) was tried on a throwaway database; nothing in this part has been run on a deployed instance yet. So the messages quoted are the code's own words, and what the code doesn't show is marked *(not confirmed)*.
+**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [8.6](#86-calls-from-the-browser)'s limits on website calls and its lines on the recorded greeting were updated the same day for fork PR #52 (`3202c18`), and its browser call length on 2026-10-20 for fork PR #54 (`9b66d01`). [8.5](#85-phone-calls)'s spending cap and [8.7](#87-the-website-chat)'s chat limit were updated on 2026-10-23 for fork PR #68 (`de62667`), and [8.4](#84-the-dashboard)'s limits on checkouts and the billing portal were added on 2026-10-24 for fork PR #74 (`7d20322`), and its message for a plan change that waits for another the same day for fork PR #75 (`24e211d`). [8.1](#81-where-to-find-the-reason)'s refusals and [8.7](#87-the-website-chat)'s chat answers were updated on 2026-10-25 for fork PR #79, and [8.10](#810-language)'s website chat row the same day for fork PR #81, and its opening-language rows for fork PR #82. [8.5](#85-phone-calls)'s notice after the greeting, [8.6](#86-calls-from-the-browser)'s first recorded opening and [8.10](#810-language)'s first row were updated on 2026-10-26 for fork PR #84. The fix in [8.12](#812-a-business-on-the-free-plan-by-mistake) was tried on a throwaway database; nothing in this part has been run on a deployed instance yet. So the messages quoted are the code's own words, and what the code doesn't show is marked *(not confirmed)*.
 
 Find what you see in the table, then go to its section. Each section lists the causes in the order to check them, with the fix. Where another part already covers a problem, the table sends you there.
 
@@ -24,6 +24,7 @@ Find what you see in the table, then go to its section. Each section lists the c
 | Calls are answered, then hang up at once | [7.16](part-7-operations.md#716-worker-crash-and-stuck-calls) |
 | Callers hear a busy signal | [8.5](#85-phone-calls) |
 | The receptionist goes quiet after a question | [8.5](#85-phone-calls) |
+| Callers hear that they're speaking with an AI and the call is recorded | [8.5](#85-phone-calls) |
 | **Test Call** is missing, or its call doesn't start | [8.6](#86-calls-from-the-browser) |
 | The website chat has no **Say Allo!** button, or says "Live voice is unavailable. Try again later." | [8.6](#86-calls-from-the-browser) |
 | The website chat doesn't appear, shows an error, or doesn't answer | [8.7](#87-the-website-chat) |
@@ -211,6 +212,10 @@ When the receptionist needs to look something up, such as open times or a docume
 
 On a phone call, the receptionist starts the greeting about 2 seconds after it answers. If it hasn't started speaking 4 seconds later, the worker asks again, up to 3 tries in all, each logged as `live.greeting`. Repeated tries point at OpenAI's status page. Calls from the browser can open with a recording instead ([8.6](#86-calls-from-the-browser)).
 
+**An AI and recording notice after the greeting**
+
+Since fork PR #84, right after the greeting every call says "You're speaking with an AI assistant, and this call is recorded and transcribed.", in the **Default customer language**. That's meant: many places require telling callers that a call is recorded. A business that tells its callers another way turns **Tell callers about AI and recording** off in **AI settings**, and calls stop saying it once the business's snapshot refreshes ([calls](../../features/calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded)).
+
 **A caller is turned away at once**
 
 The call shows "Blocked" and "Call was blocked before the assistant answered.": the caller's contact is blocked, and the receptionist blocks an abusive caller by itself. Open **Contacts**, then the contact, and click **Unblock contact**.
@@ -273,7 +278,7 @@ For "Something went wrong while starting the call." and "Live voice is unavailab
 
 With `LIVE_RECORDED_GREETING=true` on the admin ([4.6](part-4-test-environment.md#46-add-the-admin-and-the-worker), step 6), calls from the browser open with a recording of the greeting, which plays once the caller's audio reaches the call, or 3 seconds after the call starts without it. Phone calls always have the greeting spoken.
 
-- The first call after the setting is turned on, or after the greeting changes, has no recording yet: the worker records the greeting during that call, for the calls after it.
+- The first call after the setting is turned on, after the greeting changes, or after the notice after it is turned on or off, has no recording yet: the worker records the opening during that call, for the calls after it. Each business's first browser call after fork PR #84 deploys is one of these, since the notice changes every opening.
 - It needs one Redis shared by the admin and the worker, and `OPENAI_API_KEY` on the worker. When either is slow, the call falls back to the spoken greeting.
 - The admin's `live.browser_start` line shows `"greetingRecording":true` when a call used the recording. The worker logs `live.greeting_recorded` when it records one, and `live.greeting_recording_failed` when it can't.
 - The caller can't be heard while the recording plays.
@@ -354,7 +359,7 @@ When the receptionist can't book, it's told why, and tells the caller in its own
 
 | What you see | Why | What to do |
 | --- | --- | --- |
-| Calls open in English for a French or Spanish business, or the other way round | Calls start with the greeting, in the greeting's own language, and a new business's greeting is in English | Write the **Greeting** in the **Default customer language** ([6.3](part-6-first-run.md#63-set-up-the-first-business)) |
+| Calls open in English for a French or Spanish business, or the other way round | Calls start with the greeting, in the greeting's own language, and a new business's greeting is in English. The notice after the greeting is always in the **Default customer language**, so an opening in two languages means the greeting is in another | Write the **Greeting** in the **Default customer language** ([6.3](part-6-first-run.md#63-set-up-the-first-business)) |
 | Calls never open in Serbian, or in another language you want | **Default customer language** offers 13 languages: English, Spanish, French, German, Hindi, Japanese, Korean, Portuguese, Mandarin Chinese, Italian, Ukrainian, Russian and Arabic. Serbian isn't one, though the dashboard has it. The receptionist switches when a caller asks, or clearly speaks another language, and keeps answering in it for the rest of the call | Nothing |
 | A business set up from a Serbian dashboard opens calls in English | Onboarding picks the dashboard's language when calls can open in it: English, French or Spanish | **AI settings** > **Default customer language** |
 | Texts to callers are in English for a German business | Texts have wording in English, French, Spanish and Serbian only. They follow the contact's preferred language, or else the business's, and use English for any other | Nothing |

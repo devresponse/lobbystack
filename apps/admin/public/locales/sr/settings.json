@@ -1056,7 +1056,41 @@
       "webhookDisabled": {
         "title": "Webhook endpoint je isključen",
         "description": "Kada {{appName}} prestane da šalje događaje na webhook endpoint jer nijedna isporuka nije uspela oko jedan dan."
+      },
+      "callTranscript": {
+        "summary": {
+          "title": "Rezime poziva",
+          "description": "Posle svakog poziva u kom je pozivalac govorio, imejl sa onim što se desilo i linkom ka pozivu."
+        },
+        "transcript": {
+          "title": "Transkript poziva",
+          "description": "Posle svakog poziva u kom je pozivalac govorio, imejl sa onim što se desilo i celim razgovorom."
+        },
+        "emailOnly": "Samo imejlom",
+        "unavailable": {
+          "turned_off": "Vaša firma je isključila ove imejlove.",
+          "owners_and_admins_only": "Vaša firma šalje ove imejlove samo vlasnicima i administratorima."
+        }
       }
+    },
+    "callTranscripts": {
+      "title": "Imejlovi posle svakog poziva",
+      "description": "Izaberite ko iz Vašeg tima može da dobije imejl posle svakog poziva i šta on sadrži. Svako ga uključuje za sebe u odeljku Komunikacija.",
+      "recipients": {
+        "title": "Ko može da ih dobija",
+        "description": "Osobe koje izostavite prestaju da ih dobijaju od sledećeg poziva.",
+        "owners_and_admins": "Vlasnici i administratori",
+        "team": "Ceo tim",
+        "nobody": "Niko"
+      },
+      "content": {
+        "title": "Šta sadrže",
+        "summary": "Rezime i link",
+        "transcript": "Rezime i ceo razgovor",
+        "summaryDescription": "Rezime poziva i link ka njemu. Razgovor ostaje na kontrolnoj tabli, posle prijave.",
+        "transcriptDescription": "Rezime i svaku repliku, bez brojeva kartica i ličnih dokumenata. Kopije ostaju u sandučićima i kada kontrolna tabla obriše transkript, čak i kada osoba napusti tim."
+      },
+      "saveFailed": "Podešavanja imejlova posle svakog poziva nisu sačuvana."
     },
     "systemIssues": {
       "title": "Sistemski problemi"

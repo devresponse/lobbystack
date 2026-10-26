@@ -6,10 +6,11 @@ import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { requireBusinessMembership } from "../authz";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 import { resolveCallOutcome } from "./callOutcome";
+import { queueCallTranscriptEmailsInTransaction } from "./callTranscriptEmails";
 import { findOrCreateContactByPhone } from "./contacts";
 import { buildConversationSessionSummary, extractCallerContext, normalizeCallSummaryLocale, sanitizeGeneratedCallerName, type CallSummaryLocale, type ConversationTranscriptTurn, type GeneratedCallSummary } from "./conversationSummary";
 import type { DomainContext } from "./context";
-import { queueOperatorAlertInTransaction, type OperatorNotificationEventKey } from "./notifications";
+import { queueOperatorAlertInTransaction, type OperatorAlertEventKey } from "./notifications";
 import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
 import { loadSmsReachInTransaction, smsHoldError } from "./sms";
@@ -106,6 +107,8 @@ export async function finalizeConversationSession(
     await tx.update(conversations).set({ ...closedConversation(new Date()), ...(summaryText ? { summary: summaryText } : {}), revision: sql`${conversations.revision} + 1` }).where(and(eq(conversations.id, call.conversationId), eq(conversations.businessId, input.businessId)));
     await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "conversation", aggregateId: call.conversationId, dedupeKey: `conversation:${call.conversationId}:finalized:${session.id}`, payload: { type: "conversation.updated", entityId: call.conversationId } });
     await emitWebhookEventInTransaction(tx, { businessId: input.businessId, type: "call.completed", resourceId: input.callId });
+    // The team's emails after the call go out once its summary is saved.
+    await queueCallTranscriptEmailsInTransaction(tx, { businessId: input.businessId, callId: input.callId, transcript });
     return { sessionId: session.id, finalized: true };
   });
 }
@@ -219,7 +222,7 @@ async function requireReachableConversation(tx: DatabaseTransaction, input: { bu
 
 export async function appendMessage(
   context: DomainContext,
-  input: MessageInput & { operatorAlert?: { eventKind: OperatorNotificationEventKey; subject: string; body: string } },
+  input: MessageInput & { operatorAlert?: { eventKind: OperatorAlertEventKey; subject: string; body: string } },
 ): Promise<string> {
   const fromTeam = input.userId !== undefined && input.direction === "outbound";
   // A team member who writes in a website chat takes it over, so the AI stops answering alongside them.

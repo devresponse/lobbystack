@@ -1,6 +1,6 @@
 # Track the open items
 
-What is waiting, on `main` at `da1f548` (2026-10-24): steps to take on the demo after deploys, things built but never tried for real, decisions not yet made, recommended work not started, and leftovers from the original project. Take an item off this page in the pull request that settles it.
+What is waiting, on `main` at `62517d2` (2026-10-25) with fork PR #84: steps to take on the demo after deploys, things built but never tried for real, decisions not yet made, recommended work not started, and leftovers from the original project. Take an item off this page in the pull request that settles it.
 
 ## Do these on the demo after deploys
 
@@ -13,13 +13,16 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 5. **Check the settings the codebase review named:** `APP_BASE_URL` on the worker, `EMAIL_FROM` as a bare address, and the same `OTP_HASH_SECRET` on both services ([codebase review](../reviews/codebase-2026-10-18.md#check-the-deployment-settings-it-named)).
 6. **Set up alerts.** None is set up on the demo: an uptime check on `/api/health/ready`, PostHog error and log alerts, the billing alerts, and spending alerts at OpenAI and Twilio ([observability](../features/observability.md#alert-on-what-matters), [alerts](../operations/alerts.md)).
 7. **Check that the website chat answers.** On 2026-10-25 OpenAI refused the key the chat used (401 `invalid_api_key`), so the widget answered every message with "Your message couldn't be sent.". The chat, the AI behind phone calls and the call summaries use `AI_CHAT_API_KEY` when it's set, and `OPENAI_API_KEY` otherwise ([guide, Appendix A](../deployment/guide/appendix-a-variables.md)). Give the admin and the worker a working key, or leave `AI_CHAT_API_KEY` unset, then send a message on the widget. Once fork PR #79 is live, a reply that fails shows an Error ID to look up ([website widget](../features/website-widget.md#find-out-why-a-reply-failed)).
+8. **Listen to a call after fork PR #84,** which migrations `0117` and `0118` come with. Every business's calls then say "You're speaking with an AI assistant, and this call is recorded and transcribed." after the greeting, in the call's language. Make a test call and check that the whole opening is said once; turn **Tell callers about AI and recording** off in **AI settings** only for a business that tells callers another way. To get an email after each call, turn on **Call summary** under **Settings > Notifications**; its button uses the worker's `APP_BASE_URL` (item 5) ([calls](../features/calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded), [email](../features/email.md#email-the-team-after-each-call)).
 
 ## Test these
 
 - **Polar, end to end on the sandbox.** Nothing has been tried against Polar itself since fork PR #59: a checkout, an upgrade, a second business with the same payer, a promo code, a promo plan's end, the portal, and Polar's invoices against **Settings > Usage** ([billing](../billing/README.md#know-the-known-problems)).
 - **A real call with a keypad PIN:** one that cancels a test appointment with the right PIN, then one with a wrong PIN three times ([caller authentication](../features/caller-authentication.md#know-what-is-untested)).
-- **`pnpm voice:eval` and `pnpm voice:call`,** which need an OpenAI key and haven't been run since fork PRs #13, #18, #45, #50, #52, #54 and #78 ([calls](../features/calls.md#know-what-hasnt-been-tried)); and `pnpm voice:eval --browser` for the widget's calls.
+- **`pnpm voice:eval` and `pnpm voice:call`,** which need an OpenAI key and haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78 and #84 ([calls](../features/calls.md#know-what-hasnt-been-tried)); and `pnpm voice:eval --browser` for the widget's calls.
 - **Other languages on GPT-Live:** fork PR #78's Spanish callers, 3 runs each (`pnpm voice:eval --scenario spanish-switch --scenario spanish-only`), a French call over a phone line, and a call that opens in one of the languages fork PR #82 added, such as Japanese or Arabic. OpenAI doesn't publish GPT-Live's languages ([calls](../features/calls.md#know-which-language-a-call-uses), [voice platforms](../research/voice-platforms.md)).
+- **The email after each call,** in real mailboxes such as Gmail and Outlook: a phone call and a website call, with the summary and with the whole conversation, a long call's attached file, a card number said on a call, and a reply reaching the owner ([email](../features/email.md#email-the-team-after-each-call)).
+- **The notice after the greeting** on a real phone call and with `pnpm voice:eval`, in English and in another call language, and with `LIVE_RECORDED_GREETING=true` the second browser call's recorded opening ([calls](../features/calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded)).
 - **A new clone on a Windows machine,** with Git for Windows' default settings: `git ls-files --eol docker/postgres/init/roles.sh .env.example` should show `w/lf` for both, and the app should connect to the database after Postgres's first start. Fork PR #83 was tested only with Git set up that way on Linux ([line endings on Windows](../voice/local-debugging.md#line-endings-on-windows)).
 
 ## Decide these
@@ -60,6 +63,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - A dedicated n8n node ([API, CLI and integrations](../features/api-cli-integrations.md)).
 - An automatic check after each deploy.
 - The website chat's words when only the reply fails: it says the message couldn't be sent, though it was saved and the team alerted ([website widget](../features/website-widget.md#know-the-gaps)).
+- A card or ID number said across two turns of a call is still in the email after the call, which takes numbers out one turn at a time ([email](../features/email.md#email-the-team-after-each-call)).
 
 ## Clean up what still points at the original
 

@@ -30,6 +30,8 @@ type WidgetConfigPayload = {
   snapshotPresent: boolean;
   businessSlug?: string;
   voiceEnabled?: boolean;
+  /** Whether calls say they're with an AI and recorded; absent from an older server, which says it. */
+  recordingNotice?: boolean;
 };
 
 /** What the voice button shares with the chat: whether a call is live, and its captions. */
@@ -569,7 +571,13 @@ export function WidgetChatClient({ widgetKey, initialColor }: { widgetKey: strin
           </div>
         </div>
         {chatPending ? <div className="h-10 w-full animate-pulse rounded-4xl bg-zinc-100" aria-hidden="true" /> : null}
-        {chatLoaded && voiceEnabled ? <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} /> : null}
+        {chatLoaded && voiceEnabled ? (
+          <div className="flex flex-col gap-1.5">
+            <VoiceButton className="w-full" businessSlug={configState!.businessSlug!} visitorId={visitorIdRef.current} sessionToken={sessionToken} parentOrigin={parentOrigin} onStatusChange={setSubmitError} onCaptions={setVoiceCaptions} />
+            {/* The call says it too, right after the greeting. */}
+            {configState?.recordingNotice === false ? null : <p className="text-center text-xs text-zinc-500">{t("chat.voiceRecorded")}</p>}
+          </div>
+        ) : null}
       </header>
 
       {chatLoaded && handoff ? (

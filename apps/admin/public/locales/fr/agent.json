@@ -266,6 +266,10 @@
       "placeholder": "Bonjour, merci d'avoir appelé…",
       "hint": "La phrase d'ouverture utilisée par votre réceptionniste lorsqu'il répond à un appel ou démarre une conversation."
     },
+    "recordingNotice": {
+      "label": "Informer les appelants (IA et enregistrement)",
+      "hint": "Juste après le message d'accueil, les appels disent : « {{notice}} » Beaucoup d'endroits exigent d'informer les appelants que l'appel est enregistré. Désactivez cette option seulement si vous les informez autrement."
+    },
     "defaultLocale": {
       "label": "Langue client par défaut",
       "placeholder": "Choisir une langue par défaut",

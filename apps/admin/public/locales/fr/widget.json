@@ -23,6 +23,7 @@
     "handoffActive": "Messagerie en pause",
     "voiceButton": "Parlez-nous en direct",
     "voiceStart": "Dites Allo !",
+    "voiceRecorded": "Les appels sont pris par un assistant IA, et ils sont enregistrés et transcrits.",
     "voiceConnected": "Vous parlez avec la réceptionniste.",
     "voiceEnded": "La connexion vocale a été interrompue. Vous pouvez continuer à discuter ci-dessous.",
     "voiceUnavailable": "La voix en direct n'est pas disponible. Réessayez plus tard.",

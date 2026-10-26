@@ -8,7 +8,7 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 2. The loader opens an iframe panel at `/embed/<key>`, the widget app in `apps/admin/app/(app)/embed`.
 3. The panel talks to `/api/widget/*`: `session`, `config`, `history`, `chat`, `lead` and `stream`. Each request checks the key, the website's origin against the key's allowed websites, and the rate limits below.
 4. A chat message runs the receptionist agent from `packages/agent-core` on the `web_chat` channel. The conversation keys on the widget visitor's ID, so no phone number is needed.
-5. "Say Allo!" starts a browser WebRTC call to GPT-Live through `/api/voice/live/session`, the same route as the dashboard's test call, on the `web_voice` channel. No Twilio or SIP is involved. The worker attaches to the call as it does for phone calls ([voice runtime](../voice/runtime.md)).
+5. "Say Allo!" starts a browser WebRTC call to GPT-Live through `/api/voice/live/session`, the same route as the dashboard's test call, on the `web_voice` channel. No Twilio or SIP is involved. The worker attaches to the call as it does for phone calls ([voice runtime](../voice/runtime.md)). Since fork PR #84, a line under the button says calls are answered by an AI assistant and are recorded and transcribed, as the call says after its greeting, unless the business turned that off ([calls](calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded)).
 6. Team replies, take-overs and new messages reach the panel through `/api/widget/stream` (server-sent events) and the dashboard's Messages page through `/api/realtime`. Both read one Redis channel per business that the worker publishes to.
 
 ## Switch it on
@@ -130,6 +130,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 | #80 | A call's captions leave out the sounds GPT-Live's transcription marks in square brackets, such as "[tongue click]" or "[laughs]", and a caption that was only a sound goes. The saved transcript and the receptionist's agent leave them out too ([calls](calls.md#follow-a-call)). |
 | #81 | The chat answers in the language the visitor writes in and keeps it, and "Visitor's language" follows the visitor's browser ([above](#know-which-language-the-chat-uses)). |
 | #82 | "Say Allo!" opens in any of the 13 languages a business can pick, and the widget's words fall back to English for a business language they aren't translated into. |
+| #84 | A line under "Say Allo!" says calls are answered by an AI assistant and are recorded and transcribed, and the call says so after its greeting. A website call can send the team an email after it ([email](email.md#email-the-team-after-each-call)). |
 
 ## Know the gaps
 
@@ -138,4 +139,4 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 - Left from the review's improvement list: stop the 45-second fallback poll and add jitter, measure time to the first word, cache the loader with an ETag, a panel-only layout, Turnstile, and a spending cap per website.
 - Left from the realtime work: hand back an overdue team request when the visitor writes, keep polling whenever live updates are down, link a website call to its widget visitor, and show who replied on Messages.
 - When only the reply fails, the widget still says "Your message couldn't be sent. Please try again.", though the message was saved and the team alerted, and sending it again saves it twice.
-- A real GPT-Live call through the widget, and `pnpm voice:eval --browser`, haven't been run since fork PRs #18, #52 and #54.
+- A real GPT-Live call through the widget, and `pnpm voice:eval --browser`, haven't been run since fork PRs #18, #52, #54 and #84.

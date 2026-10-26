@@ -8,7 +8,7 @@ import type { JobEnvelope } from "@lobbystack/contracts";
 import { PolarRequestError, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import { planChangeRefusalOf, planChangeRefusals } from "@lobbystack/shared";
 import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimBillingSubscription, claimBillingUsageSync, claimNotificationDelivery, confirmBillingUsageSync, countPublishableOutboxMessages, deleteCallRecording, deleteCallRecordingForRetention, deleteSentProductEventsBefore, expireProspectDemos, generateAffiliatePayoutRun, loadAppointmentChangeOtpTarget, loadBillingCheckoutRequest, loadBillingUsageEvent, loadPendingProductEvents, loadPlanChangeProration, markAppointmentChangeOtpSent, polarProductLinks, readPolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged, markNotificationSent, loadLiveCallForPricing, recordCallProviderPricing, recordProductEvent, recordSmsProviderPricing, reconcileBillingProviderEvent, resolveNotificationDelivery, runPrivacyRetentionSweep, transitionProcessingNotification } from "@lobbystack/domain";
-import { claimOperatorNotificationDelivery, loadOperatorNotificationDelivery, markOperatorNotificationSent, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries } from "@lobbystack/domain";
+import { claimOperatorNotificationDelivery, loadCallTranscriptEmail, loadOperatorNotificationDelivery, markOperatorNotificationFailed, markOperatorNotificationSent, markOperatorNotificationSkipped, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, queueDailyOperatorSummaries, releaseOperatorNotificationDelivery } from "@lobbystack/domain";
 import { cancelRetiredPhoneVerificationSend, queueOnboardingFollowupEmail } from "@lobbystack/domain";
 import { correctAlertSmsUsage, enqueueBillingUsageSync, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
@@ -71,7 +71,10 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     deleteCallRecordingForRetention: vi.fn(),
     deleteSentProductEventsBefore: vi.fn(),
     loadOperatorNotificationDelivery: vi.fn(),
+    loadCallTranscriptEmail: vi.fn(),
     markOperatorNotificationSent: vi.fn(),
+    markOperatorNotificationSkipped: vi.fn(),
+    markOperatorNotificationFailed: vi.fn(),
     queueDailyOperatorSummaries: vi.fn(),
     completeNumberProvisioning: vi.fn(),
     failNumberProvisioning: vi.fn(),
@@ -1512,6 +1515,65 @@ describe("worker handlers", () => {
       idempotencyKey: `operator-notification:${deliveryId}`,
     }));
     expect(markOperatorNotificationSent).toHaveBeenCalledWith(domain, { businessId, deliveryId, providerMessageId: "email-123" });
+  });
+
+  describe("the email after a call", () => {
+    const delivery = (businessId: string, deliveryId: string) => ({ id: deliveryId, businessId, userId: randomUUID(), eventKind: "callTranscript", eventKey: "callTranscript:call-1", channel: "email", status: "processing", destination: "admin@example.test", sender: null, subject: "Call email", body: "", providerMessageId: null, scheduledFor: new Date(), sentAt: null, contentExpiresAt: new Date(), lastError: null, createdAt: new Date(), updatedAt: new Date(), businessName: "Maple Dental" });
+    const email = { locale: "en" as const, businessName: "Maple Dental", timeZone: "America/Toronto", channel: "phone" as const, callerName: "Jane Doe", callerPhone: "+14165550134", startedAt: "2026-10-26T19:42:10.000Z", durationSeconds: 252, outcome: { kind: "none" as const }, callUrl: "https://app.example.test/calls/call-1", settingsUrl: "https://app.example.test/settings/notifications", turns: null };
+    const setup = (sendTemplate: NonNullable<WorkerDependencies["email"]>["sendTemplate"]) => {
+      const businessId = randomUUID();
+      const deliveryId = randomUUID();
+      const domain = { db: undefined as never };
+      vi.mocked(claimOperatorNotificationDelivery).mockResolvedValue(true);
+      vi.mocked(loadOperatorNotificationDelivery).mockResolvedValue(delivery(businessId, deliveryId));
+      vi.mocked(loadCallTranscriptEmail).mockResolvedValue({ to: "admin.new@example.test", replyTo: "owner@example.test", email });
+      vi.stubEnv("APP_BASE_URL", "https://app.example.test");
+      return { businessId, deliveryId, domain, run: () => handleJob({ ...notificationJob({ operatorDeliveryId: deliveryId }), businessId }, { domain, email: { sendTemplate } }) };
+    };
+
+    it("is written as it goes out, to the person's address now, with replies going to the owner", async () => {
+      const sendTemplate = vi.fn().mockResolvedValue({ messageId: "email-123" });
+      const { businessId, deliveryId, domain, run } = setup(sendTemplate);
+
+      await expect(run()).resolves.toEqual({ status: "completed", entityId: deliveryId });
+
+      expect(loadCallTranscriptEmail).toHaveBeenCalledWith(domain, { businessId, deliveryId, appUrl: "https://app.example.test" });
+      expect(sendTemplate).toHaveBeenCalledWith(expect.objectContaining({ template: "call_transcript", to: "admin.new@example.test", replyTo: "owner@example.test", subject: "Call summary: Jane Doe, 4 min", callTranscript: email, idempotencyKey: `operator-notification:${deliveryId}` }));
+      expect(markOperatorNotificationSent).toHaveBeenCalledWith(domain, { businessId, deliveryId, providerMessageId: "email-123" });
+    });
+
+    it("is skipped when the call or the person's choice changed before it went out", async () => {
+      const sendTemplate = vi.fn();
+      const { businessId, deliveryId, domain, run } = setup(sendTemplate);
+      vi.mocked(loadCallTranscriptEmail).mockResolvedValue({ skip: "The call's transcript was deleted." });
+
+      await expect(run()).resolves.toEqual({ status: "skipped", entityId: deliveryId });
+
+      expect(sendTemplate).not.toHaveBeenCalled();
+      expect(markOperatorNotificationSkipped).toHaveBeenCalledWith(domain, { businessId, deliveryId, error: "The call's transcript was deleted." });
+    });
+
+    it("isn't tried again when the mail server refuses it for good", async () => {
+      const sendTemplate = vi.fn().mockRejectedValue(Object.assign(new Error("Recipient command failed"), { code: "EENVELOPE", responseCode: 550 }));
+      const { businessId, deliveryId, domain, run } = setup(sendTemplate);
+
+      await expect(run()).resolves.toEqual({ status: "skipped", entityId: deliveryId });
+
+      expect(markOperatorNotificationFailed).toHaveBeenCalledWith(domain, { businessId, deliveryId, error: "The mail server refused it with 550." });
+      expect(releaseOperatorNotificationDelivery).not.toHaveBeenCalled();
+      expect(recordProductEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "notification.delivery_failed", businessId, properties: { kind: "callTranscript" } }));
+    });
+
+    it("is tried again when the mail server can't be reached", async () => {
+      const error = Object.assign(new Error("Connection refused"), { code: "ECONNECTION" });
+      const sendTemplate = vi.fn().mockRejectedValue(error);
+      const { businessId, deliveryId, domain, run } = setup(sendTemplate);
+
+      await expect(run()).rejects.toThrow(error);
+
+      expect(releaseOperatorNotificationDelivery).toHaveBeenCalledWith(domain, { businessId, deliveryId, error: "Provider delivery failed." });
+      expect(markOperatorNotificationFailed).not.toHaveBeenCalled();
+    });
   });
 
   it("uses separate main-account credentials only for the configured operator alert sender", async () => {

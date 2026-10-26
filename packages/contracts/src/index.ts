@@ -127,6 +127,7 @@ export const snapshotSchema = z.object({
   businessType: z.string().min(1),
   telemetryEnabled: z.boolean().optional(),
   greeting: z.string(),
+  recordingNotice: z.boolean().optional(),
   voiceInstructions: z.string(),
   smsInstructions: z.string(),
   chatInstructions: z.string(),

@@ -1,4 +1,4 @@
-import type { BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { DateTime } from "luxon";
 import type { MediaSessionConfig } from "openai/resources/live/live";
 import type { SessionAcceptParams } from "openai/resources/live/sessions";
@@ -26,8 +26,10 @@ const BROWSER_SERVER_EVENTS = [
 // greeting command goes there, so GPT-Live opens the call on its own. When a
 // recording of the greeting opens the call instead (greetingRecording.ts),
 // the greeting is there as already said, so GPT-Live listens for the caller.
+// The greeting is the call's opening: the business greeting, then the notice
+// that the call is with an AI and recorded, unless the business turned it off.
 function openingHistory(snapshot: BusinessContextSnapshot, greetingRecorded: boolean): Pick<MediaSessionConfig, "input"> {
-  const greeting = snapshot.greeting?.trim();
+  const greeting = callOpening(snapshot);
   if (!greeting) return {};
   if (greetingRecorded) return { input: [{ role: "assistant", content: [{ type: "output_text", text: greeting }] }] };
   return { input: [{ role: "developer", content: [{ type: "input_text", text: greetingCommand(greeting) }] }] };

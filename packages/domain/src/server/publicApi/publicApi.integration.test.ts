@@ -660,7 +660,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
   it("reads and changes the receptionist, refreshing the snapshot only when something changes", async () => {
     const context = { db: worker!.db };
     const before = await getReceptionistForApi(context, a.caller);
-    expect(before).toMatchObject({ greeting: "Hi", tone: "warm", booking_policy: "Book", transfer_mode: "never", booking_mode: "instant", appointment_change_policy: { enabled: true, allow_cancel: true, allow_reschedule: true, verification_mode: "phone_match_and_facts" } });
+    expect(before).toMatchObject({ greeting: "Hi", tone: "warm", booking_policy: "Book", transfer_mode: "never", booking_mode: "instant", recording_notice: true, appointment_change_policy: { enabled: true, allow_cancel: true, allow_reschedule: true, verification_mode: "phone_match_and_facts" } });
     expect(apiReceptionistSchema.safeParse(before).success).toBe(true);
     const [profile] = await admin!.db.select({ id: receptionistProfiles.id }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, a.businessId));
     const refreshes = async () => (await admin!.db.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateId, profile!.id)))).length;
@@ -694,8 +694,13 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(await audits()).toContainEqual({ payload: expect.objectContaining({ fields: ["regenerate_summary"] }) });
     const rewrites = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.topic, "business.generateSummary"), eq(outboxMessages.businessId, a.businessId)));
     expect(rewrites).toContainEqual({ payload: expect.objectContaining({ reason: "operator_regenerate", force: true }) });
+    // Calls stop saying they're with an AI and recorded, and the next call reads it from the refreshed snapshot.
+    const beforeNotice = await refreshes();
+    expect(await updateReceptionistForApi(context, a.caller, { recording_notice: false })).toMatchObject({ recording_notice: false });
+    expect(await audits()).toContainEqual({ payload: expect.objectContaining({ fields: ["recording_notice"] }) });
+    expect(await refreshes()).toBe(beforeNotice + 1);
     // The other business's receptionist is untouched.
-    expect((await getReceptionistForApi(context, b.caller)).greeting).toBe("Hi");
+    expect(await getReceptionistForApi(context, b.caller)).toMatchObject({ greeting: "Hi", recording_notice: true });
   });
 
   it("shows a business with no receptionist row the defaults, and saves them with its first change", async () => {
@@ -705,7 +710,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const rows = async () => await admin!.db.select({ greeting: receptionistProfiles.greeting, tone: receptionistProfiles.tone }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
     try {
       const context = { db: worker!.db };
-      expect(await getReceptionistForApi(context, caller)).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", summary: "Bare Clinic", summary_source: "placeholder", transfer_mode: "on_request", booking_mode: "instant" });
+      expect(await getReceptionistForApi(context, caller)).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", summary: "Bare Clinic", summary_source: "placeholder", transfer_mode: "on_request", booking_mode: "instant", recording_notice: true });
       expect(await rows()).toEqual([]);
       expect(await updateReceptionistForApi(context, caller, { tone: "warm" })).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", tone: "warm", summary_source: "placeholder" });
       expect(await rows()).toEqual([{ greeting: "Thank you for calling Bare Clinic.", tone: "warm" }]);

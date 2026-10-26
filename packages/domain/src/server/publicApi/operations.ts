@@ -313,11 +313,14 @@ export async function getBusinessForApi(context: DomainContext, caller: ApiCalle
 export async function updateBusinessForApi(context: DomainContext, caller: ApiCaller, input: ApiBusinessUpdate): Promise<ApiBusiness> {
   if (input.timezone !== undefined) assertTimeZone(input.timezone, "timezone");
   const fields = { ...(input.name !== undefined ? { name: input.name } : {}), ...(input.timezone !== undefined ? { timezone: input.timezone } : {}), ...(input.locale !== undefined ? { defaultLocale: input.locale } : {}), ...(input.website_url !== undefined ? { websiteUrl: input.website_url } : {}), ...(input.business_type !== undefined ? { businessType: input.business_type } : {}) };
-  if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined) throw invalidRequest("Send at least one field to update.");
+  const callEmails = { ...(input.call_transcript_recipients !== undefined ? { callTranscriptRecipients: input.call_transcript_recipients } : {}), ...(input.call_transcript_content !== undefined ? { callTranscriptContent: input.call_transcript_content } : {}) };
+  if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined && !Object.keys(callEmails).length) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
     if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
     // Read when each AI turn finishes, so no snapshot refresh is needed.
     if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
+    // Read when each call's email is queued and again when it's sent.
+    if (Object.keys(callEmails).length) await tx.update(businesses).set({ ...callEmails, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     if (input.hours !== undefined) {
       await tx.update(businesses).set({ updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
       try {
@@ -1142,6 +1145,11 @@ const textsUnavailable: Record<NonNullable<ApiNotificationPreferences["sms"]["un
   consent_required: "The account this key acts as hasn't agreed to alert texts. Its owner turns texts on once in the dashboard's notification settings, which asks for that consent.",
 };
 
+const callEmailsUnavailable: Record<NonNullable<ApiNotificationPreferences["call_transcript"]["unavailable_reason"]>, string> = {
+  turned_off: "The business sends no email after calls: its call_transcript_recipients is nobody.",
+  owners_and_admins_only: "The business sends the email after each call to owners and admins only, and the account this key acts as is neither.",
+};
+
 /** `phoneVerified` comes from the account, which only the auth database can read. */
 export async function getNotificationPreferencesForApi(context: DomainContext, caller: ApiCaller, options: { userId: string; phoneVerified: boolean }): Promise<ApiNotificationPreferences> {
   return await asTeamMember(context, caller, options.userId, async (tx) => serializeNotificationPreferences(await loadNotificationPreferencesInTransaction(tx, { userId: options.userId, businessId: caller.businessId, phoneVerified: options.phoneVerified })));
@@ -1158,7 +1166,9 @@ export async function updateNotificationPreferencesForApi(context: DomainContext
     const target = { userId: options.userId, businessId: caller.businessId, phoneVerified: options.phoneVerified };
     const saved = await loadSavedNotificationPreferencesInTransaction(tx, target);
     const before = serializeNotificationPreferences(await loadNotificationPreferencesInTransaction(tx, target));
+    if (input.events?.call_transcript?.sms === true) throw invalidRequest("The email after each call goes by email only, so its sms stays false.", [{ path: "events.call_transcript.sms", message: "Must be false." }]);
     if (before.sms.unavailable_reason && (input.sms_enabled === true || apiNotificationEvents.some((event) => input.events?.[event]?.sms === true))) throw conflict(textsUnavailable[before.sms.unavailable_reason]);
+    if (before.call_transcript.unavailable_reason && input.events?.call_transcript?.email === true && !saved.eventPreferences.callTranscript.email) throw conflict(callEmailsUnavailable[before.call_transcript.unavailable_reason]);
     const eventPreferences = { ...saved.eventPreferences };
     for (const event of apiNotificationEvents) {
       const change = input.events?.[event];
@@ -1273,6 +1283,7 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
   transferNumber: "transfer_number",
   appointmentChangePolicy: "appointment_change_policy",
   bookingMode: "booking_mode",
+  recordingNotice: "recording_notice",
 };
 
 /** The business's receptionist row, or the defaults it would be saved with when it has none yet. */
@@ -1310,6 +1321,7 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
       ...(input.transfer_mode !== undefined ? { transferMode: input.transfer_mode } : {}),
       ...(input.transfer_number !== undefined ? { transferNumber: input.transfer_number } : {}),
       ...(input.booking_mode !== undefined ? { bookingMode: input.booking_mode } : {}),
+      ...(input.recording_notice !== undefined ? { recordingNotice: input.recording_notice } : {}),
       ...(policy ? { appointmentChangePolicy: { enabled: policy.enabled, allowCancel: policy.allow_cancel, allowReschedule: policy.allow_reschedule, verificationMode: policy.verification_mode } } : {}),
     };
     const unchanged = (field: keyof ReceptionistProfilePatch): boolean => {

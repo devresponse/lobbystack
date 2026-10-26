@@ -24,9 +24,11 @@ export async function PUT(request: Request) {
     const dailySummaryEnabled = body.dailySummaryEnabled === true;
     const dailySummarySendTime = typeof body.dailySummarySendTime === "string" && body.dailySummarySendTime ? body.dailySummarySendTime : null;
     if (dailySummaryEnabled && (!dailySummarySendTime || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailySummarySendTime))) return jsonError("A valid daily summary time is required.", 400);
-    if (body.smsEnabled || Object.values(eventPreferences).some(event => event.sms)) {
+    if (body.smsEnabled || Object.values(eventPreferences).some(event => event.sms) || eventPreferences.callTranscript.email) {
       const current = await getNotificationPreferences(createDomainContext(), { userId: session.user.id, businessId, phoneVerified: await hasVerifiedPhone(session.user.id) });
-      if (!current.canUseSms) return NextResponse.json({ error: current.smsUnavailableReason === "sender_missing" ? "An alert SMS sender is required for SMS notifications." : "Verify your phone before enabling SMS notifications." }, { status: 400 });
+      if ((body.smsEnabled || Object.values(eventPreferences).some(event => event.sms)) && !current.canUseSms) return NextResponse.json({ error: current.smsUnavailableReason === "sender_missing" ? "An alert SMS sender is required for SMS notifications." : "Verify your phone before enabling SMS notifications." }, { status: 400 });
+      // Someone the business leaves out keeps the choice they made before, but can't make a new one.
+      if (eventPreferences.callTranscript.email && !current.callTranscript.available && !current.eventPreferences.callTranscript.email) return NextResponse.json({ error: "Your business doesn't send you an email after calls." }, { status: 400 });
     }
     await setNotificationPreferences(createDomainContext(), { userId: session.user.id, businessId, emailEnabled: body.emailEnabled, smsEnabled: body.smsEnabled, eventPreferences, dailySummaryEnabled, dailySummarySendTime, ...(typeof body.smsConsent === "boolean" ? { smsConsent: body.smsConsent } : {}) });
     return NextResponse.json({ ok: true });

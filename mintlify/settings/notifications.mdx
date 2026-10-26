@@ -1,6 +1,6 @@
 ---
 title: "Configure workspace notifications"
-description: "Choose which call, message, calendar, and provider events send email or SMS alerts to your team."
+description: "Choose which call, message, calendar, and provider events send email or SMS alerts to your team, and who gets an email after each call."
 sidebarTitle: "Notifications"
 contentType: "How-to"
 ---
@@ -27,8 +27,20 @@ LobbyStack can notify your team about:
 - A failed customer SMS notification
 - A calendar synchronization issue
 - A failed live-call transfer
+- A call that ended, with its summary or the whole conversation ([Get an email after each call](#get-an-email-after-each-call))
 
 Enable alerts that require a person to act. Keep routine delivery events disabled if your team does not need them.
+
+## Get an email after each call
+
+Each person can get an email after each call the caller spoke on, phone and website calls alike, test calls included. It's off until you turn it on: under **Communication**, tick **Email** on the **Call summary** row. It goes by email only.
+
+Owners and admins choose for the business under **Emails after each call**:
+
+- **Who can get them**: **Owners and admins** (the default), **Everyone on the team**, or **Nobody**. People left out stop getting them from the next call.
+- **What they hold**: **Summary and a link** (the default), or **Summary and the whole conversation**, which names the row **Call transcript**. Card and ID numbers are taken out of the email. Copies stay in people's mailboxes after the dashboard deletes the transcript, even when they leave the team.
+
+Replies to the email go to the business owner.
 
 ## Apply the settings
 

@@ -590,6 +590,7 @@ export async function refreshBusinessSnapshot(
       ...(phoneNumber ? { phoneNumber } : {}),
       ...(smsNumber ? { smsNumber } : {}),
       greeting: currentProfile?.greeting ?? `Thank you for calling ${business[0].name}.`,
+      recordingNotice: currentProfile?.recordingNotice ?? true,
       tone: currentProfile?.tone ?? "professional",
       bookingPolicy: currentProfile?.bookingPolicy ?? "Confirm availability before booking.",
       ...(currentProfile?.voiceInstructions ? { voiceInstructions: currentProfile.voiceInstructions } : {}),

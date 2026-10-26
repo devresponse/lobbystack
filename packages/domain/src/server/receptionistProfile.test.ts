@@ -26,6 +26,8 @@ describe("readReceptionistSettingsChange", () => {
     [{ voiceInstructions: "x".repeat(RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH + 1) }, "voiceInstructions is invalid."],
     [{ transferMode: "sometimes" }, "transferMode is invalid."],
     [{ bookingMode: "later" }, "bookingMode is invalid."],
+    [{ recordingNotice: "off" }, "recordingNotice must be true or false."],
+    [{ recordingNotice: null }, "recordingNotice must be true or false."],
     [{ appointmentChangePolicy: {} }, "appointmentChangePolicy is invalid."],
     [{ appointmentChangePolicy: { enabled: true, allowCancel: true, allowReschedule: true, verificationMode: "email" } }, "appointmentChangePolicy is invalid."],
     // Serbian is a dashboard language, not one calls open in.
@@ -65,6 +67,11 @@ describe("readReceptionistSettingsChange", () => {
     expect(readReceptionistSettingsChange({ appointmentChangePolicy: { ...policy, extra: "dropped" }, tone: longest }).patch).toEqual({ tone: longest, appointmentChangePolicy: policy });
   });
 
+  it("takes the switch for what calls say about AI and recording on its own", () => {
+    expect(readReceptionistSettingsChange({ recordingNotice: false })).toEqual({ patch: { recordingNotice: false }, regenerateSummary: false });
+    expect(readReceptionistSettingsChange({ recordingNotice: true, greeting: "Hi." }).patch).toEqual({ greeting: "Hi.", recordingNotice: true });
+  });
+
   it("takes a summary regeneration on its own", () => {
     expect(readReceptionistSettingsChange({ regenerateSummary: true })).toEqual({ patch: {}, regenerateSummary: true });
   });
@@ -73,6 +80,10 @@ describe("readReceptionistSettingsChange", () => {
 describe("defaultReceptionistProfile", () => {
   it("greets callers with the business's name until someone writes a greeting", () => {
     expect(defaultReceptionistProfile("Maple Clinic")).toMatchObject({ greeting: "Thank you for calling Maple Clinic.", summary: "Maple Clinic", summarySource: "placeholder", transferMode: "on_request", bookingMode: "instant" });
+  });
+
+  it("has calls say they're with an AI and recorded", () => {
+    expect(defaultReceptionistProfile("Maple Clinic").recordingNotice).toBe(true);
   });
 });
 
@@ -100,6 +111,15 @@ describe("saveReceptionistProfileInTransaction", () => {
     expect(recorded.set).toEqual({ tone: "warm", updatedAt: expect.any(Date) });
     expect(mocks.enqueueOutbox).toHaveBeenCalledTimes(1);
     expect(mocks.enqueueOutbox).toHaveBeenCalledWith(tx, expect.objectContaining({ topic: "snapshot.refresh", businessId: "biz_1", aggregateType: "receptionist_profile", aggregateId: "profile_1", dedupeKey: `snapshot:biz_1:profile:${savedAt.toISOString()}` }));
+  });
+
+  // The snapshot refresh carries it to the next call.
+  it("saves the notice switch and refreshes the snapshot", async () => {
+    const { tx, recorded } = upsert({ id: "profile_1", updatedAt: savedAt });
+    await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: { recordingNotice: false } });
+    expect(recorded.values).toMatchObject({ businessId: "biz_1", recordingNotice: false });
+    expect(recorded.set).toEqual({ recordingNotice: false, updatedAt: expect.any(Date) });
+    expect(mocks.enqueueOutbox).toHaveBeenCalledWith(tx, expect.objectContaining({ topic: "snapshot.refresh", businessId: "biz_1" }));
   });
 
   it("marks a written summary as the business's own", async () => {

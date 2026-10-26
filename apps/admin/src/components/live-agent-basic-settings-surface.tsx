@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
-import { appointmentChangeVerificationModes, intlLocale, normalizeBookingMode, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocales, type AppointmentChangePolicy, type AppointmentChangeVerificationMode, type BookingMode, type RuntimeLocale } from "@lobbystack/shared";
+import { appointmentChangeVerificationModes, callRecordingNotices, intlLocale, normalizeBookingMode, normalizeRuntimeLocale, runtimeLocaleEndonyms, runtimeLocales, type AppointmentChangePolicy, type AppointmentChangeVerificationMode, type BookingMode, type RuntimeLocale } from "@lobbystack/shared";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 
@@ -91,13 +91,13 @@ export function AgentBasicSettingsPage({
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["agent-settings", businessId],
-    queryFn: () => requestJson<{ business: { defaultLocale: RuntimeLocale; timezone: string } | null; profile: { greeting: string; summary: string; summarySource: "placeholder" | "generated" | "operator"; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null }>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
+    queryFn: () => requestJson<{ business: { defaultLocale: RuntimeLocale; timezone: string } | null; profile: { greeting: string; recordingNotice?: boolean; summary: string; summarySource: "placeholder" | "generated" | "operator"; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null }>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
     enabled: Boolean(businessId),
   });
   const configuration = query.data;
   const hours = useBusinessHours(businessId);
   const isLoadingConfiguration = !businessId || query.isLoading;
-  async function saveProfile({ defaultLocale: locale, ...patch }: { businessId: string; defaultLocale?: RuntimeLocale; timezone?: string; greeting?: string; summary?: string; regenerateSummary?: true; transferNumber?: string | null; transferMode?: string; appointmentChangePolicy?: AppointmentChangePolicy; bookingMode?: BookingMode }, refetchType: "active" | "none" = "active") {
+  async function saveProfile({ defaultLocale: locale, ...patch }: { businessId: string; defaultLocale?: RuntimeLocale; timezone?: string; greeting?: string; recordingNotice?: boolean; summary?: string; regenerateSummary?: true; transferNumber?: string | null; transferMode?: string; appointmentChangePolicy?: AppointmentChangePolicy; bookingMode?: BookingMode }, refetchType: "active" | "none" = "active") {
     await requestJson(`/api/agent?businessId=${encodeURIComponent(businessId)}`, { method: "PATCH", body: JSON.stringify({ ...patch, ...(locale ? { locale } : {}) }) });
     await queryClient.invalidateQueries({ queryKey: ["agent-settings", businessId], refetchType });
   }
@@ -127,6 +127,9 @@ export function AgentBasicSettingsPage({
   const [bookingModeStatus, setBookingModeStatus] = useState<string | null>(null);
   const [isBookingModeSaving, setIsBookingModeSaving] = useState(false);
   const [greetingStatus, setGreetingStatus] = useState<string | null>(null);
+  const [recordingNotice, setRecordingNotice] = useState(true);
+  const [recordingNoticeStatus, setRecordingNoticeStatus] = useState<string | null>(null);
+  const [isRecordingNoticeSaving, setIsRecordingNoticeSaving] = useState(false);
   const [localeStatus, setLocaleStatus] = useState<string | null>(null);
   const [transferStatus, setTransferStatus] = useState<string | null>(null);
   const [appointmentChangeStatus, setAppointmentChangeStatus] = useState<string | null>(null);
@@ -143,6 +146,8 @@ export function AgentBasicSettingsPage({
       return;
     }
     setGreeting(profile.greeting);
+    // A profile saved before the switch existed has it on.
+    setRecordingNotice(profile.recordingNotice !== false);
     // The sign-up placeholder isn't a summary, so the field starts empty.
     setSummary(profile.summarySource === "placeholder" ? "" : profile.summary);
     setDefaultLocale(normalizeRuntimeLocale(configuration.business?.defaultLocale) ?? "en");
@@ -170,6 +175,12 @@ export function AgentBasicSettingsPage({
       }, 3000));
     }
 
+    if (recordingNoticeStatus) {
+      timeouts.push(window.setTimeout(() => {
+        setRecordingNoticeStatus(null);
+      }, 3000));
+    }
+
     if (transferStatus) {
       timeouts.push(window.setTimeout(() => {
         setTransferStatus(null);
@@ -188,7 +199,7 @@ export function AgentBasicSettingsPage({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [appointmentChangeStatus, greetingStatus, localeStatus, transferStatus]);
+  }, [appointmentChangeStatus, greetingStatus, localeStatus, recordingNoticeStatus, transferStatus]);
 
   async function saveGreeting(): Promise<void> {
     if (!canManageTenant || !persistedProfile) {
@@ -309,6 +320,23 @@ export function AgentBasicSettingsPage({
     }
   }
 
+  async function saveRecordingNotice(next: boolean): Promise<void> {
+    if (!canManageTenant || !persistedProfile) return;
+    setRecordingNotice(next);
+    setIsRecordingNoticeSaving(true);
+    setRecordingNoticeStatus(null);
+    try {
+      await saveProfile({ businessId, recordingNotice: next });
+      telemetry.track("web.agent.settings_saved", { businessId, setting: "recording_notice" });
+      setRecordingNoticeStatus(t("agent:actions.saved"));
+    } catch {
+      setRecordingNotice(!next);
+      toast.error(t("agent:actions.saveFailed"));
+    } finally {
+      setIsRecordingNoticeSaving(false);
+    }
+  }
+
   async function saveBookingMode(nextMode: BookingMode): Promise<void> {
     if (!canManageTenant || !persistedProfile) return;
     setIsBookingModeSaving(true);
@@ -377,6 +405,30 @@ export function AgentBasicSettingsPage({
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
+            </Item>
+
+            <Item
+              className="rounded-none border-x-0 border-t-0 border-b border-border last:border-b-0"
+              variant="default"
+            >
+              <ItemContent>
+                <ItemTitle>{t("agent:fields.recordingNotice.label")}</ItemTitle>
+                {/* What callers hear, in the language calls open in. */}
+                <ItemDescription>{t("agent:fields.recordingNotice.hint", { notice: callRecordingNotices[defaultLocale] })}</ItemDescription>
+                {recordingNoticeStatus ? <ItemDescription>{recordingNoticeStatus}</ItemDescription> : null}
+              </ItemContent>
+              <ItemActions>
+                {isLoadingConfiguration ? (
+                  <Skeleton className="h-5 w-8 rounded-full" />
+                ) : (
+                  <Switch
+                    aria-label={t("agent:fields.recordingNotice.label")}
+                    checked={recordingNotice}
+                    disabled={isRecordingNoticeSaving || !persistedProfile || !canManageTenant}
+                    onCheckedChange={(checked) => void saveRecordingNotice(checked)}
+                  />
+                )}
+              </ItemActions>
             </Item>
 
             <Item

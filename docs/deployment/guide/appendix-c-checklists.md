@@ -37,7 +37,7 @@ The same list as [5.4](part-5-production.md#54-go-live-checklist). Go through it
 - [ ] OpenAI's webhook in production's project points at production's address, and a browser call and a phone call both worked ([4.8](part-4-test-environment.md#48-connect-the-providers-to-this-environment), [Part 6](part-6-first-run.md)).
 - [ ] The business's number belongs to production's Twilio subaccount, and its texting registration is approved or under way ([3.3](part-3-outside-services.md#33-twilio)). A text to it showed up in **Messages** ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)).
 - [ ] The email code and an invitation arrived, from production's email key ([6.1](part-6-first-run.md#61-create-your-account), [6.6](part-6-first-run.md#66-invite-the-team)).
-- [ ] Each business that takes calls has a greeting that tells callers what their laws require, such as that an AI answers and the call is recorded ([5.1](part-5-production.md#51-what-changes-from-the-test-environment)).
+- [ ] Each business that takes calls tells callers what their laws require: the notice after the greeting says that an AI answers and the call is recorded and transcribed, unless the business turned it off, and anything more is in its greeting ([5.1](part-5-production.md#51-what-changes-from-the-test-environment)).
 - [ ] An update doesn't cut calls off. On Railway, the worker has `RAILWAY_DEPLOYMENT_DRAINING_SECONDS=1860`, so calls run on for up to 30 minutes ([4.6](part-4-test-environment.md#46-add-the-admin-and-the-worker), step 5). On a server, the override file gives the worker 45 seconds to say goodbye to each caller ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 17).
 
 *Data*

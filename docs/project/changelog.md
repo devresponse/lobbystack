@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#83](https://github.com/devresponse/lobbystack/pull/83) | Keep Linux line endings in Windows checkouts |  | `62517d2` | [docs](../voice/local-debugging.md#line-endings-on-windows) |
 | [#82](https://github.com/devresponse/lobbystack/pull/82) | Let calls open in any of 13 languages |  | `f933e19` | [docs](../features/calls.md#know-which-language-a-call-uses) |
 | [#78](https://github.com/devresponse/lobbystack/pull/78) | Keep calls in the caller's language and test it in Spanish, merged with #82 |  | `f933e19` | [docs](../features/calls.md#know-which-language-a-call-uses) |
 | [#81](https://github.com/devresponse/lobbystack/pull/81) | Answer website chats in the visitor's language |  | `a2e57ff` | [docs](../features/website-widget.md#know-which-language-the-chat-uses) |

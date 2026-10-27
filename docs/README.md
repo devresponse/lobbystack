@@ -12,13 +12,13 @@ This folder is the project's source of truth: what the fork is and how it got he
 
 ## Know the project
 
-| Page | What it holds |
-| --- | --- |
-| [Overview](project/overview.md) | The fork, the demo, the branches, making a change, a map of the code, what stays out of a public repository |
-| [History](project/history.md) | The original project from March to October 2026, and the fork since |
-| [Changelog](project/changelog.md) | Every pull request merged into the fork's `main`, newest first |
-| [Decisions](project/decisions.md) | The maintainer's decisions, and the architecture decisions (ADRs) |
-| [Open items](project/open-items.md) | What is waiting, and on whom |
+| Page                                 | What it holds                                                                                                                                                                |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Overview](project/overview.md)      | The fork, the demo, the branches, making a change, a map of the code, what stays out of a public repository                                                                  |
+| [History](project/history.md)        | The original project from March to October 2026, and the fork since                                                                                                          |
+| [Changelog](project/changelog.md)    | Every pull request merged into the fork's `main`, newest first                                                                                                               |
+| [Decisions](project/decisions.md)    | The maintainer's decisions, and the architecture decisions (ADRs)                                                                                                            |
+| [Open items](project/open-items.md)  | What is waiting, and on whom                                                                                                                                                 |
 | [Future features](roadmap/README.md) | Sign-in with Google and Microsoft, intake forms, custom voices, each business's own provider keys and the rest of what was researched, each with its plan, effort and status |
 
 ## Deploy and run it

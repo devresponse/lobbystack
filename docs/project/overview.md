@@ -56,26 +56,26 @@ If GitHub never starts a pull request's CI because it never works out whether th
 
 ## Find your way around the code
 
-| Path | What it holds |
-| --- | --- |
-| `apps/admin/` | The Next.js dashboard, sign-in, the HTTP API (dashboard routes, `/api/v1`, MCP), webhooks, the website widget's API, its loader `/embed.js` and its iframe app `/embed/<key>`, and the public profile pages. |
-| `apps/worker/` | Queued jobs, the transactional outbox, and every GPT-Live call: the admin hands it each call at `/internal/live/attach`. |
-| `apps/landing/` | The original project's marketing site, in Astro. The fork doesn't deploy it ([sites](../deployment/guide/appendix-f-sites.md)). |
-| `packages/db/` | Drizzle schema, the SQL migrations (`packages/db/migrations/`), database roles and row-level security. |
-| `packages/domain/` | Business logic that the admin and the worker share. |
-| `packages/agent-core/` | The receptionist agent that website chat and calls share, its tools, and the GPT-Live call controller. |
-| `packages/providers/` | Adapters for Twilio, OpenAI-compatible AI, embeddings, Google Calendar, email, storage, Polar and Firecrawl. |
-| `packages/shared/` | Types, billing rules, brand resolution and the v1 API's operation registry (`packages/shared/src/publicApi/operations.ts`). |
-| `packages/cli/` | The `lobbystack` command, which works only through the v1 API. |
-| `packages/embed/`, `packages/web-voice/` | The widget loader bundle, and the browser call hook and orb. |
-| `packages/contracts/`, `packages/jobs/`, `packages/telemetry/` | Job and snapshot contracts, BullMQ queues, and telemetry with redaction. |
-| `brands/` | One folder per brand: `brand.json`, images and `billing.json`. Public, like the rest of the repository. |
-| `integrations/zapier/` | The Zapier app. |
-| `scripts/` | Setup, `pnpm billing`, the `replacement:*` checks and operations scripts. |
-| `docker/`, `docker-compose.yml`, `Dockerfile.*` | The Compose stack and the images Railway builds. |
-| `mintlify/` | The original project's Help Center pages. Not maintained by the fork; this folder is the fork's documentation. |
-| `research/` | The original project's marketing research. |
-| `.railway/` | The original project's Railway definition. The fork's deployments don't use it. |
+| Path                                                           | What it holds                                                                                                                                                                                                |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `apps/admin/`                                                  | The Next.js dashboard, sign-in, the HTTP API (dashboard routes, `/api/v1`, MCP), webhooks, the website widget's API, its loader `/embed.js` and its iframe app `/embed/<key>`, and the public profile pages. |
+| `apps/worker/`                                                 | Queued jobs, the transactional outbox, and every GPT-Live call: the admin hands it each call at `/internal/live/attach`.                                                                                     |
+| `apps/landing/`                                                | The original project's marketing site, in Astro. The fork doesn't deploy it ([sites](../deployment/guide/appendix-f-sites.md)).                                                                              |
+| `packages/db/`                                                 | Drizzle schema, the SQL migrations (`packages/db/migrations/`), database roles and row-level security.                                                                                                       |
+| `packages/domain/`                                             | Business logic that the admin and the worker share.                                                                                                                                                          |
+| `packages/agent-core/`                                         | The receptionist agent that website chat and calls share, its tools, and the GPT-Live call controller.                                                                                                       |
+| `packages/providers/`                                          | Adapters for Twilio, OpenAI-compatible AI, embeddings, Google Calendar, email, storage, Polar and Firecrawl.                                                                                                 |
+| `packages/shared/`                                             | Types, billing rules, brand resolution and the v1 API's operation registry (`packages/shared/src/publicApi/operations.ts`).                                                                                  |
+| `packages/cli/`                                                | The `lobbystack` command, which works only through the v1 API.                                                                                                                                               |
+| `packages/embed/`, `packages/web-voice/`                       | The widget loader bundle, and the browser call hook and orb.                                                                                                                                                 |
+| `packages/contracts/`, `packages/jobs/`, `packages/telemetry/` | Job and snapshot contracts, BullMQ queues, and telemetry with redaction.                                                                                                                                     |
+| `brands/`                                                      | One folder per brand: `brand.json`, images and `billing.json`. Public, like the rest of the repository.                                                                                                      |
+| `integrations/zapier/`                                         | The Zapier app.                                                                                                                                                                                              |
+| `scripts/`                                                     | Setup, `pnpm billing`, the `replacement:*` checks and operations scripts.                                                                                                                                    |
+| `docker/`, `docker-compose.yml`, `Dockerfile.*`                | The Compose stack and the images Railway builds.                                                                                                                                                             |
+| `mintlify/`                                                    | The original project's Help Center pages. Not maintained by the fork; this folder is the fork's documentation.                                                                                               |
+| `research/`                                                    | The original project's marketing research.                                                                                                                                                                   |
+| `.railway/`                                                    | The original project's Railway definition. The fork's deployments don't use it.                                                                                                                              |
 
 [Architecture](../architecture/overview.md) explains how the parts talk to each other, and the [route catalog](../reference/routes.md) lists every page and HTTP route with the file that handles it.
 

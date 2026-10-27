@@ -1,12 +1,12 @@
 # Track the open items
 
-What is waiting, on `main` at `62517d2` (2026-10-25) with fork PR #84: steps to take on the demo after deploys, things built but never tried for real, decisions not yet made, recommended work not started, and leftovers from the original project. Take an item off this page in the pull request that settles it.
+What is waiting, on `main` at `c074ae4` (2026-10-26): steps to take on the demo after deploys, work with a deadline, things built but never tried for real, decisions not yet made, recommended work not started, and leftovers from the original project. Take an item off this page in the pull request that settles it. Features that were researched but not built have a page each in the [roadmap](../roadmap/README.md).
 
 ## Do these on the demo after deploys
 
-The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #71 to #76 merged on 2026-10-24.
+The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #71 to #84 merged from 2026-10-24 to 2026-10-26.
 
-1. **Check the version line** under the account menu reads `da1f548` or later ([overview](overview.md#know-where-it-runs)).
+1. **Check the version line** under the account menu reads `c074ae4` or later ([overview](overview.md#know-where-it-runs)).
 2. **Give each service its own Polar token** with only its scopes ([Polar](../providers/polar.md#give-each-service-its-own-token)): the admin's `customer_sessions:write`, and the worker's `checkouts:write`, `customers:write` (new with fork PR #72), `events:write` and `subscriptions:write` plus four read scopes for the daily check. Neither gets `webhooks:read` (fork PR #74).
 3. **Apply the plans once more,** for fork PR #73's monthly meter on yearly plans: `pnpm billing apply --brand alloplace --polar sandbox --adopt --allow-replace`, then `pnpm billing verify --brand alloplace --polar sandbox` ([guide, step 7](../deployment/guide/part-3-outside-services.md)). Then delete the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables from the admin and the worker: nothing reads them since fork PR #66, and the two yearly ones now name archived products.
 4. **Confirm `RAILWAY_DEPLOYMENT_DRAINING_SECONDS`:** 1860 on the worker so a deploy doesn't cut calls, and 120 on the admin so it doesn't cut replies being written.
@@ -14,6 +14,10 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 6. **Set up alerts.** None is set up on the demo: an uptime check on `/api/health/ready`, PostHog error and log alerts, the billing alerts, and spending alerts at OpenAI and Twilio ([observability](../features/observability.md#alert-on-what-matters), [alerts](../operations/alerts.md)).
 7. **Check that the website chat answers.** On 2026-10-25 OpenAI refused the key the chat used (401 `invalid_api_key`), so the widget answered every message with "Your message couldn't be sent.". The chat, the AI behind phone calls and the call summaries use `AI_CHAT_API_KEY` when it's set, and `OPENAI_API_KEY` otherwise ([guide, Appendix A](../deployment/guide/appendix-a-variables.md)). Give the admin and the worker a working key, or leave `AI_CHAT_API_KEY` unset, then send a message on the widget. Once fork PR #79 is live, a reply that fails shows an Error ID to look up ([website widget](../features/website-widget.md#find-out-why-a-reply-failed)).
 8. **Listen to a call after fork PR #84,** which migrations `0117` and `0118` come with. Every business's calls then say "You're speaking with an AI assistant, and this call is recorded and transcribed." after the greeting, in the call's language. Make a test call and check that the whole opening is said once; turn **Tell callers about AI and recording** off in **AI settings** only for a business that tells callers another way. To get an email after each call, turn on **Call summary** under **Settings > Notifications**; its button uses the worker's `APP_BASE_URL` (item 5) ([calls](../features/calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded), [email](../features/email.md#email-the-team-after-each-call)).
+
+## Do these before a date
+
+- **Move the recorded greeting off `gpt-4o-mini-tts` before 2027-01-06.** OpenAI shuts the model down that day and names `gpt-realtime-2.1-mini`, through the Realtime API, as its replacement (OpenAI's deprecations page, read on 2026-10-27). The recorded greeting, which plays on the demo (`LIVE_RECORDED_GREETING=true`), is rendered with it in `packages/agent-core/src/live/greetingRecording.ts`. After that day, a recording already made keeps playing until a week passes without a call that plays it, but a new or changed greeting gets none: the worker logs `live.greeting_recording_failed`, and those browser calls open as they did before fork PR #45. About 1 to 2 days ([custom voices](../roadmap/custom-voices.md#know-the-deadline-that-applies-anyway)).
 
 ## Test these
 
@@ -30,28 +34,32 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 | Question | Options and background |
 | --- | --- |
 | Should allowances reset at each renewal instead of on the first of the month (UTC)? | Today a mid-month downgrade or promo end counts the month's earlier usage against the smaller allowance ([billing](../billing/README.md#know-the-known-problems)) |
-| Add a diagnostics tab to each call page? | 4 to 6 days, or 1 to 2 for a first cut ([observability options](../research/observability-options.md#weigh-logs-inside-the-dashboard)) |
-| Which voice route for the long term: GPT-Live, a SIP-native alternative, a cheaper bridged one, or LiveKit? Build the provider seam? | The Azure port's choice of Azure OpenAI over SIP predates evidence that favours GPT-Live ([voice platforms](../research/voice-platforms.md), [Azure port](../research/azure-port.md)) |
+| Build sign-in with Google and Microsoft, and on which dashboard address? | About 11 days; eight questions, the first being the production dashboard's address ([roadmap](../roadmap/google-microsoft-sign-in.md)) |
+| Build intake forms that the receptionist fills from calls and chats? | A first version in 15 to 23 days, and a pilot with no code first; nine questions ([roadmap](../roadmap/intake-forms.md)) |
+| Ask OpenAI to enable cloned voices, and give calls a custom voice? | One voice for every call is about 2 days once OpenAI agrees, and a prompt voice works today; seven questions ([roadmap](../roadmap/custom-voices.md)) |
+| Let businesses bring their own OpenAI and Twilio keys? | 32 to 49 days in six pull requests, with their own OpenAI keys for chat and browser calls first, in 11 to 17; nine questions ([roadmap](../roadmap/business-provider-keys.md)) |
+| Add a diagnostics tab to each call page? | 4 to 6 days, or 1 to 2 for a first cut ([observability options](../research/observability-options.md#weigh-logs-inside-the-dashboard), [roadmap](../roadmap/call-diagnostics.md)) |
+| Which voice route for the long term: GPT-Live, a SIP-native alternative, a cheaper bridged one, or LiveKit? Build the provider seam? | The Azure port's choice of Azure OpenAI over SIP predates evidence that favours GPT-Live ([voice platforms](../research/voice-platforms.md), [Azure port](../research/azure-port.md), roadmap pages for the [seam](../roadmap/voice-provider-seam.md) and the [port](../roadmap/azure-phone-path.md)) |
 | Add a middle plan between Pro and Enterprise? | Rivals sell one at $129 to $299, where retention is better ([voice agent market](../research/voice-agent-market.md#estimate-the-profit)) |
-| Run the QR place guide pilot, and build its minimum product? | One downtown district, 15 signs, 90 days ([QR place guide](../research/qr-place-guide-market.md#run-the-pilot)) |
-| Build the Railway bootstrap script? | A few days of work ([Railway automation](../research/railway-automation.md)) |
+| Run the QR place guide pilot, and build its minimum product? | One downtown district, 15 signs, 90 days ([QR place guide](../research/qr-place-guide-market.md#run-the-pilot), [roadmap](../roadmap/qr-place-guide.md)) |
+| Build the Railway bootstrap script? | A few days of work ([Railway automation](../research/railway-automation.md), [roadmap](../roadmap/railway-bootstrap.md)) |
 | Bring in the original's 14 newer commits? | A trial merge conflicted in 286 files ([overview](overview.md#know-what-the-fork-is)) |
 | The codebase review's issues left alone: 15, 16, 19, 20, 21, 23 and 27 | [Codebase review](../reviews/codebase-2026-10-18.md) |
 
 ## Build these when they're needed
 
-**Protect the widget and the deployment.** None of these is started ([widget scalability](../reviews/widget-scalability-2026-10-15.md#do-these-in-order)):
+**Protect the widget and the deployment.** None of these is started ([widget scalability](../reviews/widget-scalability-2026-10-15.md#do-these-in-order), [roadmap](../roadmap/protect-the-deployment.md)):
 
 - Cloudflare in front of the dashboard's domain with a rate-limit rule, as the only way in, then `TRUSTED_CLIENT_IP_HEADER=cf-connecting-ip` on the admin, which turns on the per-IP limits.
 - Turnstile before a widget session and before a call; rate limits checked before any database work; an early 503 under overload; a per-business call concurrency cap below the GPT-Live session limit; caps on operator alert emails.
 - `AI_CHAT_REASONING_EFFORT=low` on the admin.
 - A sign-up allowlist or invite-only mode: sign-up is open to anyone who passes Turnstile ([multitenancy](../features/multitenancy.md)).
 
-**Scale one stack** ([scalability](../reviews/scalability-2026-10-18.md#follow-the-roadmap)): PgBouncer, an index on `transcripts (business_id, expires_at)`, one job per type instead of per business, a Redis memory ceiling, two admin copies, Cloudflare caching the loader and profile pages, usage counters and batched Polar events. Ask Polar to confirm in writing that an AI receptionist that rents phone numbers is accepted under its acceptable use policy before revenue depends on it.
+**Scale one stack** ([scalability](../reviews/scalability-2026-10-18.md#follow-the-roadmap), [roadmap](../roadmap/scale-past-one-stack.md)): PgBouncer, an index on `transcripts (business_id, expires_at)`, one job per type instead of per business, a Redis memory ceiling, two admin copies, Cloudflare caching the loader and profile pages, usage counters and batched Polar events. Ask Polar to confirm in writing that an AI receptionist that rents phone numbers is accepted under its acceptable use policy before revenue depends on it.
 
 **Finish the widget** ([website widget](../features/website-widget.md#know-the-gaps), [widget review](../reviews/widget-2026-10-15.md#follow-the-code-improvements)): improvements 5, 6 and 8 to 11 (stop the history poll while live updates are up, time to first word for chats, loader caching, a panel-only layout, Turnstile, a spending cap per website), and the realtime leftovers listed there.
 
-**Serve callers in more languages** ([calls](../features/calls.md#know-which-language-a-call-uses)): since fork PR #82 calls can open in 13 languages. Still open: Serbian, which the dashboard has and calls can't open in; a starter greeting in the business's language; texts to callers in the 10 of the 13 that texts have no wording for; saving the language a caller spoke on the contact, so texts after the call follow it; a voice per business or per language; and GPT-Live 1.1 once OpenAI's API offers it (`LIVE_MODEL`).
+**Serve callers in more languages** ([calls](../features/calls.md#know-which-language-a-call-uses)): since fork PR #82 calls can open in 13 languages. Still open: Serbian, which the dashboard has and calls can't open in; a starter greeting in the business's language; texts to callers in the 10 of the 13 that texts have no wording for; saving the language a caller spoke on the contact, so texts after the call follow it; a voice per business or per language ([custom voices](../roadmap/custom-voices.md)); and GPT-Live 1.1 once OpenAI's API offers it (`LIVE_MODEL`).
 
 **Close smaller gaps:**
 
@@ -60,10 +68,11 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - Extra public plans in the plan screens and checkout ([billing](../billing/README.md#know-the-known-problems)).
 - Changing a business's public page slug, and custom domains per business ([public page](../features/public-profile-and-qr.md)).
 - The v1 API's remaining gaps against the database ([API gaps](../reference/api-gaps.md)).
-- A dedicated n8n node ([API, CLI and integrations](../features/api-cli-integrations.md)).
+- A dedicated n8n node, and the Zapier app published under the brand's own account ([API, CLI and integrations](../features/api-cli-integrations.md), [roadmap](../roadmap/n8n-and-zapier.md)).
 - An automatic check after each deploy.
 - The website chat's words when only the reply fails: it says the message couldn't be sent, though it was saved and the team alerted ([website widget](../features/website-widget.md#know-the-gaps)).
 - A card or ID number said across two turns of a call is still in the email after the call, which takes numbers out one turn at a time ([email](../features/email.md#email-the-team-after-each-call)).
+- Twilio's signing-key header: the delivery-report route reads the key's ID from `X-Twilio-Signature-Key-Sid` (`apps/admin/app/api/webhooks/twilio/status/route.ts`), while Twilio's page on shared keys, read on 2026-10-27, names `X-Twilio-Webhooks-Signature-Settings`, with a `key=…,algorithm=…` value. A deployment with a separate alert account (`TWILIO_ALERT_*`) may then refuse that account's delivery reports. The deployment guide keeps those variables empty, so deployments that follow it aren't affected ([provider keys study](../research/business-provider-keys.md#know-what-it-found-on-the-way)).
 
 ## Clean up what still points at the original
 

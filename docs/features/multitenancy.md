@@ -24,11 +24,11 @@ Calls find their business by the dialled number, texts by the number they were s
 - One Polar organization, one Google OAuth app, one email sender and one brand.
 - One set of limits: for example GPT-Live's concurrent sessions count across every business.
 
-So one business that is attacked or misbehaves can use up what the others share. Set spending alerts at OpenAI and Twilio, and see [scalability](../reviews/scalability-2026-10-18.md) for what breaks first as businesses are added.
+So one business that is attacked or misbehaves can use up what the others share. Set spending alerts at OpenAI and Twilio, and see [scalability](../reviews/scalability-2026-10-18.md) for what breaks first as businesses are added. Letting each business bring its own OpenAI and Twilio keys was studied on 2026-10-25 and isn't built ([roadmap](../roadmap/business-provider-keys.md)).
 
 ## Know who can sign up
 
-Sign-up is open to anyone who can pass the Turnstile check (required everywhere but `localhost`), and there is no switch to close it. A new business gets the deployment's `DEPLOYMENT_MODE`: on `cloud`, the Free plan (30 voice minutes a month and no phone number) until it pays; on `self_hosted_standard`, the self-hosted plan with no limits. On a self-hosted deployment open to the internet, that means anyone can sign up and spend the deployment's OpenAI and Twilio budget. Use the deployment's own OpenAI project and Twilio subaccount with spending limits.
+Sign-up is open to anyone who can pass the Turnstile check (required everywhere but `localhost`), and there is no switch to close it. A new business gets the deployment's `DEPLOYMENT_MODE`: on `cloud`, the Free plan (30 voice minutes a month and no phone number) until it pays; on `self_hosted_standard`, the self-hosted plan with no limits. On a self-hosted deployment open to the internet, that means anyone can sign up and spend the deployment's OpenAI and Twilio budget. Use the deployment's own OpenAI project and Twilio subaccount with spending limits. A sign-up mode that can close sign-up or limit it to a list is recommended and not built ([roadmap](../roadmap/protect-the-deployment.md)).
 
 There is no console for the person who runs the deployment: `platform_admin` is only a membership rank, and deployment-wide work goes through an operator key and the v1 API ([API and CLI](api-cli-integrations.md#pick-a-key)).
 

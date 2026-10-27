@@ -57,7 +57,7 @@ describe("billing catalog diff", () => {
     const status = Object.fromEntries(writes.filter((write) => write.change.table === "billing_plans").map((write) => [write.change.key, write.set.status]));
     expect(status).toEqual({ enterprise: "active", free_cloud: "active", pro: "draft", starter: "draft" });
     expect(writes.every((write) => Object.keys(write.change.fields).length === 0 && !write.change.lowers_allowance && !write.change.raises_price)).toBe(true);
-    expect(writes.find((write) => write.change.key === "starter/monthly/cad")!.set).toEqual({ plan: "starter", period: "monthly", currency: "cad", cents: 3000 });
+    expect(writes.find((write) => write.change.key === "starter/monthly/cad")!.set).toEqual({ plan: "starter", period: "monthly", currency: "cad", cents: 3700 });
   });
 
   it("writes nothing when the tables already match the file", () => {
@@ -72,7 +72,7 @@ describe("billing catalog diff", () => {
       file.plans.pro.included.alertSmsSegments = 250;
       file.plans.pro.overageCents.voiceMinute = 20;
       file.plans.pro.prices.monthlyCents = 11000;
-      file.plans.starter.prices.monthlyCents = 2500;
+      file.plans.starter.prices.monthlyCents = 3500;
     });
     const { writes } = diff(after, stored(desiredBillingPlans(before)));
     const byKey = Object.fromEntries(writes.map((write) => [write.change.key, write.change]));
@@ -81,8 +81,8 @@ describe("billing catalog diff", () => {
     // A price is part of the terms, so the plan's terms_hash moves with it.
     expect(byKey.starter).toMatchObject({ action: "update", lowers_allowance: false, raises_price: false });
     expect(Object.keys(byKey.starter!.fields)).toEqual(["terms_hash"]);
-    expect(byKey["pro/monthly/cad"]).toMatchObject({ action: "update", raises_price: true, lowers_allowance: false, fields: { cents: { from: 10000, to: 11000 } } });
-    expect(byKey["starter/monthly/cad"]).toMatchObject({ raises_price: false, fields: { cents: { from: 3000, to: 2500 } } });
+    expect(byKey["pro/monthly/cad"]).toMatchObject({ action: "update", raises_price: true, lowers_allowance: false, fields: { cents: { from: 8700, to: 11000 } } });
+    expect(byKey["starter/monthly/cad"]).toMatchObject({ raises_price: false, fields: { cents: { from: 3700, to: 3500 } } });
     // A price update keeps its row.
     expect(writes.find((write) => write.change.key === "pro/monthly/cad")!.id).toBe("pro-monthly-cad");
   });
@@ -360,7 +360,7 @@ describe("billing link diff", () => {
     expect(replaced.writes.map((write) => [write.change.action, write.change.key, write.set])).toEqual([
       ["update", "pro-launch", { polar_disc: "disc_pro-launch_2" }],
       ["retire", "pro/monthly/cad", { retired_at: now }],
-      ["insert", "pro/monthly/cad", { plan: "pro", period: "monthly", currency: "cad", cents: 10000, polar_id: "prod_pro_monthly_2" }],
+      ["insert", "pro/monthly/cad", { plan: "pro", period: "monthly", currency: "cad", cents: 8700, polar_id: "prod_pro_monthly_2" }],
     ]);
     expect(replaced.writes[1]!.id).toBe("pro-monthly-cad");
   });

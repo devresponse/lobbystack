@@ -455,7 +455,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
     await rollbackTest(async (tx) => {
       const before = await listBillingPlansForApi(context(tx), sells);
       expect(before).toMatchObject({ currency: "usd", source: "built_in" });
-      expect(before.plans.find((plan) => plan.slug === "pro")!.prices.map((price) => [price.interval, price.amount_cents, price.checkout_available])).toEqual([["monthly", 8_700, true], ["annual", 87_000, false]]);
+      expect(before.plans.find((plan) => plan.slug === "pro")!.prices.map((price) => [price.interval, price.amount_cents, price.checkout_available])).toEqual([["monthly", 10_000, true], ["annual", 96_000, false]]);
       expect((await readPolarProductLinks(context(tx), sells)).planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
 
       await apply(tx, file());

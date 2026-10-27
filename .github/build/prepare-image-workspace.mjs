@@ -10,7 +10,8 @@ if (!process.argv.includes("--lockfile-only")) {
 
 // pnpm 10's lockfile has two-space importer keys and six-space dependency keys.
 // Keep resolution/snapshot records intact; fetch traverses the retained importers.
-const lock = readFileSync("pnpm-lock.yaml", "utf8");
+// A Windows clone made before .gitattributes can still hold CRLF files, so read them as LF.
+const lock = readFileSync("pnpm-lock.yaml", "utf8").replaceAll("\r\n", "\n");
 if (!lock.startsWith("lockfileVersion: '9.0'\n") || !lock.includes("\nimporters:\n")) {
   throw new Error("Review image lockfile projection for the new pnpm lockfile format.");
 }
@@ -38,5 +39,5 @@ for (const line of lock.split("\n")) {
   if (!skip) lines.push(line);
 }
 writeFileSync("pnpm-lock.yaml", lines.join("\n"));
-const workspace = readFileSync("pnpm-workspace.yaml", "utf8");
+const workspace = readFileSync("pnpm-workspace.yaml", "utf8").replaceAll("\r\n", "\n");
 writeFileSync("pnpm-workspace.yaml", workspace.replace(/^  - mintlify\n/m, ""));

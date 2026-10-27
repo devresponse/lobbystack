@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
 import { test } from "node:test";
@@ -43,5 +43,29 @@ test("image projection preserves the lockfile and excludes local tooling", () =>
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("image projection reads files with Windows line endings", () => {
+  // A Windows clone made before .gitattributes keeps CRLF files, and Way B copies them into the image.
+  const unix = mkdtempSync(join(tmpdir(), "lobbystack-image-lf-"));
+  const windows = mkdtempSync(join(tmpdir(), "lobbystack-image-crlf-"));
+  try {
+    const files = ["pnpm-lock.yaml", "pnpm-workspace.yaml"];
+    for (const file of files) {
+      const text = readFileSync(file, "utf8").replaceAll("\r\n", "\n");
+      writeFileSync(join(unix, file), text);
+      writeFileSync(join(windows, file), text.replaceAll("\n", "\r\n"));
+    }
+    const prepare = resolve(".github/build/prepare-image-workspace.mjs");
+    for (const directory of [unix, windows]) {
+      execFileSync(process.execPath, [prepare, "--lockfile-only"], { cwd: directory });
+    }
+    for (const file of files) {
+      assert.equal(readFileSync(join(windows, file), "utf8"), readFileSync(join(unix, file), "utf8"));
+    }
+  } finally {
+    rmSync(unix, { recursive: true, force: true });
+    rmSync(windows, { recursive: true, force: true });
   }
 });

@@ -21,7 +21,15 @@ On a Windows clone made before fork PR #83:
 - `git pull` brings `roles.sh` down again with LF. `git ls-files --eol docker/postgres/init/roles.sh` then shows `w/lf`.
 - If Postgres already started with the old script, `docker compose logs postgres` shows `/usr/bin/env: ‘bash\r’: No such file or directory`, and the admin and worker can't connect to the database. Run `docker compose down -v`. It deletes the database, which has nothing usable yet, along with the other Docker volumes, so the script runs again on the next start.
 - If `pnpm env:generate` said it generated 0 secrets, `.env` holds the placeholders from `.env.example`. Run `pnpm env:generate --force`, then `docker compose down -v`.
-- Other files keep CRLF until a pull changes them, and `git add` warns `CRLF will be replaced by LF the next time Git touches it` about one you edited, which is expected. Of those files, only the shell scripts in `scripts/` mind, when you run them with bash; a new clone gives them LF.
+- Other files keep CRLF until a pull changes them, and `git add` warns `CRLF will be replaced by LF the next time Git touches it` about one you edited, which is expected. An editor that saves one with LF, as `.editorconfig` asks, makes `git status` list it as modified while `git diff` shows nothing, and a `git pull` that changes it stops with `Your local changes to the following files would be overwritten by merge`. `git add` on that file clears it, because its content hasn't changed.
+- The shell scripts in `scripts/` mind CRLF when you run them with bash. Way B's image build did too, until `.github/build/prepare-image-workspace.mjs` learned to read either line ending: it stopped with `Review image lockfile projection for the new pnpm lockfile format` on a CRLF `pnpm-lock.yaml`.
+- To give every file LF, as a new clone does, commit or stash your own changes first, because this checks every tracked file out again. The last command should print nothing:
+
+  ```powershell
+  git rm -r --cached -q .
+  git reset --hard
+  git ls-files --eol | Select-String w/crlf
+  ```
 
 ### Create the environment files
 

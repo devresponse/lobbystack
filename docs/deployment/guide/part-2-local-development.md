@@ -196,6 +196,7 @@ pnpm build
 | Sign-in says "Incorrect email or password" although the password is right, and the terminal shows `Invalid origin` | The dashboard is open at an address other than `http://localhost:13000` | Use `http://localhost:13000` exactly |
 | The sign-up code never arrives | No email is set up | Sign in with the same email and password, or set up Mailpit ([2.7](#27-optional-extras)) |
 | `pnpm env:generate` says it generated 0 secrets | Windows line endings, in a clone made before fork PR #83 | `git pull`, then `pnpm env:generate --force` and `docker compose down -v` |
+| Way B's build stops with `Review image lockfile projection for the new pnpm lockfile format` | `pnpm-lock.yaml` has Windows line endings, in a clone made before fork PR #83 | `git pull` for an image script that reads either line ending, then build again, or give every file LF ("Line endings on Windows" in `docs/voice/local-debugging.md`) |
 | `.env already exists` | You already generated it | Keep it, or add `--force` and then run `docker compose down -v` |
 | `required variable BETTER_AUTH_SECRET is missing a value` | There's no `.env` | `pnpm env:generate` |
 | The apps can't sign in to the database: `password authentication failed` or `is not permitted to log in` | The database first started with other passwords, or with Windows line endings in a clone made before fork PR #83 | `git pull` for the line endings, then `docker compose down -v` and start again |
@@ -204,4 +205,4 @@ pnpm build
 | `429 Too Many Requests` while downloading an image | Docker Hub's limit for downloads without an account | `docker login`, or try again later |
 | The worker stops with `listen EAFNOSUPPORT` | The computer has IPv6 switched off | Switch IPv6 back on |
 
-**Checked against:** `docs/voice/local-debugging.md`, `docker-compose.yml`, `.env.example`, `.gitattributes`, `docker/postgres/init/roles.sh`, `scripts/generate-env.mjs`, `scripts/dev.mjs`, `apps/admin/next.config.ts`, `apps/admin/tsconfig.json`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/lib/auth.ts`, `apps/worker/src/health.ts`.
+**Checked against:** `docs/voice/local-debugging.md`, `docker-compose.yml`, `.env.example`, `.gitattributes`, `.github/build/prepare-image-workspace.mjs`, `docker/postgres/init/roles.sh`, `scripts/generate-env.mjs`, `scripts/dev.mjs`, `apps/admin/next.config.ts`, `apps/admin/tsconfig.json`, `apps/admin/src/components/auth-card.tsx`, `apps/admin/src/lib/auth.ts`, `apps/worker/src/health.ts`.

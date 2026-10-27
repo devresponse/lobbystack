@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-10-27
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#85](https://github.com/devresponse/lobbystack/pull/85) | Add a roadmap of the researched features to docs |  | `cccf0ac` | [docs](../roadmap/README.md) |
+
 ### 2026-10-26
 
 | PR | What changed | Migrations | Merge | More |

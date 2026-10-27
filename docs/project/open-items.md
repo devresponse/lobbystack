@@ -87,4 +87,4 @@ The docs no longer link to the original project's sites, but some code and confi
 
 ## Know what lives outside the repository
 
-Two helper scripts are kept in the maintainer's project files, not in the repository: `polar-setup.mjs`, the first Polar setup script, which `pnpm billing apply --adopt` replaced, and `railway-vars.mjs`, which sets Railway variables from a file with a project token and was only tested against a stand-in. Anything a deployment needs should be in the repository and the [deployment guide](../deployment/guide/README.md) instead.
+Two of the maintainer's helper scripts moved into `devops/` on 2026-10-27: `polar-setup.mjs`, the first Polar setup script, which `pnpm billing apply --adopt` replaced, and `railway-vars.mjs`, which sets Railway variables from a file with a project token and was only tested against a stand-in. Neither is a step in the [deployment guide](../deployment/guide/README.md), which is where anything a deployment needs belongs.

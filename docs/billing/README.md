@@ -110,7 +110,7 @@ Flags that need a person's say:
 | `--webhook-url <url>` | A webhook address other than the deployment's own `/api/webhooks/polar`. |
 | `--railway-file <new file>` | Saving `POLAR_API_BASE_URL`, `POLAR_ORGANIZATION_ID` and, when the run made the webhook, `POLAR_WEBHOOK_SECRET` to a new file readable only by you. A name like `.env.railway` keeps it out of commits. Delete it once the values are set. |
 
-The file's format is the input of the maintainer's `railway-vars.mjs`, which isn't part of the repository; setting the values in Railway by hand works the same. Current subscribers keep their old price, and edits made by hand in Polar's dashboard are put back to match the file.
+The file's format is the input of `devops/railway-vars.mjs`; setting the values in Railway by hand works the same. Current subscribers keep their old price, and edits made by hand in Polar's dashboard are put back to match the file.
 
 ### Use the other billing commands
 

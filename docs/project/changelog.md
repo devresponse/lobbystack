@@ -172,7 +172,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 ### Direct commits on `main`
 
-Seven commits reached `main` without a pull request:
+Eight commits reached `main` without a pull request:
 
 | Date | Commit | What changed |
 | --- | --- | --- |
@@ -183,3 +183,4 @@ Seven commits reached `main` without a pull request:
 | 2026-10-27 | `37c35d2` | Let Way B's image build read a `pnpm-lock.yaml` with Windows line endings, from a Windows clone made before fork PR #83, and say how to give such a clone Linux line endings everywhere ([line endings on Windows](../voice/local-debugging.md#line-endings-on-windows)). |
 | 2026-10-27 | `5312092` | Note Way B's first run, on Windows, and add IIS holding port 80 and Docker Desktop restarting mid-build to the local troubleshooting table ([2.10](../deployment/guide/part-2-local-development.md#210-if-something-fails-locally)). |
 | 2026-10-27 | `fd36d0a` | Line up the columns of the tables in `docs/README.md` and `docs/project/overview.md`. |
+| 2026-10-27 | `26c582d` | Add the maintainer's `polar-setup.mjs` and `railway-vars.mjs` to `devops/`, and point the billing docs and the guide at them. |

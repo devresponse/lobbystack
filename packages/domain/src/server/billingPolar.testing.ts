@@ -234,6 +234,11 @@ const setupMeters = [
   { name: "Call transfers", event: "billing.outbound_call_attempts", noun: "call transfers" },
 ];
 
+/** Gives a billing file the prices polar-setup.mjs sold, so adopting what it made changes no price. */
+export function withSetupPrices(file: Record<string, any>): void {
+  for (const plan of setupPlans) file.plans[plan.label.toLowerCase()].prices = { monthlyCents: plan.monthly, annualCents: plan.annual };
+}
+
 /** What polar-setup.mjs made in a CAD organization on 2026-10-19: three meters, four products, Credits on the two monthly ones, and the webhook, none of them tagged. */
 export async function seedPolarSetup(fake: FakePolar, webhookUrl = "https://demo.alloplace.com/api/webhooks/polar"): Promise<void> {
   const call = async (method: string, path: string, body: unknown) => (await (await fake.fetch(`https://sandbox-api.polar.sh${path}`, { method, body: JSON.stringify(body) })).json()) as { id: string };

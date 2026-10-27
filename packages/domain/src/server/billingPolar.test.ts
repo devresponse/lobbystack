@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { desiredBillingPlans } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps, type PolarPlanOptions } from "./billingPolar";
-import { createFakePolar, seedPolarSetup, type FakePolar } from "./billingPolar.testing";
+import { createFakePolar, seedPolarSetup, withSetupPrices, type FakePolar } from "./billingPolar.testing";
 
 // The Polar plan on a stand-in that keeps Polar's rules: what a file needs,
 // what an organization gets, and that running the plan leaves nothing to do.
@@ -65,10 +65,10 @@ describe("desiredPolarCatalog", () => {
       ["outbound_call_attempts", "Call transfers", "billing.outbound_call_attempts"],
     ]);
     expect(catalog.products.map((product) => [product.name, product.interval, product.meterInterval, product.cents, product.currency, product.rates, product.visibility])).toEqual([
-      ["Starter annual", "year", "month", 28800, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Starter monthly", "month", null, 3000, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Pro annual", "year", "month", 96000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
-      ["Pro monthly", "month", null, 10000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Starter annual", "year", "month", 37000, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Starter monthly", "month", null, 3700, "cad", { voice_minutes: 20, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Pro annual", "year", "month", 87000, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
+      ["Pro monthly", "month", null, 8700, "cad", { voice_minutes: 18, alert_sms_segments: 2, outbound_call_attempts: 2 }, "public"],
     ]);
     expect(catalog.discounts).toEqual([]);
     expect(catalog.webhook).toEqual({ url: webhookUrl, events: expect.arrayContaining(["subscription.created", "order.refunded"]) });
@@ -145,7 +145,7 @@ describe("planPolarChanges", () => {
       ["Pro annual", "month", 1],
       ["Pro monthly", null, null],
     ]);
-    expect(first.steps.find((step) => step.subject === 'Product "Pro annual"')!.changes).toEqual(["960.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each", "overage invoiced each month"]);
+    expect(first.steps.find((step) => step.subject === 'Product "Pro annual"')!.changes).toEqual(["870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each", "overage invoiced each month"]);
     expect(fake.state.webhooks.map((endpoint) => endpoint.api_version)).toEqual(["2026-10"]);
   });
 
@@ -155,11 +155,11 @@ describe("planPolarChanges", () => {
     const ids = fake.state.products.map((product) => product.id);
     const monthlyIds = fake.state.products.filter((product) => product.recurring_interval === "month").map((product) => product.id);
     // Its annual products invoice overage once a year, and Polar never adds a meter cycle to a product.
-    expect((await plan(fake, profile(), { adopt: true })).refusals).toEqual([
+    expect((await plan(fake, profile(withSetupPrices), { adopt: true })).refusals).toEqual([
       { object: "product", subject: 'Product "Starter annual"', message: "\"Starter annual\" invoices its overage once a year, not each month, and Polar never changes a product's meter cycle. Run with --allow-replace to make a new product and archive this one; its subscribers keep it." },
       expect.objectContaining({ subject: 'Product "Pro annual"' }),
     ]);
-    const { first } = await apply(fake, profile(), { adopt: true, allowReplace: true });
+    const { first } = await apply(fake, profile(withSetupPrices), { adopt: true, allowReplace: true });
     expect(summary(first.steps)).toEqual([...Array(3).fill("tag meter"), "create product", "tag product", "create product", "tag product", "detach product", "detach product", "archive product", "archive product"]);
     expect(first.steps.filter((step) => step.action === "tag").every((step) => step.changes.includes("tag it as LobbyStack's"))).toBe(true);
     expect(first.steps.filter((step) => step.action === "archive").map((step) => [step.subject, step.changes])).toEqual([
@@ -177,7 +177,7 @@ describe("planPolarChanges", () => {
     expect(fake.state.products.every((product) => product.prices.every((price) => !price.is_archived))).toBe(true);
     const live = fake.state.products.filter((product) => !product.is_archived);
     expect(live.map((product) => [product.name, product.meter_interval])).toEqual([["Starter monthly", null], ["Pro monthly", null], ["Starter annual", "month"], ["Pro annual", "month"]]);
-    const links = polarLinkPlans({ catalog: catalogFor(profile()), plans: desiredBillingPlans(profile()), snapshot: await client(fake).readSnapshot(), now });
+    const links = polarLinkPlans({ catalog: catalogFor(profile(withSetupPrices)), plans: desiredBillingPlans(profile(withSetupPrices)), snapshot: await client(fake).readSnapshot(), now });
     expect(links.missing).toEqual([]);
     expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id)).sort()).toEqual(live.map((product) => product.id).sort());
     expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id))).toEqual(expect.arrayContaining(monthlyIds));
@@ -203,11 +203,11 @@ describe("planPolarChanges", () => {
       file.plans.pro.prices.monthlyCents = 12000;
     }));
     const step = first.steps.find((entry) => entry.subject === 'Product "Pro monthly"')!;
-    expect(step.changes).toEqual(["add 120.00 CAD a month", "drop 100.00 CAD fixed", expect.stringMatching(/^made from older terms/)]);
+    expect(step.changes).toEqual(["add 120.00 CAD a month", "drop 87.00 CAD fixed", expect.stringMatching(/^made from older terms/)]);
     expect((step.body as { prices: unknown[] }).prices).toEqual([...kept.map((id) => ({ id })), { amount_type: "fixed", price_amount: 12000, price_currency: "cad" }]);
     const after = fake.state.products.find((product) => product.id === before.id)!;
     expect(after.prices.filter((price) => !price.is_archived && price.amount_type === "fixed").map((price) => price.price_amount)).toEqual([12000]);
-    expect(after.prices.find((price) => price.price_amount === 10000)!.is_archived).toBe(true);
+    expect(after.prices.find((price) => price.price_amount === 8700)!.is_archived).toBe(true);
     expect(fake.state.products.filter((product) => product.metadata.lobbystack_plan === "pro")).toHaveLength(2);
   });
 

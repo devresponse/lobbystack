@@ -141,13 +141,12 @@ Two things to know about Way B:
 2. Sign up at `http://localhost:13000/en/signup`. The password needs at least 8 characters, a number and a special character. No captcha appears on your computer.
 3. The next page asks for a 6-digit code sent by email. Without an email setup it never arrives. Go to `http://localhost:13000/en/login` instead, and sign in with the same email and password. This works because your settings don't require a verified email.
 4. Onboarding walks you through these steps:
-   1. **Make this app your own:** name the app and add a logo, or choose **Skip and keep LobbyStack**. Only the first person on a new instance sees this.
-   2. Your business's name.
-   3. Your website, or **I don't have a website**. Importing a website needs a Firecrawl key.
-   4. Knowledge: **Skip for now**.
-   5. The greeting callers hear.
-   6. The plan: choose **Start free**. The page lists the hosted service's plans, but on your own instance a business has unlimited call minutes.
-   7. How you heard about LobbyStack: **Skip**.
+   1. Your business's name. The app is already AlloPlace, the only brand in the code besides LobbyStack, so nothing asks you to name it. A copy older than fork PR #87, or one with no brand of its own, first shows **Make this app your own** ([6.2](part-6-first-run.md#62-the-brand-step)).
+   2. Your website, or **I don't have a website**. Importing a website needs a Firecrawl key.
+   3. Knowledge: **Skip for now**.
+   4. The greeting callers hear.
+   5. The plan: choose **Start free**. The page lists the hosted service's plans, but on your own instance a business has unlimited call minutes.
+   6. How you heard about AlloPlace: **Skip**.
 5. The dashboard opens with your business.
 6. Add at least one service and your opening hours. The receptionist can't book anything until the business has an active service.
 7. With your OpenAI key in `.env.local`, restart `pnpm dev` and use the dashboard's **Test Call** button to talk to your receptionist from the browser. (Not tested yet: the test machine had no OpenAI key.)

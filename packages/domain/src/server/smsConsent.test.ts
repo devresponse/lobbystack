@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword, sharedSenderHelpReply } from "./sms";
+import { classifySmsConsentUpdate, classifySmsKeywordReply, normalizeSmsKeyword } from "./sms";
 
 describe("SMS consent classifiers", () => {
   it("normalizes keywords to alphanumeric uppercase", () => {
@@ -32,9 +32,13 @@ describe("SMS HELP replies", () => {
     vi.unstubAllEnvs();
   });
 
-  it("keep LobbyStack's registered wording when the deployment sets no name or links", () => {
-    expect(classifySmsKeywordReply({ body: "help" }, "LobbyStack")?.body).toBe("LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.");
-    expect(sharedSenderHelpReply("LobbyStack")).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.");
+  it("keep LobbyStack's registered wording on a deployment that shows LobbyStack", async () => {
+    // The brand is resolved once per process, so this test loads the modules afresh.
+    vi.resetModules();
+    vi.stubEnv("BRAND_PRESET", "lobbystack");
+    const sms = await import("./sms");
+    expect(sms.classifySmsKeywordReply({ body: "help" }, "LobbyStack")?.body).toBe("LobbyStack: For help, contact hello@lobbystack.com or visit https://lobbystack.com. Reply STOP to opt out.");
+    expect(sms.sharedSenderHelpReply("LobbyStack")).toBe("LobbyStack: For help with an appointment, call the business you booked with. For anything else, email hello@lobbystack.com. Reply STOP to opt out.");
   });
 
   it("give the deployment's own name, and the address and website of the brand file its domain picks", async () => {

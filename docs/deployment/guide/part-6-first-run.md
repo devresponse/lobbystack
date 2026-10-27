@@ -1,6 +1,6 @@
 # Part 6. First run on a new instance
 
-**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s test call length was updated on 2026-10-20 for fork PR #54 (`9b66d01`), and [6.3](#63-set-up-the-first-business)'s opening language on 2026-10-25 for fork PR #82, and [6.3](#63-set-up-the-first-business)'s notice to callers, its alerts and [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s first calls on 2026-10-26 for fork PR #84. The onboarding steps were tried on a computer on 2026-10-18 ([2.6](part-2-local-development.md#26-sign-in-for-the-first-time-and-create-a-test-business)); nothing else in this part has been run on a deployed instance yet.
+**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s test call length was updated on 2026-10-20 for fork PR #54 (`9b66d01`), and [6.3](#63-set-up-the-first-business)'s opening language on 2026-10-25 for fork PR #82, and [6.3](#63-set-up-the-first-business)'s notice to callers, its alerts and [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s first calls on 2026-10-26 for fork PR #84, and [6.2](#62-the-brand-step)'s conditions on 2026-10-27 for fork PR #87. The onboarding steps were tried on a computer on 2026-10-18 ([2.6](part-2-local-development.md#26-sign-in-for-the-first-time-and-create-a-test-business)); nothing else in this part has been run on a deployed instance yet.
 
 This part takes a new instance from an empty dashboard to a business whose receptionist answers calls and chats, books appointments and takes messages. Do it on the test environment first ([Part 4](part-4-test-environment.md)), then on production ([Part 5](part-5-production.md)).
 
@@ -49,7 +49,7 @@ Row-level security keeps each business's data apart, so a stranger never sees yo
 
 "Make this app your own" is the first onboarding page only when all of these are true:
 
-- No brand matches your address, and `BRAND_PRESET` isn't set ([3.6](part-3-outside-services.md#36-your-brand)).
+- No brand file applies ([3.6](part-3-outside-services.md#36-your-brand)): no brand claims your address, `BRAND_PRESET` names none, and the code has no brand besides LobbyStack, or several. With AlloPlace in the code, that never happens, so the step never appears and onboarding starts with your business.
 - You have no business yet.
 - Nobody has chosen yet, and you own every business on the instance. On a new instance, that's the first person to get here.
 - migrate set up the database as its main user, as in Parts 4 and 5. Otherwise the step never appears, and no message says why.
@@ -282,7 +282,7 @@ Run `pnpm lobbystack onboard acme.yaml --plan` to see what it would do, then run
 
 **Not yet confirmed:**
 
-- Whether the brand step appears on Railway. It should, because migrate signs in as the database's main user ([4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database)).
+- Whether the brand step appears on Railway, in a copy of the code where no brand file applies. It should, because migrate signs in as the database's main user ([4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database)).
 - How long a number takes to buy, and how a reply to a US phone shows before the texting registration is approved.
 - Whether Twilio itself replies to STOP.
 - What the plan picker shows on an instance that doesn't sell plans when **Choose a number** opens it.

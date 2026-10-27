@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ appBaseUrl: "http://localhost" }));
+const fixture = vi.hoisted(() => ({ appBaseUrl: "http://localhost", preset: null as string | null }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  return { ...shared, currentBrand: () => shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl }) };
+  return { ...shared, currentBrand: () => shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: fixture.preset }) };
 });
 vi.mock("@/lib/branding", () => ({ loadBranding: vi.fn() }));
 
@@ -13,6 +13,7 @@ const branding = { appName: "AlloPlace", logoUrl: "/brand/alloplace/logo.svg?v=1
 
 afterEach(() => {
   fixture.appBaseUrl = "http://localhost";
+  fixture.preset = null;
 });
 
 describe("brandingMetadata", () => {
@@ -32,7 +33,12 @@ describe("brandingMetadata", () => {
     expect(brandingMetadata(branding).robots).toEqual({ index: false, follow: false });
   });
 
+  it("gives an address no brand claims the only brand's preview", () => {
+    expect(brandingMetadata(branding).openGraph).toMatchObject({ images: [{ url: expect.stringMatching(/^http:\/\/localhost\/brand\/alloplace\/og\.png\?v=/) }] });
+  });
+
   it("adds no preview for a brand without a share image", () => {
+    fixture.preset = "lobbystack";
     expect(brandingMetadata({ appName: "LobbyStack", logoUrl: null })).not.toHaveProperty("openGraph");
   });
 });

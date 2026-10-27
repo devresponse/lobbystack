@@ -37,7 +37,10 @@ export type BrandDefinition = {
 };
 
 export type BrandIndex = {
-  /** The brand a deployment gets when no brand claims its domain. */
+  /**
+   * The brand a deployment gets when nothing picks another: no brand claims its
+   * domain, BRAND_PRESET names none, and there isn't exactly one other brand.
+   */
   default: string;
   /** Apex domain, such as alloplace.com, to brand id. */
   domains: Record<string, string>;

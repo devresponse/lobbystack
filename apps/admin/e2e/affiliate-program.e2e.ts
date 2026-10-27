@@ -4,6 +4,7 @@ import { eq, like, sql } from "drizzle-orm";
 
 import { affiliateAttributions, affiliateCommissions, affiliatePayoutItems, affiliateProfiles, businesses, createDatabaseClient, providerEvents, users, type Database } from "@lobbystack/db";
 import { createBusiness, generateAffiliatePayoutRun, markAffiliatePayoutItemPaid, reconcileBillingProviderEvent } from "@lobbystack/domain";
+import { brandLinks } from "@lobbystack/shared";
 
 import enAffiliate from "../public/locales/en/affiliate.json" with { type: "json" };
 import frAffiliate from "../public/locales/fr/affiliate.json" with { type: "json" };
@@ -141,7 +142,9 @@ test("the affiliate program works from referral link to payout", async ({ browse
     await page.goto("/affiliate?lng=fr");
     await expectFullyTranslated(page, frAffiliate, frCommon.loading.retry);
     await page.screenshot({ path: testInfo.outputPath("affiliate-fr.png"), fullPage: true });
-    await page.getByRole("link", { name: frAffiliate.terms.link }).evaluate((link) => (link as HTMLAnchorElement).href).then((href) => expect(href).toBe("https://lobbystack.com/fr/terms/#affiliate-program"));
+    // A brand with its own terms page opens it at the top; LobbyStack's opens its affiliate section in French.
+    const affiliateTerms = brandLinks().termsUrl ?? "https://lobbystack.com/fr/terms/#affiliate-program";
+    await page.getByRole("link", { name: frAffiliate.terms.link }).evaluate((link) => (link as HTMLAnchorElement).href).then((href) => expect(href).toBe(affiliateTerms));
 
     // Payout settings.
     await page.getByRole("tab", { name: frAffiliate.settings.open }).click();

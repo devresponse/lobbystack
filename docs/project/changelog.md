@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#88](https://github.com/devresponse/lobbystack/pull/88) | Show the brand's billing.json plans before a deployment's first apply |  | `edad2bf` | [docs](../billing/README.md#know-the-plans) |
 | [#87](https://github.com/devresponse/lobbystack/pull/87) | Use the only brand folder where no address or preset picks one |  | `141a4cd` | [docs](../branding.md) |
 | [#85](https://github.com/devresponse/lobbystack/pull/85) | Add a roadmap of the researched features to docs |  | `cccf0ac` | [docs](../roadmap/README.md) |
 

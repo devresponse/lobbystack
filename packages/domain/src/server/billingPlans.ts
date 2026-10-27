@@ -3,9 +3,11 @@ import { sql } from "drizzle-orm";
 import { withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   billingIntervals,
+  brandBillingPlans,
   builtInBillingPlanLimits,
   builtInBillingPlanList,
   cloudBillingPlanSlugs,
+  currentBrand,
   hostedCheckoutPlanSlugs,
   type ApiBillingPlans,
   type BillingInterval,
@@ -23,10 +25,10 @@ import type { DomainContext } from "./context";
 // The billing catalog as checkout, plan changes, Polar's webhook, the plan
 // screens and usage limits read it at run time. Standard plans are the rows
 // whose code is their tier. A deployment that hasn't applied a billing.json has
-// no rows, so it shows and enforces the plans this build ships with, and sells
-// through the four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables if it
-// has them. Once a link makes a plan active, only its linked products sell it,
-// and the variables never again.
+// no rows, so it shows and enforces the plans its build carries, its brand's
+// billing.json or else the built-in ones, and sells through the four optional
+// POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID variables if it has them. Once a link makes
+// a plan active, only its linked products sell it, and the variables never again.
 
 type Row = Record<string, unknown>;
 
@@ -184,19 +186,54 @@ export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<s
 }
 
 /**
- * The plan list the screens and the API show. From the catalog once it holds
- * a Starter or Pro row, in its currency; before that, the built-in plans in
- * US dollars. A price can start a checkout when checkout is set up for the
- * caller and a Polar product sells it.
+ * The catalog a brand's billing.json would apply, as this build carries it:
+ * its four standard plans, a sold one in draft as an apply first writes it,
+ * and their prices, none linked to a Polar product. Null for a brand without
+ * a billing.json, such as LobbyStack.
  */
-export function billingPlanList(catalog: BillingCatalogSnapshot, options: { checkout: boolean; links: PolarProductLinks }): BillingPlanList {
+export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | null {
+  const plans = brandBillingPlans(brandId);
+  if (!plans) return null;
+  const status = (plan: { sold: boolean }): CatalogStandardPlan["status"] => (plan.sold ? "draft" : "active");
+  return {
+    plans: plans.map(({ prices: _prices, ...plan }) => ({ ...plan, status: status(plan) })),
+    prices: plans.flatMap((plan) => plan.prices.map((price) => ({
+      plan: plan.code,
+      tier: plan.code,
+      status: status(plan),
+      period: price.period,
+      currency: price.currency,
+      cents: price.cents,
+      // As billing_prices computes per_month.
+      per_month: price.period === "annual" ? Math.floor(price.cents / 12) : price.cents,
+      polar_id: null,
+      retired: false,
+    }))),
+  };
+}
+
+/** The catalog this deployment's brand file would apply: the plans it shows and enforces until its first apply. */
+export function deploymentBrandCatalog(): BillingCatalogSnapshot | null {
+  return brandBillingCatalog(currentBrand().id);
+}
+
+/**
+ * The plan list the screens and the API show. From the catalog once it holds
+ * a Starter or Pro row, in its currency; before that, from brandCatalog, the
+ * catalog the deployment's brand file would apply, in the file's currency, or
+ * for a brand without a file, the built-in plans in US dollars. A price can
+ * start a checkout when checkout is set up for the caller and a Polar product
+ * sells it, which before an apply only the variables do.
+ */
+export function billingPlanList(catalog: BillingCatalogSnapshot, options: { checkout: boolean; links: PolarProductLinks; brandCatalog?: BillingCatalogSnapshot | null }): BillingPlanList {
   const available = (plan: HostedCheckoutPlanSlug, interval: BillingInterval) => options.checkout && options.links.productFor(plan, interval) !== null;
   const builtIn = builtInBillingPlanList(available);
-  if (!catalogApplies(catalog.plans)) return builtIn;
-  const live = catalog.prices.filter((price) => !price.retired && price.plan === price.tier);
+  const shown = catalogApplies(catalog.plans) ? catalog : options.brandCatalog;
+  if (!shown) return builtIn;
+  const live = shown.prices.filter((price) => !price.retired && price.plan === price.tier);
   const currency = live[0]?.currency ?? builtIn.currency;
   const plans = cloudBillingPlanSlugs.map((slug): BillingPlanOffer => {
-    const row = catalog.plans.find((plan) => plan.code === slug);
+    const row = shown.plans.find((plan) => plan.code === slug);
     // A tier the caller can't read, such as hidden Enterprise for the app: its built-in terms, unpriced.
     if (!row) return { ...builtIn.plans.find((plan) => plan.slug === slug)!, prices: [] };
     return {
@@ -212,7 +249,7 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
       }),
     };
   });
-  return { currency, source: "catalog", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
+  return { currency, source: shown === catalog ? "catalog" : "built_in", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
 }
 
 /** A plan row's terms, as limits enforce them. */
@@ -233,21 +270,23 @@ function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
 
 /**
  * The limits each plan enforces, by the same rule as the plan list: the
- * catalog's terms once it holds a Starter or Pro row, else this build's. A
- * tier the caller can't read, such as hidden Enterprise for the app, keeps
- * this build's terms, which a custom plan's row matches. Self-hosting has no
- * row and no limits.
+ * catalog's terms once it holds a Starter or Pro row, else those of brandPlans,
+ * the standard plans the deployment's brand file would apply, else this
+ * build's. A tier the caller can't read, such as hidden Enterprise for the
+ * app, keeps this build's terms, which a custom plan's row matches.
+ * Self-hosting has no row and no limits.
  */
-export function billingPlanLimits(plans: CatalogStandardPlan[]): BillingPlanLimitTable {
-  if (!catalogApplies(plans)) return builtInBillingPlanLimits;
+export function billingPlanLimits(plans: CatalogStandardPlan[], brandPlans: CatalogStandardPlan[] | null = null): BillingPlanLimitTable {
+  const rows = catalogApplies(plans) ? plans : brandPlans;
+  if (!rows) return builtInBillingPlanLimits;
   const table = { ...builtInBillingPlanLimits };
-  for (const row of plans) table[row.code] = planLimits(row);
+  for (const row of rows) table[row.code] = planLimits(row);
   return table;
 }
 
 /** The limits each plan enforces, read in the caller's transaction. */
-export async function readBillingPlanLimits(tx: DatabaseTransaction): Promise<BillingPlanLimitTable> {
-  return billingPlanLimits(await readStandardPlans(tx));
+export async function readBillingPlanLimits(tx: DatabaseTransaction, brandCatalog: BillingCatalogSnapshot | null = deploymentBrandCatalog()): Promise<BillingPlanLimitTable> {
+  return billingPlanLimits(await readStandardPlans(tx), brandCatalog?.plans ?? null);
 }
 
 /**
@@ -271,9 +310,10 @@ export function limitsFor(book: BillingPlanLimitBook, tier: BillingPlanSlug, pla
 }
 
 /** The limit book from the standard rows and the others, by the same rule as the tier table. */
-export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Array<Omit<CatalogStandardPlan, "code"> & { code: string; tier: string }>): BillingPlanLimitBook {
-  const tiers = billingPlanLimits(standard);
-  if (tiers === builtInBillingPlanLimits) return { tiers, plans: {} };
+export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Array<Omit<CatalogStandardPlan, "code"> & { code: string; tier: string }>, brandPlans: CatalogStandardPlan[] | null = null): BillingPlanLimitBook {
+  const tiers = billingPlanLimits(standard, brandPlans);
+  // Before the first apply, no other plan has a row.
+  if (!catalogApplies(standard)) return { tiers, plans: {} };
   return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row) }])) };
 }
 
@@ -282,9 +322,9 @@ export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Ar
  * worker reads every plan; the app reads the public ones, the one its
  * business is on and any its usage counted under.
  */
-export async function readBillingPlanLimitBook(tx: DatabaseTransaction): Promise<BillingPlanLimitBook> {
+export async function readBillingPlanLimitBook(tx: DatabaseTransaction, brandCatalog: BillingCatalogSnapshot | null = deploymentBrandCatalog()): Promise<BillingPlanLimitBook> {
   const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
-  return billingPlanLimitBook(await readStandardPlans(tx), others.map((row) => ({ ...planRow(row), code: String(row.code), tier: String(row.tier) })));
+  return billingPlanLimitBook(await readStandardPlans(tx), others.map((row) => ({ ...planRow(row), code: String(row.code), tier: String(row.tier) })), brandCatalog?.plans ?? null);
 }
 
 /** Whether this deployment has Polar's token and organization, which every checkout needs. */
@@ -305,9 +345,9 @@ export async function readPolarProductLinks(context: DomainContext, env: Record<
 }
 
 /** GET /billing/plans: the plans this deployment sells, as any key may see them. */
-export async function listBillingPlansForApi(context: DomainContext, env: Record<string, string | undefined> = process.env): Promise<ApiBillingPlans> {
+export async function listBillingPlansForApi(context: DomainContext, env: Record<string, string | undefined> = process.env, brandCatalog: BillingCatalogSnapshot | null = deploymentBrandCatalog()): Promise<ApiBillingPlans> {
   const { catalog, links } = await withBusinessTransaction(context.db, { actorType: "worker" }, (tx) => loadBillingCatalog(tx, env), { accessMode: "read only" });
-  const list = billingPlanList(catalog, { checkout: polarCheckoutConfigured(env), links });
+  const list = billingPlanList(catalog, { checkout: polarCheckoutConfigured(env), links, brandCatalog });
   return {
     currency: list.currency,
     source: list.source,

@@ -140,13 +140,16 @@ export const billingMeterEventNames = {
 } as const;
 
 /**
- * The plans this build ships with. They are only the seed: a deployment shows
- * and enforces them until its first billing.json apply, and after that the
- * billing catalog's rows decide prices, allowances, limits and numbers. The
- * app reads them only through builtInBillingPlanList and
+ * The plans this code ships with, for a brand without a billing.json, such as
+ * LobbyStack. They are only the seed: such a deployment shows and enforces
+ * them until its first billing.json apply, while one whose brand has a file
+ * uses the file's plans as its build carries them (brandBillingPlans), and
+ * after the apply the billing catalog's rows decide prices, allowances, limits
+ * and numbers. The app reads them only through builtInBillingPlanList and
  * builtInBillingPlanLimits, which billingPlans.ts falls back to; the landing
  * site's plan facts (product-capabilities.ts) and the number claims' fallback
- * in app.business_included_numbers (migration 0112) repeat them.
+ * in app.business_included_numbers (migration 0112) repeat them, whatever the
+ * brand.
  */
 export const billingPlanCatalog = {
   self_host: {
@@ -279,7 +282,7 @@ const limitsOf = (plan: BillingPlanLimits): BillingPlanLimits => ({
   outboundCallAttemptOverageRateCents: plan.outboundCallAttemptOverageRateCents,
 });
 
-/** The limits this build ships with, which a deployment enforces until its first catalog apply. */
+/** The limits this code ships with, which a deployment whose brand has no billing.json enforces until its first catalog apply. */
 export const builtInBillingPlanLimits = Object.fromEntries(billingPlanSlugs.map((slug) => [slug, limitsOf(billingPlanCatalog[slug])])) as BillingPlanLimitTable;
 
 /** One price of a plan as the screens show it. */
@@ -335,7 +338,9 @@ export function billingPlanIncluded(limits: BillingPlanLimits): BillingPlanOffer
 
 /**
  * The standard plans a deployment shows: from its billing catalog once a
- * billing.json is applied, else the ones this build ships with, in US dollars.
+ * billing.json is applied (catalog), else the ones its build carries
+ * (built_in): its brand's billing.json, or for a brand without one, the
+ * built-in plans in US dollars.
  */
 export type BillingPlanList = {
   currency: string;
@@ -343,7 +348,7 @@ export type BillingPlanList = {
   plans: BillingPlanOffer[];
 };
 
-/** The plans this build ships with, which a deployment shows until its first catalog apply. */
+/** The plans this code ships with, which a deployment whose brand has no billing.json shows until its first catalog apply. */
 export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutPlanSlug, interval: BillingInterval) => boolean = () => false): BillingPlanList {
   const currency = "usd";
   return {

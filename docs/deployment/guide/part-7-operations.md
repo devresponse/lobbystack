@@ -413,7 +413,7 @@ LobbyStack deletes some content by itself after a set time, and keeps the rest u
 
 **What LobbyStack keeps, and for how long**
 
-Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:197-221`, `packages/domain/src/server/privacy.ts:9-74`):
+Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:425-437`, `packages/domain/src/server/privacy.ts:9-74`):
 
 | What | Kept |
 | --- | --- |

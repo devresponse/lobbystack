@@ -17,7 +17,7 @@ export function LiveUsageSurface() {
   const { businesses, business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<BillingUsageViewModel>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId) });
   const plan = billing.data?.effectivePlan ?? "free_cloud";
-  // The effective plan's allowances, from the billing catalog once one is applied. Null means custom.
+  // The effective plan's allowances, from the billing catalog once one is applied, else the brand's billing.json as the build carries it. Null means custom.
   const limits = billing.data?.limits;
   const included = (value: number | null | undefined, per = 1) => (value === null || value === undefined ? null : value / per);
   const status = billing.data?.usageStatus ?? {

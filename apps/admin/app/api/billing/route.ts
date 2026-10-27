@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
 import { billingAccounts, billingTransactions, billingUsageEvents } from "@lobbystack/db";
-import { billingAccess, billingPlanList, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -23,9 +23,9 @@ export async function GET(request: Request) {
       // The plan the server enforces, and its limits: a canceled Pro subscription still stores plan "pro".
       const { plan: effectivePlan, limits } = await loadBusinessPlanLimits(tx, businessId);
       const permissions = billingAccess(membership.role, account[0] ?? null, polarCheckoutConfigured(process.env));
-      // The plans as the catalog has them, or this build's before an apply. A price can be bought here when a Polar product sells it.
+      // The plans as the catalog has them, or before an apply as the brand's billing.json sets them in this build. A price can be bought here when a Polar product sells it.
       const { catalog, links } = await loadBillingCatalog(tx, process.env);
-      const plans = billingPlanList(catalog, { checkout: permissions.hasCheckoutAccess, links });
+      const plans = billingPlanList(catalog, { checkout: permissions.hasCheckoutAccess, links, brandCatalog: deploymentBrandCatalog() });
       const availableCheckoutIntervals: HostedCheckoutPlanIntervals = { starter: [], pro: [] };
       for (const plan of hostedCheckoutPlanSlugs) {
         for (const interval of billingIntervals) {

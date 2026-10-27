@@ -36,7 +36,7 @@ The repository is public, so everything in a brand folder is public too.
 
 ### Billing
 
-A brand folder can also hold a `billing.json`: the plans the brand sells, their prices, allowances and overage rates, and any promo plans. `pnpm billing apply` writes it to the deployment's billing catalog and sets Polar up to match, and `pnpm billing verify` checks that the three still agree. [`brands/README.md`](../brands/README.md) describes the file and the commands. The file holds no keys and no Polar product ids: the catalog keeps the ids it links, so the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables aren't needed. Until a deployment applies a `billing.json`, it shows this build's built-in plans in US dollars.
+A brand folder can also hold a `billing.json`: the plans the brand sells, their prices, allowances and overage rates, and any promo plans. `pnpm billing apply` writes it to the deployment's billing catalog and sets Polar up to match, and `pnpm billing verify` checks that the three still agree. [`brands/README.md`](../brands/README.md) describes the file and the commands. The file holds no keys and no Polar product ids: the catalog keeps the ids it links, so the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables aren't needed. Until a deployment applies a `billing.json`, it shows and enforces the four standard plans of the file its build carries, which `pnpm brands:build` writes into the code, or for a brand without a file, the code's built-in plans in US dollars (fork PR #88).
 
 ### How a deployment picks its brand
 

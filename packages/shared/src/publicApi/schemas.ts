@@ -452,7 +452,7 @@ export const apiBillingPlanSchema = z.object({
 
 export const apiBillingPlansSchema = z.object({
   currency: z.string().describe("The prices' currency, three lowercase letters."),
-  source: z.enum(["catalog", "built_in"]).describe("catalog once the deployment applied a billing.json; built_in before that: the plans the running code ships with, in US dollars."),
+  source: z.enum(["catalog", "built_in"]).describe("catalog once the deployment applied a billing.json; built_in before that: the plans the running code carries, its brand's billing.json, or for a brand without one the code's own plans in US dollars."),
   plans: z.array(apiBillingPlanSchema).describe("Free, Starter, Pro and Enterprise, by sort."),
 }).describe("The standard plans this deployment offers, with their allowances and prices.");
 

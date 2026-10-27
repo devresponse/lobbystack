@@ -350,6 +350,9 @@
       "enterpriseSubject": "Enterprise paket",
       "billingIntervalLabel": "Period naplate",
       "annualDiscount": "Uštedite {{percent}}%",
+      "annualFreeMonths_one": "Dobijte {{count}} mesec besplatno!",
+      "annualFreeMonths_few": "Dobijte {{count}} meseca besplatno!",
+      "annualFreeMonths_other": "Dobijte {{count}} meseci besplatno!",
       "customPrice": "Po dogovoru",
       "perMonth": "/mes.",
       "billingIntervals": {

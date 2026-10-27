@@ -361,7 +361,7 @@ export const apiBillingCatalogPriceSchema = z.object({
   period: z.enum(["monthly", "annual"]),
   currency: z.string(),
   cents: z.number().int().describe("The price for one period."),
-  per_month: z.number().int().describe("cents for monthly, cents / 12 rounded down for annual."),
+  per_month: z.number().int().describe("cents for monthly; for annual, cents / 12 rounded to the nearest whole unit of the currency (a multiple of 100)."),
   polar_id: z.string().nullable().describe("The Polar product that sells it, once Polar is seeded."),
   retired_at: nullableTimestamp.describe("When it stopped being sold. Null for a live price."),
   created_at: timestamp,
@@ -425,7 +425,7 @@ export const apiBillingPlanPriceSchema = z.object({
   interval: z.enum(billingIntervals),
   currency: z.string().describe("Three lowercase letters, such as cad."),
   amount_cents: z.number().int().describe("The price for one period."),
-  monthly_amount_cents: z.number().int().describe("amount_cents for monthly, amount_cents / 12 rounded down for annual."),
+  monthly_amount_cents: z.number().int().describe("amount_cents for monthly; for annual, amount_cents / 12 rounded to the nearest whole unit of the currency (a multiple of 100)."),
   checkout_available: z.boolean().describe("true when POST /billing/checkout can sell it here: Polar is set up and one of its products sells this price."),
 });
 

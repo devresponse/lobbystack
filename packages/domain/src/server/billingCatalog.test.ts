@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { billingProfileSchema, type BillingProfile } from "@lobbystack/shared";
+import { billingProfileSchema, perMonthCents, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
@@ -30,7 +30,7 @@ const proLaunch = {
 function stored(plans: DesiredBillingPlan[], status: (plan: DesiredBillingPlan) => StoredBillingPlan["status"] = (plan) => (plan.sold ? "draft" : "active")): { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] } {
   return {
     plans: plans.map(({ prices: _prices, ...plan }) => ({ ...plan, status: status(plan as DesiredBillingPlan), src: "file", polar_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: earlier, updated_at: earlier })),
-    prices: plans.flatMap((plan) => plan.prices.map((price) => ({ id: `${plan.code}-${price.period}-${price.currency}`, plan: plan.code, period: price.period, currency: price.currency, cents: price.cents, per_month: price.period === "annual" ? Math.floor(price.cents / 12) : price.cents, polar_id: null, run_id: null, retired_at: null, created_at: earlier, updated_at: earlier }))),
+    prices: plans.flatMap((plan) => plan.prices.map((price) => ({ id: `${plan.code}-${price.period}-${price.currency}`, plan: plan.code, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: null, run_id: null, retired_at: null, created_at: earlier, updated_at: earlier }))),
   };
 }
 

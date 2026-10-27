@@ -1263,8 +1263,8 @@ export const billingPrices = pgTable(
     currency: char("currency", { length: 3 }).notNull(),
     /** Price for one period. */
     cents: integer("cents").notNull(),
-    /** Price per month, computed: cents, or cents / 12 rounded down for annual. */
-    perMonth: integer("per_month").generatedAlwaysAs(sql`CASE WHEN period = 'annual' THEN cents / 12 ELSE cents END`),
+    /** Price per month, computed: cents, or for annual cents / 12 rounded to a whole unit (migration 0119). */
+    perMonth: integer("per_month").generatedAlwaysAs(sql`CASE WHEN period = 'annual' THEN (round(cents / 1200.0) * 100)::integer ELSE cents END`),
     /** The Polar product that sells it, recorded by a link. */
     polarId: text("polar_id"),
     /** The run that last changed the row. */

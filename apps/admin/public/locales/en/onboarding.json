@@ -202,7 +202,9 @@
       "label": "Billing interval",
       "monthly": "Monthly",
       "annual": "Annual",
-      "save": "Save {{percent}}%"
+      "save": "Save {{percent}}%",
+      "freeMonths_one": "Get {{count}} month for free!",
+      "freeMonths_other": "Get {{count}} months for free!"
     },
     "tiers": {
       "free_cloud": {

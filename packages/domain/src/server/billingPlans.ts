@@ -9,6 +9,7 @@ import {
   cloudBillingPlanSlugs,
   currentBrand,
   hostedCheckoutPlanSlugs,
+  perMonthCents,
   type ApiBillingPlans,
   type BillingInterval,
   type BillingPlanLimits,
@@ -205,7 +206,7 @@ export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | n
       currency: price.currency,
       cents: price.cents,
       // As billing_prices computes per_month.
-      per_month: price.period === "annual" ? Math.floor(price.cents / 12) : price.cents,
+      per_month: perMonthCents(price.period, price.cents),
       polar_id: null,
       retired: false,
     }))),

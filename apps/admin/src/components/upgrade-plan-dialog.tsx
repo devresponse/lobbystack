@@ -12,10 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
+import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
 import {
-  annualSavingPercent,
   type BillingInterval,
   type BillingPlanList,
   type BillingPlanSlug,
@@ -85,7 +84,7 @@ export function UpgradePlanDialog({
   prompt?: ReactNode;
   t: BillingTranslation;
 }) {
-  const annualSaving = annualSavingPercent(plans);
+  const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "billing.upgradeDialog.annualFreeMonths", "billing.upgradeDialog.annualDiscount");
   const availableBillingIntervals = (["monthly", "annual"] as const).filter(
     (interval) =>
       availableCheckoutPlans.some((plan) =>
@@ -126,16 +125,17 @@ export function UpgradePlanDialog({
         {prompt}
 
         <div className="flex justify-center">
+          {/* On a narrow phone the Annual tab puts its badge under its name, and wraps it if need be, rather than overflow the dialog. */}
           <div
             aria-label={t("billing.upgradeDialog.billingIntervalLabel")}
-            className="inline-flex rounded-full border border-border bg-muted/40 p-1"
+            className="inline-flex max-w-full rounded-full border border-border bg-muted/40 p-1"
             role="tablist"
           >
             {switcherIntervals.map((interval) => (
               <Button
                 aria-selected={selectedBillingInterval === interval}
                 className={cn(
-                  "h-9 rounded-full px-4",
+                  "h-auto min-h-9 shrink flex-wrap gap-x-2 gap-y-0.5 whitespace-normal rounded-full px-3 py-1 sm:px-4",
                   selectedBillingInterval === interval
                     ? "bg-background text-foreground shadow-sm hover:bg-background"
                     : "border-transparent bg-transparent text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -148,9 +148,9 @@ export function UpgradePlanDialog({
                 variant="outline"
               >
                 {t(`billing.upgradeDialog.billingIntervals.${interval}`)}
-                {interval === "annual" && annualSaving !== null ? (
-                  <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                    {t("billing.upgradeDialog.annualDiscount", { percent: annualSaving })}
+                {interval === "annual" && annualBadgeText !== null ? (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-center text-xs font-medium text-emerald-700">
+                    {annualBadgeText}
                   </span>
                 ) : null}
               </Button>

@@ -156,7 +156,6 @@ export const billingPlanCatalog = {
     hostedBilling: false,
     monthlyChargeCents: 0,
     annualChargeCents: null,
-    annualEffectiveMonthlyChargeCents: null,
     knowledgeStorageBytes: null,
     voiceSecondsIncluded: null,
     alertSmsSegmentsIncluded: null,
@@ -172,7 +171,6 @@ export const billingPlanCatalog = {
     hostedBilling: true,
     monthlyChargeCents: 0,
     annualChargeCents: null,
-    annualEffectiveMonthlyChargeCents: null,
     knowledgeStorageBytes: 1 * 1024 * 1024,
     voiceSecondsIncluded: 1_800,
     alertSmsSegmentsIncluded: 10,
@@ -188,7 +186,6 @@ export const billingPlanCatalog = {
     hostedBilling: true,
     monthlyChargeCents: 3_000,
     annualChargeCents: 28_800,
-    annualEffectiveMonthlyChargeCents: 2_400,
     knowledgeStorageBytes: 5 * 1024 * 1024,
     voiceSecondsIncluded: 9_000,
     alertSmsSegmentsIncluded: 50,
@@ -204,7 +201,6 @@ export const billingPlanCatalog = {
     hostedBilling: true,
     monthlyChargeCents: 10_000,
     annualChargeCents: 96_000,
-    annualEffectiveMonthlyChargeCents: 8_000,
     knowledgeStorageBytes: 20 * 1024 * 1024,
     voiceSecondsIncluded: 30_000,
     alertSmsSegmentsIncluded: 200,
@@ -220,7 +216,6 @@ export const billingPlanCatalog = {
     hostedBilling: true,
     monthlyChargeCents: null,
     annualChargeCents: null,
-    annualEffectiveMonthlyChargeCents: null,
     knowledgeStorageBytes: null,
     voiceSecondsIncluded: null,
     alertSmsSegmentsIncluded: null,
@@ -238,7 +233,6 @@ export const billingPlanCatalog = {
     hostedBilling: boolean;
     monthlyChargeCents: number | null;
     annualChargeCents: number | null;
-    annualEffectiveMonthlyChargeCents: number | null;
     knowledgeStorageBytes: number | null;
     voiceSecondsIncluded: number | null;
     alertSmsSegmentsIncluded: number | null;
@@ -292,7 +286,7 @@ export type BillingPlanPrice = {
   currency: string;
   /** The price for one period. */
   amountCents: number;
-  /** amountCents, or for annual amountCents / 12 rounded down. */
+  /** What it comes to a month (perMonthCents): amountCents, or for annual a twelfth of it rounded to a whole unit. */
   monthlyAmountCents: number;
   /** A Polar product sells it here, so a plan button can start a checkout or a plan change. */
   checkoutAvailable: boolean;
@@ -360,7 +354,7 @@ export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutP
       if (slug === "starter" || slug === "pro") {
         const starterOrPro = billingPlanCatalog[slug];
         prices.push({ interval: "monthly", currency, amountCents: starterOrPro.monthlyChargeCents, monthlyAmountCents: starterOrPro.monthlyChargeCents, checkoutAvailable: checkoutAvailable(slug, "monthly") });
-        prices.push({ interval: "annual", currency, amountCents: starterOrPro.annualChargeCents, monthlyAmountCents: starterOrPro.annualEffectiveMonthlyChargeCents, checkoutAvailable: checkoutAvailable(slug, "annual") });
+        prices.push({ interval: "annual", currency, amountCents: starterOrPro.annualChargeCents, monthlyAmountCents: perMonthCents("annual", starterOrPro.annualChargeCents), checkoutAvailable: checkoutAvailable(slug, "annual") });
       }
       return {
         slug,
@@ -389,6 +383,33 @@ export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutP
 /** A plan's price for an interval, if it has one. */
 export function billingPlanPrice(plan: Pick<BillingPlanOffer, "prices"> | undefined, interval: BillingInterval): BillingPlanPrice | undefined {
   return plan?.prices.find((price) => price.interval === interval);
+}
+
+/**
+ * What a price comes to a month: a monthly price as it is, an annual one over
+ * twelve months rounded to the nearest whole unit of its currency, so CA$370
+ * a year is CA$31 a month and CA$870 is CA$73. billing_prices.per_month
+ * computes the same (migration 0119). It is only shown: Polar charges the
+ * annual price itself.
+ */
+export function perMonthCents(interval: BillingInterval, cents: number): number {
+  return interval === "annual" ? Math.round(cents / 1200) * 100 : cents;
+}
+
+/**
+ * The months of monthly payments a year of annual billing leaves free, as
+ * every plan with both prices gets at least: 2 where a year costs ten months.
+ * Null when that isn't a whole number of months, at least one, so the plan
+ * screens say the saving as a percent instead.
+ */
+export function annualFreeMonths(list: Pick<BillingPlanList, "plans">): number | null {
+  const months = list.plans.flatMap((plan) => {
+    const monthly = billingPlanPrice(plan, "monthly")?.amountCents ?? 0;
+    const annual = billingPlanPrice(plan, "annual");
+    return annual && monthly > 0 ? [(monthly * 12 - annual.amountCents) / monthly] : [];
+  });
+  const least = months.length ? Math.min(...months) : 0;
+  return least >= 1 && Number.isInteger(least) ? least : null;
 }
 
 /**

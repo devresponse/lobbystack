@@ -38,7 +38,7 @@ Checks keep the shapes apart: a standard plan has no names and no promo fields, 
 | --- | --- |
 | `plan`, `period` | The plan code, and `monthly` or `annual` |
 | `currency`, `cents` | Three lowercase letters, and the price of one period |
-| `per_month` | Computed: `cents`, or `cents / 12` for annual |
+| `per_month` | Computed: `cents`, or for annual `cents / 12` rounded to the nearest whole unit of the currency, so 37000 gives 3100 (`0119`) |
 | `polar_id` | The Polar product that sells it, unique across every plan |
 | `run_id`, `retired_at`, `created_at`, `updated_at` | The run that last changed it, and its times |
 
@@ -106,8 +106,9 @@ The columns the fork added to them:
 | `0114_billing_sweep` | #71 | `app.list_billing_sweep_work` and two partial indexes for it |
 | `0115_billing_email` | #72 | `billing_checkout_requests.billing_email` |
 | `0116_billing_edges` | #75 | The subscription claim, the usage sync columns, and open checkouts counting toward a shared code's limit |
+| `0119_whole_annual_per_month` | #89 | `per_month` rounded to a whole unit, by adding the column again and making `billing_offers` again |
 
-They only add tables, columns, indexes and functions, so rolling back one release leaves the database usable. `0113` fills `billing_code_redemptions` only when the migration signs in as a role that bypasses row-level security, such as `postgres`: its log says `Promo codes: <n> uses by a business recorded.`, or `Skipping the promo code redemption backfill` when it couldn't.
+They only add tables, columns, indexes and functions, and `0119` only changes what `per_month` holds, so rolling back one release leaves the database usable. `0113` fills `billing_code_redemptions` only when the migration signs in as a role that bypasses row-level security, such as `postgres`: its log says `Promo codes: <n> uses by a business recorded.`, or `Skipping the promo code redemption backfill` when it couldn't.
 
 ## Know the database functions
 

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { billingProfileSchema, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "@lobbystack/shared";
+import { billingProfileSchema, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
@@ -53,7 +53,7 @@ async function syncedInstance(file = profile()) {
     created_at: earlier,
     updated_at: earlier,
     discount: plan.discount as Record<string, unknown> | null,
-    prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: price.period === "annual" ? Math.floor(price.cents / 12) : price.cents, polar_id: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
+    prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
   }));
   // The product ID variables are optional, and an instance set up since the catalog has none.
   const productVars: Record<string, string | null> = { "starter/monthly": null, "starter/annual": null, "pro/monthly": null, "pro/annual": null };

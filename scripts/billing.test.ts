@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { billingCatalogWriteOrder, desiredBillingPlans, diffBillingCatalog, diffBillingLinks, type StoredBillingPlan, type StoredBillingPrice } from "../packages/domain/src/server/billingCatalog";
 import { createFakePolar, seedPolarSetup, type FakePolar } from "../packages/domain/src/server/billingPolar.testing";
-import { billingProfileSchema, canonicalBillingProfileJson, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
+import { billingProfileSchema, canonicalBillingProfileJson, perMonthCents, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "../packages/shared/src/index";
 import { runBilling } from "./billing";
 
 // pnpm billing end to end, against the Polar stand-in and a stand-in instance
@@ -42,8 +42,8 @@ function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>
       if (entry.change.action === "insert") instance.plans.push({ polar_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPlan);
       else Object.assign(instance.plans.find((plan) => plan.code === entry.change.key)!, entry.set, { updated_at: now });
     } else if (entry.change.action === "insert") {
-      const set = entry.set as { period: string; cents: number };
-      instance.prices.push({ id: crypto.randomUUID(), polar_id: null, run_id: null, retired_at: null, created_at: now, updated_at: now, per_month: set.period === "annual" ? Math.floor(set.cents / 12) : set.cents, ...entry.set } as StoredBillingPrice);
+      const set = entry.set as { period: "monthly" | "annual"; cents: number };
+      instance.prices.push({ id: crypto.randomUUID(), polar_id: null, run_id: null, retired_at: null, created_at: now, updated_at: now, per_month: perMonthCents(set.period, set.cents), ...entry.set } as StoredBillingPrice);
     } else {
       Object.assign(instance.prices.find((price) => price.id === entry.id)!, entry.set, { updated_at: now });
     }

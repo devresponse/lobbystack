@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OnboardingPlanSurface } from "./onboarding-plan-surface";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
-import { builtInBillingPlanList, type BillingPlanList } from "@lobbystack/shared";
+import { builtInBillingPlanList, perMonthCents, type BillingPlanList } from "@lobbystack/shared";
 
 const route = vi.hoisted(() => ({ router: { push: vi.fn(), replace: vi.fn() }, search: new URLSearchParams() }));
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
@@ -149,9 +149,10 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     const starter = plans.plans.find((plan) => plan.slug === "starter")!;
     starter.included.voiceSeconds = 12_000;
     starter.overageRates.voiceMinuteCents = 25;
-    starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2625, checkoutAvailable: true }];
+    starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2600, checkoutAvailable: true }];
     setup(false, false, "free_cloud", plans);
-    expect(screen.getByText("CA$26.25")).toBeTruthy();
+    // CA$315 a year comes to CA$26.25 a month, which the plan list rounds to whole dollars.
+    expect(screen.getByText("CA$26")).toBeTruthy();
     expect(screen.getByText("CA$0")).toBeTruthy();
     expect(translate).toHaveBeenCalledWith("plan.tiers.starter.highlights.voiceMinutes", { count: 200, rate: "CA$0.25" });
     expect(translate).toHaveBeenCalledWith("plan.tiers.starter.description.annual", { minutes: 200 });
@@ -159,6 +160,19 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     expect(translate).toHaveBeenCalledWith("plan.billingInterval.save", { percent: 20 });
     await userEvent.click(screen.getByRole("tab", { name: "plan.billingInterval.monthly" }));
     expect(screen.getByText("CA$35")).toBeTruthy();
+  });
+  it("says the months a year leaves free when every plan's year costs whole months", () => {
+    const plans = builtInBillingPlanList();
+    plans.currency = "cad";
+    for (const [slug, monthly] of [["starter", 3700], ["pro", 8700]] as const) {
+      plans.plans.find((plan) => plan.slug === slug)!.prices = [{ interval: "monthly", currency: "cad", amountCents: monthly, monthlyAmountCents: monthly, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: monthly * 10, monthlyAmountCents: perMonthCents("annual", monthly * 10), checkoutAvailable: true }];
+    }
+    setup(false, false, "free_cloud", plans);
+    expect(translate).toHaveBeenCalledWith("plan.billingInterval.freeMonths", { count: 2 });
+    expect(screen.getByText("plan.billingInterval.freeMonths")).toBeTruthy();
+    expect(translate.mock.calls.some(([key]) => key === "plan.billingInterval.save")).toBe(false);
+    expect(screen.getByText("CA$31")).toBeTruthy();
+    expect(screen.getByText("CA$73")).toBeTruthy();
   });
   it("promises no annual saving when no plan sells a year", () => {
     const plans = builtInBillingPlanList();

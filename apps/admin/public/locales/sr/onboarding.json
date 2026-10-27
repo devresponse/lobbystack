@@ -202,7 +202,10 @@
       "label": "Period naplate",
       "monthly": "Mesečno",
       "annual": "Godišnje",
-      "save": "Uštedite {{percent}}%"
+      "save": "Uštedite {{percent}}%",
+      "freeMonths_one": "Dobijte {{count}} mesec besplatno!",
+      "freeMonths_few": "Dobijte {{count}} meseca besplatno!",
+      "freeMonths_other": "Dobijte {{count}} meseci besplatno!"
     },
     "tiers": {
       "free_cloud": {

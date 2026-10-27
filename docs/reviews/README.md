@@ -1,6 +1,6 @@
 # Find the reviews
 
-Each review looked at part of the system on a given date and listed what it found. These pages keep the findings and what happened to each since, so they stay useful as the code moves on. For how things work now, follow the links to the feature pages.
+Each review looked at part of the system on a given date and listed what it found. These pages keep the findings and what happened to each since, so they stay useful as the code moves on. For how things work now, follow the links to the feature pages; for what the reviews recommended and nobody has built yet, see the [roadmap](../roadmap/README.md).
 
 | Date | Review | Found | Since |
 | --- | --- | --- | --- |

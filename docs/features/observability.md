@@ -41,6 +41,6 @@ Railway keeps logs 7 days on the Hobby plan and 30 on Pro, and its Monitors need
 
 ## Know what isn't built
 
-- A view of logs and errors inside the dashboard was proposed on 2026-10-09 and is undecided.
+- A view of logs and errors inside the dashboard was proposed on 2026-10-09 and is undecided ([roadmap](../roadmap/call-diagnostics.md)).
 - Twilio's call SID isn't on the worker's lines, and Twilio's price lookup doesn't use it.
 - Nothing checks a deployment automatically after it deploys ([open items](../project/open-items.md)).

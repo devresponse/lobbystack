@@ -8,6 +8,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 - [Deploy it from GitHub](deployment/guide/README.md): the step-by-step guide, from accounts to the first business.
 - [Develop and test](development/README.md): set up a checkout and run the checks a pull request needs.
 - [Track the open items](project/open-items.md): steps to take after deploys, things to test, decisions to make, work not started.
+- [Find the future features](roadmap/README.md): what research proposed and nobody has built yet, one page each, with the plan, the effort and the decisions it waits on.
 
 ## Know the project
 
@@ -18,6 +19,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Changelog](project/changelog.md) | Every pull request merged into the fork's `main`, newest first |
 | [Decisions](project/decisions.md) | The maintainer's decisions, and the architecture decisions (ADRs) |
 | [Open items](project/open-items.md) | What is waiting, and on whom |
+| [Future features](roadmap/README.md) | Sign-in with Google and Microsoft, intake forms, custom voices, each business's own provider keys and the rest of what was researched, each with its plan, effort and status |
 
 ## Deploy and run it
 
@@ -66,7 +68,8 @@ This folder is the project's source of truth: what the fork is and how it got he
 ## Read the reviews and research
 
 - [Reviews](reviews/README.md): the phone call path, the website widget and how far it scales, the whole codebase, what limits scale, and billing, each with what has happened since.
-- [Research](research/README.md): voice platforms, an Azure port, Cloudflare, Railway automation and observability, plus the voice agent market, a QR place guide and the brand name.
+- [Research](research/README.md): voice platforms, an Azure port, Cloudflare, Railway automation, observability, sign-in with Google and Microsoft, forms filled from calls, a cloned voice and each business's own provider keys, plus the voice agent market, a QR place guide and the brand name.
+- [Future features](roadmap/README.md): what the reviews and research proposed and isn't built, kept current where the studies keep their dates.
 
 ## Read the original project's records
 
@@ -83,6 +86,7 @@ The `*.json` files in `validation/` are inputs to the parity scripts and browser
 
 - **Update the docs in the pull request that changes the code:** the feature page it changes, a row in the [changelog](project/changelog.md), [open items](project/open-items.md) for anything left to do after the deploy, the [deployment guide](deployment/guide/README.md) for a new variable or step, the [route catalog](reference/routes.md) for a new page or route, and [decisions](project/decisions.md) for a new decision.
 - **Say what you checked.** A page that describes code names the commit of `main` it was checked against; update it when you check the page again.
+- **Give each proposed feature a roadmap page.** Research or a review that proposes a feature adds a page to the [roadmap](roadmap/README.md); the pull request that builds it describes the feature on its features page and removes the roadmap page.
 - **Keep dated records as they were.** Reviews, research and the original project's records keep what they found on their date, with a note on what has happened since. Fix a wrong fact, but don't rewrite history.
 - **Keep it public.** The repository is public: no secrets, keys, personal names, emails or phone numbers, no customer or demo business data, and no links to private documents ([what stays out](project/overview.md#keep-public-things-public)).
 - **Don't link to the original project's sites.** Name them in words, such as "the original project's documentation".

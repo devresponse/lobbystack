@@ -134,7 +134,7 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 
 ## Know the gaps
 
-- Bots: nothing but rate limits stops a script from opening sessions or starting calls. One script can use a business's hourly session allowance, and a business with a phone number can be called for about $75 a day. Turnstile before opening and before a call, Cloudflare in front, and a per-business call concurrency cap are recommended and not built ([widget scalability](../reviews/widget-scalability-2026-10-15.md)).
+- Bots: nothing but rate limits stops a script from opening sessions or starting calls. One script can use a business's hourly session allowance, and a business with a phone number can be called for about $75 a day. Turnstile before opening and before a call, Cloudflare in front, and a per-business call concurrency cap are recommended and not built ([widget scalability](../reviews/widget-scalability-2026-10-15.md), [roadmap](../roadmap/protect-the-deployment.md)).
 - Capacity: one admin process handled about 400 people chatting at once in a local test. Past that, add admin replicas, which first needs connection pooling ([scalability](../reviews/scalability-2026-10-18.md)).
 - Left from the review's improvement list: stop the 45-second fallback poll and add jitter, measure time to the first word, cache the loader with an ETag, a panel-only layout, Turnstile, and a spending cap per website.
 - Left from the realtime work: hand back an overdue team request when the visitor writes, keep polling whenever live updates are down, link a website call to its widget visitor, and show who replied on Messages.

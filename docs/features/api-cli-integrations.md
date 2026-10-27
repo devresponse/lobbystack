@@ -68,4 +68,4 @@ n8n works with what's there, with no LobbyStack changes:
 - **Triggers:** a webhook made in **Integrations > Webhooks** that posts to an n8n Webhook node. LobbyStack delivers only to public `https://` addresses: it refuses `localhost`, `*.local`, `*.internal` (so `*.railway.internal`) and private IPs.
 - **Signatures:** check them in a Code node with `crypto` (on self-hosted n8n, allow it with `NODE_FUNCTION_ALLOW_BUILTIN=crypto`).
 
-A dedicated n8n node, porting the Zapier app's actions and a trigger that manages its own webhook, would take about 3 to 5 days and isn't built. n8n Cloud shows only verified nodes, which have publishing rules of their own.
+A dedicated n8n node, porting the Zapier app's actions and a trigger that manages its own webhook, would take about 3 to 5 days and isn't built. n8n Cloud shows only verified nodes, which have publishing rules of their own ([roadmap](../roadmap/n8n-and-zapier.md)).

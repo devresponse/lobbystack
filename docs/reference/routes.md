@@ -5,7 +5,7 @@ Every page and HTTP route in the LobbyStack code, written against **https://demo
 | | |
 |---|---|
 | Base URL | `https://demo.alloplace.com` |
-| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16) |
+| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims |
 | How it was made | Read from the code, including every entry file and the files it calls. No route was tried against the live site. |
 | What runs at the base URL | `apps/admin`: the dashboard, sign-in pages, public business pages, the website widget, every HTTP API and the MCP server |
 | Also listed | The worker's internal routes (section 14) and the marketing site's pages (section 15). Neither is served at demo.alloplace.com. |
@@ -420,7 +420,7 @@ A new account lands here, and the dashboard keeps sending it back until its busi
 
 | Address | Page | Onboarding stage | Who | Docs today | Entry file |
 |---|---|---|---|---|---|
-| `https://demo.alloplace.com/onboarding/brand` | "Make this app your own": the app's name and logo | Before the first business, only on a deployment with no brand file. demo.alloplace.com has one (AlloPlace), so it never shows there. | The deployment's first owner | None yet | `apps/admin/app/(onboarding)/onboarding/brand/page.tsx` |
+| `https://demo.alloplace.com/onboarding/brand` | "Make this app your own": the app's name and logo | Before the first business, only where no brand file applies. demo.alloplace.com has one (AlloPlace), and since fork PR #87 so does every other address while AlloPlace is the only brand besides LobbyStack, so it never shows in this code. | The deployment's first owner | None yet | `apps/admin/app/(onboarding)/onboarding/brand/page.tsx` |
 | `https://demo.alloplace.com/onboarding/business` | "First, what is the name of your business?" | `create_business`. `?create=true` starts another business (workspace menu > Create Business). | Signed in | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/business/page.tsx` |
 | `https://demo.alloplace.com/onboarding/website` | "Now let's train {{appName}} on your website" | `website` | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/website/page.tsx` |
 | `https://demo.alloplace.com/onboarding/knowledge` | "Add training documents" | `knowledge` | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/knowledge/page.tsx` |
@@ -455,7 +455,7 @@ Related files: `apps/admin/src/components/onboarding-route-shell.tsx`, `apps/adm
 
 Asks a fresh deployment's first owner, before they name their business, for the product name and logo shown across the deployment. Everyone else is sent on to their current step.
 
-- `GET /onboarding/brand`: It does not call `requireOnboardingStage`. Signed out, it redirects to `/login`. It then calls `asksInitialBranding` (`apps/admin/src/lib/onboarding-branding.ts`): false when a brand file sets the branding, else `canSaveInitialBranding`, true only while nothing is saved and the user is an active `business_owner` of every business. When false it redirects to the user's current step. `OnboardingBrandSurface` posts the name and a base64 logo to `POST /api/branding/initial`, or `{}` on Skip to keep the default and end the choice, then goes to `/onboarding/business`. On `branding_already_saved` or `branding_not_allowed` it reloads `GET /api/branding` and offers Continue.
+- `GET /onboarding/brand`: It does not call `requireOnboardingStage`. Signed out, it redirects to `/login`. It then calls `asksInitialBranding` (`apps/admin/src/lib/onboarding-branding.ts`): false when a brand file sets the branding, picked by the domain, `BRAND_PRESET` or as the only brand besides the default (`brandFileMatched`), else `canSaveInitialBranding`, true only while nothing is saved and the user is an active `business_owner` of every business. When false it redirects to the user's current step. `OnboardingBrandSurface` posts the name and a base64 logo to `POST /api/branding/initial`, or `{}` on Skip to keep the default and end the choice, then goes to `/onboarding/business`. On `branding_already_saved` or `branding_not_allowed` it reloads `GET /api/branding` and offers Continue.
 
 Related files: `apps/admin/src/components/onboarding-brand-surface.tsx`, `apps/admin/src/lib/onboarding-branding.ts`, `packages/domain/src/server/branding.ts`, `apps/admin/app/api/branding/initial/route.ts`.
 
@@ -1697,7 +1697,7 @@ Related files: `packages/domain/src/server/publicProfiles.ts`, `apps/admin/src/c
 | Method | Address | What it does | Who | Entry file |
 |---|---|---|---|---|
 | GET | `https://demo.alloplace.com/api/branding` | The deployment's app name and logo address | Public | `apps/admin/app/api/branding/route.ts` |
-| POST | `https://demo.alloplace.com/api/branding/initial` | Save the name and logo chosen at `/onboarding/brand`. Refused (409) where a brand file sets them, as on demo.alloplace.com. | The deployment's first owner | `apps/admin/app/api/branding/initial/route.ts` |
+| POST | `https://demo.alloplace.com/api/branding/initial` | Save the name and logo chosen at `/onboarding/brand`. Refused (409) where a brand file sets them, as on demo.alloplace.com and, while AlloPlace is the only brand besides LobbyStack, on every address. | The deployment's first owner | `apps/admin/app/api/branding/initial/route.ts` |
 | GET | `https://demo.alloplace.com/api/branding/logo` | The logo uploaded at onboarding (`?v=` makes it cacheable for good; 404 when there is none) | Public | `apps/admin/app/api/branding/logo/route.ts` |
 
 #### Entry files
@@ -1706,7 +1706,7 @@ Related files: `packages/domain/src/server/publicProfiles.ts`, `apps/admin/src/c
 
 Tells prerendered pages the deployment's name and logo. `branding-provider.tsx` fetches it without cookies when a page was built before the database could say, and the onboarding brand screen reads the current choice.
 
-- `GET /api/branding`: Public: no session or business. `loadBranding` (`apps/admin/src/lib/branding.ts`) uses the brand file that matches the deployment, else what onboarding saved in `deployment_branding` (`getSavedBranding`), else the defaults. It caches the result for 30 seconds and falls back to the brand file or defaults when the database read fails. Answers 200 `{ appName, logoUrl }`.
+- `GET /api/branding`: Public: no session or business. `loadBranding` (`apps/admin/src/lib/branding.ts`) uses the brand file the deployment picks, else what onboarding saved in `deployment_branding` (`getSavedBranding`), else the defaults. It caches the result for 30 seconds and falls back to the brand file or defaults when the database read fails. Answers 200 `{ appName, logoUrl }`.
 
 Related files: `apps/admin/src/lib/branding.ts`, `apps/admin/src/components/branding-provider.tsx`, `packages/domain/src/server/branding.ts`.
 
@@ -1714,7 +1714,7 @@ Related files: `apps/admin/src/lib/branding.ts`, `apps/admin/src/components/bran
 
 Saves the deployment's own name and logo from the onboarding brand step (`onboarding-brand-surface.tsx`). Only the deployment's first owner may choose, and only once.
 
-- `POST /api/branding/initial`: `requireApiSession`. When a brand file matches the deployment, it answers 409 `branding_set_by_brand_file`. The body is read up to a logo-sized limit (413 `logo_too_large`) and must be JSON (400 `invalid_json`) with `appName` as text and `logo` as base64, either null (400 `invalid_branding`). `saveInitialBranding` (`packages/domain/src/server/branding.ts`) checks name length, logo size and image type (400 or 413), then calls `app.save_initial_branding`, which inserts the single `deployment_branding` row only if none exists (409 `branding_already_saved`) and the caller owns every business (403 `branding_not_allowed`). It clears the branding cache and answers 200 `{ appName, logoUrl }`.
+- `POST /api/branding/initial`: `requireApiSession`. When a brand file applies to the deployment, by its domain, `BRAND_PRESET` or as the only brand besides the default, it answers 409 `branding_set_by_brand_file`. The body is read up to a logo-sized limit (413 `logo_too_large`) and must be JSON (400 `invalid_json`) with `appName` as text and `logo` as base64, either null (400 `invalid_branding`). `saveInitialBranding` (`packages/domain/src/server/branding.ts`) checks name length, logo size and image type (400 or 413), then calls `app.save_initial_branding`, which inserts the single `deployment_branding` row only if none exists (409 `branding_already_saved`) and the caller owns every business (403 `branding_not_allowed`). It clears the branding cache and answers 200 `{ appName, logoUrl }`.
 
 Related files: `packages/domain/src/server/branding.ts`, `packages/db/migrations/0098_deployment_branding.sql`, `apps/admin/src/components/onboarding-brand-surface.tsx`, `apps/admin/src/lib/branding.ts`.
 
@@ -2932,7 +2932,7 @@ Related files: `apps/admin/src/lib/release-version.ts`.
 
 Readiness probe for the admin app; Railway's deployment health check (`.railway/railway.ts`) waits on it. It reports whether PostgreSQL, file storage and Redis answer, plus which brand the build serves.
 
-- `GET /api/health/ready`: Public; maintenance mode lets it through. Runs in parallel `databaseHealthCheck` from `packages/db/src/client.ts` (`select 1` on the `lobbystack_app` role), `getStorageProvider().ensureReady()` (an S3 bucket check or a local disk write and read) and a Redis `ping` (required in production, skipped elsewhere without `REDIS_URL`). Answers `{ ok, service, brand: { id, source }, checks: { database, storage, redis } }`, each check `ok` or `failed`: 200 when all pass, otherwise 503. An unexpected error gives 503 with every check `failed` and no `brand`.
+- `GET /api/health/ready`: Public; maintenance mode lets it through. Runs in parallel `databaseHealthCheck` from `packages/db/src/client.ts` (`select 1` on the `lobbystack_app` role), `getStorageProvider().ensureReady()` (an S3 bucket check or a local disk write and read) and a Redis `ping` (required in production, skipped elsewhere without `REDIS_URL`). Answers `{ ok, service, brand: { id, source }, checks: { database, storage, redis } }`, where `source` is `apex`, `preset`, `only` or `default` (`packages/shared/src/brands/resolve.ts`), and each check `ok` or `failed`: 200 when all pass, otherwise 503. An unexpected error gives 503 with every check `failed` and no `brand`.
 
 Related files: `packages/db/src/client.ts`, `apps/admin/src/lib/storage.ts`, `apps/admin/src/lib/redis.ts`.
 

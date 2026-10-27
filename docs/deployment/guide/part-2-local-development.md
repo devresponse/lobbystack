@@ -1,6 +1,6 @@
 # Part 2. Local development and testing
 
-**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested.
+**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)).
 
 This part puts a complete LobbyStack on your own computer. It's the safest place to learn how LobbyStack works and to try changes, because nothing you do here reaches real customers. There are two ways to run it:
 
@@ -113,7 +113,7 @@ To stop, press Ctrl+C in the terminal running `pnpm dev`. The marketing site can
 
 ## 2.5 Way B: run everything in Docker
 
-**Untested:** the test machine couldn't build the images. These steps come from `docs/voice/local-debugging.md` and `docker-compose.yml`.
+**Run once,** on Windows 11 on 2026-10-26 with `c074ae4`: the images built and every service became healthy. That clone was made before fork PR #83, so its files first needed Linux line endings, and IIS held port 80, so Caddy needed `HTTP_PORT` ([2.10](#210-if-something-fails-locally)). The steps come from `docs/voice/local-debugging.md` and `docker-compose.yml`.
 
 1. Stop Way A first with Ctrl+C, because Way B uses the same ports.
 2. Build and start everything:
@@ -201,7 +201,8 @@ pnpm build
 | `required variable BETTER_AUTH_SECRET is missing a value` | There's no `.env` | `pnpm env:generate` |
 | The apps can't sign in to the database: `password authentication failed` or `is not permitted to log in` | The database first started with other passwords, or with Windows line endings in a clone made before fork PR #83 | `git pull` for the line endings, then `docker compose down -v` and start again |
 | A container keeps restarting with `must not use a placeholder value in production` (Way B) | `.env` was copied instead of generated | `pnpm env:generate --force`, then `docker compose down -v` |
-| `Ports are not available` | Another program uses the port, or Windows reserved it | Change the port in `.env`, along with the addresses that contain it |
+| `Ports are not available` | Another program uses the port, or Windows reserved it. On Windows, IIS often holds port 80, which Way B's Caddy uses | Change the port in `.env`, along with the addresses that contain it. For Caddy, add `HTTP_PORT=8080` to `.env.local`; the dashboard stays at `http://localhost:13000` |
+| Way B's build stops with `failed to receive status: rpc error: code = Unavailable desc = error reading from server: EOF` | Docker Desktop restarted during the build. On Windows, event 2004 in Event Viewer's System log means Windows ran low on virtual memory | Close programs you don't need or restart Windows, then build one image at a time with the same `--env-file` options: `build worker`, then `build admin`, then `up -d` |
 | `429 Too Many Requests` while downloading an image | Docker Hub's limit for downloads without an account | `docker login`, or try again later |
 | The worker stops with `listen EAFNOSUPPORT` | The computer has IPv6 switched off | Switch IPv6 back on |
 

@@ -6,7 +6,7 @@ import { requestJson } from "@/lib/request-json";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { useStepNavigation } from "@/lib/use-step-navigation";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { annualSavingPercent, brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
+import { brandLinks, contactEmailFor, type BillingPlanList, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowRight, Check, LoaderCircle } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
@@ -16,7 +16,7 @@ import { FieldError } from "@/components/ui/field";
 import { OnboardingPlanComparison } from "@/components/onboarding-plan-comparison";
 import { PromoCodeEntry } from "@/components/promo-code-entry";
 import { useTelemetry } from "@/components/product-analytics";
-import { findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
+import { annualBadge, findPlan, formatMoney, monthlyPriceCents, planStringValues, planValues } from "@/lib/billing-plans";
 import { cn } from "@/lib/utils";
 
 type BillingInterval = "monthly" | "annual";
@@ -183,14 +183,15 @@ export function OnboardingPlanSurface() {
     </section>;
   }
   const locale = i18n.language;
-  const annualSaving = annualSavingPercent(plans);
+  const annualBadgeText = annualBadge(plans, (key, options) => t(key, options), "plan.billingInterval.freeMonths", "plan.billingInterval.save");
 
   return (
     <div className="flex flex-col gap-12">
 
       <div className="flex justify-center">
-        <div aria-label={t("plan.billingInterval.label")} className="inline-flex rounded-full border border-border bg-input/30 p-1" role="tablist">
-          {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-9 rounded-full px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualSaving !== null ? <span className="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">{t("plan.billingInterval.save", { percent: annualSaving })}</span> : null}</Button>)}
+        {/* On a narrow phone the Annual tab puts its badge under its name, and wraps it if need be, rather than overflow the screen. */}
+        <div aria-label={t("plan.billingInterval.label")} className="inline-flex max-w-full rounded-full border border-border bg-input/30 p-1" role="tablist">
+          {(["monthly", "annual"] as const).map((value) => <Button aria-selected={interval === value} className={cn("h-auto min-h-9 shrink flex-wrap gap-x-2 gap-y-0.5 whitespace-normal rounded-full px-3 py-1 sm:px-4", interval === value ? "bg-background text-foreground shadow-sm hover:bg-background" : "border-transparent bg-transparent text-muted-foreground hover:bg-muted")} disabled={Boolean(pendingPlan) || (availableIntervals.length > 0 && !availableIntervals.includes(value))} key={value} onClick={() => setInterval(value)} role="tab" size="sm" type="button" variant="outline">{t(`plan.billingInterval.${value}`)}{value === "annual" && annualBadgeText !== null ? <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-center text-xs font-medium text-emerald-700">{annualBadgeText}</span> : null}</Button>)}
         </div>
       </div>
       {/* A promo link's code waits here from sign-up, filled in and checked. */}

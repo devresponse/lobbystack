@@ -350,6 +350,9 @@
       "enterpriseSubject": "Plan Enterprise",
       "billingIntervalLabel": "Periodicidad de facturación",
       "annualDiscount": "Ahorre un {{percent}} %",
+      "annualFreeMonths_one": "¡Obtenga {{count}} mes gratis!",
+      "annualFreeMonths_many": "¡Obtenga {{count}} meses gratis!",
+      "annualFreeMonths_other": "¡Obtenga {{count}} meses gratis!",
       "customPrice": "A medida",
       "perMonth": "/mes",
       "billingIntervals": {

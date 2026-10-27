@@ -122,6 +122,7 @@ export const SCHEMA_MIGRATIONS = [
   "0116_billing_edges.sql",
   "0117_call_transcript_emails.sql",
   "0118_call_recording_notice.sql",
+  "0119_whole_annual_per_month.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

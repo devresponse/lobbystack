@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  annualFreeMonths,
   annualSavingPercent,
   billableVoiceSeconds,
   billingPlanCatalog,
@@ -15,6 +16,7 @@ import {
   planChangeDirection,
   planChangeRefusalOf,
   planChangeRefusals,
+  perMonthCents,
 } from "./billing";
 
 describe("knowledge storage limits", () => {
@@ -85,7 +87,6 @@ describe("hosted plan pricing", () => {
     expect(billingPlanCatalog.starter.voiceSecondsIncluded).toBe(9_000);
     expect(billingPlanCatalog.starter.voiceOverageRatePerMinuteCents).toBe(20);
     expect(billingPlanCatalog.starter.monthlyChargeCents).toBe(3_000);
-    expect(billingPlanCatalog.starter.annualEffectiveMonthlyChargeCents).toBe(2_400);
     expect(billingPlanCatalog.starter.annualChargeCents).toBe(28_800);
   });
 
@@ -93,7 +94,6 @@ describe("hosted plan pricing", () => {
     expect(billingPlanCatalog.pro.voiceSecondsIncluded).toBe(30_000);
     expect(billingPlanCatalog.pro.voiceOverageRatePerMinuteCents).toBe(18);
     expect(billingPlanCatalog.pro.monthlyChargeCents).toBe(10_000);
-    expect(billingPlanCatalog.pro.annualEffectiveMonthlyChargeCents).toBe(8_000);
     expect(billingPlanCatalog.pro.annualChargeCents).toBe(96_000);
   });
 });
@@ -175,6 +175,25 @@ describe("built-in plan list", () => {
     expect(billingPlanPrice(list.plans[2], "annual")?.checkoutAvailable).toBe(true);
     expect(list.plans[3]!.included.voiceSeconds).toBeNull();
     expect(list.plans.map((plan) => plan.sortOrder)).toEqual([0, 10, 20, 30]);
+  });
+
+  it("spreads an annual price over twelve months in whole units of its currency", () => {
+    expect(perMonthCents("annual", 37_000)).toBe(3_100);
+    expect(perMonthCents("annual", 87_000)).toBe(7_300);
+    expect(perMonthCents("annual", 28_800)).toBe(2_400);
+    expect(perMonthCents("annual", 36_588)).toBe(3_000);
+    expect(perMonthCents("monthly", 3_750)).toBe(3_750);
+    expect(billingPlanPrice(builtInBillingPlanList().plans[2], "annual")?.monthlyAmountCents).toBe(8_000);
+  });
+
+  it("finds the whole months free every plan with both prices gets from paying yearly", () => {
+    const price = (interval: "monthly" | "annual", amountCents: number) => ({ interval, currency: "cad", amountCents, monthlyAmountCents: amountCents, checkoutAvailable: true });
+    expect(annualFreeMonths({ plans: [{ prices: [price("monthly", 3700), price("annual", 37_000)] }, { prices: [price("monthly", 8700), price("annual", 87_000)] }] as never })).toBe(2);
+    expect(annualFreeMonths({ plans: [{ prices: [price("monthly", 3000), price("annual", 33_000)] }, { prices: [price("monthly", 10_000), price("annual", 100_000)] }] as never })).toBe(1);
+    // The built-in plans save 20%, 2.4 months, which the screens say as a percent.
+    expect(annualFreeMonths(builtInBillingPlanList())).toBeNull();
+    expect(annualFreeMonths({ plans: [{ prices: [price("monthly", 3000), price("annual", 34_500)] }] as never })).toBeNull();
+    expect(annualFreeMonths({ plans: [{ prices: [price("monthly", 3000)] }] as never })).toBeNull();
   });
 
   it("finds the saving every plan with both prices gets from paying yearly", () => {

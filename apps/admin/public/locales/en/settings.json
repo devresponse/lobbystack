@@ -347,6 +347,8 @@
       "enterpriseSubject": "Enterprise plan",
       "billingIntervalLabel": "Billing interval",
       "annualDiscount": "Save {{percent}}%",
+      "annualFreeMonths_one": "Get {{count}} month for free!",
+      "annualFreeMonths_other": "Get {{count}} months for free!",
       "customPrice": "Custom",
       "perMonth": "/mo",
       "billingIntervals": {

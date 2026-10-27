@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
-import { builtInBillingPlanList, type BillingPlanList } from "@lobbystack/shared";
+import { billingPlanPrice, builtInBillingPlanList, perMonthCents, type BillingPlanList } from "@lobbystack/shared";
 import { UpgradePlanDialog } from "./upgrade-plan-dialog";
 
 type Props = ComponentProps<typeof UpgradePlanDialog>;
@@ -65,7 +65,7 @@ describe("main upgrade dialog", () => {
     const starter = plans.plans.find(plan => plan.slug === "starter")!;
     starter.included = { ...starter.included, voiceSeconds: 12_000, businessNumbers: 2, alertSmsSegments: 75 };
     starter.overageRates = { ...starter.overageRates, voiceMinuteCents: 25 };
-    starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2625, checkoutAvailable: true }];
+    starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2600, checkoutAvailable: true }];
     setup({ plans, billingInterval: "monthly" });
     expect(screen.getByText("CA$35")).toBeTruthy();
     expect(screen.getByText("CA$0")).toBeTruthy();
@@ -78,7 +78,22 @@ describe("main upgrade dialog", () => {
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.annualDiscount", { percent: 20 });
     cleanup();
     setup({ plans, billingInterval: "annual" });
-    expect(screen.getByText("CA$26.25")).toBeTruthy();
+    // CA$315 a year comes to CA$26.25 a month, which the plan list rounds to whole dollars.
+    expect(screen.getByText("CA$26")).toBeTruthy();
+  });
+  it("says the months a year leaves free when every plan's year costs whole months", () => {
+    const plans = builtInBillingPlanList();
+    for (const plan of plans.plans) {
+      const monthly = billingPlanPrice(plan, "monthly");
+      if (monthly) plan.prices = [monthly, { ...monthly, interval: "annual", amountCents: monthly.amountCents * 10, monthlyAmountCents: perMonthCents("annual", monthly.amountCents * 10) }];
+    }
+    setup({ plans, billingInterval: "annual" });
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.annualFreeMonths", { count: 2 });
+    expect(screen.getByText("billing.upgradeDialog.annualFreeMonths")).toBeTruthy();
+    expect(translate).not.toHaveBeenCalledWith("billing.upgradeDialog.annualDiscount", expect.anything());
+    // $300 and $1,000 a year come to $25 and $83 a month.
+    expect(screen.getByText("$25")).toBeTruthy();
+    expect(screen.getByText("$83")).toBeTruthy();
   });
   it("leaves out the saving badge when paying yearly saves nothing", () => {
     const plans = builtInBillingPlanList();

@@ -141,7 +141,7 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       expect(first.run.ended_at).not.toBeNull();
       expect(Object.fromEntries((await rows(tx, sql`select code, status, src, access from public.billing_plans`)).map((row) => [row.code, `${String(row.status)} ${String(row.src)} ${String(row.access)}`]))).toEqual({ free_cloud: "active file public", starter: "draft file public", pro: "draft file public", enterprise: "active file hidden" });
       expect((await rows(tx, sql`select distinct run_id from public.billing_plans union select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
-      expect((await prices(tx, "starter")).map((row) => [row.period, row.cents, row.per_month])).toEqual([["annual", 37000, 3083], ["monthly", 3700, 3700]]);
+      expect((await prices(tx, "starter")).map((row) => [row.period, row.cents, row.per_month])).toEqual([["annual", 37000, 3100], ["monthly", 3700, 3700]]);
 
       const again = await apply(tx, file());
       expect(again.run).toMatchObject({ status: "unchanged", changes: [], prev_hash: first.run.hash, hash: first.run.hash });
@@ -471,7 +471,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       expect(applied.plans.map((plan) => plan.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
       const pro = applied.plans.find((plan) => plan.slug === "pro")!;
       expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
-      expect(pro.prices.map((price) => [price.interval, price.currency, price.amount_cents, price.monthly_amount_cents, price.checkout_available])).toEqual([["monthly", "cad", 8_700, 8_700, true], ["annual", "cad", 87_000, 7_250, false]]);
+      expect(pro.prices.map((price) => [price.interval, price.currency, price.amount_cents, price.monthly_amount_cents, price.checkout_available])).toEqual([["monthly", "cad", 8_700, 8_700, true], ["annual", "cad", 87_000, 7_300, false]]);
       expect(applied.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [] });
 
       const { plans } = await seededPolar(file());
@@ -676,7 +676,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file(withExamples("pro-launch")));
       await as(tx, "owner");
-      expect((await prices(tx, "pro")).map((row) => [row.period, row.cents, row.per_month])).toEqual([["annual", 87000, 7250], ["monthly", 8700, 8700]]);
+      expect((await prices(tx, "pro")).map((row) => [row.period, row.cents, row.per_month])).toEqual([["annual", 87000, 7300], ["monthly", 8700, 8700]]);
       const check = async (statement: ReturnType<typeof sql>, constraint: string) => expect(await failure(tx, statement)).toEqual({ code: "23514", constraint });
       await check(sql`update public.billing_plans set names = ${JSON.stringify(names("Pro"))}::jsonb where code = 'pro'`, "billing_plans_standard");
       await check(sql`update public.billing_plans set access = 'code' where code = 'pro'`, "billing_plans_standard");
@@ -765,7 +765,7 @@ describe.skipIf(!testUrl)("billing catalog tables", () => {
 
       const q1 = sql`SELECT code, tier, names, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, period, currency, cents, per_month FROM billing_offers ORDER BY sort, code, period`;
       await as(tx, "lobbystack_app");
-      expect((await rows(tx, q1)).map((row) => [row.code, row.period, row.cents, row.per_month])).toEqual([["free_cloud", null, null, null], ["starter", "annual", 37000, 3083], ["starter", "monthly", 3700, 3700], ["pro", "annual", 87000, 7250], ["pro", "monthly", 8700, 8700]]);
+      expect((await rows(tx, q1)).map((row) => [row.code, row.period, row.cents, row.per_month])).toEqual([["free_cloud", null, null, null], ["starter", "annual", 37000, 3100], ["starter", "monthly", 3700, 3700], ["pro", "annual", 87000, 7300], ["pro", "monthly", 8700, 8700]]);
       const q3 = sql`SELECT polar_id, polar_disc, months, ends FROM billing_offers WHERE code = ${"pro-launch"} AND period = ${"monthly"}`;
       expect(await rows(tx, q3)).toEqual([]);
 

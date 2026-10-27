@@ -33,8 +33,9 @@ AlloPlace's plans, from [`brands/alloplace/billing.json`](../../brands/alloplace
 - A paid plan can have a monthly spending cap on its overage, set in **Settings > Plan** or with `pnpm lobbystack billing cap`. Since fork PR #68 the cap refuses only usage that itself pushes spend past it, so included minutes always work and website chats never stop.
 - A plan includes at most one phone number (fork PR #70), and a phone number claim counts the numbers the plan includes (fork PR #66): Free can't claim one.
 - Promo plans, sold only through codes, can carry their own allowances, storage and overage rates in place of their tier's. Their data retention and features stay the tier's.
+- The plan screens and the plans API show a yearly price as what it comes to a month: the price over twelve months, rounded to the nearest whole dollar, so Starter shows CA$31 and Pro CA$73 a month (fork PR #89). Polar charges the yearly price itself. The **Annual** tab says **Get 2 months for free!** when every plan's year costs a whole number of months, as AlloPlace's cost ten; otherwise it says the percent saved, such as the built-in plans' **Save 20%**.
 
-Until `pnpm billing apply` has run on a deployment, the dashboard shows and enforces the four standard plans of its brand's `billing.json` as the build carries them, in the file's currency, so AlloPlace shows the table above from its first start (fork PR #88). It sells them only through the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables, if they are set. A brand without a file, such as LobbyStack, gets the code's built-in plans: the same numbers in US dollars.
+Until `pnpm billing apply` has run on a deployment, the dashboard shows and enforces the four standard plans of its brand's `billing.json` as the build carries them, in the file's currency, so AlloPlace shows the table above from its first start (fork PR #88). It sells them only through the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables, if they are set. A brand without a file, such as LobbyStack, gets the code's built-in plans: the same allowances and rates, in US dollars, at $30 and $100 a month or $288 and $960 a year.
 
 ## Follow the money
 

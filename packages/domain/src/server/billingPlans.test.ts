@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
-import { billingProfileSchema, builtInBillingPlanLimits, resolveBillingPlans } from "@lobbystack/shared";
+import { billingProfileSchema, builtInBillingPlanLimits, perMonthCents, resolveBillingPlans } from "@lobbystack/shared";
 
 import { billingPlanLimitBook, billingPlanLimits, billingPlanList, brandBillingCatalog, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
 
@@ -11,7 +11,7 @@ const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["st
   sort: { free_cloud: 0, starter: 10, pro: 20, enterprise: 30 }[code], ...extra,
 });
 const price = (planCode: string, period: CatalogPrice["period"], cents: number, polarId: string | null, extra: Partial<CatalogPrice> = {}): CatalogPrice => ({
-  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: period === "annual" ? Math.floor(cents / 12) : cents, polar_id: polarId, retired: false, ...extra,
+  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: perMonthCents(period, cents), polar_id: polarId, retired: false, ...extra,
 });
 const variables = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "var_starter_month", POLAR_STARTER_ANNUAL_PRODUCT_ID: "var_starter_year", POLAR_PRO_MONTHLY_PRODUCT_ID: " var_pro_month ", POLAR_PRO_ANNUAL_PRODUCT_ID: "" };
 const empty: BillingCatalogSnapshot = { plans: [], prices: [] };
@@ -104,8 +104,9 @@ describe("plan list", () => {
     const [free, starter, pro, enterprise] = list.plans;
     expect(free).toMatchObject({ overagesBillable: false, prices: [], included: { voiceSeconds: 1_800, businessNumbers: 0 } });
     expect(starter).toMatchObject({ included: { voiceSeconds: 12_000 } });
-    expect(starter!.prices.map((entry) => [entry.interval, entry.currency, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", "cad", 3700, 3700, true], ["annual", "cad", 37_000, 3083, true]]);
-    expect(pro!.prices.map((entry) => [entry.interval, entry.amountCents, entry.checkoutAvailable])).toEqual([["monthly", 8700, true], ["annual", 87_000, false]]);
+    expect(starter!.prices.map((entry) => [entry.interval, entry.currency, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", "cad", 3700, 3700, true], ["annual", "cad", 37_000, 3100, true]]);
+    // A year comes to whole dollars a month: CA$370 to CA$31 and CA$870 to CA$73.
+    expect(pro!.prices.map((entry) => [entry.interval, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", 8700, 8700, true], ["annual", 87_000, 7300, false]]);
     expect(enterprise).toMatchObject({ custom: true, prices: [], included: { voiceSeconds: null } });
     // Without checkout for this caller, nothing is available.
     expect(billingPlanList(empty, { checkout: false, links: polarProductLinks(empty, variables), brandCatalog }).plans.flatMap((entry) => entry.prices).some((entry) => entry.checkoutAvailable)).toBe(false);
@@ -196,7 +197,7 @@ describe("brand catalog", () => {
     expect(catalog.plans.map((entry) => [entry.code, entry.status, entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort])).toEqual(standard.map((entry) => [entry.code, entry.sold ? "draft" : "active", entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort]));
     expect(catalog.prices).toEqual(standard.flatMap((entry) => entry.prices.map((value) => ({
       plan: entry.code, tier: entry.code, status: entry.sold ? "draft" : "active", period: value.period, currency: profile.currency, cents: value.cents,
-      per_month: value.period === "annual" ? Math.floor(value.cents / 12) : value.cents, polar_id: null, retired: false,
+      per_month: perMonthCents(value.period, value.cents), polar_id: null, retired: false,
     }))));
     // A brand without a billing.json keeps the built-in plans.
     expect(brandBillingCatalog("lobbystack")).toBeNull();

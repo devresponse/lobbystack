@@ -128,7 +128,7 @@ Found while checking fork PR #59, on `main` at `a44f995`:
 
 Found while checking fork PR #61, on `main` at `b6ba2aa`:
 
-96. `pnpm billing verify` and the worker's daily check still count each `POLAR_…_PRODUCT_ID` that's unset, or differs from the product its price is linked to, as drift, saying "Checkout still reads the variable: set it on Railway and redeploy." (`packages/domain/src/server/billingVerify.ts:158-168`). Since fork PR #61, checkout reads a variable only for a plan no link has made active (`packages/domain/src/server/billingPlans.ts:127-131`), so the message is out of date, but leaving the four unset still ends `verify` with exit 1 and makes the worker send `ops.billing.profile_drift` every day. Since fork PR #66, `verify` skips a variable that isn't set and lists one that is as `info` or `warn`, neither of which fails it. **(fixed in `d800141`)**
+96. `pnpm billing verify` and the worker's daily check still count each `POLAR_…_PRODUCT_ID` that's unset, or differs from the product its price is linked to, as drift, saying "Checkout still reads the variable: set it on Railway and redeploy." (`packages/domain/src/server/billingVerify.ts:158-168`). Since fork PR #61, checkout reads a variable only for a plan no link has made active (`packages/domain/src/server/billingPlans.ts:128-132`), so the message is out of date, but leaving the four unset still ends `verify` with exit 1 and makes the worker send `ops.billing.profile_drift` every day. Since fork PR #66, `verify` skips a variable that isn't set and lists one that is as `info` or `warn`, neither of which fails it. **(fixed in `d800141`)**
 
 Found while checking fork PR #74, on `main` at `7d20322`:
 

@@ -202,7 +202,10 @@
       "label": "Periodo de facturación",
       "monthly": "Mensual",
       "annual": "Anual",
-      "save": "Ahorre un {{percent}} %"
+      "save": "Ahorre un {{percent}} %",
+      "freeMonths_one": "¡Obtenga {{count}} mes gratis!",
+      "freeMonths_many": "¡Obtenga {{count}} meses gratis!",
+      "freeMonths_other": "¡Obtenga {{count}} meses gratis!"
     },
     "tiers": {
       "free_cloud": {

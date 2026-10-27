@@ -1,4 +1,4 @@
-import { billingPlanPrice, type BillingInterval, type BillingPlanList, type BillingPlanOffer, type CloudBillingPlanSlug } from "@lobbystack/shared";
+import { annualFreeMonths, annualSavingPercent, billingPlanPrice, type BillingInterval, type BillingPlanList, type BillingPlanOffer, type CloudBillingPlanSlug } from "@lobbystack/shared";
 
 import { intlLocale } from "./locale";
 
@@ -38,11 +38,23 @@ export function findPlan(list: BillingPlanList | undefined, slug: CloudBillingPl
   return list?.plans.find((plan) => plan.slug === slug);
 }
 
-/** What a plan costs a month on an interval, an annual price spread over twelve months; undefined where that interval isn't sold. */
+/** What a plan costs a month on an interval, an annual price spread over twelve months in whole units; undefined where that interval isn't sold. */
 export function monthlyPriceCents(plan: BillingPlanOffer | undefined, interval: BillingInterval): number | undefined {
   const price = billingPlanPrice(plan, interval);
   if (!price) return undefined;
   return interval === "annual" ? price.monthlyAmountCents : price.amountCents;
+}
+
+/**
+ * What the Annual tab's badge says: the months a year leaves free, such as
+ * "Get 2 months for free!" where a year costs ten months, else the percent
+ * it saves, else nothing. monthsKey takes {{count}} and percentKey {{percent}}.
+ */
+export function annualBadge(list: Pick<BillingPlanList, "plans">, t: (key: string, options: Record<string, unknown>) => string, monthsKey: string, percentKey: string): string | null {
+  const months = annualFreeMonths(list);
+  if (months !== null) return t(monthsKey, { count: months });
+  const percent = annualSavingPercent(list);
+  return percent === null ? null : t(percentKey, { percent });
 }
 
 /** A storage limit in whole megabytes, or gigabytes from one gigabyte up. */

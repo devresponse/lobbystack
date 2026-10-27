@@ -350,6 +350,9 @@
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez {{percent}} %",
+      "annualFreeMonths_one": "Obtenez {{count}} mois gratuit\u00a0!",
+      "annualFreeMonths_many": "Obtenez {{count}} mois gratuits\u00a0!",
+      "annualFreeMonths_other": "Obtenez {{count}} mois gratuits\u00a0!",
       "customPrice": "Sur mesure",
       "perMonth": "/mois",
       "billingIntervals": {

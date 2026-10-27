@@ -108,12 +108,12 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
         {
           "period": "annual",
           "currency": "cad",
-          "cents": 28800
+          "cents": 37000
         },
         {
           "period": "monthly",
           "currency": "cad",
-          "cents": 3000
+          "cents": 3700
         }
       ]
     },
@@ -136,12 +136,12 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
         {
           "period": "annual",
           "currency": "cad",
-          "cents": 96000
+          "cents": 87000
         },
         {
           "period": "monthly",
           "currency": "cad",
-          "cents": 10000
+          "cents": 8700
         }
       ]
     },

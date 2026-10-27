@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { builtInBillingPlanLimits } from "@lobbystack/shared";
+import { readFileSync } from "node:fs";
 
-import { billingPlanLimits, billingPlanList, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
+import { describe, expect, it } from "vitest";
+import { billingProfileSchema, builtInBillingPlanLimits, resolveBillingPlans } from "@lobbystack/shared";
+
+import { billingPlanLimitBook, billingPlanLimits, billingPlanList, brandBillingCatalog, polarCheckoutConfigured, polarProductLinks, type BillingCatalogSnapshot, type CatalogPrice, type CatalogStandardPlan } from "./billingPlans";
 
 const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["status"], extra: Partial<CatalogStandardPlan> = {}): CatalogStandardPlan => ({
   code, status, sold: code === "starter" || code === "pro", custom: code === "enterprise", overage: code !== "free_cloud",
@@ -13,6 +15,21 @@ const price = (planCode: string, period: CatalogPrice["period"], cents: number, 
 });
 const variables = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "var_starter_month", POLAR_STARTER_ANNUAL_PRODUCT_ID: "var_starter_year", POLAR_PRO_MONTHLY_PRODUCT_ID: " var_pro_month ", POLAR_PRO_ANNUAL_PRODUCT_ID: "" };
 const empty: BillingCatalogSnapshot = { plans: [], prices: [] };
+// A brand file's catalog as a build carries it: sold plans in draft, nothing linked.
+const brandCatalog: BillingCatalogSnapshot = {
+  plans: [
+    plan("free_cloud", "active", { sold: false, voice_sec: 1_800, sms_seg: 10, calls_out: 2, chat_units: 5, kb_bytes: 1_048_576, numbers: 0, voice_rate: null, sms_rate: null, call_rate: null, sort: 10 }),
+    plan("starter", "draft", { voice_sec: 12_000, sort: 20 }),
+    plan("pro", "draft", { voice_sec: 30_000, voice_rate: 18, sort: 30 }),
+    plan("enterprise", "active", { sold: false, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 40 }),
+  ],
+  prices: [
+    price("starter", "annual", 37_000, null, { status: "draft" }),
+    price("starter", "monthly", 3700, null, { status: "draft" }),
+    price("pro", "annual", 87_000, null, { status: "draft" }),
+    price("pro", "monthly", 8700, null, { status: "draft" }),
+  ],
+};
 
 describe("Polar product links", () => {
   it("sells through the product variables before the catalog has rows", () => {
@@ -76,6 +93,30 @@ describe("plan list", () => {
     expect(billingPlanList(empty, { checkout: false, links: polarProductLinks(empty, variables) }).plans.flatMap((entry) => entry.prices).some((entry) => entry.checkoutAvailable)).toBe(false);
     // Only Free's row isn't enough to switch to the catalog.
     expect(billingPlanList({ plans: [plan("free_cloud", "active")], prices: [] }, { checkout: true, links: polarProductLinks(empty, {}) }).source).toBe("built_in");
+    // A brand without a billing.json, such as LobbyStack, keeps them.
+    expect(billingPlanList(empty, { checkout: true, links: polarProductLinks(empty, variables), brandCatalog: null })).toEqual(list);
+  });
+
+  it("shows the brand file's plans in its currency before an apply, sold through the variables", () => {
+    const list = billingPlanList(empty, { checkout: true, links: polarProductLinks(empty, variables), brandCatalog });
+    expect(list).toMatchObject({ currency: "cad", source: "built_in" });
+    expect(list.plans.map((entry) => entry.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+    const [free, starter, pro, enterprise] = list.plans;
+    expect(free).toMatchObject({ overagesBillable: false, prices: [], included: { voiceSeconds: 1_800, businessNumbers: 0 } });
+    expect(starter).toMatchObject({ included: { voiceSeconds: 12_000 } });
+    expect(starter!.prices.map((entry) => [entry.interval, entry.currency, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", "cad", 3700, 3700, true], ["annual", "cad", 37_000, 3083, true]]);
+    expect(pro!.prices.map((entry) => [entry.interval, entry.amountCents, entry.checkoutAvailable])).toEqual([["monthly", 8700, true], ["annual", 87_000, false]]);
+    expect(enterprise).toMatchObject({ custom: true, prices: [], included: { voiceSeconds: null } });
+    // Without checkout for this caller, nothing is available.
+    expect(billingPlanList(empty, { checkout: false, links: polarProductLinks(empty, variables), brandCatalog }).plans.flatMap((entry) => entry.prices).some((entry) => entry.checkoutAvailable)).toBe(false);
+  });
+
+  it("shows an applied catalog rather than the brand file", () => {
+    const catalog: BillingCatalogSnapshot = { plans: [plan("free_cloud", "active"), plan("starter", "active"), plan("pro", "active")], prices: [price("pro", "monthly", 9900, "cat_pro_month")] };
+    const list = billingPlanList(catalog, { checkout: true, links: polarProductLinks(catalog, variables), brandCatalog });
+    expect(list).toMatchObject({ currency: "cad", source: "catalog" });
+    expect(list.plans.find((entry) => entry.slug === "pro")!.prices.map((entry) => entry.amountCents)).toEqual([9900]);
+    expect(list.plans.find((entry) => entry.slug === "starter")!.prices).toEqual([]);
   });
 
   it("shows the catalog's allowances, rates and live prices in its currency, in its order", () => {
@@ -116,6 +157,20 @@ describe("plan limits", () => {
   it("enforces the built-in limits before an apply, and while only Free's row is visible", () => {
     expect(billingPlanLimits([])).toBe(builtInBillingPlanLimits);
     expect(billingPlanLimits([plan("free_cloud", "active")])).toBe(builtInBillingPlanLimits);
+    expect(billingPlanLimits([], null)).toBe(builtInBillingPlanLimits);
+  });
+
+  it("enforces the brand file's limits before an apply, and the catalog's once it applies", () => {
+    const limits = billingPlanLimits([], brandCatalog.plans);
+    expect(limits.starter).toMatchObject({ voiceSecondsIncluded: 12_000, voiceOverageRatePerMinuteCents: 20, overagesBillable: true });
+    expect(limits.pro).toMatchObject({ voiceSecondsIncluded: 30_000, voiceOverageRatePerMinuteCents: 18 });
+    expect(limits.free_cloud).toMatchObject({ voiceSecondsIncluded: 1_800, includedBusinessNumbers: 0, overagesBillable: false });
+    // The file's custom Enterprise means what this build's does, and self-hosting has no row.
+    expect(limits.enterprise).toEqual(builtInBillingPlanLimits.enterprise);
+    expect(limits.self_host).toBe(builtInBillingPlanLimits.self_host);
+    expect(billingPlanLimits([plan("free_cloud", "active"), plan("starter", "active", { voice_sec: 6_000 }), plan("pro", "active")], brandCatalog.plans).starter.voiceSecondsIncluded).toBe(6_000);
+    // No other plan has a row before an apply.
+    expect(billingPlanLimitBook([], [{ ...plan("starter", "active", { voice_sec: 1 }), code: "promo", tier: "starter" }], brandCatalog.plans)).toEqual({ tiers: limits, plans: {} });
   });
 
   it("enforces each readable tier's row once the catalog applies, keeping the built-in terms for the rest", () => {
@@ -130,5 +185,20 @@ describe("plan limits", () => {
     // Hidden Enterprise, which the app can't read, and self-hosting keep this build's terms.
     expect(limits.enterprise).toBe(builtInBillingPlanLimits.enterprise);
     expect(limits.self_host).toBe(builtInBillingPlanLimits.self_host);
+  });
+});
+
+describe("brand catalog", () => {
+  it("carries the standard plans an apply of the brand's billing.json writes, with nothing linked", () => {
+    const profile = billingProfileSchema.parse(JSON.parse(readFileSync(new URL("../../../../brands/alloplace/billing.json", import.meta.url), "utf8")));
+    const standard = resolveBillingPlans(profile).filter((entry) => entry.code === entry.tier);
+    const catalog = brandBillingCatalog("alloplace")!;
+    expect(catalog.plans.map((entry) => [entry.code, entry.status, entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort])).toEqual(standard.map((entry) => [entry.code, entry.sold ? "draft" : "active", entry.voice_sec, entry.numbers, entry.voice_rate, entry.sort]));
+    expect(catalog.prices).toEqual(standard.flatMap((entry) => entry.prices.map((value) => ({
+      plan: entry.code, tier: entry.code, status: entry.sold ? "draft" : "active", period: value.period, currency: profile.currency, cents: value.cents,
+      per_month: value.period === "annual" ? Math.floor(value.cents / 12) : value.cents, polar_id: null, retired: false,
+    }))));
+    // A brand without a billing.json keeps the built-in plans.
+    expect(brandBillingCatalog("lobbystack")).toBeNull();
   });
 });

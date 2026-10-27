@@ -2,10 +2,10 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import { billingProfileSchema, canonicalBillingProfileJson } from "../billingProfile";
+import { billingProfileSchema, canonicalBillingProfileJson, resolveBillingPlans, type BillingProfile } from "../billingProfile";
 import { MAX_APP_NAME_LENGTH, brandLogoContentType, normalizeAccentColor, normalizeAppName } from "../branding";
 import { normalizeEmailAddress, normalizePageUrl, normalizeSiteUrl } from "../brandLinks";
-import type { BrandDefinition, BrandImage, BrandIndex } from "./types";
+import type { BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // The files under brands/ and how `pnpm brands:build` turns them into
 // generated.ts. Only the build script and tests import this module, so the
@@ -62,6 +62,8 @@ export type CompiledBrands = {
   brands: Record<string, BrandDefinition>;
   /** The SHA-256 of each brand's normalized billing.json, for the brands that have one. */
   billingHashes: Record<string, string>;
+  /** The four standard plans of each brand's billing.json, for the brands that have one. */
+  billingPlans: Record<string, BrandBillingPlan[]>;
   /** The files the admin serves, by their path under its public folder. */
   publicAssets: Record<string, Uint8Array>;
 };
@@ -80,6 +82,27 @@ function pngSize(bytes: Uint8Array): { width: number; height: number } | null {
   return width && height ? { width, height } : null;
 }
 
+/** A file's four standard plans as an apply writes their rows, with their prices. */
+function standardBillingPlans(profile: BillingProfile): BrandBillingPlan[] {
+  return resolveBillingPlans(profile).flatMap((plan) => plan.code !== plan.tier ? [] : [{
+    code: plan.tier,
+    sold: plan.sold,
+    custom: plan.custom,
+    overage: plan.overage,
+    voice_sec: plan.voice_sec,
+    sms_seg: plan.sms_seg,
+    calls_out: plan.calls_out,
+    chat_units: plan.chat_units,
+    kb_bytes: plan.kb_bytes,
+    numbers: plan.numbers,
+    voice_rate: plan.voice_rate,
+    sms_rate: plan.sms_rate,
+    call_rate: plan.call_rate,
+    sort: plan.sort,
+    prices: plan.prices,
+  }]);
+}
+
 function issues(prefix: string, error: z.ZodError): string[] {
   return error.issues.map((issue) => `${prefix}${issue.path.length ? ` ${issue.path.join(".")}` : ""}: ${issue.message}`);
 }
@@ -94,6 +117,7 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
   if (!index.success) errors.push(...issues("brands/index.json", index.error));
   const brands: Record<string, BrandDefinition> = {};
   const billingHashes: Record<string, string> = {};
+  const billingPlans: Record<string, BrandBillingPlan[]> = {};
   const publicAssets: Record<string, Uint8Array> = {};
   for (const id of Object.keys(sources.brands).sort()) {
     const where = `brands/${id}/brand.json`;
@@ -101,11 +125,14 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
       errors.push(`brands/${id}: a folder name must be lowercase letters, digits and dashes`);
       continue;
     }
-    // The plans the brand sells. Only its hash reaches the apps; an operator applies the file itself.
+    // The plans the brand sells. Its hash reaches the apps, and so do its four
+    // standard plans, which a deployment uses until an operator applies the file.
     if (sources.brands[id]!.billing !== undefined) {
       const billing = billingProfileSchema.safeParse(sources.brands[id]!.billing);
-      if (billing.success) billingHashes[id] = createHash("sha256").update(canonicalBillingProfileJson(billing.data)).digest("hex");
-      else errors.push(...issues(`brands/${id}/billing.json`, billing.error));
+      if (billing.success) {
+        billingHashes[id] = createHash("sha256").update(canonicalBillingProfileJson(billing.data)).digest("hex");
+        billingPlans[id] = standardBillingPlans(billing.data);
+      } else errors.push(...issues(`brands/${id}/billing.json`, billing.error));
     }
     const parsed = brandFileSchema.safeParse(sources.brands[id]!.file);
     if (!parsed.success) {
@@ -178,15 +205,15 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
   }
   if (errors.length) throw new Error(`Brand files have problems:\n- ${errors.join("\n- ")}`);
   const { default: defaultId, domains } = index.data!;
-  return { index: { default: defaultId, domains: Object.fromEntries(Object.entries(domains).sort(([a], [b]) => a.localeCompare(b))) }, brands, billingHashes, publicAssets };
+  return { index: { default: defaultId, domains: Object.fromEntries(Object.entries(domains).sort(([a], [b]) => a.localeCompare(b))) }, brands, billingHashes, billingPlans, publicAssets };
 }
 
 /** generated.ts for compiled brands. */
-export function brandsModuleSource(compiled: Pick<CompiledBrands, "index" | "brands" | "billingHashes">): string {
+export function brandsModuleSource(compiled: Pick<CompiledBrands, "index" | "brands" | "billingHashes" | "billingPlans">): string {
   return [
     "// Generated by `pnpm brands:build` from the files under brands/. Do not edit.",
     "",
-    'import type { BrandDefinition, BrandIndex } from "./types";',
+    'import type { BrandBillingPlan, BrandDefinition, BrandIndex } from "./types";',
     "",
     `export const BRAND_INDEX: BrandIndex = ${JSON.stringify(compiled.index, null, 2)};`,
     "",
@@ -194,6 +221,9 @@ export function brandsModuleSource(compiled: Pick<CompiledBrands, "index" | "bra
     "",
     "/** The SHA-256 of each brand's normalized billing.json, which a catalog apply compares with the file it is sent. */",
     `export const BILLING_PROFILE_HASHES: Record<string, string> = ${JSON.stringify(compiled.billingHashes, null, 2)};`,
+    "",
+    "/** The four standard plans of each brand's billing.json, which a deployment shows and enforces until its first catalog apply. */",
+    `export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = ${JSON.stringify(compiled.billingPlans, null, 2)};`,
     "",
   ].join("\n");
 }

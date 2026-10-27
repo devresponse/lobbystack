@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
+import { brandBillingPlans, brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
@@ -131,6 +131,15 @@ describe("onlyBrand", () => {
     expect(onlyBrand(data)).toBeNull();
     expect(onlyBrand({ index: { default: "lobbystack", domains: {} }, brands: { lobbystack: data.brands.lobbystack! } })).toBeNull();
     expect(onlyBrand()).toBe("alloplace");
+  });
+});
+
+describe("brandBillingPlans", () => {
+  it("gives the four standard plans of a brand's billing.json, and nothing for a brand without one", () => {
+    expect(brandBillingPlans("alloplace")!.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+    expect(brandBillingPlans("lobbystack")).toBeNull();
+    expect(brandBillingPlans("nobody")).toBeNull();
+    expect(brandBillingPlans("toString", {})).toBeNull();
   });
 });
 

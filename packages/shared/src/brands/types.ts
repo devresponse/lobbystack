@@ -2,6 +2,8 @@
 // Every value has already passed the checks the matching environment variable
 // gets (branding.ts and brandLinks.ts), so code can use it as it stands.
 
+import type { BillingPlanTier, ResolvedBillingPlan } from "../billingProfile";
+
 /** Settings for hosts whose first label matches a pattern, such as dev01 for "dev*". */
 export type BrandEnvironment = {
   /** "dev*" matches any first label that starts with dev; anything else matches exactly. */
@@ -35,6 +37,13 @@ export type BrandDefinition = {
   };
   environments: BrandEnvironment[];
 };
+
+/**
+ * One of the four standard plans of a brand's billing.json, as the row an
+ * apply writes for it, under the columns' own names, with its prices. A
+ * deployment shows and enforces these until its first catalog apply.
+ */
+export type BrandBillingPlan = Pick<ResolvedBillingPlan, "sold" | "custom" | "overage" | "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "voice_rate" | "sms_rate" | "call_rate" | "sort" | "prices"> & { code: BillingPlanTier };
 
 export type BrandIndex = {
   /**

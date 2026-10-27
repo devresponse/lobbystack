@@ -34,7 +34,7 @@ AlloPlace's plans, from [`brands/alloplace/billing.json`](../../brands/alloplace
 - A plan includes at most one phone number (fork PR #70), and a phone number claim counts the numbers the plan includes (fork PR #66): Free can't claim one.
 - Promo plans, sold only through codes, can carry their own allowances, storage and overage rates in place of their tier's. Their data retention and features stay the tier's.
 
-Until `pnpm billing apply` has run on a deployment, the dashboard shows the code's built-in plans, the same numbers in US dollars, and sells through the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables if they are set.
+Until `pnpm billing apply` has run on a deployment, the dashboard shows and enforces the four standard plans of its brand's `billing.json` as the build carries them, in the file's currency, so AlloPlace shows the table above from its first start (fork PR #88). It sells them only through the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables, if they are set. A brand without a file, such as LobbyStack, gets the code's built-in plans: the same numbers in US dollars.
 
 ## Follow the money
 
@@ -51,7 +51,7 @@ Until `pnpm billing apply` has run on a deployment, the dashboard shows the code
 
 The plans live in one reviewed file, and one command makes the database and Polar match it:
 
-1. `brands/<brand>/billing.json` holds the plans: prices in one currency, allowances, limits, overage rates, promo plans and four Polar settings. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rest and writes its hash into the code, so a deployment knows which file it was built with. Codes never go in the file, since the repository is public.
+1. `brands/<brand>/billing.json` holds the plans: prices in one currency, allowances, limits, overage rates, promo plans and four Polar settings. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rest and writes its hash and its four standard plans into the code, so a deployment knows which file it was built with and shows that file's plans until its first apply. Codes never go in the file, since the repository is public.
 2. `pnpm billing apply` writes the file to the catalog tables (`billing_plans`, `billing_prices`, `billing_runs`), makes Polar's organization sell what it says, records which Polar product sells each price, and checks the three against each other.
 3. Once the file is applied, the plan screens (fork PR #61), allowances, rates, storage and number limits (fork PRs #62 and #66) read the catalog, in its currency. Once a link makes a plan active, checkout, plan changes and the webhook use the Polar products it links, and so do promo codes and promo plans (fork PRs #63 to #65). A change to the allowances or rates counts for the whole current month.
 4. The worker checks the file, the tables and Polar once a day (`billing.verifyCatalog`).
@@ -203,7 +203,7 @@ Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set (
 
 - **Changing a sold plan's terms** makes the usage screens and the cap disagree with Polar's invoices. Add a new plan instead.
 - **Nothing has been tried against Polar since fork PR #59.** Upgrades, per-business customers, promo codes, promo endings and the monthly invoicing of yearly plans have been tested only against a stand-in built from Polar's code. Try a checkout, an upgrade, a code and the portal on the sandbox, and compare Polar's invoices with **Settings > Usage**.
-- **Before the first apply** the dashboard shows prices in US dollars while AlloPlace's file says Canadian dollars.
+- **Before the first apply** the dashboard shows the brand's file as the build carries it, so an edit to `billing.json` shows only after `pnpm brands:build` and a new build. A phone number claim still counts the code's numbers until then (none on Free, one on Starter and Pro), which AlloPlace's file matches, and a `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variable's product charges whatever Polar has for it, whatever the screens say.
 - **Yearly products made before fork PR #73** invoice their overage once a year until `pnpm billing apply` runs once with `--allow-replace`, and the daily check reports them as drift until then. Their current subscribers stay on them.
 - **Allowances reset on the first of the month (UTC), not at renewal.** After a mid-month downgrade or a promo plan's end, the month's earlier usage counts against the smaller allowance. Whether to keep this is undecided ([open items](../project/open-items.md)).
 - **A promo plan with an annual price** would get its months of discount on the whole first year, because Polar checks a repeating discount against the start of the period it bills. No such plan exists.

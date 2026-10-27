@@ -10,7 +10,7 @@ export * from "./receptionist";
 export * from "./branding";
 export * from "./brandLinks";
 export * from "./brands/resolve";
-export type { BrandDefinition, BrandEnvironment, BrandImage, BrandIndex } from "./brands/types";
+export type { BrandBillingPlan, BrandDefinition, BrandEnvironment, BrandImage, BrandIndex } from "./brands/types";
 export { isCertificationMode, assertCertificationRecipient, assertCertificationOperationAllowed, assertCertificationCalendar, assertCertificationBillingSandbox } from "./certification";
 
 export type DeploymentMode = "cloud" | "self_hosted_standard" | "development";

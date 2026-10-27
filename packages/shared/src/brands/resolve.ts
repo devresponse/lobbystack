@@ -1,5 +1,5 @@
-import { BILLING_PROFILE_HASHES, BRAND_INDEX, BRANDS } from "./generated";
-import type { BrandDefinition, BrandImage, BrandIndex } from "./types";
+import { BILLING_PROFILE_HASHES, BRAND_BILLING_PLANS, BRAND_INDEX, BRANDS } from "./generated";
+import type { BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // Which brand a deployment shows. A deployment knows its own address
 // (APP_BASE_URL), and the domain it sits under picks the brand from
@@ -128,6 +128,15 @@ export function brandImage(brand: Pick<ResolvedBrand, "origin">, image: BrandIma
  */
 export function billingProfileHash(brandId: string, hashes: Record<string, string> = BILLING_PROFILE_HASHES): string | null {
   return Object.hasOwn(hashes, brandId) ? hashes[brandId]! : null;
+}
+
+/**
+ * The four standard plans of the brand's billing.json as this build carries
+ * it, or null when the brand has none, as LobbyStack. A deployment shows and
+ * enforces them until its first catalog apply, after which the tables decide.
+ */
+export function brandBillingPlans(brandId: string, plans: Record<string, BrandBillingPlan[]> = BRAND_BILLING_PLANS): BrandBillingPlan[] | null {
+  return Object.hasOwn(plans, brandId) ? plans[brandId]! : null;
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */

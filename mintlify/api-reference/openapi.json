@@ -18233,7 +18233,7 @@
               "catalog",
               "built_in"
             ],
-            "description": "catalog once the deployment applied a billing.json; built_in before that: the plans the running code ships with, in US dollars."
+            "description": "catalog once the deployment applied a billing.json; built_in before that: the plans the running code carries, its brand's billing.json, or for a brand without one the code's own plans in US dollars."
           },
           "plans": {
             "type": "array",

@@ -145,7 +145,7 @@ Two things to know about Way B:
    2. Your website, or **I don't have a website**. Importing a website needs a Firecrawl key.
    3. Knowledge: **Skip for now**.
    4. The greeting callers hear.
-   5. The plan: choose **Start free**. The page lists the hosted service's plans, but on your own instance a business has unlimited call minutes.
+   5. The plan: choose **Start free**. The page lists the plans of AlloPlace's `brands/alloplace/billing.json`, in Canadian dollars, with **Starter** and **Pro** greyed out, since nothing sells them on your computer (fork PR #88). On your own instance a business has unlimited call minutes anyway.
    6. How you heard about AlloPlace: **Skip**.
 5. The dashboard opens with your business.
 6. Add at least one service and your opening hours. The receptionist can't book anything until the business has an active service.

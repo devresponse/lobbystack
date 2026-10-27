@@ -99,6 +99,7 @@ describe("compileBrands", () => {
     const compiled = compileBrands(withBilling);
     expect(Object.keys(compiled.billingHashes)).toEqual(["alloplace"]);
     expect(compiled.billingHashes.alloplace).toMatch(/^[0-9a-f]{64}$/);
+    expect(Object.keys(compiled.billingPlans)).toEqual(["alloplace"]);
     // The hash covers the checked file, not its formatting or its $schema.
     withBilling.brands.alloplace!.billing = { ...billing, $schema: "elsewhere.json" };
     expect(compileBrands(withBilling).billingHashes).toEqual(compiled.billingHashes);
@@ -107,6 +108,31 @@ describe("compileBrands", () => {
     expect(run).toThrow("brands/alloplace/billing.json currency: three lowercase letters");
     expect(run).toThrow("brands/alloplace/billing.json plans.Promo.tier");
     expect(compileBrands(sources()).billingHashes).toEqual({});
+    expect(compileBrands(sources()).billingPlans).toEqual({});
+  });
+
+  it("carries a billing.json's four standard plans as an apply writes them, without its other plans", () => {
+    const billing = JSON.parse(readFileSync(new URL("../../../../brands/alloplace/billing.json", import.meta.url), "utf8"));
+    const withBilling = sources();
+    withBilling.brands.alloplace!.billing = {
+      ...billing,
+      plans: {
+        ...billing.plans,
+        starter: { ...billing.plans.starter, prices: { monthlyCents: 3700, annualCents: 37_000 }, included: { ...billing.plans.starter.included, voiceMinutes: 200 } },
+        "salons-plus": { tier: "starter", access: "code", sold: true, names: { en: "Salons Plus", fr: "Salons Plus", es: "Salons Plus", sr: "Salons Plus" }, prices: { monthlyCents: 3000 } },
+      },
+    };
+    const plans = compileBrands(withBilling).billingPlans.alloplace!;
+    expect(plans.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+    expect(plans[1]).toEqual({
+      code: "starter", sold: true, custom: false, overage: true,
+      voice_sec: 12_000, sms_seg: billing.plans.starter.included.alertSmsSegments, calls_out: billing.plans.starter.included.outboundCallAttempts, chat_units: billing.plans.starter.included.chatAiUnits,
+      kb_bytes: billing.plans.starter.limits.knowledgeStorageMb * 1_048_576, numbers: billing.plans.starter.limits.businessNumbers,
+      voice_rate: billing.plans.starter.overageCents.voiceMinute, sms_rate: billing.plans.starter.overageCents.alertSmsSegment, call_rate: billing.plans.starter.overageCents.outboundCallAttempt,
+      sort: 20,
+      prices: [{ period: "annual", currency: billing.currency, cents: 37_000 }, { period: "monthly", currency: billing.currency, cents: 3700 }],
+    });
+    expect(plans[3]).toMatchObject({ code: "enterprise", sold: false, custom: true, voice_sec: null, prices: [] });
   });
 
   it("keeps a name with its environment suffix within the length limit", () => {

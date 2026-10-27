@@ -36,8 +36,9 @@ ARG POSTHOG_SOURCEMAP_API_KEY
 ARG POSTHOG_PROJECT_ID=266281
 # The brand comes from the folder under brands/ that the deployment's address
 # picks (packages/shared/src/brands/resolve.ts), or BRAND_PRESET where no brand
-# claims it. The build writes both into the admin, so the prerendered sign-in
-# pages show the brand without asking the server first.
+# claims it, or else the only folder besides lobbystack. The build writes both
+# into the admin, so the prerendered sign-in pages show the brand without
+# asking the server first.
 ARG APP_BASE_URL
 ARG BRAND_PRESET
 RUN pnpm --filter @lobbystack/admin... build

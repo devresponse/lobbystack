@@ -1,15 +1,17 @@
-import { BILLING_PROFILE_HASHES, BRAND_INDEX, BRANDS } from "./generated";
-import type { BrandDefinition, BrandImage, BrandIndex } from "./types";
+import { BILLING_PROFILE_HASHES, BRAND_BILLING_PLANS, BRAND_INDEX, BRANDS } from "./generated";
+import type { BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // Which brand a deployment shows. A deployment knows its own address
 // (APP_BASE_URL), and the domain it sits under picks the brand from
 // brands/index.json, so dev01.alloplace.com and demo.alloplace.com are both
 // AlloPlace. BRAND_PRESET names a brand only where no brand claims the domain,
-// such as localhost or a *.up.railway.app address. Anything else gets the
+// such as localhost or a *.up.railway.app address. Where neither picks one,
+// the only brand folder besides the default is used, so a copy of the code
+// with one brand of its own shows it on every address. Anything else gets the
 // default brand, LobbyStack.
 
-/** How the brand was chosen: the domain, BRAND_PRESET, or neither. */
-export type BrandSource = "apex" | "preset" | "default";
+/** How the brand was chosen: the domain, BRAND_PRESET, being the only brand besides the default, or none of these. */
+export type BrandSource = "apex" | "preset" | "only" | "default";
 
 export type ResolvedBrand = Omit<BrandDefinition, "environments"> & {
   source: BrandSource;
@@ -67,11 +69,21 @@ function matchesLabel(pattern: string, label: string): boolean {
   return pattern.endsWith("*") ? label.startsWith(pattern.slice(0, -1)) : label === pattern;
 }
 
+/**
+ * The one brand folder besides the default, or null when there's none, or
+ * more than one and nothing says which a deployment means.
+ */
+export function onlyBrand(data: BrandData = GENERATED): string | null {
+  const others = Object.keys(data.brands).filter((id) => id !== data.index.default);
+  return others.length === 1 ? others[0]! : null;
+}
+
 /** The brand for a deployment's address and BRAND_PRESET. */
 export function resolveBrand(input: { appBaseUrl?: string | null | undefined; preset?: string | null | undefined }, data: BrandData = GENERATED): ResolvedBrand {
   const host = brandHost(input.appBaseUrl);
   const domain = host ? claimedDomain(host, data.index.domains) : null;
   const preset = input.preset?.trim() || null;
+  const only = onlyBrand(data);
   let id = data.index.default;
   let source: BrandSource = "default";
   if (domain) {
@@ -80,6 +92,9 @@ export function resolveBrand(input: { appBaseUrl?: string | null | undefined; pr
   } else if (preset && Object.hasOwn(data.brands, preset)) {
     id = preset;
     source = "preset";
+  } else if (only) {
+    id = only;
+    source = "only";
   }
   const { environments, ...brand } = data.brands[id]!;
   // Only a subdomain of the claimed domain has a first label to match: dev01 in dev01.alloplace.com.
@@ -113,6 +128,15 @@ export function brandImage(brand: Pick<ResolvedBrand, "origin">, image: BrandIma
  */
 export function billingProfileHash(brandId: string, hashes: Record<string, string> = BILLING_PROFILE_HASHES): string | null {
   return Object.hasOwn(hashes, brandId) ? hashes[brandId]! : null;
+}
+
+/**
+ * The four standard plans of the brand's billing.json as this build carries
+ * it, or null when the brand has none, as LobbyStack. A deployment shows and
+ * enforces them until its first catalog apply, after which the tables decide.
+ */
+export function brandBillingPlans(brandId: string, plans: Record<string, BrandBillingPlan[]> = BRAND_BILLING_PLANS): BrandBillingPlan[] | null {
+  return Object.hasOwn(plans, brandId) ? plans[brandId]! : null;
 }
 
 /** Whether a brand file decides the name and logo, rather than onboarding's saved choice. */
@@ -160,8 +184,9 @@ export function brandStartupReport(brand: ResolvedBrand, environment: Record<str
       : `[brand] brand.base_url_missing: APP_BASE_URL is missing or isn't a URL, so the default ${brand.id} brand stands in. Set it to the dashboard's address, such as https://app.example.com.`);
   }
   const required = environment.BRAND_REQUIRED === "true" && !brandFileMatched(brand);
+  const how = brand.source === "only" ? "only brand" : `${brand.source}${brand.domain ? ` ${brand.domain}` : ""}`;
   return {
-    info: `[brand] ${brand.id} (${brand.source}${brand.domain ? ` ${brand.domain}` : ""}), shown as ${brand.appName}`,
+    info: `[brand] ${brand.id} (${how}), shown as ${brand.appName}`,
     warnings,
     error: required ? `[brand] BRAND_REQUIRED=true, but no brand file matches ${brand.host ?? "APP_BASE_URL"} or BRAND_PRESET.` : null,
   };

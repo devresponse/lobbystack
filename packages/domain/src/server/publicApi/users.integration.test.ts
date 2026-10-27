@@ -4,6 +4,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createDatabaseClient, outboxMessages, users } from "@lobbystack/db";
+import { currentBrand } from "@lobbystack/shared";
 
 import { PublicApiError } from "./errors";
 import { generatePlatformKey, resolvePlatformKey } from "./platformKeys";
@@ -71,6 +72,6 @@ describe.skipIf(!testUrl)("POST /users", () => {
     await enqueueAccountSetupEmail(app!.db, { user: created.user, appBaseUrl: "https://app.example.com" });
     await enqueueAccountSetupEmail(app!.db, { user: created.user, appBaseUrl: "https://app.example.com" });
     const queued = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.aggregateId, created.user.id), eq(outboxMessages.topic, "email.send")));
-    expect(queued).toEqual([{ payload: { template: "account_setup", to: created.user.email, subject: "Configure su cuenta de LobbyStack", variables: { locale: "es", email: created.user.email, url: "https://app.example.com/es/forgot-password" } } }]);
+    expect(queued).toEqual([{ payload: { template: "account_setup", to: created.user.email, subject: `Configure su cuenta de ${currentBrand().appName}`, variables: { locale: "es", email: created.user.email, url: "https://app.example.com/es/forgot-password" } } }]);
   });
 });

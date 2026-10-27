@@ -3,8 +3,9 @@ import { billingPlanPrice, type BillingInterval, type BillingPlanList, type Bill
 import { intlLocale } from "./locale";
 
 // The plan screens' numbers come from the plan list GET /api/billing returns:
-// the deployment's billing catalog, or the built-in plans before an apply.
-// Translations keep the words and take these values.
+// the deployment's billing catalog, or before an apply the plans its build
+// carries: its brand's billing.json, else the built-in ones. Translations keep
+// the words and take these values.
 
 /**
  * How long a plan change waits for Polar's webhook before it stops checking.

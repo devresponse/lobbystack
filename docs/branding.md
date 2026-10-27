@@ -1,6 +1,6 @@
 # Brand a deployment
 
-A deployment can show its own app name, logo and colour instead of LobbyStack's, and send its outside links to its own website. Each brand is a folder under `brands/`, and a deployment's address picks one. This page covers how to add a brand, how the admin and worker pick which to show, and where the LobbyStack brand still appears.
+A deployment can show its own app name, logo and colour instead of LobbyStack's, and send its outside links to its own website. Each brand is a folder under `brands/`, and a deployment's address picks one, or else `BRAND_PRESET`, or else the only brand there besides LobbyStack. This page covers how to add a brand, how the admin and worker pick which to show, and where the LobbyStack brand still appears.
 
 ## Brand files
 
@@ -36,32 +36,33 @@ The repository is public, so everything in a brand folder is public too.
 
 ### Billing
 
-A brand folder can also hold a `billing.json`: the plans the brand sells, their prices, allowances and overage rates, and any promo plans. `pnpm billing apply` writes it to the deployment's billing catalog and sets Polar up to match, and `pnpm billing verify` checks that the three still agree. [`brands/README.md`](../brands/README.md) describes the file and the commands. The file holds no keys and no Polar product ids: the catalog keeps the ids it links, so the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables aren't needed. Until a deployment applies a `billing.json`, it shows this build's built-in plans in US dollars.
+A brand folder can also hold a `billing.json`: the plans the brand sells, their prices, allowances and overage rates, and any promo plans. `pnpm billing apply` writes it to the deployment's billing catalog and sets Polar up to match, and `pnpm billing verify` checks that the three still agree. [`brands/README.md`](../brands/README.md) describes the file and the commands. The file holds no keys and no Polar product ids: the catalog keeps the ids it links, so the four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables aren't needed. Until a deployment applies a `billing.json`, it shows and enforces the four standard plans of the file its build carries, which `pnpm brands:build` writes into the code, or for a brand without a file, the code's built-in plans in US dollars (fork PR #88).
 
 ### How a deployment picks its brand
 
 The admin and the worker resolve the brand once when they start (`packages/shared/src/brands/resolve.ts`):
 
 1. The brand whose domain the host of `APP_BASE_URL` sits under. `dev01.alloplace.com`, `demo.alloplace.com` and `alloplace.com` all get AlloPlace. Domains match whole labels, so `notalloplace.com` doesn't.
-2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace`. Use it for `localhost` and for platform addresses such as `*.up.railway.app`. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
-3. Otherwise the default brand, LobbyStack. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
+2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace` or `lobbystack`. Use it on `localhost` and on platform addresses such as `*.up.railway.app` to pick another brand than step 3 would, or one among several. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
+3. Where neither picks one, the only brand under `brands/` besides the default, if there's exactly one. This repository has one, AlloPlace, so `localhost` and Railway's addresses show AlloPlace with no `BRAND_PRESET`, and `BRAND_PRESET=lobbystack` shows LobbyStack there instead. With two or more brands besides the default, nothing says which one an address means, so this step picks none.
+4. Otherwise the default brand, LobbyStack: in a copy of the code with no brand of its own, or with several and none picked. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
 
 Earlier releases let `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` and `NEXT_PUBLIC_CONTACT_EMAIL` override the brand file. They no longer do anything, so put their values in a brand folder.
 
 When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
 
-At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`. In production it also logs `brand.unmatched` when no brand claims the address, and `brand.base_url_missing` when `APP_BASE_URL` is missing or isn't a URL and no `BRAND_PRESET` names a brand. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked.
+At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`, or `[brand] alloplace (only brand), shown as AlloPlace` on an address no brand claims. In production it also logs `brand.unmatched` when the default brand stands in because no brand claims the address, and `brand.base_url_missing` when it stands in because `APP_BASE_URL` is missing or isn't a URL. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked: `apex`, `preset`, `only` or `default`.
 
 ### Add a brand
 
 1. Make a folder under `brands/` named for the brand, in lowercase letters, digits and dashes, with its `brand.json` and logo.
 2. Claim its apex domains in `brands/index.json`.
-3. Run `pnpm brands:build` and commit what it writes.
+3. Run `pnpm brands:build` and commit what it writes. A second brand besides the default ends step 3 above: each deployment on an address no brand claims, such as `localhost` or Railway's, then needs a `BRAND_PRESET`, or it shows LobbyStack.
 4. Deploy with `APP_BASE_URL` on that domain. Set `APP_BASE_URL` on both the admin and the worker, and give it to the admin's Docker build: `Dockerfile.admin` takes it as a build argument, and on Railway the admin's service variables reach its build.
 
 ### The onboarding step
 
-On a deployment no brand file matches, the first owner sees a **Make this app your own** step before naming their business. It never appears where a brand file matches, and `POST /api/branding/initial` answers 409 there. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice.
+On a deployment that shows the default brand ([step 4](#how-a-deployment-picks-its-brand)), the first owner sees a **Make this app your own** step before naming their business. It never appears where a brand file applies, the only brand besides the default included, and `POST /api/branding/initial` answers 409 there. With AlloPlace as this repository's only brand besides LobbyStack, that's every deployment: the step comes back only in a copy with no brand of its own, or with several and none picked. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice. A row saved before a brand file applied stays in the table but no longer shows.
 
 The step is shown only when both of these are true. `app.can_save_initial_branding()` checks them in the database, and `app.save_initial_branding()` checks them again when the choice is saved:
 
@@ -72,7 +73,7 @@ Uploaded logos can be PNG, JPEG, WebP, or SVG files of up to 256 KB. The admin w
 
 ### Change the branding later
 
-On a deployment a brand file matches, edit the brand file and redeploy.
+On a deployment a brand file applies to, edit the brand file and redeploy.
 
 Elsewhere, there's no settings page for this yet. Delete the saved row as the database superuser, because the runtime roles can't write the table, and open `/onboarding/brand` as the owner of every business:
 
@@ -101,7 +102,7 @@ Every email and text the app sends calls it by the same name as the dashboard: v
 
 Every email except the founder check-in and dashboard feedback has an HTML version whose header shows the name as a wordmark, under the brand file's `emailLogo` when it has one. The logo has to be a PNG, because Gmail and Outlook don't show SVG, and it loads from the admin at `APP_BASE_URL`, so the worker needs that address to show it. Some mail clients hide remote images until the reader allows them, which is why the name stays as text.
 
-When `EMAIL_FROM` holds only an address and a brand file matches, the worker puts the brand's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
+When `EMAIL_FROM` holds only an address and a brand file applies, the worker puts the brand's name in front of it, as in `"AlloPlace" <no-reply@alloplace.com>`. A name already in `EMAIL_FROM` stays as it is. Without `EMAIL_FROM`, the worker sends as `"<app name>" <no-reply@localhost>`.
 
 The SMS HELP and START replies are part of the registered SMS campaign or toll-free verification, so update the registration's sample messages when the name changes.
 
@@ -119,7 +120,7 @@ The admin also links to pages outside itself: the website, the terms of service 
 | Docs | `links.docs` | The original project's documentation site |
 | Contact address | `contactEmail` | The original project's address for each place: its support address in the feedback panel, its sales address for Enterprise plans, and its general address in text messages. |
 
-**Give every deployment a brand file with its own links.** Without one, as on a domain no brand claims and with no `BRAND_PRESET`, the default `lobbystack` brand applies, and these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all five, with alloplace.com's home page standing in for docs.
+**Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all five, with alloplace.com's home page standing in for docs.
 
 Where each one appears:
 
@@ -146,7 +147,7 @@ Businesses' public profile pages put one color behind the chat, or behind the ca
 - `packages/shared/src/branding.ts`: the limits, the order of precedence (`resolveBranding`), the logo type check (`brandLogoContentType`), and the public pages' color (`brandAccentColor`, `readableTextOn`).
 - `packages/db/migrations/0098_deployment_branding.sql`: the one-row table and the two functions. Every runtime role can read the table, but only `app.save_initial_branding()` writes to it. Row level security is forced on it.
 - `packages/domain/src/server/branding.ts`: reads and saves the branding.
-- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file matches, it never reads the database. If the database can't be read, pages fall back to the default brand, and the error is reported at most once a minute.
+- `apps/admin/src/lib/branding.ts`: loads the branding for each render with a 30-second cache. Where a brand file applies, it never reads the database. If the database can't be read, pages fall back to the default brand, and the error is reported at most once a minute.
 - Routes:
   - `GET /api/branding` returns `{ appName, logoUrl }` and is never cached.
   - `GET /api/branding/logo` serves the saved logo. Its URL carries the logo's SHA-256 (`?v=`), so browsers can keep it for good.
@@ -155,7 +156,7 @@ Businesses' public profile pages put one color behind the chat, or behind the ca
 
 ### Prerendered pages
 
-The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. Where the build's `APP_BASE_URL` or `BRAND_PRESET` picks a brand file, they carry that brand and need nothing more. Otherwise, the browser asks `/api/branding` for the name and logo onboarding saved. Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow.
+The sign-in, sign-up, and other public pages are prerendered at build time, before any database can be read. Where the build picks a brand file, by its `APP_BASE_URL`, its `BRAND_PRESET` or as the only brand besides the default, they carry that brand and need nothing more. Otherwise, the browser asks `/api/branding` for the name and logo onboarding saved. Until it answers, the page keeps the logo's space empty instead of showing a name it would then replace, and then the tab title and icon follow.
 
 ## Text that keeps LobbyStack on purpose
 

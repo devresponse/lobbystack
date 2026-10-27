@@ -7,7 +7,8 @@ import { brandJsonSchemas, brandsModuleSource, compileBrands, type BrandSources 
 // Compiles the brands under brands/ into the files the apps read:
 // packages/shared/src/brands/generated.ts, each brand's images under
 // apps/admin/public/brand/<id>/, and JSON Schemas for editors. A brand's
-// billing.json is checked and hashed but never copied anywhere. A test in
+// billing.json is checked, hashed and its four standard plans resolved into
+// generated.ts, but the file is never copied anywhere. A test in
 // scripts/brands.test.ts fails when any of them falls behind brands/.
 
 export const repositoryRoot = fileURLToPath(new URL("..", import.meta.url));

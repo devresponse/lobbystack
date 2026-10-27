@@ -12,7 +12,11 @@ import {
   normalizeLogoUrl,
   resolveBranding,
 } from "./branding";
-import { resolveBrand } from "./brands/resolve";
+import { BRANDS } from "./brands/generated";
+import { resolveBrand, type BrandData } from "./brands/resolve";
+
+// A copy of the code with no brand of its own, where nothing picks a brand file.
+const lobbyStackOnly: BrandData = { index: { default: "lobbystack", domains: {} }, brands: { lobbystack: BRANDS.lobbystack! } };
 
 const svg = (body: string, prologue = "") => new TextEncoder().encode(`${prologue}<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">${body}</svg>`);
 
@@ -79,7 +83,7 @@ describe("resolveBranding with a brand", () => {
   });
 
   it("keeps onboarding's choice over the default brand", () => {
-    const fallback = resolveBrand({ appBaseUrl: "http://localhost" });
+    const fallback = resolveBrand({ appBaseUrl: "http://localhost" }, lobbyStackOnly);
     expect(resolveBranding({ saved, brand: fallback })).toMatchObject({ appName: "Saved Name", sources: { appName: "database", logoUrl: "database" } });
     expect(resolveBranding({ saved: null, brand: fallback })).toEqual({ appName: "LobbyStack", logoUrl: null, sources: { appName: "default", logoUrl: "default" } });
   });
@@ -94,7 +98,7 @@ describe("brandAccentColor", () => {
 
 describe("emailSender", () => {
   const matched = resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" });
-  const unmatched = resolveBrand({ appBaseUrl: "https://app.example.com" });
+  const unmatched = resolveBrand({ appBaseUrl: "https://app.example.com" }, lobbyStackOnly);
 
   it("puts a matched brand's name in front of an address on its own", () => {
     expect(emailSender({ EMAIL_FROM: " no-reply@alloplace.com " }, matched)).toBe('"AlloPlace (dev)" <no-reply@alloplace.com>');
@@ -120,7 +124,7 @@ describe("brandEmailLogo", () => {
   });
 
   it("shows none without an email logo or an address to load it from", () => {
-    expect(brandEmailLogo(resolveBrand({ appBaseUrl: "http://localhost:3000" }))).toBeNull();
+    expect(brandEmailLogo(resolveBrand({ appBaseUrl: "http://localhost:3000" }, lobbyStackOnly))).toBeNull();
     expect(brandEmailLogo({ ...brand, origin: null })).toBeNull();
   });
 });

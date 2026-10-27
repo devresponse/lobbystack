@@ -95,7 +95,8 @@ services:
         NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${NEXT_PUBLIC_TURNSTILE_SITE_KEY:-}
         NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN: ${NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN:-}
         NEXT_PUBLIC_POSTHOG_HOST: ${NEXT_PUBLIC_POSTHOG_HOST:-https://ts.lobbystack.com}
-        # The brand comes from brands/ by this address, or BRAND_PRESET where no brand claims it.
+        # The brand comes from brands/ by this address, or BRAND_PRESET where no brand claims it,
+        # or else the only brand there besides lobbystack.
         APP_BASE_URL: ${APP_BASE_URL:-http://localhost}
         BRAND_PRESET: ${BRAND_PRESET:-}
     restart: unless-stopped

@@ -1,6 +1,6 @@
 # Brands
 
-Each folder here is one brand: its `brand.json` and the images it names. `index.json` maps apex domains to folders, and a deployment shows the brand that claims the domain of its `APP_BASE_URL`. `BRAND_PRESET` names a folder where no brand claims the domain, such as on `localhost`.
+Each folder here is one brand: its `brand.json` and the images it names. `index.json` maps apex domains to folders, and a deployment shows the brand that claims the domain of its `APP_BASE_URL`. `BRAND_PRESET` names a folder where no brand claims the domain, such as on `localhost`. Where neither names one, a deployment shows the only folder besides `lobbystack`, which is `alloplace` today, so adding a second brand means giving each deployment on such an address a `BRAND_PRESET`.
 
 After any change here, run `pnpm brands:build` and commit what it writes. The repository is public, so everything in these folders is public too.
 
@@ -10,7 +10,7 @@ See [docs/branding.md](../docs/branding.md) for the fields and how a deployment 
 
 ## billing.json
 
-A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash into the code. The admin never serves it.
+A brand's `billing.json` holds its plans: the four standard ones (`free_cloud`, `starter`, `pro` and `enterprise`) and any others, each with its prices in one currency, what it includes and what usage past that costs. `brands/billing.schema.json` checks it as you type, and `pnpm brands:build` checks the rules the schema can't and writes its hash and its four standard plans into the code. The admin never serves the file.
 
 It is public like the rest of this folder, so it never holds a key, a token, a webhook secret or a Polar product id. Keys, tokens and the webhook secret stay in environment variables, and the deployment's tables keep the product ids, so no product id variable is needed.
 
@@ -24,7 +24,7 @@ Every plan other than the four standard ones is one more key under `plans`. Its 
 
 A plan's code is never reused for other terms. Once someone has subscribed, its terms can't change: put new terms under a new code.
 
-Nothing reads the plans from the file at run time. After the change is merged and deployed, an operator's platform key writes it into the deployment's tables:
+Nothing reads the file at run time. A deployment that has never applied one shows and enforces the four standard plans its build carries, and sells them only through the `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables; from the first apply on, its tables decide. After the change is merged and deployed, an operator's platform key writes it into those tables:
 
 ```bash
 pnpm lobbystack billing catalog-preview alloplace --billing-file @brands/alloplace/billing.json
@@ -33,7 +33,7 @@ pnpm lobbystack billing catalog-apply alloplace --billing-file @brands/alloplace
 
 The preview changes nothing and lists every change, flagging any that lowers an allowance or raises a price. The first apply leaves out `--replaces-hash`, or passes `null` to stop if someone applied first. A change to a sold plan's terms, its prices included, sends the plan back to draft, and checkout stops selling it until Polar sells the new terms and a link records them, so for anything Polar sells, use `pnpm billing apply` (below), which does both in one run.
 
-Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses the ones its build ships with. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once. A business holds one number at most, so `businessNumbers` is 0 or 1: 1 lets it claim one.
+Once applied, the standard plans' allowances, overage rates, knowledge storage and included numbers are what the deployment enforces and what the plan and Usage pages show; until the first apply, it uses those of the file its build carries (fork PR #88), though a number claim counts one number on Starter and Pro and none on Free. A change counts for the whole current month: usage already recorded this month is measured against the new allowance, so lowering one can block a business at once. A business holds one number at most, so `businessNumbers` is 0 or 1: 1 lets it claim one.
 
 ### Promo codes
 

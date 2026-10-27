@@ -16,11 +16,12 @@ import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domai
 import { releaseBillingCheckoutRequest, releaseBillingSubscription, runDailyBillingVerify, sweepBillingWork } from "@lobbystack/domain";
 import { loadPromoEndWork, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
 
-// A test that names the deployment gives it the AlloPlace brand file.
+// A test that names the deployment gives it the AlloPlace brand file. The
+// others show LobbyStack, as BRAND_PRESET=lobbystack picks it.
 const brand = vi.hoisted(() => ({ appBaseUrl: null as string | null }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  return { ...shared, currentBrand: () => brand.appBaseUrl ? shared.resolveBrand({ appBaseUrl: brand.appBaseUrl }) : shared.currentBrand() };
+  return { ...shared, currentBrand: () => shared.resolveBrand(brand.appBaseUrl ? { appBaseUrl: brand.appBaseUrl } : { preset: "lobbystack" }) };
 });
 
 vi.mock("@lobbystack/domain", async (importOriginal) => {

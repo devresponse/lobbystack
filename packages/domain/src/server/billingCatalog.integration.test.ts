@@ -9,7 +9,7 @@ import { apiBillingCatalogApplySchema, apiBillingCatalogLinkSchema, billingProfi
 import { PolarCatalogClient } from "../../../providers/src/polar/polarCatalog";
 import { getBillingUsageStatus, getWebVoiceBillingAllowance } from "./billing";
 import { applyBillingCatalogForApi, billingDeploymentPolar, desiredBillingPlans, getBillingCatalogForApi, linkBillingCatalogForApi, listBillingCatalogRunsForApi, loadPlanChangeProration, recordBillingVerifyRun, type BillingCatalogDeployment } from "./billingCatalog";
-import { billingPlanList, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
+import { billingPlanList, brandBillingCatalog, listBillingPlansForApi, loadBillingCatalog, readBillingPlanLimits, readPolarProductLinks } from "./billingPlans";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps } from "./billingPolar";
 import { createFakePolar, type FakePolar } from "./billingPolar.testing";
 import { runDailyBillingVerify } from "./billingVerify";
@@ -451,17 +451,23 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
 describe.skipIf(!testUrl)("billing catalog at run time", () => {
   const sells = { POLAR_ACCESS_TOKEN: "polar_oat_x", POLAR_ORGANIZATION_ID: "org_test", POLAR_PRO_MONTHLY_PRODUCT_ID: "var_pro_month" };
 
-  it("shows the built-in plans and sells through the variables until an apply, then the file's plans in its currency, linked products once linked", async () => {
+  it("shows the brand file's plans as built, or the built-in plans, and sells through the variables until an apply, then the file's plans in its currency, linked products once linked", async () => {
     await rollbackTest(async (tx) => {
-      const before = await listBillingPlansForApi(context(tx), sells);
+      // A brand without a billing.json, such as LobbyStack: the built-in plans in US dollars.
+      const before = await listBillingPlansForApi(context(tx), sells, null);
       expect(before).toMatchObject({ currency: "usd", source: "built_in" });
       expect(before.plans.find((plan) => plan.slug === "pro")!.prices.map((price) => [price.interval, price.amount_cents, price.checkout_available])).toEqual([["monthly", 10_000, true], ["annual", 96_000, false]]);
       expect((await readPolarProductLinks(context(tx), sells)).planFor("var_pro_month")).toEqual({ plan: "pro", interval: "monthly", code: "pro" });
+      // AlloPlace: its billing.json as this build carries it.
+      const fromFile = await listBillingPlansForApi(context(tx), sells, brandBillingCatalog("alloplace"));
+      expect(fromFile).toMatchObject({ currency: "cad", source: "built_in" });
 
       await apply(tx, file());
       // Applied, not linked: the file's numbers in CAD, still sold through the variables.
       const applied = await listBillingPlansForApi(context(tx), sells);
       expect(applied).toMatchObject({ currency: "cad", source: "catalog" });
+      // The apply wrote what the build carried, so only the source changed.
+      expect({ ...applied, source: "built_in" }).toEqual(fromFile);
       expect(applied.plans.map((plan) => plan.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
       const pro = applied.plans.find((plan) => plan.slug === "pro")!;
       expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
@@ -519,8 +525,9 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
       await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:${randomUUID()}`, usageKind: "voice_seconds", quantity: 1_200, planAtRecordTime: "free_cloud", syncStatus: "skipped" });
       await as(tx, "lobbystack_worker");
 
-      // Before an apply, this build's limits.
-      expect(await readBillingPlanLimits(tx)).toBe(builtInBillingPlanLimits);
+      // Before an apply, the brand file's limits as this build carries them, or for a brand without one, this build's own.
+      expect(await readBillingPlanLimits(tx, null)).toBe(builtInBillingPlanLimits);
+      expect((await readBillingPlanLimits(tx, brandBillingCatalog("alloplace"))).free_cloud.voiceSecondsIncluded).toBe(file().plans.free_cloud.included.voiceMinutes * 60);
       expect(await getWebVoiceBillingAllowance(context(tx), { businessId })).toMatchObject({ allowed: true, maxDurationMs: 600_000 });
       expect(await numberRefusal(tx, businessId)).toBe("paid_plan_required");
 
@@ -581,7 +588,9 @@ describe.skipIf(!testUrl)("billing catalog limits", () => {
         await as(tx, "lobbystack_worker");
       };
 
-      // Before an apply, this build's plans: none on Free, one on a live Starter, no limit on Enterprise.
+      // Before an apply, the brand file's plans as this build carries them: none on Free, one on a live
+      // Starter, no limit on Enterprise. The claim functions count this build's own until then, so the
+      // file must include the same numbers.
       expect(await included()).toBe(0);
       await account({ plan: "starter", subscriptionState: "active" });
       expect(await included()).toBe(1);

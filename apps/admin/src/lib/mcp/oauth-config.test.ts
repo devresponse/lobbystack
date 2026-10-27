@@ -4,11 +4,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MCP_OAUTH_SCOPES, mcpBearerChallenge, mcpResourceUrl, oauthIssuer, protectedResourceMetadata, protectedResourceMetadataUrl, tokenAudienceMatches } from "./oauth-config";
 import { mcpTools } from "./tools";
 
-// The deployment's brand: LobbyStack's, unless a test picks another.
+// The deployment's brand: LobbyStack's, as BRAND_PRESET=lobbystack picks it, unless a test's domain picks another.
 const brand = vi.hoisted(() => ({ appBaseUrl: "http://localhost" }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  return { ...shared, brandLinks: () => shared.resolveBrandLinks(shared.resolveBrand({ appBaseUrl: brand.appBaseUrl }).links) };
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks(shared.resolveBrand({ appBaseUrl: brand.appBaseUrl, preset: "lobbystack" }).links) };
 });
 
 const env = { APP_BASE_URL: "https://app.example.com/" };

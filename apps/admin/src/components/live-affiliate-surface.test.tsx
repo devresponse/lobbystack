@@ -15,6 +15,12 @@ import en from "../../public/locales/en/affiliate.json";
 import fr from "../../public/locales/fr/affiliate.json";
 import { LiveAffiliateSurface } from "./live-affiliate-surface";
 
+// The deployment's brand: LobbyStack's, as BRAND_PRESET=lobbystack picks it, whose terms have an affiliate section in each language.
+vi.mock("@lobbystack/shared", async (importOriginal) => {
+  const shared = await importOriginal<typeof import("@lobbystack/shared")>();
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks(shared.resolveBrand({ preset: "lobbystack" }).links) };
+});
+
 type Bundle = Record<string, unknown>;
 const bundles = { en: en as Bundle, fr: fr as Bundle };
 // jsdom replaces the global URL, so resolve the path from the module string.

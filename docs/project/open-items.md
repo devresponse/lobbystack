@@ -79,7 +79,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 The docs no longer link to the original project's sites, but some code and configuration still default to them. Each is a code change for its own pull request:
 
 - `NEXT_PUBLIC_POSTHOG_HOST` defaults to the original's PostHog relay in `docker-compose.yml` and `.env.example`; on Railway, leave it unset.
-- `packages/shared/src/brandLinks.ts` and `brands/lobbystack/brand.json` name the original's site, docs and email addresses for the `lobbystack` brand, and the affiliate route falls back to the original's dashboard address.
+- `packages/shared/src/brandLinks.ts` and `brands/lobbystack/brand.json` name the original's site, docs and email addresses for the `lobbystack` brand, and the affiliate route falls back to the original's dashboard address. Since fork PR #87 a deployment of this code shows that brand only with `BRAND_PRESET=lobbystack`.
 - `scripts/production-smoke.ts` expects the original's phone numbers unless `SMOKE_EXPECTED_NUMBERS` is set, and `scripts/write-openapi.ts` writes the original's server address into the OpenAPI file.
 - The Zapier app (`integrations/zapier/`) connects to the original's dashboard and docs unless `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` are set; the CLI's onboarding help links to the original's docs.
 - `.railway/railway.ts` allows the original's site as a website-call origin; the fork's deployments don't use that file.

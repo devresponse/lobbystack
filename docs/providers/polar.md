@@ -18,7 +18,7 @@ Run `pnpm billing apply` with your brand's `billing.json` (see [`brands/README.m
 
 Use `starter` or `pro` for checkout, with monthly or annual billing.
 
-The four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables (such as `POLAR_STARTER_MONTHLY_PRODUCT_ID`) are optional. A deployment that hasn't applied a `billing.json` yet sells a plan through its variable if it has one, and shows this build's built-in plans in US dollars. After a plan's first link, checkout ignores them, and `pnpm billing verify` notes any that are still set so you can remove them.
+The four `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables (such as `POLAR_STARTER_MONTHLY_PRODUCT_ID`) are optional. A deployment that hasn't applied a `billing.json` yet sells a plan through its variable if it has one, and shows the plans of its brand's `billing.json` as its build carries them, or for a brand without one, the code's built-in plans in US dollars (fork PR #88). After a plan's first link, checkout ignores them, and `pnpm billing verify` notes any that are still set so you can remove them.
 
 ## Configure usage event ingestion
 

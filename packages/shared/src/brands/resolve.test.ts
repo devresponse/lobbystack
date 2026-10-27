@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, resolveBrand, type BrandData } from "./resolve";
+import { brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
 const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
@@ -19,6 +19,12 @@ const data: BrandData = {
     ]),
     realinfobot: brand("realinfobot", "RealInfoBot"),
   },
+};
+
+// A copy of the code with one brand of its own besides LobbyStack.
+const oneBrand: BrandData = {
+  index: { default: "lobbystack", domains: { "alloplace.com": "alloplace" } },
+  brands: { lobbystack: data.brands.lobbystack!, alloplace: data.brands.alloplace! },
 };
 
 describe("brandHost", () => {
@@ -75,6 +81,27 @@ describe("resolveBrand", () => {
     expect(resolveBrand({}, data)).toMatchObject({ id: "lobbystack", source: "default", host: null });
   });
 
+  it("uses the only brand besides the default where neither the domain nor BRAND_PRESET picks one", () => {
+    const only = resolveBrand({ appBaseUrl: "http://localhost:13000" }, oneBrand);
+    expect(only).toMatchObject({ id: "alloplace", source: "only", appName: "AlloPlace", domain: null, indexing: true, origin: "http://localhost:13000" });
+    expect(brandFileMatched(only)).toBe(true);
+    expect(resolveBrand({ appBaseUrl: "https://admin-production.up.railway.app" }, oneBrand)).toMatchObject({ id: "alloplace", source: "only" });
+    expect(resolveBrand({}, oneBrand)).toMatchObject({ id: "alloplace", source: "only", host: null });
+    expect(resolveBrand({ appBaseUrl: "http://localhost", preset: "nope" }, oneBrand)).toMatchObject({ id: "alloplace", source: "only", unknownPreset: "nope" });
+  });
+
+  it("lets the domain and BRAND_PRESET win over the only brand, so BRAND_PRESET can keep the default", () => {
+    expect(resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }, oneBrand)).toMatchObject({ id: "alloplace", source: "apex", appName: "AlloPlace (dev)" });
+    const kept = resolveBrand({ appBaseUrl: "http://localhost", preset: "lobbystack" }, oneBrand);
+    expect(kept).toMatchObject({ id: "lobbystack", source: "preset", appName: "LobbyStack" });
+    expect(brandFileMatched(kept)).toBe(true);
+  });
+
+  it("keeps the default when there's no brand besides it, or several and none is picked", () => {
+    expect(resolveBrand({ appBaseUrl: "http://localhost" }, { index: { default: "lobbystack", domains: {} }, brands: { lobbystack: data.brands.lobbystack! } })).toMatchObject({ id: "lobbystack", source: "default" });
+    expect(resolveBrand({ appBaseUrl: "http://localhost" }, data)).toMatchObject({ id: "lobbystack", source: "default" });
+  });
+
   it("applies the environment settings of a matching first label", () => {
     expect(resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }, data)).toMatchObject({ appName: "AlloPlace (dev)", indexing: false });
     expect(resolveBrand({ appBaseUrl: "https://staging.alloplace.com" }, data)).toMatchObject({ appName: "AlloPlace", indexing: false });
@@ -92,7 +119,18 @@ describe("resolveBrand", () => {
 
   it("resolves the committed brands", () => {
     expect(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" })).toMatchObject({ id: "alloplace", appName: "AlloPlace", accentColor: "#ffd100", links: { siteUrl: "https://alloplace.com", contactEmail: "support@alloplace.com" } });
-    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "lobbystack", appName: "LobbyStack", logoUrl: null, emailLogo: null, ogImage: null });
+    // AlloPlace is the only brand besides LobbyStack, so it shows on localhost too.
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "alloplace", source: "only", appName: "AlloPlace" });
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000", preset: "lobbystack" })).toMatchObject({ id: "lobbystack", appName: "LobbyStack", logoUrl: null, emailLogo: null, ogImage: null });
+  });
+});
+
+describe("onlyBrand", () => {
+  it("names the one brand besides the default, and nothing when there are none or several", () => {
+    expect(onlyBrand(oneBrand)).toBe("alloplace");
+    expect(onlyBrand(data)).toBeNull();
+    expect(onlyBrand({ index: { default: "lobbystack", domains: {} }, brands: { lobbystack: data.brands.lobbystack! } })).toBeNull();
+    expect(onlyBrand()).toBe("alloplace");
   });
 });
 
@@ -135,9 +173,17 @@ describe("brandStartupReport", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://app.example.com" }, data), { BRAND_REQUIRED: "true" }).error).toContain("BRAND_REQUIRED=true");
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost", preset: "alloplace" }, data), { BRAND_REQUIRED: "true" }).error).toBeNull();
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost" }, oneBrand), { BRAND_REQUIRED: "true" }).error).toBeNull();
   });
 
   it("names the brand and how it was chosen", () => {
     expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }, data), {}).info).toBe("[brand] alloplace (apex alloplace.com), shown as AlloPlace (dev)");
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost", preset: "realinfobot" }, data), {}).info).toBe("[brand] realinfobot (preset), shown as RealInfoBot");
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost" }, oneBrand), {}).info).toBe("[brand] alloplace (only brand), shown as AlloPlace");
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: "http://localhost" }, data), {}).info).toBe("[brand] lobbystack (default), shown as LobbyStack");
+  });
+
+  it("doesn't warn in production when the only brand stands in for an unclaimed address", () => {
+    expect(brandStartupReport(resolveBrand({ appBaseUrl: "https://admin-production.up.railway.app" }, oneBrand), { NODE_ENV: "production" }).warnings).toEqual([]);
   });
 });

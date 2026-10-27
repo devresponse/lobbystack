@@ -4,9 +4,10 @@ import type { BrandImage } from "./brands/types";
 // The name and logo a deployment shows in place of LobbyStack.
 //
 // A brand file under brands/ sets them when the deployment's domain or
-// BRAND_PRESET picks one (brands/resolve.ts). Otherwise the deployment's first
-// owner picks them in onboarding and the database keeps them, and LobbyStack
-// fills in whatever nobody chose.
+// BRAND_PRESET picks one, or when it's the only brand besides LobbyStack
+// (brands/resolve.ts). Otherwise the deployment's first owner picks them in
+// onboarding and the database keeps them, and LobbyStack fills in whatever
+// nobody chose.
 
 export const DEFAULT_APP_NAME = "LobbyStack";
 

@@ -21,9 +21,10 @@ async function readBranding(): Promise<Branding> {
 }
 
 /**
- * The deployment's name and logo: the brand file the deployment's domain
- * picks, then what onboarding saved, then LobbyStack. When the database can't
- * be read, pages still render with the brand file's choice.
+ * The deployment's name and logo: the brand file the deployment picks by its
+ * domain, BRAND_PRESET or as the only brand besides LobbyStack, then what
+ * onboarding saved, then LobbyStack. When the database can't be read, pages
+ * still render with the brand file's choice.
  */
 export async function loadBranding(): Promise<Branding> {
   const now = Date.now();

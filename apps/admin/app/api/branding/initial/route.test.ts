@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn(), appBaseUrl: "http://localhost" }));
+const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn(), appBaseUrl: "http://localhost", unbranded: true }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  return { ...shared, currentBrand: () => shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl }) };
+  // An unbranded copy of the code has no brand besides LobbyStack, so the first owner may choose.
+  return { ...shared, currentBrand: () => fixture.unbranded ? { ...shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: "lobbystack" }), source: "default" } : shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl }) };
 });
 vi.mock("@lobbystack/domain", () => ({ saveInitialBranding: fixture.save }));
 vi.mock("@/lib/api-helpers", () => ({
@@ -26,7 +27,7 @@ beforeEach(() => {
   fixture.save.mockResolvedValue(undefined);
   fixture.load.mockResolvedValue({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" });
 });
-afterEach(() => { vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; });
+afterEach(() => { vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; fixture.unbranded = true; });
 
 describe("initial branding route", () => {
   it("saves the name and the decoded logo, then answers with what pages now show", async () => {
@@ -38,7 +39,16 @@ describe("initial branding route", () => {
   });
 
   it("refuses on a deployment whose brand file sets the name and logo", async () => {
+    fixture.unbranded = false;
     fixture.appBaseUrl = "https://demo.alloplace.com";
+    const response = await post(JSON.stringify({ appName: "Acme Desk" }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "branding_set_by_brand_file" });
+    expect(fixture.save).not.toHaveBeenCalled();
+  });
+
+  it("refuses on an address no brand claims when the code has one brand besides LobbyStack", async () => {
+    fixture.unbranded = false;
     const response = await post(JSON.stringify({ appName: "Acme Desk" }));
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: "branding_set_by_brand_file" });

@@ -10,6 +10,8 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#88](https://github.com/devresponse/lobbystack/pull/88) | Show the brand's billing.json plans before a deployment's first apply |  | `edad2bf` | [docs](../billing/README.md#know-the-plans) |
+| [#87](https://github.com/devresponse/lobbystack/pull/87) | Use the only brand folder where no address or preset picks one |  | `141a4cd` | [docs](../branding.md) |
 | [#85](https://github.com/devresponse/lobbystack/pull/85) | Add a roadmap of the researched features to docs |  | `cccf0ac` | [docs](../roadmap/README.md) |
 
 ### 2026-10-26
@@ -169,7 +171,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 ### Direct commits on `main`
 
-Four commits reached `main` without a pull request:
+Seven commits reached `main` without a pull request:
 
 | Date | Commit | What changed |
 | --- | --- | --- |
@@ -177,3 +179,6 @@ Four commits reached `main` without a pull request:
 | 2026-10-12 | `044e8f3` | Run the original project's production release job only in the original's repository. |
 | 2026-10-12 | `85adb66` | Tell GPT-Live that only the backend can transfer a call, after it said "Connecting you now" on two demo calls without asking the backend to transfer. |
 | 2026-10-15 | `acaab6a` | A comment in `packages/db/src/index.ts`, so a push rebuilds and redeploys the admin, worker and migrator, which all watch that path. |
+| 2026-10-27 | `37c35d2` | Let Way B's image build read a `pnpm-lock.yaml` with Windows line endings, from a Windows clone made before fork PR #83, and say how to give such a clone Linux line endings everywhere ([line endings on Windows](../voice/local-debugging.md#line-endings-on-windows)). |
+| 2026-10-27 | `5312092` | Note Way B's first run, on Windows, and add IIS holding port 80 and Docker Desktop restarting mid-build to the local troubleshooting table ([2.10](../deployment/guide/part-2-local-development.md#210-if-something-fails-locally)). |
+| 2026-10-27 | `fd36d0a` | Line up the columns of the tables in `docs/README.md` and `docs/project/overview.md`. |

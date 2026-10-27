@@ -23,8 +23,8 @@ AlloPlace's plans, from [`brands/alloplace/billing.json`](../../brands/alloplace
 | Plan | Monthly | Yearly | Voice minutes | Alert text segments | Call transfers | Website chats | Knowledge storage | Phone numbers | Past the allowance |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Free (`free_cloud`) | $0 | $0 | 30 | 10 | 2 | 5 | 1 MB | 0 | Refused, not billed |
-| Starter | $30 | $288 | 150 | 50 | 20 | 50 | 5 MB | 1 | $0.20 a minute, $0.02 a segment or transfer |
-| Pro | $100 | $960 | 500 | 200 | 100 | 200 | 20 MB | 1 | $0.18 a minute, $0.02 a segment or transfer |
+| Starter | $37 | $370 | 150 | 50 | 20 | 50 | 5 MB | 1 | $0.20 a minute, $0.02 a segment or transfer |
+| Pro | $87 | $870 | 500 | 200 | 100 | 200 | 20 MB | 1 | $0.18 a minute, $0.02 a segment or transfer |
 | Enterprise | Custom | Custom | Custom | Custom | Custom | Custom | Custom | Custom | Billed by hand |
 
 - Allowances reset on the first of each month (UTC), on monthly and yearly subscriptions alike, whatever day the subscription renews.

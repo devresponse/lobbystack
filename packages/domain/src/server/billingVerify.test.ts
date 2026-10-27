@@ -180,7 +180,7 @@ describe("verifyBillingCatalog", () => {
       'drift file_polar product Product "Pro annual"',
     ]);
     expect(result.checks.filter((check) => check.level === "drift").map((check) => check.message)).toEqual([
-      'Product "Pro annual": 960.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month.',
+      'Product "Pro annual": 870.00 CAD a year, Voice minutes at 0.18 CAD each, Alert SMS segments at 0.02 CAD each, Call transfers at 0.02 CAD each; overage invoiced each month.',
       `Webhook ${webhookUrl}: API version 2027-01, LobbyStack reads 2026-10.`,
       'Product "Pro annual": replaced by a product that invoices its overage each month; its subscribers keep it.',
     ]);

@@ -16,6 +16,8 @@ const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); navigation.search = ""; navigation.replace.mockReset(); });
 
 const ZAPIER_SCOPES = ["business:read", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:write", "webhooks:manage"];
+// Make's triggers subscribe to message.taken, which needs messages:read, though no module reads messages.
+const MAKE_SCOPES = ZAPIER_SCOPES;
 
 const postedBody = (fetchMock: ReturnType<typeof setup>) => JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "POST")?.[1]?.body));
 
@@ -109,6 +111,37 @@ describe("API keys settings", () => {
     navigation.search = "setup=zapier";
     setup("viewer");
     expect(await screen.findByText("apiKeys.restricted.title")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(navigation.replace).not.toHaveBeenCalled();
+  });
+
+  it("sets a key up for Make, with the access every Make module and trigger needs", async () => {
+    const user = userEvent.setup();
+    const fetchMock = setup("business_owner");
+    await user.click(await screen.findByRole("button", { name: /apiKeys.create.action/ }));
+    await user.click(screen.getByRole("button", { name: /apiKeys.create.make$/ }));
+    expect((screen.getByLabelText("apiKeys.create.nameLabel") as HTMLInputElement).value).toBe("Make");
+    expect(screen.getByText("apiKeys.create.makeHint")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "apiKeys.create.submit" }));
+    await screen.findByTestId("secret-value");
+    expect(postedBody(fetchMock)).toEqual({ name: "Make", scopes: MAKE_SCOPES });
+  });
+
+  it("opens the dialog set up for Make from the Integrations page's link", async () => {
+    navigation.search = "setup=make";
+    setup("business_owner");
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect((screen.getByLabelText("apiKeys.create.nameLabel") as HTMLInputElement).value).toBe("Make");
+    expect(screen.getByRole("checkbox", { name: /messages:read/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("checkbox", { name: /webhooks:manage/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("checkbox", { name: /business:write/ }).getAttribute("aria-checked")).toBe("false");
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith("/settings/api-keys", { scroll: false }));
+  });
+
+  it("leaves the dialog closed for a setup link it doesn't know", async () => {
+    navigation.search = "setup=n8n";
+    setup("business_owner");
+    expect(await screen.findByText("apiKeys.title")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(navigation.replace).not.toHaveBeenCalled();
   });

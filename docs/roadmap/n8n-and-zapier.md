@@ -1,13 +1,14 @@
 # Publish the n8n and Zapier integrations
 
-Zapier and n8n can already reach LobbyStack, but neither has an integration that anyone can find in its directory ([integrations](../features/api-cli-integrations.md#connect-zapier)). Since fork PR #94 each brand publishes the Zapier integration in `integrations/zapier` privately, on its own Zapier account: people join it through the brand's invite link, which the dashboard's **Integrations** page opens. An n8n node was sized on 2026-10-13, checked again on 2026-10-28, and never built.
+Zapier and n8n can already reach LobbyStack, but neither has an integration that anyone can find in its directory ([integrations](../features/api-cli-integrations.md#connect-zapier)). Since fork PR #94 each brand publishes the Zapier integration in `integrations/zapier` privately, on its own Zapier account: people join it through the brand's invite link, which the dashboard's **Integrations** page opens. Fork PR #95 does the same for Make with the app in `integrations/make`, which each brand publishes on its own Make account and shares through an invite link ([integrations](../features/api-cli-integrations.md#connect-make)). An n8n node was sized on 2026-10-13, checked again on 2026-10-28, and never built.
 
-- **Status:** the private Zapier integration is built (fork PR #94). The n8n node and a listing in Zapier's directory aren't started; build them when customers ask.
+- **Status:** the private Zapier integration (fork PR #94) and the Make app (fork PR #95) are built. The n8n node and a listing in Zapier's directory aren't started; build them when customers ask. Listing the Make app for every Make user takes Make's own review, which isn't sized.
 - **Effort:** about 3 to 5 days for the n8n node, with tests, CI and help pages; about 1.5 to 2.5 days to list the Zapier integration, plus about 3 hours of the maintainer's, then Zapier's review.
 
 ## Know what works today
 
 - **Zapier:** the brand's private integration, through the Zapier card on the **Integrations** page, or Webhooks by Zapier on a paid Zapier plan with a webhook from **Integrations > Webhooks**.
+- **Make:** the brand's app, through the Make card on the **Integrations** page once it's published, or Make's HTTP module and custom webhook trigger with a key and a webhook from **Integrations > Webhooks**.
 - **n8n:** the MCP Client node at `/api/mcp` runs the MCP tools with an `lsk_` key, the HTTP Request node covers the v1 API, and a webhook from **Integrations > Webhooks** starts an n8n Webhook node.
 
 ## Build the n8n node

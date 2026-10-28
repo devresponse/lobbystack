@@ -1,0 +1,454 @@
+{
+  "fileVersion": 1,
+  "generalCodeFiles": {
+    "base": "general/base.iml.json",
+    "common": null,
+    "readme": "README.md",
+    "groups": "modules/groups.json"
+  },
+  "components": {
+    "connection": {
+      "api-key": {
+        "label": "__APP_NAME__",
+        "connectionType": "basic",
+        "codeFiles": {
+          "communication": "connections/api-key/api-key.communication.iml.json",
+          "params": "connections/api-key/api-key.params.iml.json",
+          "common": null
+        }
+      }
+    },
+    "webhook": {
+      "call-completed": {
+        "label": "Completed calls",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/call-completed/call-completed.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/call-completed/call-completed.attach.iml.json",
+          "detach": "webhooks/call-completed/call-completed.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      },
+      "appointment-booked": {
+        "label": "New appointments",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/appointment-booked/appointment-booked.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/appointment-booked/appointment-booked.attach.iml.json",
+          "detach": "webhooks/appointment-booked/appointment-booked.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      },
+      "appointment-rescheduled": {
+        "label": "Rescheduled appointments",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/appointment-rescheduled/appointment-rescheduled.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/appointment-rescheduled/appointment-rescheduled.attach.iml.json",
+          "detach": "webhooks/appointment-rescheduled/appointment-rescheduled.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      },
+      "appointment-cancelled": {
+        "label": "Cancelled appointments",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/appointment-cancelled/appointment-cancelled.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/appointment-cancelled/appointment-cancelled.attach.iml.json",
+          "detach": "webhooks/appointment-cancelled/appointment-cancelled.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      },
+      "message-taken": {
+        "label": "New messages",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/message-taken/message-taken.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/message-taken/message-taken.attach.iml.json",
+          "detach": "webhooks/message-taken/message-taken.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      },
+      "contact-created": {
+        "label": "New contacts",
+        "webhookType": "web",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "webhooks/contact-created/contact-created.communication.iml.json",
+          "params": null,
+          "attach": "webhooks/contact-created/contact-created.attach.iml.json",
+          "detach": "webhooks/contact-created/contact-created.detach.iml.json",
+          "update": null,
+          "requiredScope": null
+        }
+      }
+    },
+    "module": {
+      "watchCompletedCalls": {
+        "label": "Watch completed calls",
+        "description": "Triggers when a phone call or a call from the website ends, with its summary and outcome.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "call-completed",
+        "codeFiles": {
+          "communication": "modules/watch-completed-calls/watch-completed-calls.communication.iml.json",
+          "staticParams": "modules/watch-completed-calls/watch-completed-calls.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-completed-calls/watch-completed-calls.interface.iml.json",
+          "samples": "modules/watch-completed-calls/watch-completed-calls.samples.iml.json"
+        }
+      },
+      "watchNewAppointments": {
+        "label": "Watch new appointments",
+        "description": "Triggers when a new appointment is booked.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "appointment-booked",
+        "codeFiles": {
+          "communication": "modules/watch-new-appointments/watch-new-appointments.communication.iml.json",
+          "staticParams": "modules/watch-new-appointments/watch-new-appointments.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-new-appointments/watch-new-appointments.interface.iml.json",
+          "samples": "modules/watch-new-appointments/watch-new-appointments.samples.iml.json"
+        }
+      },
+      "watchRescheduledAppointments": {
+        "label": "Watch rescheduled appointments",
+        "description": "Triggers when an appointment is moved to a new time.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "appointment-rescheduled",
+        "codeFiles": {
+          "communication": "modules/watch-rescheduled-appointments/watch-rescheduled-appointments.communication.iml.json",
+          "staticParams": "modules/watch-rescheduled-appointments/watch-rescheduled-appointments.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-rescheduled-appointments/watch-rescheduled-appointments.interface.iml.json",
+          "samples": "modules/watch-rescheduled-appointments/watch-rescheduled-appointments.samples.iml.json"
+        }
+      },
+      "watchCancelledAppointments": {
+        "label": "Watch cancelled appointments",
+        "description": "Triggers when an appointment is cancelled.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "appointment-cancelled",
+        "codeFiles": {
+          "communication": "modules/watch-cancelled-appointments/watch-cancelled-appointments.communication.iml.json",
+          "staticParams": "modules/watch-cancelled-appointments/watch-cancelled-appointments.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-cancelled-appointments/watch-cancelled-appointments.interface.iml.json",
+          "samples": "modules/watch-cancelled-appointments/watch-cancelled-appointments.samples.iml.json"
+        }
+      },
+      "watchNewMessages": {
+        "label": "Watch new messages",
+        "description": "Triggers when the receptionist takes a new message for the team.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "message-taken",
+        "codeFiles": {
+          "communication": "modules/watch-new-messages/watch-new-messages.communication.iml.json",
+          "staticParams": "modules/watch-new-messages/watch-new-messages.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-new-messages/watch-new-messages.interface.iml.json",
+          "samples": "modules/watch-new-messages/watch-new-messages.samples.iml.json"
+        }
+      },
+      "watchNewContacts": {
+        "label": "Watch new contacts",
+        "description": "Triggers when a new contact is created.",
+        "moduleType": "instant_trigger",
+        "connection": null,
+        "altConnection": null,
+        "webhook": "contact-created",
+        "codeFiles": {
+          "communication": "modules/watch-new-contacts/watch-new-contacts.communication.iml.json",
+          "staticParams": "modules/watch-new-contacts/watch-new-contacts.static-params.iml.json",
+          "mappableParams": null,
+          "interface": "modules/watch-new-contacts/watch-new-contacts.interface.iml.json",
+          "samples": "modules/watch-new-contacts/watch-new-contacts.samples.iml.json"
+        }
+      },
+      "getCall": {
+        "label": "Get a call",
+        "description": "Returns information about a specific call by its ID, with its transcript.",
+        "moduleType": "action",
+        "actionCrud": "read",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/get-call/get-call.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/get-call/get-call.mappable-params.iml.json",
+          "interface": "modules/get-call/get-call.interface.iml.json",
+          "samples": "modules/get-call/get-call.samples.iml.json",
+          "scope": null
+        }
+      },
+      "searchAppointments": {
+        "label": "Search appointments",
+        "description": "Returns a list of appointments filtered by contact, status or start time, newest booking first.",
+        "moduleType": "search",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/search-appointments/search-appointments.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/search-appointments/search-appointments.mappable-params.iml.json",
+          "interface": "modules/search-appointments/search-appointments.interface.iml.json",
+          "samples": "modules/search-appointments/search-appointments.samples.iml.json",
+          "scope": null
+        }
+      },
+      "getAppointment": {
+        "label": "Get an appointment",
+        "description": "Returns information about a specific appointment by its ID.",
+        "moduleType": "action",
+        "actionCrud": "read",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/get-appointment/get-appointment.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/get-appointment/get-appointment.mappable-params.iml.json",
+          "interface": "modules/get-appointment/get-appointment.interface.iml.json",
+          "samples": "modules/get-appointment/get-appointment.samples.iml.json",
+          "scope": null
+        }
+      },
+      "listOpenTimes": {
+        "label": "List open appointment times",
+        "description": "Returns a list of open start times for a service from one day to another, in 30-minute steps within opening hours.",
+        "moduleType": "search",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/list-open-times/list-open-times.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/list-open-times/list-open-times.mappable-params.iml.json",
+          "interface": "modules/list-open-times/list-open-times.interface.iml.json",
+          "samples": "modules/list-open-times/list-open-times.samples.iml.json",
+          "scope": null
+        }
+      },
+      "bookAppointment": {
+        "label": "Book an appointment",
+        "description": "Books an appointment at an open time. The business's booking must be set to book appointments.",
+        "moduleType": "action",
+        "actionCrud": "create",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/book-appointment/book-appointment.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/book-appointment/book-appointment.mappable-params.iml.json",
+          "interface": "modules/book-appointment/book-appointment.interface.iml.json",
+          "samples": "modules/book-appointment/book-appointment.samples.iml.json",
+          "scope": null
+        }
+      },
+      "rescheduleAppointment": {
+        "label": "Reschedule an appointment",
+        "description": "Reschedules an appointment to another open time. The business's booking must be set to book appointments.",
+        "moduleType": "action",
+        "actionCrud": "update",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/reschedule-appointment/reschedule-appointment.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/reschedule-appointment/reschedule-appointment.mappable-params.iml.json",
+          "interface": "modules/reschedule-appointment/reschedule-appointment.interface.iml.json",
+          "samples": "modules/reschedule-appointment/reschedule-appointment.samples.iml.json",
+          "scope": null
+        }
+      },
+      "cancelAppointment": {
+        "label": "Cancel an appointment",
+        "description": "Cancels an appointment. An appointment that is already cancelled is returned as it is.",
+        "moduleType": "action",
+        "actionCrud": "update",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/cancel-appointment/cancel-appointment.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/cancel-appointment/cancel-appointment.mappable-params.iml.json",
+          "interface": "modules/cancel-appointment/cancel-appointment.interface.iml.json",
+          "samples": "modules/cancel-appointment/cancel-appointment.samples.iml.json",
+          "scope": null
+        }
+      },
+      "searchContacts": {
+        "label": "Search contacts",
+        "description": "Returns a list of contacts filtered by phone number, email or name, newest first.",
+        "moduleType": "search",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/search-contacts/search-contacts.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/search-contacts/search-contacts.mappable-params.iml.json",
+          "interface": "modules/search-contacts/search-contacts.interface.iml.json",
+          "samples": "modules/search-contacts/search-contacts.samples.iml.json",
+          "scope": null
+        }
+      },
+      "getContact": {
+        "label": "Get a contact",
+        "description": "Returns information about a specific contact by its ID.",
+        "moduleType": "action",
+        "actionCrud": "read",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/get-contact/get-contact.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/get-contact/get-contact.mappable-params.iml.json",
+          "interface": "modules/get-contact/get-contact.interface.iml.json",
+          "samples": "modules/get-contact/get-contact.samples.iml.json",
+          "scope": null
+        }
+      },
+      "createContact": {
+        "label": "Create a contact",
+        "description": "Creates a new contact. A phone number another contact already has is an error, so use Search contacts first.",
+        "moduleType": "action",
+        "actionCrud": "create",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/create-contact/create-contact.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/create-contact/create-contact.mappable-params.iml.json",
+          "interface": "modules/create-contact/create-contact.interface.iml.json",
+          "samples": "modules/create-contact/create-contact.samples.iml.json",
+          "scope": null
+        }
+      },
+      "updateContact": {
+        "label": "Update a contact",
+        "description": "Updates a contact's name, phone, email, language or time zone. Fields left empty keep their value.",
+        "moduleType": "action",
+        "actionCrud": "update",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/update-contact/update-contact.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/update-contact/update-contact.mappable-params.iml.json",
+          "interface": "modules/update-contact/update-contact.interface.iml.json",
+          "samples": "modules/update-contact/update-contact.samples.iml.json",
+          "scope": null
+        }
+      },
+      "addKnowledgeEntry": {
+        "label": "Add a knowledge entry",
+        "description": "Adds a question and answer, or a text entry, that the receptionist answers callers from.",
+        "moduleType": "action",
+        "actionCrud": "create",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/add-knowledge-entry/add-knowledge-entry.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/add-knowledge-entry/add-knowledge-entry.mappable-params.iml.json",
+          "interface": "modules/add-knowledge-entry/add-knowledge-entry.interface.iml.json",
+          "samples": "modules/add-knowledge-entry/add-knowledge-entry.samples.iml.json",
+          "scope": null
+        }
+      },
+      "makeApiCall": {
+        "label": "Make an API call",
+        "description": "Sends a custom API call to __APP_NAME__. You can use this to call endpoints that aren't covered by existing modules.",
+        "moduleType": "universal",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "modules/make-api-call/make-api-call.communication.iml.json",
+          "staticParams": null,
+          "mappableParams": "modules/make-api-call/make-api-call.mappable-params.iml.json",
+          "interface": "modules/make-api-call/make-api-call.interface.iml.json",
+          "samples": "modules/make-api-call/make-api-call.samples.iml.json",
+          "scope": null
+        }
+      }
+    },
+    "rpc": {
+      "listServices": {
+        "label": "List services",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-services/list-services.communication.iml.json",
+          "params": null
+        }
+      },
+      "listStaff": {
+        "label": "List staff members",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-staff/list-staff.communication.iml.json",
+          "params": null
+        }
+      },
+      "listAppointments": {
+        "label": "List upcoming appointments",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-appointments/list-appointments.communication.iml.json",
+          "params": null
+        }
+      },
+      "listContacts": {
+        "label": "List recent contacts",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-contacts/list-contacts.communication.iml.json",
+          "params": null
+        }
+      },
+      "listCalls": {
+        "label": "List recent calls",
+        "connection": "api-key",
+        "altConnection": null,
+        "codeFiles": {
+          "communication": "rpcs/list-calls/list-calls.communication.iml.json",
+          "params": null
+        }
+      }
+    },
+    "function": {},
+    "endpoint": {}
+  },
+  "origins": []
+}

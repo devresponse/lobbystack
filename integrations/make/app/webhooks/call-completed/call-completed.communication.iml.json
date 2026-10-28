@@ -1,0 +1,4 @@
+{
+  "condition": "{{body.type == 'call.completed'}}",
+  "output": "{{body.data}}"
+}

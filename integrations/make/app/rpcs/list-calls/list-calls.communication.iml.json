@@ -1,0 +1,21 @@
+{
+  "url": "/calls",
+  "method": "GET",
+  "qs": {
+    "limit": 100
+  },
+  "response": {
+    "limit": 300,
+    "iterate": "{{body.data}}",
+    "output": {
+      "label": "{{formatDate(item.started_at, 'YYYY-MM-DD HH:mm') + ' ' + ifempty(item.caller_name, ifempty(item.caller_phone, 'Unknown caller'))}}",
+      "value": "{{item.id}}"
+    }
+  },
+  "pagination": {
+    "qs": {
+      "cursor": "{{body.next_cursor}}"
+    },
+    "condition": "{{body.has_more}}"
+  }
+}

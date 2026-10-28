@@ -1,0 +1,32 @@
+{
+  "baseUrl": "{{connection.dashboardUrl}}/api/v1",
+  "headers": {
+    "authorization": "Bearer {{connection.apiKey}}"
+  },
+  "response": {
+    "error": {
+      "400": {
+        "type": "DataError",
+        "message": "[{{statusCode}}] {{switch(body.error.code, 'booking_requires_confirmation', 'This business takes booking requests that the team confirms, so Make cannot book or move appointments. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'booking_disabled', 'Booking is turned off for this business. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'slot_unavailable', 'That time is no longer open. Use List open appointment times to pick an open time, then try again.', ifempty(body.error.message, 'The request failed.'))}}{{if(length(body.error.details) > 0, ' ' + join(map(body.error.details, 'message'), ' '), '')}}"
+      },
+      "401": {
+        "type": "InvalidAccessTokenError",
+        "message": "[401] This __APP_NAME__ API key is invalid or was revoked. Create a key in __APP_NAME__ under Settings > API keys with Set up for Make, then update the connection."
+      },
+      "403": {
+        "type": "InvalidConfigurationError",
+        "message": "[403] {{ifempty(body.error.message, 'This API key is not allowed to do that.')}}{{if(body.error.code == 'insufficient_scope', ' Create a key in __APP_NAME__ under Settings > API keys with Set up for Make, then update the connection.', '')}}"
+      },
+      "409": {
+        "type": "DataError",
+        "message": "[{{statusCode}}] {{switch(body.error.code, 'booking_requires_confirmation', 'This business takes booking requests that the team confirms, so Make cannot book or move appointments. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'booking_disabled', 'Booking is turned off for this business. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'slot_unavailable', 'That time is no longer open. Use List open appointment times to pick an open time, then try again.', ifempty(body.error.message, 'The request failed.'))}}{{if(length(body.error.details) > 0, ' ' + join(map(body.error.details, 'message'), ' '), '')}}"
+      },
+      "message": "[{{statusCode}}] {{switch(body.error.code, 'booking_requires_confirmation', 'This business takes booking requests that the team confirms, so Make cannot book or move appointments. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'booking_disabled', 'Booking is turned off for this business. In __APP_NAME__, go to Agent > Booking and set Appointments to Books appointments, then try again.', 'slot_unavailable', 'That time is no longer open. Use List open appointment times to pick an open time, then try again.', ifempty(body.error.message, 'The request failed.'))}}{{if(length(body.error.details) > 0, ' ' + join(map(body.error.details, 'message'), ' '), '')}}"
+    }
+  },
+  "log": {
+    "sanitize": [
+      "request.headers.authorization"
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "url": "/availability",
+  "method": "GET",
+  "qs": {
+    "service_id": "{{parameters.service_id}}",
+    "start_date": "{{parameters.start_date}}",
+    "end_date": "{{parameters.end_date}}",
+    "staff_id": "{{parameters.staff_id}}"
+  },
+  "response": {
+    "iterate": "{{body.data}}",
+    "output": "{{item}}",
+    "limit": "{{parameters.limit}}"
+  }
+}

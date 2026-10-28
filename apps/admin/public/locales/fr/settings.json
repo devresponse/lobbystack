@@ -740,6 +740,18 @@
       "createKey": "Créer une clé pour Zapier",
       "bookingNote": "Les Zaps ne peuvent réserver des rendez-vous que si la section Rendez-vous de la page Agent est réglée sur Réserve les rendez-vous."
     },
+    "make": {
+      "title": "Connecter Make",
+      "description": "Les scénarios peuvent démarrer à la fin d'un appel, quand un rendez-vous est réservé, déplacé ou annulé, quand un message est pris ou quand un contact est ajouté. Ils peuvent aussi consulter des appels, des rendez-vous et des contacts, ajouter et modifier des contacts, réserver, déplacer et annuler des rendez-vous, et ajouter des connaissances pour votre agent.",
+      "steps": {
+        "invite": "Installez {{appName}} dans votre organisation Make à partir de son lien d'invitation. Make vous demande d'abord de vous connecter ou de créer un compte gratuit.",
+        "key": "Créez une clé API pour Make. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
+        "scenario": "Dans Make, ajoutez un module {{appName}} à un scénario et choisissez Create a connection. Collez la clé dans «\u00a0API key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+      },
+      "openInvite": "Ouvrir {{appName}} dans Make",
+      "createKey": "Créer une clé pour Make",
+      "bookingNote": "Les scénarios ne peuvent réserver des rendez-vous que si la section Rendez-vous de la page Agent est réglée sur Réserve les rendez-vous."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -752,6 +764,10 @@
       "zapier": {
         "title": "Zapier",
         "description": "Connectez {{appName}} à des milliers d'applications, sans code."
+      },
+      "make": {
+        "title": "Make",
+        "description": "Créez des scénarios visuels qui relient {{appName}} à vos autres applications."
       }
     },
     "status": {
@@ -1194,6 +1210,8 @@
       "scopesLabel": "Accès",
       "zapier": "Configurer pour Zapier",
       "zapierHint": "Autorise tout ce dont Zapier a besoin pour vos Zaps.",
+      "make": "Configurer pour Make",
+      "makeHint": "Autorise tout ce dont Make a besoin pour vos scénarios.",
       "cancel": "Annuler",
       "submit": "Créer la clé",
       "creating": "Création…"

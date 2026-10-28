@@ -1,0 +1,11 @@
+[
+  {
+    "name": "call_id",
+    "type": "select",
+    "label": "Call ID",
+    "options": "rpc://listCalls",
+    "mode": "edit",
+    "required": true,
+    "help": "Map the Call ID from Watch completed calls or Watch new messages, or switch off Map to pick a recent call."
+  }
+]

@@ -41,7 +41,7 @@ The old `production` branch was rewritten on 2026-10-09 and deleted on 2026-10-1
 
 1. Branch from `main` and open a pull request into `main`. Use the template's Summary, Testing and Docs sections.
 2. Update the docs in the same pull request: `docs/` is the project's source of truth ([how this folder works](../README.md#keep-this-folder-true)).
-3. CI runs on every pull request and every push to `main`: checks, database, end-to-end, Zapier, images and CodeQL, about 10 minutes. A new push cancels the running one. Pushes to `main` also run the replacement validation, 13 to 20 minutes. Pushes to `alloplace/r1` run nothing.
+3. CI runs on every pull request and every push to `main`: checks, database, end-to-end, Zapier, Make, images and CodeQL, about 10 minutes. A new push cancels the running one. Pushes to `main` also run the replacement validation, 13 to 20 minutes. Pushes to `alloplace/r1` run nothing.
 4. Merge only when CI is green. The maintainer merges, or says when to. The merge is a merge commit, "Merge pull request #N from devresponse/&lt;branch&gt;", pushed to `alloplace/r1` and then `main`.
 5. After the deploy, check the version line, then do any steps the pull request lists for after the deploy. The open ones are in [open items](open-items.md).
 
@@ -71,6 +71,7 @@ If GitHub never starts a pull request's CI because it never works out whether th
 | `packages/contracts/`, `packages/jobs/`, `packages/telemetry/` | Job and snapshot contracts, BullMQ queues, and telemetry with redaction.                                                                                                                                     |
 | `brands/`                                                      | One folder per brand: `brand.json`, images and `billing.json`. Public, like the rest of the repository.                                                                                                      |
 | `integrations/zapier/`                                         | The Zapier app.                                                                                                                                                                                              |
+| `integrations/make/`                                           | The Make app, and each brand's record of what it deployed to Make.                                                                                                                                           |
 | `scripts/`                                                     | Setup, `pnpm billing`, the `replacement:*` checks and operations scripts.                                                                                                                                    |
 | `docker/`, `docker-compose.yml`, `Dockerfile.*`                | The Compose stack and the images Railway builds.                                                                                                                                                             |
 | `mintlify/`                                                    | The original project's Help Center pages. Not maintained by the fork; this folder is the fork's documentation.                                                                                               |

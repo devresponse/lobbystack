@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { DEFAULT_APP_NAME } from "../branding";
 
-import { BUSINESS_HEADER, CONTACT_PASSCODES_MAX_PER_REQUEST, PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, businessApiKeyScopes, webhookEventTypes, type ApiKeyScope, type BusinessApiKeyScope } from "./constants";
+import { BUSINESS_HEADER, CONTACT_PASSCODES_MAX_PER_REQUEST, PUBLIC_API_AVAILABILITY_MAX_DAYS, PUBLIC_API_DEFAULT_PAGE_SIZE, PUBLIC_API_DEFAULT_RATE_LIMIT_PER_MINUTE, PUBLIC_API_MAX_PAGE_SIZE, PUBLIC_API_VERSION, WEBHOOK_TEST_EVENT_TYPE, apiKeyScopes, businessApiKeyScopes, webhookEventScope, webhookEventTypes, type ApiKeyScope, type BusinessApiKeyScope, type WebhookEventType } from "./constants";
 import {
   apiAccountCalendarSchema,
   apiAppointmentCreateSchema,
@@ -270,6 +270,49 @@ export const zapierOperationIds = [
 
 /** The scopes those operations need, in the order Settings > API keys lists them. */
 export const zapierApiKeyScopes: readonly BusinessApiKeyScope[] = offeredApiKeyScopes.filter((scope) => zapierOperationIds.some((id) => (apiOperations[id] as ApiOperation).scope === scope));
+
+/**
+ * Every operation the Make app in integrations/make calls, and the events its
+ * instant triggers subscribe to. Add one here when the app starts using it, so
+ * the key that Settings > API keys sets up for Make still allows every module.
+ */
+export const makeOperationIds = [
+  "getMe",
+  "listServices",
+  "listStaff",
+  "listCalls",
+  "getCall",
+  "listContacts",
+  "getContact",
+  "createContact",
+  "updateContact",
+  "listAppointments",
+  "getAppointment",
+  "getAvailability",
+  "createAppointment",
+  "cancelAppointment",
+  "rescheduleAppointment",
+  "createKnowledgeEntry",
+  "listWebhooks",
+  "createWebhook",
+  "deleteWebhook",
+] as const satisfies readonly ApiOperationId[];
+
+export const makeWebhookEvents = [
+  "call.completed",
+  "appointment.booked",
+  "appointment.rescheduled",
+  "appointment.cancelled",
+  "message.taken",
+  "contact.created",
+] as const satisfies readonly WebhookEventType[];
+
+/**
+ * The scopes those operations need, plus the read scope each event needs to
+ * subscribe to it, in the order Settings > API keys lists them.
+ */
+export const makeApiKeyScopes: readonly BusinessApiKeyScope[] = offeredApiKeyScopes.filter((scope) =>
+  makeOperationIds.some((id) => (apiOperations[id] as ApiOperation).scope === scope) || makeWebhookEvents.some((event) => webhookEventScope[event] === scope));
 
 /**
  * The schema behind each component name the operations use, each with its own

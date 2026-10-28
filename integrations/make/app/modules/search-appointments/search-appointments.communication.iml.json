@@ -1,0 +1,22 @@
+{
+  "url": "/appointments",
+  "method": "GET",
+  "qs": {
+    "contact_id": "{{parameters.contact_id}}",
+    "status": "{{parameters.status}}",
+    "starts_after": "{{if(parameters.starts_after, formatDate(parameters.starts_after, 'YYYY-MM-DDTHH:mm:ss[Z]', 'UTC'), undefined)}}",
+    "starts_before": "{{if(parameters.starts_before, formatDate(parameters.starts_before, 'YYYY-MM-DDTHH:mm:ss[Z]', 'UTC'), undefined)}}",
+    "limit": "{{if(parameters.limit > 0 && parameters.limit < 100, parameters.limit, 100)}}"
+  },
+  "response": {
+    "iterate": "{{body.data}}",
+    "output": "{{item}}",
+    "limit": "{{parameters.limit}}"
+  },
+  "pagination": {
+    "qs": {
+      "cursor": "{{body.next_cursor}}"
+    },
+    "condition": "{{body.has_more}}"
+  }
+}

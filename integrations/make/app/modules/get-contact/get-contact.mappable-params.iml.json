@@ -1,0 +1,11 @@
+[
+  {
+    "name": "contact_id",
+    "type": "select",
+    "label": "Contact ID",
+    "options": "rpc://listContacts",
+    "mode": "edit",
+    "required": true,
+    "help": "Map the ID from a trigger or a search, or switch off Map to pick a recent contact."
+  }
+]

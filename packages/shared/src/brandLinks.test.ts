@@ -4,6 +4,7 @@ import {
   LOBBYSTACK_CONTACT_EMAILS,
   contactEmailFor,
   normalizeEmailAddress,
+  normalizeMakeUrl,
   normalizePageUrl,
   normalizeSiteUrl,
   normalizeZapierUrl,
@@ -64,6 +65,22 @@ describe("normalizeZapierUrl", () => {
   });
 });
 
+describe("normalizeMakeUrl", () => {
+  it("keeps an invite link on make.com or one of its zones", () => {
+    expect(normalizeMakeUrl(" https://www.make.com/en/hq/app-invitation/0a1b2c3d4e5f ")).toBe("https://www.make.com/en/hq/app-invitation/0a1b2c3d4e5f");
+    expect(normalizeMakeUrl("https://eu1.make.com/app/invite/0a1b2c3d4e5f")).toBe("https://eu1.make.com/app/invite/0a1b2c3d4e5f");
+  });
+
+  it("refuses any other site, plain http and credentials", () => {
+    expect(normalizeMakeUrl("http://www.make.com/en/hq/app-invitation/0a1b2c3d4e5f")).toBeNull();
+    expect(normalizeMakeUrl("https://notmake.com/app/invite/0a1b2c3d4e5f")).toBeNull();
+    expect(normalizeMakeUrl("https://make.com.example.com/app/invite/0a1b2c3d4e5f")).toBeNull();
+    expect(normalizeMakeUrl("https://user@eu1.make.com/app/invite/0a1b2c3d4e5f")).toBeNull();
+    expect(normalizeMakeUrl("javascript:alert(1)")).toBeNull();
+    expect(normalizeMakeUrl(undefined)).toBeNull();
+  });
+});
+
 describe("normalizeEmailAddress", () => {
   it("accepts plain addresses", () => {
     expect(normalizeEmailAddress(" support@alloplace.com ")).toBe("support@alloplace.com");
@@ -83,7 +100,7 @@ describe("normalizeEmailAddress", () => {
 describe("resolveBrandLinks", () => {
   it("links to LobbyStack's site, docs and addresses without a brand", () => {
     const links = resolveBrandLinks();
-    expect(links).toEqual({ siteUrl: "https://lobbystack.com", termsUrl: null, privacyUrl: null, docsUrl: "https://docs.lobbystack.com", contactEmail: null, zapierUrl: null });
+    expect(links).toEqual({ siteUrl: "https://lobbystack.com", termsUrl: null, privacyUrl: null, docsUrl: "https://docs.lobbystack.com", contactEmail: null, zapierUrl: null, makeUrl: null });
     expect(contactEmailFor(links, "support")).toBe("support@lobbystack.com");
     expect(contactEmailFor(links, "sales")).toBe("hello@lobbystack.ai");
     expect(contactEmailFor(links, "sms")).toBe("hello@lobbystack.com");
@@ -98,22 +115,25 @@ describe("resolveBrandLinks", () => {
       docsUrl: "https://alloplace.com",
       contactEmail: "support@alloplace.com",
       zapierUrl: null,
+      makeUrl: null,
     });
     for (const purpose of Object.keys(LOBBYSTACK_CONTACT_EMAILS) as Array<keyof typeof LOBBYSTACK_CONTACT_EMAILS>) {
       expect(contactEmailFor(links, purpose)).toBe("support@alloplace.com");
     }
   });
 
-  it("fills in LobbyStack's site and docs where the brand has none, but never a Zapier link", () => {
-    expect(resolveBrandLinks({ siteUrl: null, termsUrl: "https://example.com/terms", privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null })).toEqual({
+  it("fills in LobbyStack's site and docs where the brand has none, but never a Zapier or Make link", () => {
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: "https://example.com/terms", privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: null })).toEqual({
       siteUrl: "https://lobbystack.com",
       termsUrl: "https://example.com/terms",
       privacyUrl: null,
       docsUrl: "https://docs.lobbystack.com",
       contactEmail: null,
       zapierUrl: null,
+      makeUrl: null,
     });
-    expect(resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: "https://zapier.com/apps/example/integrations" }).zapierUrl).toBe("https://zapier.com/apps/example/integrations");
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: "https://zapier.com/apps/example/integrations", makeUrl: null }).zapierUrl).toBe("https://zapier.com/apps/example/integrations");
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: "https://www.make.com/en/hq/app-invitation/0a1b2c3d4e5f" }).makeUrl).toBe("https://www.make.com/en/hq/app-invitation/0a1b2c3d4e5f");
   });
 });
 

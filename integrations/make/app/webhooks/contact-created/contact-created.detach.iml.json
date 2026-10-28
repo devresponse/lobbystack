@@ -1,0 +1,16 @@
+[
+  {
+    "url": "/webhooks",
+    "method": "GET",
+    "response": {
+      "temp": {
+        "exists": "{{contains(map(body.data, 'id'), webhook.externalHookId)}}"
+      }
+    }
+  },
+  {
+    "condition": "{{temp.exists}}",
+    "url": "/webhooks/{{webhook.externalHookId}}",
+    "method": "DELETE"
+  }
+]

@@ -740,6 +740,18 @@
       "createKey": "Crear una clave para Zapier",
       "bookingNote": "Los Zaps solo pueden reservar citas mientras la sección Reservas de la página Agente esté en Reserva citas."
     },
+    "make": {
+      "title": "Conectar Make",
+      "description": "Los escenarios pueden empezar cuando termina una llamada, cuando se reserva, cambia o cancela una cita, cuando se toma un mensaje o cuando se agrega un contacto. También pueden consultar llamadas, citas y contactos, agregar y actualizar contactos, reservar, cambiar y cancelar citas, y agregar conocimiento para su agente.",
+      "steps": {
+        "invite": "Instale {{appName}} en su organización de Make desde su enlace de invitación. Make le pedirá primero que inicie sesión o cree una cuenta gratuita.",
+        "key": "Cree una clave de API para Make. Solo la verá una vez, así que cópiela antes de cerrar la ventana.",
+        "scenario": "En Make, agregue un módulo de {{appName}} a un escenario y elija Create a connection. Pegue la clave en «API key» y compruebe que «{{appName}} URL» sea {{url}}."
+      },
+      "openInvite": "Abrir {{appName}} en Make",
+      "createKey": "Crear una clave para Make",
+      "bookingNote": "Los escenarios solo pueden reservar citas mientras la sección Reservas de la página Agente esté en Reserva citas."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -752,6 +764,10 @@
       "zapier": {
         "title": "Zapier",
         "description": "Conecte {{appName}} con miles de aplicaciones sin programar."
+      },
+      "make": {
+        "title": "Make",
+        "description": "Cree escenarios visuales que conecten {{appName}} con sus otras aplicaciones."
       }
     },
     "status": {
@@ -1194,6 +1210,8 @@
       "scopesLabel": "Acceso",
       "zapier": "Configurar para Zapier",
       "zapierHint": "Permite todo lo que Zapier necesita para sus Zaps.",
+      "make": "Configurar para Make",
+      "makeHint": "Permite todo lo que Make necesita para sus escenarios.",
       "cancel": "Cancelar",
       "submit": "Crear clave",
       "creating": "Creando…"

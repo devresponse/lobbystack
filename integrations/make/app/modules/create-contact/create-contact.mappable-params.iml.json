@@ -1,0 +1,48 @@
+[
+  {
+    "name": "name",
+    "type": "text",
+    "label": "Name"
+  },
+  {
+    "name": "phone",
+    "type": "text",
+    "label": "Phone",
+    "help": "Enter a phone or an email. For example, +14165550134. A 10-digit number is read as North American."
+  },
+  {
+    "name": "email",
+    "type": "email",
+    "label": "Email"
+  },
+  {
+    "name": "locale",
+    "type": "select",
+    "label": "Language",
+    "help": "Language of the contact's reminders and confirmations. If left empty, they use the business's language when it is one of these, else English.",
+    "options": [
+      {
+        "label": "English",
+        "value": "en"
+      },
+      {
+        "label": "French",
+        "value": "fr"
+      },
+      {
+        "label": "Spanish",
+        "value": "es"
+      },
+      {
+        "label": "Serbian",
+        "value": "sr"
+      }
+    ]
+  },
+  {
+    "name": "timezone",
+    "type": "timezone",
+    "label": "Time zone",
+    "help": "The contact's time zone, such as America/Toronto."
+  }
+]

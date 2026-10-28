@@ -40,6 +40,9 @@
         },
         "zapier": {
           "type": "string"
+        },
+        "make": {
+          "type": "string"
         }
       },
       "additionalProperties": false

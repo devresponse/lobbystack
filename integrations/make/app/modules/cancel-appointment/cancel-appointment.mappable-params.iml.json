@@ -1,0 +1,11 @@
+[
+  {
+    "name": "appointment_id",
+    "type": "select",
+    "label": "Appointment ID",
+    "options": "rpc://listAppointments",
+    "mode": "edit",
+    "required": true,
+    "help": "Map the ID from a trigger or a search, or switch off Map to pick an upcoming appointment."
+  }
+]

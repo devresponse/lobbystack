@@ -1,0 +1,19 @@
+{
+  "id": "3c9a1e7b-5d2f-4e8a-b6c4-9f0d1e2a3b4c",
+  "name": "Jordan Lee",
+  "phone": "+14165550134",
+  "email": "jordan.lee@example.com",
+  "locale": "en",
+  "timezone": "America/Toronto",
+  "passcode": {
+    "set_at": "2026-09-22T15:10:12Z",
+    "locked": false
+  },
+  "sms_consent": {
+    "status": "subscribed",
+    "updated_at": "2026-09-22T15:04:02Z"
+  },
+  "blocked_at": null,
+  "created_at": "2026-09-22T15:03:40Z",
+  "updated_at": "2026-09-22T15:10:12Z"
+}

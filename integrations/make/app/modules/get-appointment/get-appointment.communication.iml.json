@@ -1,0 +1,7 @@
+{
+  "url": "/appointments/{{parameters.appointment_id}}",
+  "method": "GET",
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "url": "/appointments/{{parameters.appointment_id}}/cancel",
+  "method": "POST",
+  "body": {},
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

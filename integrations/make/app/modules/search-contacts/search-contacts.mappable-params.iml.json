@@ -1,0 +1,27 @@
+[
+  {
+    "name": "phone",
+    "type": "text",
+    "label": "Phone",
+    "help": "Only the contact with this phone number. For example, +14165550134. A 10-digit number is read as North American."
+  },
+  {
+    "name": "email",
+    "type": "email",
+    "label": "Email",
+    "help": "Only contacts with this email address."
+  },
+  {
+    "name": "name",
+    "type": "text",
+    "label": "Name",
+    "help": "Only contacts whose name contains this text."
+  },
+  {
+    "name": "limit",
+    "type": "uinteger",
+    "label": "Limit",
+    "help": "Maximum number of results to return and work with during one execution cycle.",
+    "default": 10
+  }
+]

@@ -1,0 +1,82 @@
+[
+  {
+    "name": "id",
+    "type": "text",
+    "label": "Appointment ID"
+  },
+  {
+    "name": "status",
+    "type": "text",
+    "label": "Status"
+  },
+  {
+    "name": "starts_at",
+    "type": "date",
+    "label": "Start time"
+  },
+  {
+    "name": "ends_at",
+    "type": "date",
+    "label": "End time"
+  },
+  {
+    "name": "timezone",
+    "type": "text",
+    "label": "Time zone"
+  },
+  {
+    "name": "service_id",
+    "type": "text",
+    "label": "Service ID"
+  },
+  {
+    "name": "service_name",
+    "type": "text",
+    "label": "Service"
+  },
+  {
+    "name": "staff_id",
+    "type": "text",
+    "label": "Staff member ID"
+  },
+  {
+    "name": "staff_name",
+    "type": "text",
+    "label": "Staff member"
+  },
+  {
+    "name": "contact_id",
+    "type": "text",
+    "label": "Contact ID"
+  },
+  {
+    "name": "contact_name",
+    "type": "text",
+    "label": "Contact name"
+  },
+  {
+    "name": "contact_phone",
+    "type": "text",
+    "label": "Contact phone"
+  },
+  {
+    "name": "source",
+    "type": "text",
+    "label": "Source"
+  },
+  {
+    "name": "calendar_sync_status",
+    "type": "text",
+    "label": "Calendar sync status"
+  },
+  {
+    "name": "created_at",
+    "type": "date",
+    "label": "Created at"
+  },
+  {
+    "name": "updated_at",
+    "type": "date",
+    "label": "Updated at"
+  }
+]

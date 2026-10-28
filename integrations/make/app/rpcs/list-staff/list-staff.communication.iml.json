@@ -1,0 +1,14 @@
+{
+  "url": "/staff",
+  "method": "GET",
+  "response": {
+    "iterate": {
+      "container": "{{body.data}}",
+      "condition": "{{item.active}}"
+    },
+    "output": {
+      "label": "{{item.name}}",
+      "value": "{{item.id}}"
+    }
+  }
+}

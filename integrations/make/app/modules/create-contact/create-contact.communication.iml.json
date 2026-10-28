@@ -1,0 +1,15 @@
+{
+  "temp": {
+    "phoneDigits": "{{replace(parameters.phone, '/[^0-9]/g', '')}}",
+    "phoneText": "{{trim(parameters.phone)}}"
+  },
+  "url": "/contacts",
+  "method": "POST",
+  "body": {
+    "{{...}}": "{{omit(parameters, 'phone')}}",
+    "phone": "{{if(parameters.phone, if(length(temp.phoneDigits) == 10 && indexOf(temp.phoneText, '+') != 0, '+1' + temp.phoneDigits, if(indexOf(temp.phoneText, '00') == 0, '+' + substring(temp.phoneDigits, 2), '+' + temp.phoneDigits)), undefined)}}"
+  },
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

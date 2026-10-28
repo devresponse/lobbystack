@@ -6,7 +6,7 @@ import type { ResolvedBrand } from "@lobbystack/shared";
 const brand = vi.hoisted(() => ({ links: {} as Partial<ResolvedBrand["links"]> }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  return { ...shared, brandLinks: () => shared.resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, ...brand.links }) };
+  return { ...shared, brandLinks: () => shared.resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null, makeUrl: null, ...brand.links }) };
 });
 
 import { affiliateTermsHref, localizeMarketingHref, privacyHref, termsHref } from "./marketing-site-url";

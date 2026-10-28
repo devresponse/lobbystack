@@ -1,0 +1,19 @@
+[
+  {
+    "name": "apiKey",
+    "type": "password",
+    "label": "API key",
+    "help": "In __APP_NAME__, go to Settings > API keys, select Create API key, then Set up for Make, which allows every module here. The key starts with lsk_. For the steps, see [Connect Make](__HELP_URL__).",
+    "required": true,
+    "editable": true
+  },
+  {
+    "name": "url",
+    "type": "url",
+    "label": "__APP_NAME__ URL",
+    "help": "Your dashboard's address, such as __DASHBOARD_URL__. Only its https:// address with nothing after the host is used.",
+    "default": "__DASHBOARD_URL__",
+    "required": true,
+    "editable": true
+  }
+]

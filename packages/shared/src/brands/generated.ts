@@ -32,7 +32,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "privacyUrl": "https://alloplace.com/legal/privacy",
       "docsUrl": "https://alloplace.com",
       "contactEmail": "support@alloplace.com",
-      "zapierUrl": null
+      "zapierUrl": null,
+      "makeUrl": null
     },
     "environments": [
       {
@@ -60,7 +61,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "privacyUrl": null,
       "docsUrl": "https://docs.lobbystack.com",
       "contactEmail": null,
-      "zapierUrl": null
+      "zapierUrl": null,
+      "makeUrl": null
     },
     "environments": []
   }

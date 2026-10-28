@@ -1,0 +1,52 @@
+[
+  {
+    "name": "type",
+    "type": "select",
+    "label": "Type",
+    "required": true,
+    "default": "faq",
+    "mappable": false,
+    "options": [
+      {
+        "label": "Question and answer",
+        "value": "faq",
+        "nested": [
+          {
+            "name": "question",
+            "type": "text",
+            "label": "Question",
+            "required": true,
+            "help": "Up to 300 characters."
+          },
+          {
+            "name": "answer",
+            "type": "text",
+            "label": "Answer",
+            "required": true,
+            "help": "Up to 20,000 characters."
+          }
+        ]
+      },
+      {
+        "label": "Text",
+        "value": "text",
+        "nested": [
+          {
+            "name": "title",
+            "type": "text",
+            "label": "Title",
+            "required": true,
+            "help": "A short name for the entry, up to 300 characters."
+          },
+          {
+            "name": "content",
+            "type": "text",
+            "label": "Content",
+            "required": true,
+            "help": "What the receptionist should know, up to 20,000 characters."
+          }
+        ]
+      }
+    ]
+  }
+]

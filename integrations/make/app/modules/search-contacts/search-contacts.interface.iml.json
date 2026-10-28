@@ -1,0 +1,81 @@
+[
+  {
+    "name": "id",
+    "type": "text",
+    "label": "Contact ID"
+  },
+  {
+    "name": "name",
+    "type": "text",
+    "label": "Name"
+  },
+  {
+    "name": "phone",
+    "type": "text",
+    "label": "Phone"
+  },
+  {
+    "name": "email",
+    "type": "email",
+    "label": "Email"
+  },
+  {
+    "name": "locale",
+    "type": "text",
+    "label": "Language"
+  },
+  {
+    "name": "timezone",
+    "type": "text",
+    "label": "Time zone"
+  },
+  {
+    "name": "passcode",
+    "type": "collection",
+    "label": "Keypad PIN",
+    "spec": [
+      {
+        "name": "set_at",
+        "type": "date",
+        "label": "Set at"
+      },
+      {
+        "name": "locked",
+        "type": "boolean",
+        "label": "Locked"
+      }
+    ]
+  },
+  {
+    "name": "sms_consent",
+    "type": "collection",
+    "label": "Text consent",
+    "spec": [
+      {
+        "name": "status",
+        "type": "text",
+        "label": "Status"
+      },
+      {
+        "name": "updated_at",
+        "type": "date",
+        "label": "Updated at"
+      }
+    ]
+  },
+  {
+    "name": "blocked_at",
+    "type": "date",
+    "label": "Blocked at"
+  },
+  {
+    "name": "created_at",
+    "type": "date",
+    "label": "Created at"
+  },
+  {
+    "name": "updated_at",
+    "type": "date",
+    "label": "Updated at"
+  }
+]

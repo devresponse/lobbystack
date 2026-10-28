@@ -1,9 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { businesses, createDatabaseClient, onboardingNumberClaimEvents, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { businesses, createDatabaseClient, onboardingNumberClaimEvents, phoneNumbers, users, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
-import { reserveOnboardingNumberClaim, searchBusinessNumberInventory } from "./phoneNumbers";
+import { completeNumberProvisioning, reserveOnboardingNumberClaim, searchBusinessNumberInventory } from "./phoneNumbers";
 import { createBusiness } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -90,6 +90,24 @@ describe.skipIf(!testUrl)("onboarding number claims against dedicated PostgreSQL
       expect(await reserveAsApp(tx, { userId, businessId })).toMatch(/^[0-9a-f-]{36}$/);
       const [stalled] = await tx.select({ status: onboardingNumberClaimEvents.status }).from(onboardingNumberClaimEvents).where(eq(onboardingNumberClaimEvents.id, stalledId));
       expect(stalled?.status).toBe("failed");
+    });
+  });
+
+  it("saves a number bought again after its release, and still refuses one a business holds", async () => {
+    await rollbackTest(async (tx) => {
+      // The claim in provisioning is for +14165550100, which an earlier business released.
+      const { businessId, stalledId } = await workspaceWithProvisioningClaim(tx, 1);
+      const [earlier] = await tx.insert(businesses).values({ slug: `released-${randomUUID()}`, name: "Earlier owner", timezone: "UTC", businessType: "test" }).returning({ id: businesses.id });
+      await tx.insert(phoneNumbers).values({ businessId: earlier!.id, e164: "+14165550100", providerPhoneId: `PN-${randomUUID()}`, status: "reclaimed", voiceEnabled: false, smsEnabled: false });
+      await tx.execute(sql`set local role lobbystack_worker`);
+      const numberId = await completeNumberProvisioning({ db: tx as unknown as Database }, { businessId, claimId: stalledId, e164: "+14165550100", providerPhoneId: `PN-${randomUUID()}`, voiceUrl: "https://voice.test/twiml", smsUrl: "https://admin.test/api/webhooks/twilio/sms" });
+      await tx.execute(sql`reset role`);
+      const holders = await tx.select({ id: phoneNumbers.id, businessId: phoneNumbers.businessId, status: phoneNumbers.status }).from(phoneNumbers).where(eq(phoneNumbers.e164, "+14165550100"));
+      expect(holders).toHaveLength(2);
+      expect(holders).toContainEqual({ id: numberId, businessId, status: "active" });
+      await expect(tx.transaction(async (savepoint) => {
+        await savepoint.insert(phoneNumbers).values({ businessId: earlier!.id, e164: "+14165550100", providerPhoneId: `PN-${randomUUID()}` });
+      })).rejects.toMatchObject({ cause: { code: "23505", constraint: "phone_numbers_e164_unreclaimed_unique" } });
     });
   });
 });

@@ -5,6 +5,7 @@ import { businesses, calls, contacts, conversations, conversationSessions, creat
 
 import { recordCallOutcomeInTransaction } from "./callOutcome";
 import { finalizeConversationSession, getOrCreateWidgetConversation, loadCallSummaryInput, registerWidgetVisitor } from "./conversations";
+import { runPrivacyRetentionSweep } from "./privacy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -118,6 +119,43 @@ describe.skipIf(!testUrl)("call summaries against PostgreSQL under worker RLS", 
       await finalizeConversationSession({ db: fixture.db }, fixture);
       const [conversation] = await withBusinessTransaction(fixture.db, { businessId: fixture.businessId, actorType: "worker" }, async (workerTx) => await workerTx.select({ status: conversations.status, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt }).from(conversations).where(eq(conversations.id, fixture.conversationId)));
       expect(conversation).toEqual({ status: "closed", automationState: "ai_active", automationPausedAt: null });
+    });
+  });
+
+  it("clears the call's summary when the privacy sweep deletes its transcript", async () => {
+    const expireTranscript = async (tx: DatabaseTransaction, fixture: Fixture) => {
+      await tx.execute(sql`reset role`);
+      await tx.update(transcripts).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(transcripts.callId, fixture.callId));
+      await tx.execute(sql`set local role lobbystack_worker`);
+    };
+    await rollbackTest(async (tx) => {
+      const fixture = await seedCall(tx, { turns: fridayCall });
+      await finalizeConversationSession({ db: fixture.db }, { ...fixture, generated: { summary: "Marie asked whether the office is open Friday.", callerName: "Marie" } });
+      await expireTranscript(tx, fixture);
+      expect(await runPrivacyRetentionSweep({ db: fixture.db }, fixture)).toMatchObject({ deletedTranscripts: 3 });
+      expect(await readBack(fixture)).toEqual({ session: { summaryKind: null, summary: null }, conversation: { summary: null }, contact: { name: "Marie" } });
+    });
+    // A message taken for the team, saved with its words as earlier versions did,
+    // stays marked as one without them.
+    await rollbackTest(async (tx) => {
+      const fixture = await seedCall(tx, { turns: fridayCall });
+      const message = "Marie asks for a call back about Friday.";
+      await tx.execute(sql`reset role`);
+      await tx.insert(conversationSessions).values({ businessId: fixture.businessId, conversationId: fixture.conversationId, callId: fixture.callId, channel: "voice", status: "closed", summaryKind: "message_taking", summary: { kind: "message_taking", summary: message } });
+      await tx.update(conversations).set({ summary: message }).where(eq(conversations.id, fixture.conversationId));
+      await expireTranscript(tx, fixture);
+      await runPrivacyRetentionSweep({ db: fixture.db }, fixture);
+      expect(await readBack(fixture)).toMatchObject({ session: { summaryKind: "message_taking", summary: { kind: "message_taking" } }, conversation: { summary: null } });
+    });
+    // A conversation whose summary has moved on keeps it.
+    await rollbackTest(async (tx) => {
+      const fixture = await seedCall(tx, { turns: fridayCall });
+      await finalizeConversationSession({ db: fixture.db }, { ...fixture, generated: { summary: "Asked about Friday hours." } });
+      await tx.execute(sql`reset role`);
+      await tx.update(conversations).set({ summary: "Booked a cleaning for next week." }).where(eq(conversations.id, fixture.conversationId));
+      await expireTranscript(tx, fixture);
+      await runPrivacyRetentionSweep({ db: fixture.db }, fixture);
+      expect(await readBack(fixture)).toMatchObject({ session: { summaryKind: null, summary: null }, conversation: { summary: "Booked a cleaning for next week." } });
     });
   });
 

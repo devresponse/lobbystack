@@ -30,7 +30,7 @@ After that, it's built for Cloudflare Pages, whose free plan is enough *(not tri
 - The site's values are built into its pages, so a change needs a new deploy.
 - The home page's voice demo needs `PUBLIC_LIVE_CALL_ENDPOINT=https://<your address>/api/voice/live/session` and `PUBLIC_WEB_CALL_BUSINESS_SLUG=<slug>` on the site. The slug is the business's, as it ends its public profile address, `/profile/<slug>` ([6.5](part-6-first-run.md#65-put-the-chat-on-your-website)). The admin then needs `WEB_CALL_PUBLIC_BUSINESS_SLUG` with the same slug, and `WEB_CALL_ALLOWED_ORIGINS` with the site's address. Without them, the demo calls LobbyStack's own service, which refuses it.
 - Leave the `PUBLIC_POSTHOG_…` values and `INDEXNOW_KEY` unset until a developer has changed the addresses written into the code: PostHog's default is the original project's own relay, and IndexNow reports pages for the original project's website.
-- No GitHub workflow publishes the site. Pushes to the fork only build it and check its links.
+- No GitHub workflow publishes the site. Pushes to the fork only build it and check its links, leaving out a few outside sites that refuse the checker, such as Comcast's support site since fork PR #92 (`.github/workflows/landing-link-check.yml`).
 
 **The docs site, `mintlify/`**
 

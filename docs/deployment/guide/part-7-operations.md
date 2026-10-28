@@ -109,10 +109,10 @@ A migration is a file of changes to the database's tables, in `packages/db/migra
 
 **How migrations behave**
 
-- Each file runs whole or not at all, together with its record, so the database is never left halfway through a file (`packages/db/src/cli.ts:298-353`). Two runs never overlap: a second one waits for the first, then finds nothing left to do.
+- Each file runs whole or not at all, together with its record, so the database is never left halfway through a file (`packages/db/src/cli.ts:394-405`). The five files that build an index without blocking writes, such as `0123` and `0127` (fork PR #93), run outside a transaction instead: when a build fails, the next run removes the broken index and builds it again (`packages/db/src/cli.ts:373-393`). Two runs never overlap: a second one waits for the first, then finds nothing left to do.
 - Nothing undoes a migration. A rollback ([7.5](#75-roll-back-a-bad-release)) puts back the previous version of the code, which keeps working with the new tables only because each migration must keep working with the version before (`.railway/README.md:33`). Nothing checks that, so a release with migrations is the riskiest kind.
 - The admin and the worker don't check that the migrations ran, so new code on the old tables can fail while every health check stays green. A release that adds a column the sign-in reads, for example, would probably fail every sign-in until migrate has run.
-- Nine of the files give up after 5 seconds when the running app holds a lock they need, rather than make the app wait behind them: `0057`, `0070` and `0090`, the billing files `0114`, `0115` and `0116` (fork PRs #71, #72 and #75), `0117` and `0118`, for the email after each call and the notice after a call's greeting (fork PR #84), and `0119`, which shows a yearly price's month in whole dollars (fork PR #89). A busy hour makes that likelier.
+- Thirteen of the files give up after 5 seconds when the running app holds a lock they need, rather than make the app wait behind them: `0057`, `0070` and `0090`, the billing files `0114`, `0115` and `0116` (fork PRs #71, #72 and #75), `0117` and `0118`, for the email after each call and the notice after a call's greeting (fork PR #84), `0119`, which shows a yearly price's month in whole dollars (fork PR #89), and `0122`, `0124`, `0125` and `0126`, the original project's database fixes (fork PR #93). A busy hour makes that likelier.
 
 **Before a release that changes the database**
 
@@ -123,8 +123,8 @@ A migration is a file of changes to the database's tables, in `packages/db/migra
 **On Railway**
 
 4. Move the branch ([7.1](#71-release-a-new-version), step 6). Railway deploys migrate, the admin and the worker each on its own: the admin and the worker don't wait for migrate.
-5. Open migrate's newest deployment and read its log *(where it shows the pre-deploy command's lines: not confirmed)*. It should show `Applied migration <file>.` for each new file, then `Database migrations applied.` and the other lines of [4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database), step 6, ending with `RLS enabled and forced on <n> tables.` A file that repairs data adds a line saying what it changed, such as `Promo codes: <n> uses by a business recorded.` from `0113` (fork PR #70). A line starting `Skipping the` instead means that repair didn't run, because migrate didn't sign in as `postgres` ([4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database), step 2).
-6. If the admin's or the worker's newest deployment went live before migrate finished (compare the times in their **Deployments** tabs), redeploy it: that deployment's menu (the three dots), then **Redeploy**.
+5. Open migrate's newest deployment and read its log *(where it shows the pre-deploy command's lines: not confirmed)*. It should show `Applied migration <file>.` for each new file, then `Database migrations applied.` and the other lines of [4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database), step 6, ending with `RLS enabled and forced on <n> tables.` A file that repairs data adds a line saying what it changed, such as `Promo codes: <n> uses by a business recorded.` from `0113` (fork PR #70), or, from fork PR #93, `Users: <n> unused password hash copies cleared.` (`0121`) and `Expired calls: <n> session and <n> conversation summaries cleared.` (`0126`). A line starting `Skipping the` instead means that repair didn't run, because migrate didn't sign in as `postgres` ([4.5](part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database), step 2).
+6. If the admin's or the worker's newest deployment went live before migrate finished (compare the times in their **Deployments** tabs), redeploy it: that deployment's menu (the three dots), then **Redeploy**. Since fork PR #93, a worker that started first logs `startup scheduling failed` and skips the summaries and re-embedding it queues at startup until then (`apps/worker/src/index.ts:234-280`).
 
 **On a server**
 
@@ -277,7 +277,7 @@ Leave `LOBBYSTACK_MAINTENANCE_MODE` at `false`. It isn't a way to pause the inst
 - PostgreSQL's exact message when one of the three files meets a lock it can't get.
 - The name of the automatic deploys setting ([7.2](#72-pause-automatic-deploys)), and whether Railway deploys the commits pushed during a pause.
 
-**[7.1](#71-release-a-new-version) to [7.6](#76-change-a-setting-safely) were checked against:** `packages/db/src/cli.ts`, `packages/db/src/migrations/raw-migrations.ts`, the migrations `0057`, `0070`, `0090`, `0105`, `0113`, `0114`, `0115`, `0116`, `0117`, `0118`, `0119` and the three index files in `packages/db/migrations/`, `.railway/README.md`, `.github/workflows/ci.yml`, `docker-compose.yml`, `Dockerfile.admin`, `Dockerfile.migrator`, `apps/admin/instrumentation.ts`, `apps/admin/csp.ts`, `apps/admin/src/lib/live-prototype.ts`, `apps/admin/app/api/webhooks/openai/live/route.ts`, `apps/admin/app/api/webhooks/twilio/sms/route.ts`, `apps/worker/src/index.ts`, `apps/worker/src/liveCalls.ts`, `apps/worker/src/handlers.ts`, `packages/agent-core/src/live/callController.ts`, `packages/shared/src/maintenance.ts`, Railway's and Docker Compose's documentation, and Docker Compose's source at v2.40.3 and v5.5.0, as read on 2026-10-19. A run of migrate against a throwaway PostgreSQL 16 showed how a failed migration is reported and run again.
+**[7.1](#71-release-a-new-version) to [7.6](#76-change-a-setting-safely) were checked against:** `packages/db/src/cli.ts`, `packages/db/src/migrations/raw-migrations.ts`, the migrations `0057`, `0070`, `0090`, `0105`, `0113`, `0114`, `0115`, `0116`, `0117`, `0118`, `0119`, `0120` to `0127` and the five index files in `packages/db/migrations/`, `.railway/README.md`, `.github/workflows/ci.yml`, `docker-compose.yml`, `Dockerfile.admin`, `Dockerfile.migrator`, `apps/admin/instrumentation.ts`, `apps/admin/csp.ts`, `apps/admin/src/lib/live-prototype.ts`, `apps/admin/app/api/webhooks/openai/live/route.ts`, `apps/admin/app/api/webhooks/twilio/sms/route.ts`, `apps/worker/src/index.ts`, `apps/worker/src/liveCalls.ts`, `apps/worker/src/handlers.ts`, `packages/agent-core/src/live/callController.ts`, `packages/shared/src/maintenance.ts`, Railway's and Docker Compose's documentation, and Docker Compose's source at v2.40.3 and v5.5.0, as read on 2026-10-19. A run of migrate against a throwaway PostgreSQL 16 showed how a failed migration is reported and run again.
 
 ## Data protection
 
@@ -413,22 +413,23 @@ LobbyStack deletes some content by itself after a set time, and keeps the rest u
 
 **What LobbyStack keeps, and for how long**
 
-Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:446-458`, `packages/domain/src/server/privacy.ts:9-74`):
+Retention is on by default (`CONTENT_RETENTION_ENABLED`, `.env.example:143-148`). On an instance that doesn't sell plans, and on the paid plans of one that does (`packages/shared/src/billing.ts:446-458`, `packages/domain/src/server/privacy.ts:9-98`):
 
 | What | Kept |
 | --- | --- |
-| Call transcripts and recordings | 90 days |
+| Call transcripts and recordings. Since fork PR #93, a call's summary goes when its transcript does: a message taken during the call stays listed as one without its words, and a conversation whose summary has changed since keeps it | 90 days |
 | AI debug traces: what the receptionist was given and did for each answer, callers' and visitors' words included. Only a business that turns them on keeps them, through the API or the command line (`ai_traces_enabled`) | 30 days, on every plan (`packages/db/migrations/0106_ai_traces.sql`) |
 | Texts and website chat messages | 365 days. Then each one's words read "[content expired]" |
 | Messages the receptionist took for the team | 365 days |
 | Copies of the alerts sent to the team | 30 days, even with retention off |
 | The record of each email after a call (fork PR #84): who it went to and its subject, never the call's words | 30 days, even with retention off |
-| Contacts (name, phone, email), each call's time and outcome, appointments, the summaries of chats and calls, each STOP or START, and the audit log | Until someone deletes them |
+| Contacts (name, phone, email), each call's time and outcome, appointments, the summaries of chats, each STOP or START, and the audit log | Until someone deletes them |
 | The record of each incoming text, with its sender and its words (`provider_events`) | **Forever**: nothing deletes it |
 
 The free plan, on an instance that sells plans, keeps everything for 30 days.
 
 - Each item's end date is set when it's written, so a change of the periods applies only to new content. To change them, set `CONTENT_RETENTION_POLICY_JSON` on the admin and the worker, the same on both, such as `{"categories":{"transcripts":30,"recordings":30}}`. The five categories are `messages`, `transcripts`, `recordings`, `follow_ups` and `ai_traces`, in days. A value it can't read is ignored without a warning, so check the spelling (`packages/domain/src/server/contentRetentionPolicy.ts:13-44`).
+- Before fork PR #93, a call's summary stayed after its transcript was gone. That release's migration `0126` clears those, and migrate's log says how many ([7.3](#73-database-migrations), step 5). Like the original project's, it also clears the summary of any call more than a day old that never had a transcript line.
 - Content written while retention was off never expires, even after it's turned back on. `scripts/content-retention-backfill.ts` gives it an end date, one business and one category at a time; it's a job for someone technical (`docs/operations/remediation-rollout.md:100-112`).
 - No screen, API call or command deletes one recording: only the end date does (`packages/domain/src/server/storage.ts:312-380`).
 - Deleting a document under **Knowledge** removes its text from the receptionist, but its file stays in the bucket (`packages/domain/src/server/knowledge.ts:240-247`).
@@ -478,7 +479,7 @@ With a key for that business ([6.7](part-6-first-run.md#67-optional-the-api-and-
 - How long Railway takes to prepare a restore, for a given size.
 - The deletion statements outlined in the notes ([7.9](#79-data-retention-and-deletion-requests)), which have never been run.
 
-**[7.7](#77-back-up-the-database-and-files) to [7.9](#79-data-retention-and-deletion-requests) were checked against:** `scripts/replacement-backup.sh`, `scripts/replacement-restore.sh`, `scripts/replacement-restore-drill.sh`, `packages/contracts/src/index.ts`, `packages/providers/src/storage/local.ts`, `packages/domain/src/server/storage.ts`, `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/contentRetentionPolicy.ts`, `packages/domain/src/server/contacts.ts`, `packages/shared/src/billing.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/db/src/schema/index.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/calendarJobs.ts`, `docs/voice/runtime.md`, `docs/operations/remediation-rollout.md`, and Railway's, Cloudflare's and the AWS command-line tool's documentation as read on 2026-10-19.
+**[7.7](#77-back-up-the-database-and-files) to [7.9](#79-data-retention-and-deletion-requests) were checked against:** `scripts/replacement-backup.sh`, `scripts/replacement-restore.sh`, `scripts/replacement-restore-drill.sh`, `packages/contracts/src/index.ts`, `packages/providers/src/storage/local.ts`, `packages/domain/src/server/storage.ts`, `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/contentRetentionPolicy.ts`, `packages/domain/src/server/contacts.ts`, `packages/shared/src/billing.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/db/src/schema/index.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/calendarJobs.ts`, `docs/voice/runtime.md`, `docs/operations/remediation-rollout.md`, and Railway's, Cloudflare's and the AWS command-line tool's documentation as read on 2026-10-19. The lines on call summaries were checked against `packages/domain/src/server/privacy.ts`, `packages/domain/src/server/conversations.ts` and `packages/db/migrations/0126_clear_expired_call_summaries.sql` (fork PR #93).
 
 ## Watching the system
 
@@ -1154,6 +1155,7 @@ Each business has one number, which an owner or admin buys in the dashboard ([6.
 - The worker buys the number, names it "LobbyStack <business ID>" in Twilio, puts it on production's trunk, and points its texts at the instance. In Twilio's console, that name tells you which business each number belongs to.
 - **US numbers:** once the texting registration's campaign is approved ([3.3](part-3-outside-services.md#33-twilio), step 14), add each new number to the campaign's Messaging Service: in Twilio, open the service, then its **Sender Pool**, and add the number *(Twilio's labels not confirmed)*. Nothing does this by itself, and until it's done the number's texts to US phones fail with error 30034 ([7.17](#717-emails-or-texts-not-going-out)).
 - LobbyStack can't take over a number the business already has, at Twilio or elsewhere. Forward that number's calls to the LobbyStack number instead ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)).
+- A number released earlier, by any business, can be bought again when Twilio offers it again. Before fork PR #93 that failed after Twilio had charged for it: LobbyStack still counted the number as taken, so the worker released it again and the dashboard said it couldn't get that number (`packages/db/migrations/0124_phone_numbers_e164_unreclaimed_unique.sql`, `apps/worker/src/handlers.ts:1081-1094`).
 
 **Changing a number**
 
@@ -1186,7 +1188,7 @@ A release is final: the number goes back to Twilio, and its monthly fee stops. T
 - Which number a business's texts come from while a change is under way.
 - Whether a release takes the number out of the Sender Pool, and the Sender Pool's labels in Twilio's current console.
 
-**[7.21](#721-buy-change-and-release-numbers) was checked against:** `packages/domain/src/server/phoneNumbers.ts`, `packages/domain/src/server/compliance.ts`, `packages/domain/src/server/smsSender.ts`, `packages/domain/src/server/publicApi/resources.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/cli/src/commands.ts`, `apps/worker/src/handlers.ts`, `packages/providers/src/twilio/twilioProvider.ts`, `apps/admin/src/components/live-phone-number-settings-surface.tsx`, `packages/db/migrations/0003_resolvers.sql`, and Twilio's pages as read on 2026-10-19.
+**[7.21](#721-buy-change-and-release-numbers) was checked against:** `packages/domain/src/server/phoneNumbers.ts`, `packages/domain/src/server/compliance.ts`, `packages/domain/src/server/smsSender.ts`, `packages/domain/src/server/publicApi/resources.ts`, `packages/shared/src/publicApi/operations.ts`, `packages/cli/src/commands.ts`, `apps/worker/src/handlers.ts`, `packages/providers/src/twilio/twilioProvider.ts`, `apps/admin/src/components/live-phone-number-settings-surface.tsx`, `packages/db/migrations/0003_resolvers.sql`, and Twilio's pages as read on 2026-10-19. The line on buying a released number again was checked against `packages/db/migrations/0124_phone_numbers_e164_unreclaimed_unique.sql` and `packages/domain/src/server/phoneNumbers.ts` (fork PR #93).
 
 ## Maintenance
 

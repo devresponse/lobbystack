@@ -4,7 +4,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { apiKeys, businesses, businessHours, businessInvitations, businessMemberships, createDatabaseClient, outboxMessages, services, staff, users, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { findAvailability } from "./booking";
 import { generateApiKey } from "./publicApi/apiKeys";
-import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, removeMember } from "./tenancy";
+import { acceptInvitation, createBusiness, inviteMember, listUserBusinesses, previewInvitation, removeMember } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -184,6 +184,24 @@ describe.skipIf(!client)("team membership", () => {
       await expect(accept(stranger!, token)).rejects.toMatchObject({ status: 403 });
       await expect(acceptInvitation(context, { userId: invitee!.id, tokenHash: hash(token), email: invitee!.email, emailVerified: false })).rejects.toMatchObject({ status: 403 });
       await expect(accept(invitee!, token)).resolves.toMatchObject({ role: "business_admin" });
+    });
+  });
+
+  it("previews an expired or accepted invitation by its state, and still refuses to accept it again", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, people: [owner, late, joined], invite, accept } = await seedTeam(tx, ["Ana", "Ben", "Cy"]);
+      const lateToken = await invite(owner!.id, late!.email, "viewer");
+      const joinedToken = await invite(owner!.id, joined!.email, "viewer");
+      await accept(joined!, joinedToken);
+      await tx.execute(sql`reset role`);
+      await tx.update(businessInvitations).set({ expiresAt: new Date(Date.now() - 60_000) }).where(eq(businessInvitations.tokenHash, hash(lateToken)));
+      await tx.execute(sql`set local role lobbystack_app`);
+
+      expect(await previewInvitation(context, { tokenHash: hash(lateToken) })).toEqual({ businessName: "Team Dental", email: late!.email, expired: true, status: "pending" });
+      expect(await previewInvitation(context, { tokenHash: hash(joinedToken) })).toEqual({ businessName: "Team Dental", email: joined!.email, expired: false, status: "accepted" });
+      expect(await previewInvitation(context, { tokenHash: hash("never-sent") })).toBeNull();
+      await expect(accept(late!, lateToken)).rejects.toThrow("Invitation is invalid or expired.");
+      await expect(accept(joined!, joinedToken)).rejects.toThrow("Invitation is invalid or expired.");
     });
   });
 

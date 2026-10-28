@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
-import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listSchedulerBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
 import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
@@ -590,6 +590,57 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       await tx.execute(sql`reset session authorization`);
       await tx.execute(sql`set local session authorization lobbystack_worker`);
       await expect(withBusinessTransaction(tx as unknown as Database, { actorType: "worker" }, (inner) => inner.execute(sql`select * from app.list_scheduler_businesses()`))).rejects.toMatchObject({ cause: { message: expect.stringMatching(/permission denied/) } });
+      await tx.execute(sql`reset session authorization`);
+    });
+  });
+
+  it("lists only the businesses whose startup summary or re-embed job would change something", async () => {
+    await rollbackTest(async (tx) => {
+      const business = async (input: { summarySource?: "placeholder" | "generated" } = {}) => {
+        const businessId = randomUUID();
+        await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Backfill listing", timezone: "UTC", businessType: "test" });
+        await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Backfill listing", summarySource: input.summarySource ?? "placeholder", bookingPolicy: "Confirm first.", transferMode: "never" });
+        return businessId;
+      };
+      const document = async (businessId: string, input: { status: string; active?: boolean }) => {
+        const [row] = await tx.insert(knowledgeDocuments).values({ businessId, sourceType: "upload", title: "Menu", status: input.status, active: input.active ?? true }).returning({ id: knowledgeDocuments.id });
+        return row!.id;
+      };
+      const vector = Array.from({ length: 1536 }, () => 0.01);
+      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: string }) => {
+        await tx.insert(knowledgeChunks).values({ businessId, documentId: await document(businessId, { status: "indexed" }), sequence: 0, content: "Open 9 to 5.", contentHash: randomUUID(), embedding: input.embedded ? vector : null, embeddingFingerprint: input.fingerprint, embeddingStatus: input.status });
+      };
+
+      const withSnippet = await business();
+      await tx.insert(knowledgeSnippets).values({ businessId: withSnippet, title: "Hours", content: "Open 9 to 5." });
+      const withDocument = await business();
+      await document(withDocument, { status: "indexed" });
+      const withoutKnowledge = await business();
+      const unusableKnowledge = await business();
+      await tx.insert(knowledgeSnippets).values({ businessId: unusableKnowledge, title: "Old", content: "Closed.", active: false });
+      await document(unusableKnowledge, { status: "processing" });
+      await document(unusableKnowledge, { status: "indexed", active: false });
+      const written = await business({ summarySource: "generated" });
+      await tx.insert(knowledgeSnippets).values({ businessId: written, title: "Hours", content: "Open 9 to 5." });
+
+      const current = await business({ summarySource: "generated" });
+      await chunk(current, { fingerprint: "model-b", embedded: true, status: "completed" });
+      const otherModel = await business({ summarySource: "generated" });
+      await chunk(otherModel, { fingerprint: "model-a", embedded: true, status: "completed" });
+      const neverEmbedded = await business({ summarySource: "generated" });
+      await chunk(neverEmbedded, { fingerprint: null, embedded: false, status: "pending" });
+      const failed = await business({ summarySource: "generated" });
+      await chunk(failed, { fingerprint: "model-b", embedded: true, status: "failed" });
+      const ours = new Set<string>([withSnippet, withDocument, withoutKnowledge, unusableKnowledge, written, current, otherModel, neverEmbedded, failed]);
+
+      // Like the scheduler's listing, these trust only the dispatcher's login identity.
+      await tx.execute(sql`set local session authorization lobbystack_dispatcher`);
+      const db = tx as unknown as Database;
+      expect((await listSummaryBackfillBusinesses(db)).filter((id) => ours.has(id)).sort()).toEqual([withSnippet, withDocument].sort());
+      expect((await listReembedBusinesses(db, "model-b")).filter((id) => ours.has(id)).sort()).toEqual([otherModel, neverEmbedded, failed].sort());
+      await tx.execute(sql`reset session authorization`);
+      await tx.execute(sql`set local session authorization lobbystack_worker`);
+      await expect(withBusinessTransaction(db, { actorType: "worker" }, (inner) => inner.execute(sql`select app.list_reembed_businesses('model-b')`))).rejects.toMatchObject({ cause: { message: expect.stringMatching(/permission denied/) } });
       await tx.execute(sql`reset session authorization`);
     });
   });

@@ -6,9 +6,9 @@ Checked against `main` at `da1f548` (fork PR #76), 2026-10-24.
 
 ## Know what the fork is
 
-- The original project's repository is no longer available (since 2026-10-18), so the fork develops on its own. Pull requests go into the fork's `main`, and nothing is sent back to the original.
+- The original project's repository was unavailable from 2026-10-18 and is back since 2026-10-27. The fork still develops on its own: pull requests go into the fork's `main`, and nothing is sent back to the original.
 - The fork's `main` was reset to the original's history at its PR #301 (`380d9e0`, 2026-10-11). Everything after that commit is the fork's own work. [History](history.md) covers what came before.
-- A copy of the original still fetched on 2026-10-23. It was 14 commits past `380d9e0`, the fork had 225 commits the original lacks, and a trial merge conflicted in 286 files. Bringing those 14 commits in would be a project of its own, on its own branch and pull request, so the weekly sync check is paused.
+- On 2026-10-27 the original was 25 commits past `380d9e0`, the fork had 285 commits the original lacks, and a trial merge conflicted in 326 files, so the weekly sync check stays paused. Fork PR #90 brought over the original's Node.js 26.12.1 images and its nodemailer 10.1.4 and zod 4.6.6 updates by hand; whether to bring over the rest the same way, or merge, is [open](open-items.md#decide-these).
 - The code still calls itself LobbyStack: the package names (`@lobbystack/*`), the `lobbystack` command, its `LOBBYSTACK_*` variables and the database roles. What a visitor sees comes from a brand: each deployment shows the name, logo, colour and outside links of a folder under `brands/` ([branding](../branding.md)). AlloPlace is the brand for alloplace.com and alloplace.ai, and, as the only brand besides LobbyStack, for any address no brand claims, such as `localhost`.
 
 ## Know where it runs

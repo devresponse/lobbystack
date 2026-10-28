@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#89](https://github.com/devresponse/lobbystack/pull/89) | Show a yearly price's month in whole units, and the months it leaves free | `0119` | `9cddd87` | [docs](../billing/README.md#know-the-plans) |
 | [#86](https://github.com/devresponse/lobbystack/pull/86) | Raise Starter to $37 and lower Pro to $87 a month |  | `fabb536` | [docs](../billing/README.md#know-the-plans) |
 | [#88](https://github.com/devresponse/lobbystack/pull/88) | Show the brand's billing.json plans before a deployment's first apply |  | `edad2bf` | [docs](../billing/README.md#know-the-plans) |
 | [#87](https://github.com/devresponse/lobbystack/pull/87) | Use the only brand folder where no address or preset picks one |  | `141a4cd` | [docs](../branding.md) |
@@ -172,7 +173,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 ### Direct commits on `main`
 
-Eight commits reached `main` without a pull request:
+Ten commits reached `main` without a pull request:
 
 | Date | Commit | What changed |
 | --- | --- | --- |
@@ -184,3 +185,5 @@ Eight commits reached `main` without a pull request:
 | 2026-10-27 | `5312092` | Note Way B's first run, on Windows, and add IIS holding port 80 and Docker Desktop restarting mid-build to the local troubleshooting table ([2.10](../deployment/guide/part-2-local-development.md#210-if-something-fails-locally)). |
 | 2026-10-27 | `fd36d0a` | Line up the columns of the tables in `docs/README.md` and `docs/project/overview.md`. |
 | 2026-10-27 | `26c582d` | Add the maintainer's `polar-setup.mjs` and `railway-vars.mjs` to `devops/`, and point the billing docs and the guide at them. |
+| 2026-10-27 | `d6fb078` | List `26c582d` in this table. |
+| 2026-10-27 | `0beb75b` | Add two of the maintainer's PowerShell scripts to `devops/`: `delete-kb.ps1` deletes one business's whole knowledge base through the `lobbystack` command, and `reload-kb-from-pdfs.ps1` does the same, then uploads every PDF in a folder to be read again. |

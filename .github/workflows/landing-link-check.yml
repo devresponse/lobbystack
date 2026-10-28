@@ -63,6 +63,7 @@ jobs:
             --exclude '^https://(help|www)\.getjobber\.com/'
             --exclude '^https://support\.grasshopper\.com/'
             --exclude '^https://www\.spectrum\.com/'
+            --exclude '^https://business\.comcast\.com/'
             --exclude '^https://www\.t-mobile\.com/'
             --exclude '^https://www\.hhs\.gov/hipaa/for-professionals/special-topics/health-information-technology/cloud-computing/$'
             --exclude '^https://openai\.com/api/pricing/$'

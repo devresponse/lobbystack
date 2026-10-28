@@ -123,6 +123,14 @@ export const SCHEMA_MIGRATIONS = [
   "0117_call_transcript_emails.sql",
   "0118_call_recording_notice.sql",
   "0119_whole_annual_per_month.sql",
+  "0120_invitation_resolver_any_status.sql",
+  "0121_clear_unused_password_hashes.sql",
+  "0122_drop_business_memberships_business_index.sql",
+  "0123_transcripts_business_expiry_index.sql",
+  "0124_phone_numbers_e164_unreclaimed_unique.sql",
+  "0125_backfill_business_listings.sql",
+  "0126_clear_expired_call_summaries.sql",
+  "0127_knowledge_chunks_reembed_pending_index.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

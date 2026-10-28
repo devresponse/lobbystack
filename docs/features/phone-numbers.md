@@ -9,6 +9,8 @@ A business answers calls and sends texts on a Twilio number that LobbyStack buys
 3. The worker buys the number from Twilio, attaches it to the SIP trunk (`TWILIO_SIP_TRUNK_SID`) and the text webhook, and marks the claim done. The business's context snapshot is refreshed, so the receptionist and the website widget's call button know the number (fork PR #30).
 4. A replacement buys the new number first. The old one keeps working for 30 days, so callers who still have it get through, and then the worker releases it back to Twilio.
 
+A released number keeps its row, marked released, and only numbers a business still holds must differ. So when Twilio offers a released number again, any business can buy it (fork PR #93, migration `0124`). Before, that purchase failed after Twilio had charged for the number, and the worker released it again.
+
 The worker needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_SIP_TRUNK_SID`. Without them it ends the claim at once and its `job.failed` log line names the missing variable. Before fork PR #32, a claim stayed reserved for 15 minutes and refused the next pick.
 
 ## Know the limits

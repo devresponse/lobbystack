@@ -276,7 +276,9 @@ async function main(): Promise<void> {
             ('lobbystack_worker', 'app.resolve_public_profile(text)'),
             ('lobbystack_worker', 'app.list_open_live_call_businesses(timestamptz, timestamptz)'),
             ('lobbystack_worker', 'app.list_billing_sweep_work(timestamptz, timestamptz, timestamptz, timestamptz, bigint, integer)'),
-            ('lobbystack_dispatcher', 'app.list_scheduler_businesses()')
+            ('lobbystack_dispatcher', 'app.list_scheduler_businesses()'),
+            ('lobbystack_dispatcher', 'app.list_summary_backfill_businesses()'),
+            ('lobbystack_dispatcher', 'app.list_reembed_businesses(text)')
           ) as expected(role_name, function_name)
           where not has_function_privilege(expected.role_name, expected.function_name, 'EXECUTE')
         `);

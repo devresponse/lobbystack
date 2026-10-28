@@ -474,7 +474,7 @@ What's different from Railway:
     docker compose run --rm -e VERIFY_RLS_BEHAVIOR=true migrator node_modules/.bin/tsx dist/cli.js verify-rls
     ```
 
-    The first prints a line that starts with `{"ok":true`, and the second ends with `RLS enabled and forced on <n> tables.` The second adds two test businesses and removes them again within one transaction, so it's safe on a database in use (`packages/db/src/cli.ts:367-431`).
+    The first prints a line that starts with `{"ok":true`, and the second ends with `RLS enabled and forced on <n> tables.` The second adds two test businesses and removes them again within one transaction, so it's safe on a database in use (`packages/db/src/cli.ts:422-489`).
 
 **Connect the providers**
 

@@ -1,6 +1,6 @@
 # Part 2. Local development and testing
 
-**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)).
+**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac.
 
 This part puts a complete LobbyStack on your own computer. It's the safest place to learn how LobbyStack works and to try changes, because nothing you do here reaches real customers. There are two ways to run it:
 
@@ -32,15 +32,15 @@ Install these programs:
 | Git | Any recent version | git-scm.com. On a Mac, typing `git --version` in Terminal offers to install it. |
 | Docker | Docker Desktop on Windows and Mac; on Windows, keep the WSL 2 option it suggests. On Linux, Docker Engine 24 or later with the Compose plugin. | docker.com |
 | Node.js | 26 | nodejs.org, the installer for your system |
-| pnpm | 10.30.3 exactly | The command below |
+| pnpm | 12.15.0 exactly | The command below |
 
 Open a terminal (PowerShell on Windows, Terminal on a Mac) and install pnpm:
 
 ```sh
-npm install --global pnpm@10.30.3
+npm install --global pnpm@12.15.0
 ```
 
-Node 26 doesn't come with Corepack, so `npm` is the way to install pnpm.
+Node 26 doesn't come with Corepack, so `npm` is the way to install pnpm, and the same command replaces an older pnpm. npm may warn that pnpm's install scripts aren't covered by `allowScripts`; it runs them anyway.
 
 Check that each tool works. Each command prints a version:
 
@@ -51,7 +51,7 @@ node --version
 pnpm --version
 ```
 
-`node --version` should start with `v26`, and `pnpm --version` should print `10.30.3`. Start Docker Desktop before you go on, and leave it running.
+`node --version` should start with `v26`, and `pnpm --version` should print `12.15.0`. Start Docker Desktop before you go on, and leave it running.
 
 LobbyStack uses these ports on your computer, so close anything else that uses them: 13000 (dashboard), 13002 (worker), 4321 (marketing site), 15433 (PostgreSQL) and 16380 (Redis).
 

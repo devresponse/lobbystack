@@ -4,7 +4,7 @@ How to work on the code: set up a checkout, run the checks a pull request needs,
 
 ## Set up a checkout
 
-- Use Node 26, as CI does, and pnpm 10.30.3 (`packageManager` in `package.json`).
+- Use Node 26, as CI does, and pnpm 12.15.0 (`packageManager` in `package.json`).
 - `pnpm env:generate` writes `.env` with new random secrets. Keep your own keys and overrides in `.env.local`, which wins over `.env` and which Git and Docker both ignore.
 - Build `@lobbystack/telemetry` before the first `pnpm dev`, and again after changing it: the admin loads it from its build output. In a fresh checkout, `pnpm build` once also builds the packages some tests import.
 - `next dev` rewrites `apps/admin/next-env.d.ts`. Restore it before committing.

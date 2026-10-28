@@ -6,7 +6,7 @@ The commands this guide uses, in one place. Each one names the section that expl
 
 | To | Run | See |
 | --- | --- | --- |
-| Install pnpm | `npm install --global pnpm@10.30.3` | [2.2](part-2-local-development.md#22-install-the-tools) |
+| Install pnpm | `npm install --global pnpm@12.15.0` | [2.2](part-2-local-development.md#22-install-the-tools) |
 | Check the tools | `git --version`, `docker compose version`, `node --version`, `pnpm --version` | [2.2](part-2-local-development.md#22-install-the-tools) |
 | Get the code | `git clone https://github.com/devresponse/lobbystack.git`, or your own fork's address ([1.4](part-1-prepare.md#14-get-the-code)), then `cd lobbystack` | [2.3](part-2-local-development.md#23-get-the-code-and-create-your-settings-file) |
 | Install, and make the settings file | `pnpm install`, then `pnpm env:generate` | [2.3](part-2-local-development.md#23-get-the-code-and-create-your-settings-file) |

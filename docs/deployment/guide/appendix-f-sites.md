@@ -23,7 +23,7 @@ After that, it's built for Cloudflare Pages, whose free plan is enough *(not tri
 
 1. In Cloudflare, open **Workers & Pages** > **Create application** > **Pages** > **Connect to Git** (some of Cloudflare's pages call it **Import an existing Git repository**). Choose **GitHub** and your fork, click **Install & Authorize**, then **Begin setup**.
 2. Set **Production branch** to `main`, **Build command** to `pnpm run build` and **Build output directory** to `dist`. Under **Root directory (advanced)**, set **Path** to `apps/landing`.
-3. Under **Environment variables**, add `NODE_VERSION=26`, `PNPM_VERSION=10.30.3`, and `PUBLIC_APP_URL=https://<your address>`, where the site's **Log in** and **Sign up** buttons go. Click **Save and Deploy**.
+3. Under **Environment variables**, add `NODE_VERSION=26`, `PNPM_VERSION=12.15.0` *(whether Cloudflare's build image installs pnpm 12 isn't confirmed)*, and `PUBLIC_APP_URL=https://<your address>`, where the site's **Log in** and **Sign up** buttons go. Click **Save and Deploy**.
 4. If the build fails while it installs, add `SKIP_DEPENDENCY_INSTALL=1`, change the build command to `pnpm install --frozen-lockfile && pnpm run build`, and deploy again *(not tried: Cloudflare doesn't say how it installs a folder whose lockfile is at the top of the repository)*.
 5. For your own domain, open the project's **Custom domains** tab and click **Set up a domain**. A main domain, such as `example.com`, must use Cloudflare's nameservers. A subdomain can stay with another DNS provider, with a CNAME record to `<project>.pages.dev`, added only after the domain is set up in Cloudflare.
 

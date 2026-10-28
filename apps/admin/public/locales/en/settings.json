@@ -716,6 +716,18 @@
       "syncNeedsAttention": "Needs attention",
       "discoveryFailed": "Calendar access or synchronization could not be verified. Retry synchronization or reconnect your Google account."
     },
+    "zapier": {
+      "title": "Connect Zapier",
+      "description": "Zaps can start when a call ends, an appointment is booked, moved or cancelled, a message is taken or a contact is added. They can also add and update contacts, book, move and cancel appointments, and add knowledge for your agent.",
+      "steps": {
+        "invite": "Accept the invitation to use {{appName}} in Zapier. Zapier asks you to sign in or create a free account first.",
+        "key": "Create an API key for Zapier. You'll see it only once, so copy it before you close the dialog.",
+        "zap": "In Zapier, make a Zap and choose {{appName}}. When Zapier asks you to sign in, paste the key into \"API Key\" and check that \"{{appName}} URL\" is {{url}}."
+      },
+      "openInvite": "Open {{appName}} in Zapier",
+      "createKey": "Create a key for Zapier",
+      "bookingNote": "Zaps can book appointments only while the Agent page's Booking section is set to Books appointments."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -724,6 +736,10 @@
       "webhooks": {
         "title": "Webhooks",
         "description": "Send calls, bookings and messages to your own tools."
+      },
+      "zapier": {
+        "title": "Zapier",
+        "description": "Connect {{appName}} to thousands of apps without code."
       }
     },
     "status": {
@@ -1164,6 +1180,8 @@
       "nameLabel": "Name",
       "namePlaceholder": "Zapier",
       "scopesLabel": "Access",
+      "zapier": "Set up for Zapier",
+      "zapierHint": "Allows everything Zapier needs for your Zaps.",
       "cancel": "Cancel",
       "submit": "Create key",
       "creating": "Creating…"

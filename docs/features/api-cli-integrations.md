@@ -1,6 +1,6 @@
 # Use the API, the CLI and integrations
 
-Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, and how Zapier and n8n connect. Checked against `main` at `da1f548`.
+Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, and how Zapier and n8n connect. Checked against `main` at `e788004`, with fork PR #94's changes.
 
 ## Know the pieces
 
@@ -23,7 +23,7 @@ The [route catalog](../reference/routes.md) lists every operation with its route
 
 A business API key may leave out the `LobbyStack-Business` header; a platform key names the business in it. The business ID is shown above the keys in **Settings > API keys**, with a Copy button (fork PR #31), and `GET /me` returns it.
 
-The **Create an API key** dialog preselects the read scopes for calls, contacts, appointments, messages and the business, but not `webhooks:manage`, which Zapier triggers and n8n's webhook setup need.
+The **Create an API key** dialog preselects the read scopes for calls, contacts, appointments, messages and the business, but not `webhooks:manage`, which Zapier triggers and n8n's webhook setup need. Its **Set up for Zapier** button names the key Zapier, unless it already has a name, and ticks the nine scopes the Zapier integration's steps use, `webhooks:manage` included (fork PR #94). `/settings/api-keys?setup=zapier` opens the dialog set up that way.
 
 ## Use the CLI
 
@@ -48,17 +48,25 @@ pnpm lobbystack onboard manifest.yaml
 | #36, #37 | The API, MCP, demos and Zapier name the deployment's brand, not LobbyStack. |
 | #51 | `GET /ai-traces` and `GET /ai-traces/{trace_id}`. |
 | #58 to #75 | Billing operations: the catalog, Polar links, plans, checkout, promo codes and promo plans ([billing](../billing/README.md#run-billing-from-the-command-line)). |
+| #94 | The Zapier integration under each brand's own name and account: `npm run push` for a brand, a Zapier card on the **Integrations** page, **Set up for Zapier** in the Create dialog, and the contact and service fields its samples were missing. |
 
 ## Connect Zapier
 
 `integrations/zapier` is a Zapier Platform app outside the pnpm workspace. It only calls the v1 API with a business key. It has 6 triggers (call completed, appointment booked, rescheduled or cancelled, message taken, contact created), 6 actions, 3 searches and Find or Create Contact. Turning a trigger Zap on creates a webhook named "Zapier: &lt;label&gt;".
 
-The app was registered on the original project's Zapier account and was never published, so it can't be installed from Zapier's directory. To use it:
+Each brand publishes it on its own Zapier developer account, under its own name (fork PR #94). `npm run push -- --brand <id> --url <dashboard address>` uploads it with the name from the brand file, the dashboard's address as each new connection's default, and a help link to that dashboard's Zapier dialog. AlloPlace's is a private integration, on a Zapier account under an alloplace.com address, that people join through its invite link. The [integration's README](../../integrations/zapier/README.md#publish-it-for-a-brand) has the steps. The original project registered its own copy on its own Zapier account, and this folder no longer points at it.
 
-- register and push a private copy from `integrations/zapier` with the Zapier Platform CLI, answering No when it offers to update the linked app; or
-- use Webhooks by Zapier (a paid Zapier plan) with a webhook from **Integrations > Webhooks** and the v1 API.
+With the invite link in the brand file as `links.zapier` ([branding](../branding.md#send-the-outside-links-to-your-own-site)), the **Integrations** page shows a Zapier card. Its dialog:
 
-In the app's connection, set the URL to your dashboard's `https://` address: its default is the original project's hosted app. Book Appointment needs instant booking turned on.
+1. opens the invite in Zapier;
+2. links to the Create dialog set up for Zapier (`/settings/api-keys?setup=zapier`);
+3. says to pick the brand in a Zap, paste the key, and check that the connection's address is this dashboard's.
+
+A brand without a Zapier link, such as LobbyStack, shows no card. `/integrations?setup=zapier` opens the dialog, and the help link in the integration's API key field goes there. Book Appointment needs the agent's **Booking** set to **Books appointments**.
+
+`zapierOperationIds` in `packages/shared/src/publicApi/operations.ts` lists every operation the integration calls, and the scopes **Set up for Zapier** ticks come from it. `packages/shared/src/publicApi/zapier.test.ts` checks in every CI run that the integration's samples have the fields the API returns.
+
+Without the brand's integration, Webhooks by Zapier, on a paid Zapier plan, works with a webhook from **Integrations > Webhooks** and the v1 API.
 
 ## Connect n8n
 

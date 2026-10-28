@@ -34,6 +34,7 @@ export type BrandDefinition = {
     privacyUrl: string | null;
     docsUrl: string | null;
     contactEmail: string | null;
+    zapierUrl: string | null;
   };
   environments: BrandEnvironment[];
 };

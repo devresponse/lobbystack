@@ -8,10 +8,16 @@ import { LiveApiKeysSurface } from "./live-api-keys-surface";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "en", resolvedLanguage: "en" } }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+const navigation = vi.hoisted(() => ({ search: "", replace: vi.fn() }));
+vi.mock("next/navigation", () => ({ usePathname: () => "/settings/api-keys", useSearchParams: () => new URLSearchParams(navigation.search), useRouter: () => ({ replace: navigation.replace }) }));
 
 const BUSINESS_ID = "75795511-9ee2-4cb2-a89d-f173ec1dd82d";
 const clients: QueryClient[] = [];
-afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); });
+afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); navigation.search = ""; navigation.replace.mockReset(); });
+
+const ZAPIER_SCOPES = ["business:read", "calls:read", "contacts:read", "contacts:write", "appointments:read", "appointments:write", "messages:read", "knowledge:write", "webhooks:manage"];
+
+const postedBody = (fetchMock: ReturnType<typeof setup>) => JSON.parse(String(fetchMock.mock.calls.find(([, init]) => init?.method === "POST")?.[1]?.body));
 
 function setup(role: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -64,5 +70,46 @@ describe("API keys settings", () => {
     await user.click(screen.getByRole("button", { name: "apiKeys.created.done" }));
     await waitFor(() => expect(screen.queryByTestId("secret-value")).toBeNull());
     expect(await screen.findByText("lsk_1a2b3c4d…")).toBeTruthy();
+  });
+
+  it("sets a key up for Zapier, with the access every Zapier step needs, including webhooks", async () => {
+    const user = userEvent.setup();
+    const fetchMock = setup("business_owner");
+    await user.click(await screen.findByRole("button", { name: /apiKeys.create.action/ }));
+    await user.click(screen.getByRole("button", { name: /apiKeys.create.zapier$/ }));
+    expect((screen.getByLabelText("apiKeys.create.nameLabel") as HTMLInputElement).value).toBe("Zapier");
+    expect(screen.getByText("apiKeys.create.zapierHint")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "apiKeys.create.submit" }));
+    await screen.findByTestId("secret-value");
+    expect(postedBody(fetchMock)).toEqual({ name: "Zapier", scopes: ZAPIER_SCOPES });
+  });
+
+  it("keeps a name already typed when the key is set up for Zapier", async () => {
+    const user = userEvent.setup();
+    const fetchMock = setup("business_owner");
+    await user.click(await screen.findByRole("button", { name: /apiKeys.create.action/ }));
+    await user.type(screen.getByLabelText("apiKeys.create.nameLabel"), "Zapier (front desk)");
+    await user.click(screen.getByRole("button", { name: /apiKeys.create.zapier$/ }));
+    await user.click(screen.getByRole("button", { name: "apiKeys.create.submit" }));
+    await screen.findByTestId("secret-value");
+    expect(postedBody(fetchMock)).toEqual({ name: "Zapier (front desk)", scopes: ZAPIER_SCOPES });
+  });
+
+  it("opens the dialog set up for Zapier from the Integrations page's link and consumes the setup parameter", async () => {
+    navigation.search = "setup=zapier";
+    setup("business_owner");
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+    expect((screen.getByLabelText("apiKeys.create.nameLabel") as HTMLInputElement).value).toBe("Zapier");
+    expect(screen.getByRole("checkbox", { name: /webhooks:manage/ }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("checkbox", { name: /business:write/ }).getAttribute("aria-checked")).toBe("false");
+    await waitFor(() => expect(navigation.replace).toHaveBeenCalledWith("/settings/api-keys", { scroll: false }));
+  });
+
+  it("ignores the Zapier link for a member who can't manage keys", async () => {
+    navigation.search = "setup=zapier";
+    setup("viewer");
+    expect(await screen.findByText("apiKeys.restricted.title")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(navigation.replace).not.toHaveBeenCalled();
   });
 });

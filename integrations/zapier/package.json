@@ -10,7 +10,9 @@
   },
   "scripts": {
     "test": "jest --testTimeout 10000",
-    "validate": "zapier-platform validate",
+    "validate": "node scripts/zapier.js validate",
+    "zapier": "node scripts/zapier.js",
+    "push": "node scripts/push.js",
     "e2e:local": "node scripts/e2e-local.js"
   },
   "dependencies": {

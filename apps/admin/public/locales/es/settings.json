@@ -728,6 +728,18 @@
       "syncNeedsAttention": "Requiere atención",
       "discoveryFailed": "No se pudo verificar el acceso al calendario ni su sincronización. Vuelva a intentar la sincronización o vuelva a conectar su cuenta de Google."
     },
+    "zapier": {
+      "title": "Conectar Zapier",
+      "description": "Los Zaps pueden empezar cuando termina una llamada, cuando se reserva, cambia o cancela una cita, cuando se toma un mensaje o cuando se agrega un contacto. También pueden agregar y actualizar contactos, reservar, cambiar y cancelar citas, y agregar conocimiento para su agente.",
+      "steps": {
+        "invite": "Acepte la invitación para usar {{appName}} en Zapier. Zapier le pedirá primero que inicie sesión o cree una cuenta gratuita.",
+        "key": "Cree una clave de API para Zapier. Solo la verá una vez, así que cópiela antes de cerrar la ventana.",
+        "zap": "En Zapier, cree un Zap y elija {{appName}}. Cuando Zapier le pida iniciar sesión, pegue la clave en «API Key» y compruebe que «{{appName}} URL» sea {{url}}."
+      },
+      "openInvite": "Abrir {{appName}} en Zapier",
+      "createKey": "Crear una clave para Zapier",
+      "bookingNote": "Los Zaps solo pueden reservar citas mientras la sección Reservas de la página Agente esté en Reserva citas."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -736,6 +748,10 @@
       "webhooks": {
         "title": "Webhooks",
         "description": "Envíe llamadas, reservas y mensajes a sus propias herramientas."
+      },
+      "zapier": {
+        "title": "Zapier",
+        "description": "Conecte {{appName}} con miles de aplicaciones sin programar."
       }
     },
     "status": {
@@ -1176,6 +1192,8 @@
       "nameLabel": "Nombre",
       "namePlaceholder": "Zapier",
       "scopesLabel": "Acceso",
+      "zapier": "Configurar para Zapier",
+      "zapierHint": "Permite todo lo que Zapier necesita para sus Zaps.",
       "cancel": "Cancelar",
       "submit": "Crear clave",
       "creating": "Creando…"

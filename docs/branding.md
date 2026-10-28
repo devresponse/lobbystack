@@ -26,6 +26,7 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 | `links.site`, `links.docs` | An `http://` or `https://` URL without credentials, a query, or a fragment. | LobbyStack's site and docs. |
 | `links.terms`, `links.privacy` | An `http://` or `https://` URL without credentials. | `/terms` and `/privacy` on the site. |
 | `contactEmail` | A plain address, such as `support@example.com`. | LobbyStack's address for each place. |
+| `links.zapier` | An `https://` link on zapier.com: the brand's Zapier invite link, or its page in Zapier's app directory once it's listed. | No Zapier card on the Integrations page. |
 | `environments` | Settings by host label, such as `"dev*": { "appNameSuffix": " (dev)", "indexing": false }`. A pattern ending in `*` matches any first label that starts with it. | The plain brand on every host. |
 
 `brands/brand.schema.json` and `brands/index.schema.json` give editors completion and checks.
@@ -110,7 +111,7 @@ The consent text for operator alert texts uses the app name too (`OPERATOR_SMS_D
 
 ## Send the outside links to your own site
 
-The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, and an address to write to. The brand file's `links` and `contactEmail` point them at the brand's own site and inbox, with the values the [brand file table](#brand-files) accepts:
+The admin also links to pages outside itself: the website, the terms of service and privacy policy, the docs, an address to write to, and the brand's Zapier integration. The brand file's `links` and `contactEmail` point them at the brand's own site, inbox and integration, with the values the [brand file table](#brand-files) accepts:
 
 | Link | Field in `brand.json` | Without it |
 | --- | --- | --- |
@@ -119,6 +120,7 @@ The admin also links to pages outside itself: the website, the terms of service 
 | Privacy policy | `links.privacy` | `/privacy` on the website |
 | Docs | `links.docs` | The original project's documentation site |
 | Contact address | `contactEmail` | The original project's address for each place: its support address in the feedback panel, its sales address for Enterprise plans, and its general address in text messages. |
+| Zapier integration | `links.zapier` | None. The original project's integration connects to its own hosted dashboard, so a brand gets no Zapier link but its own. |
 
 **Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all five, with alloplace.com's home page standing in for docs.
 
@@ -128,6 +130,7 @@ Where each one appears:
 - **Terms and privacy**: the links under the sign-up form and at the foot of onboarding, and the affiliate program's terms link. With `links.terms` set, the affiliate link opens the top of that page, since only LobbyStack's terms have an `#affiliate-program` section.
 - **Docs**: the "see docs" and Help Center links in the dashboard's feedback panel, and `resource_documentation` in the MCP server's OAuth metadata, which adds `/ai/mcp`.
 - **Contact address**: the feedback panel's "Contact us" link, the Enterprise plan's contact button in onboarding and billing, and both SMS HELP replies. The HELP reply is part of the registered A2P 10DLC campaign, so update the campaign when the address or the website changes.
+- **Zapier integration**: the Zapier card on the **Integrations** page, whose dialog opens the link (fork PR #94). Without a link the card isn't shown ([integrations](features/api-cli-integrations.md#connect-zapier)).
 
 ### The brand is part of the build
 
@@ -188,7 +191,7 @@ These places still say LobbyStack or link to the original project's sites. Varia
 | Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use the brand's `accentColor`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
 | CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to the original project's docs in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
-| Zapier | The integration's name and logo in Zapier's developer dashboard | `ZAPIER_APP_NAME`, `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` set its labels, messages, default address and docs link (`integrations/zapier/README.md`); registering it under that name is done in Zapier. |
+| Zapier | The integration's logo in Zapier's developer dashboard, and its name, default address and help link when it's pushed some other way than `npm run push` | `npm run push -- --brand <id> --url <dashboard>` (fork PR #94) takes the name from the brand file and points the default address and help link at the dashboard; the brand registers the integration under that name on its own Zapier account and uploads the logo there (`integrations/zapier/README.md`). |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |
 

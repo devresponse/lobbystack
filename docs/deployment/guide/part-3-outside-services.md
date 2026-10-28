@@ -1,6 +1,6 @@
 # Part 3. Set up the outside services
 
-**Status:** written on 2026-10-18 from the code on `main` at `d18f916` and from each provider's documentation that day. No provider account was opened for this part, so a few button names couldn't be checked on the real screens; they're marked *(name not confirmed)*. Each service gets its first real test in [Part 4](part-4-test-environment.md). The Polar steps ([3.7](#37-optional-services), "[Selling plans](#selling-plans-polar)") were rewritten on 2026-10-22 for fork PR #59 (`a44f995`) and updated for fork PRs #60 to #62 the same day, #63 to #66 (`d800141`) on 2026-10-23 and #67 to #70 (`40435d2` to `fa0aa11`) the same day, and #72 to #75 (`cc0c65d` to `24e211d`) on 2026-10-24, from the code only, and checked again at `24e211d` later that day. The brand ([3.6](#36-your-brand)) was updated on 2026-10-27 for fork PR #87, from the code only: an address no brand claims now gets the only brand besides LobbyStack. The notes on the plan screens in "[Selling plans](#selling-plans-polar)", step 7, were updated the same day for fork PRs #88 and #89, from the code only.
+**Status:** written on 2026-10-18 from the code on `main` at `d18f916` and from each provider's documentation that day. No provider account was opened for this part, so a few button names couldn't be checked on the real screens; they're marked *(name not confirmed)*. Each service gets its first real test in [Part 4](part-4-test-environment.md). The Polar steps ([3.7](#37-optional-services), "[Selling plans](#selling-plans-polar)") were rewritten on 2026-10-22 for fork PR #59 (`a44f995`) and updated for fork PRs #60 to #62 the same day, #63 to #66 (`d800141`) on 2026-10-23 and #67 to #70 (`40435d2` to `fa0aa11`) the same day, and #72 to #75 (`cc0c65d` to `24e211d`) on 2026-10-24, from the code only, and checked again at `24e211d` later that day. The brand ([3.6](#36-your-brand)) was updated on 2026-10-27 for fork PR #87, from the code only: an address no brand claims now gets the only brand besides LobbyStack. The notes on the plan screens in "[Selling plans](#selling-plans-polar)", step 7, were updated the same day for fork PRs #88 and #89, from the code only. "[Zapier](#zapier)" was added on 2026-10-28 for fork PR #94, from the code and the Zapier command line's own source; no Zapier account was used.
 
 LobbyStack relies on outside services to answer calls, send email and keep robots from signing up. This part sets up each one. As you go, write each value on your worksheet ([Appendix D](appendix-d-worksheet.md)), or, for a key or a secret, the name of the password manager entry that holds it; [Part 4](part-4-test-environment.md) puts them into Railway.
 
@@ -14,6 +14,7 @@ LobbyStack relies on outside services to answer calls, send email and keep robot
 | Google Cloud | Google Calendar, and the map on public profile pages | Optional | Free | [3.7](#37-optional-services) |
 | Firecrawl | Importing a business's website | Optional | Free up to 1,000 pages a month | [3.7](#37-optional-services) |
 | PostHog | Errors, analytics and logs | Optional; recommended for production | Free tier | [3.7](#37-optional-services) |
+| Zapier | Lets businesses connect the dashboard to other apps | Optional; once per brand, not per instance | A free developer account | [3.7](#zapier) |
 
 Three rules for this part:
 
@@ -453,6 +454,16 @@ Collects the errors and logs of every LobbyStack service in one place. It's opti
 - Once the token is built in, dashboard analytics are on for every business from the start, recordings of operators' screens included. Each business can turn them off with **Share telemetry data** under **Settings** > **Preferences** ([7.11](part-7-operations.md#711-logs-error-ids-and-following-one-call)).
 
 **Not yet confirmed:** the EU address for logs, presumably `https://eu.i.posthog.com/i`, and whether PostHog charges for the traces and metrics that LobbyStack sends along with its logs, since its free tier lists neither.
+
+### Zapier
+
+Lets each business connect its dashboard to other apps through the brand's own Zapier integration: a Zap can start when a call ends, an appointment is booked, moved or cancelled, a message is taken or a contact is added, and can add contacts, book appointments and add knowledge. It's done once per brand, by its maintainer, from `integrations/zapier`; no service takes a variable for it.
+
+1. Create the brand's Zapier account, under an address at the brand's domain.
+2. On a computer with the repository and Node.js, register the integration and push it with the dashboard's address, as "[Publish it for a brand](../../../integrations/zapier/README.md#publish-it-for-a-brand)" in its README describes: `npm run zapier -- register "<name>"`, then `npm run push -- --brand <id> --url https://<your address>`. Commit the `.zapierapprc` that registering writes.
+3. Run `npm run zapier -- users:links` and put the invite link for all versions in the brand file as `links.zapier`, then `pnpm brands:build`, and release it ([7.1](part-7-operations.md#71-release-a-new-version)). The dashboard's **Integrations** page then shows a Zapier card.
+
+The integration is private: only people who open the invite can see it. One integration serves one dashboard address as its default, so push it with production's address once production runs, and again after a move ([7.23](part-7-operations.md#723-change-the-domain-or-the-brand)).
 
 ### Selling plans (Polar)
 

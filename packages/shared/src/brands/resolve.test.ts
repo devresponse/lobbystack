@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { brandBillingPlans, brandFileMatched, brandHost, brandImage, brandStartupReport, claimedDomain, onlyBrand, resolveBrand, type BrandData } from "./resolve";
 import type { BrandDefinition } from "./types";
 
-const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
+const links = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null };
 
 function brand(id: string, appName: string, environments: BrandDefinition["environments"] = []): BrandDefinition {
   return { id, appName, logoUrl: `/brand/${id}/logo.svg?v=1`, emailLogo: null, ogImage: null, accentColor: null, links, environments };

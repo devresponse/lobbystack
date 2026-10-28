@@ -1,12 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound } from "lucide-react";
-import { useState } from "react";
+import { Check, Copy, KeyRound, Zap } from "lucide-react";
+import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { BUSINESS_HEADER, offeredApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
+import { BUSINESS_HEADER, offeredApiKeyScopes, zapierApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
@@ -24,6 +24,7 @@ import { Surface } from "@/components/ui/surface";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { requestJson } from "@/lib/request-json";
 import { intlLocale } from "@/lib/locale";
+import { useSetupAction } from "@/lib/use-setup-action";
 
 type ApiKeyRecord = {
   id: string;
@@ -38,6 +39,10 @@ type ApiKeyRecord = {
 
 const scopeKey = (scope: ApiKeyScope) => scope.replace(":", "_");
 
+// "Set up for Zapier" names a new key Zapier, unless it already has a name,
+// and allows what every Zapier trigger, action and search calls.
+const ZAPIER_KEY_NAME = "Zapier";
+
 export function LiveApiKeysSurface() {
   const { i18n, t } = useTranslation("settings");
   const queryClient = useQueryClient();
@@ -49,6 +54,18 @@ export function LiveApiKeysSurface() {
   const { businesses, business } = useActiveBusiness();
   const canManage = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const keys = useQuery({ queryKey: ["api-keys", business?.businessId], queryFn: () => requestJson<{ keys: ApiKeyRecord[] }>(`/api/api-keys?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId && canManage) });
+  const setUpForZapier = useCallback(() => {
+    setScopes([...zapierApiKeyScopes]);
+    setName((current) => current.trim() ? current : ZAPIER_KEY_NAME);
+  }, []);
+  // The Integrations page's Zapier card links here with ?setup=zapier.
+  useSetupAction(canManage, useCallback((action: string) => {
+    if (action !== "zapier") return false;
+    setCreated(null);
+    setUpForZapier();
+    setCreateOpen(true);
+    return true;
+  }, [setUpForZapier]));
   const formatDate = (value: string) => new Intl.DateTimeFormat(intlLocale(i18n.resolvedLanguage ?? i18n.language), { dateStyle: "medium" }).format(new Date(value));
 
   const create = useMutation({
@@ -151,6 +168,10 @@ export function LiveApiKeysSurface() {
                 </Field>
                 <fieldset className="flex flex-col gap-3">
                   <legend className="mb-2 text-sm font-medium">{t("apiKeys.create.scopesLabel")}</legend>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Button onClick={setUpForZapier} size="sm" type="button" variant="outline"><Zap data-icon="inline-start" />{t("apiKeys.create.zapier")}</Button>
+                    <span className="text-xs text-muted-foreground">{t("apiKeys.create.zapierHint")}</span>
+                  </div>
                   {offeredApiKeyScopes.map((scope) => (
                     <div className="flex items-start gap-3 text-sm" key={scope}>
                       <Checkbox

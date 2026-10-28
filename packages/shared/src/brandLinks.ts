@@ -1,10 +1,12 @@
 import { currentBrand, type ResolvedBrand } from "./brands/resolve";
 
 // Where the app sends people outside itself: the deployment's website, its
-// terms and privacy policy, its docs, and the address people write to.
+// terms and privacy policy, its docs, the address people write to, and its
+// integration on Zapier.
 //
 // Each one comes from the deployment's brand file (brands/resolve.ts), and
-// whatever the brand leaves out goes to LobbyStack's own.
+// whatever the brand leaves out goes to LobbyStack's own, except Zapier: a
+// brand without its own Zapier integration has none.
 
 export const LOBBYSTACK_SITE_URL = "https://lobbystack.com";
 export const LOBBYSTACK_DOCS_URL = "https://docs.lobbystack.com";
@@ -32,6 +34,8 @@ export type BrandLinks = {
   docsUrl: string;
   /** The one address for everything, or null for LobbyStack's address for each purpose. */
   contactEmail: string | null;
+  /** The brand's integration on Zapier: its invite link while it's private, its page in Zapier's app directory once it's public; null for none. */
+  zapierUrl: string | null;
 };
 
 function httpUrl(value: unknown): URL | null {
@@ -55,6 +59,12 @@ export function normalizePageUrl(value: unknown): string | null {
   return httpUrl(value)?.toString() ?? null;
 }
 
+/** A page on Zapier's own site: an https URL on zapier.com or one of its subdomains. */
+export function normalizeZapierUrl(value: unknown): string | null {
+  const url = httpUrl(value);
+  return url && url.protocol === "https:" && (url.hostname === "zapier.com" || url.hostname.endsWith(".zapier.com")) ? url.toString() : null;
+}
+
 // Plain addresses only: anything else could end a mailto: link early or read
 // oddly inside a text message.
 const EMAIL_ADDRESS = /^[A-Za-z0-9._+-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,}$/;
@@ -65,9 +75,9 @@ export function normalizeEmailAddress(value: unknown): string | null {
   return address.length <= 254 && EMAIL_ADDRESS.test(address) ? address : null;
 }
 
-const NO_BRAND_LINKS: ResolvedBrand["links"] = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null };
+const NO_BRAND_LINKS: ResolvedBrand["links"] = { siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null };
 
-/** Each link from the brand, else LobbyStack's. */
+/** Each link from the brand, else LobbyStack's, but Zapier's only from the brand. */
 export function resolveBrandLinks(brand: ResolvedBrand["links"] = NO_BRAND_LINKS): BrandLinks {
   return {
     siteUrl: brand.siteUrl ?? LOBBYSTACK_SITE_URL,
@@ -75,6 +85,9 @@ export function resolveBrandLinks(brand: ResolvedBrand["links"] = NO_BRAND_LINKS
     privacyUrl: brand.privacyUrl,
     docsUrl: brand.docsUrl ?? LOBBYSTACK_DOCS_URL,
     contactEmail: brand.contactEmail,
+    // LobbyStack's own Zapier integration connects to LobbyStack's hosted
+    // dashboard, never this deployment, so there's no fallback.
+    zapierUrl: brand.zapierUrl,
   };
 }
 

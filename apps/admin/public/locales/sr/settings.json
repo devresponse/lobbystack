@@ -728,6 +728,18 @@
       "syncNeedsAttention": "Potrebna je pažnja",
       "discoveryFailed": "Nije bilo moguće proveriti pristup kalendaru ili sinhronizaciju. Pokušajte ponovo da sinhronizujete ili ponovo povežite Google nalog."
     },
+    "zapier": {
+      "title": "Povežite Zapier",
+      "description": "Zapovi mogu da se pokrenu kada se poziv završi, kada se termin zakaže, pomeri ili otkaže, kada se primi poruka ili kada se doda kontakt. Mogu i da dodaju i menjaju kontakte, da zakazuju, pomeraju i otkazuju termine i da dodaju znanje vašem agentu.",
+      "steps": {
+        "invite": "Prihvatite pozivnicu da koristite {{appName}} u Zapieru. Zapier će prvo tražiti da se prijavite ili napravite besplatan nalog.",
+        "key": "Kreirajte API ključ za Zapier. Videćete ga samo jednom, zato ga kopirajte pre nego što zatvorite prozor.",
+        "zap": "U Zapieru napravite Zap i izaberite {{appName}}. Kada Zapier zatraži prijavu, nalepite ključ u polje „API Key” i proverite da polje „{{appName}} URL” sadrži {{url}}."
+      },
+      "openInvite": "Otvori {{appName}} u Zapieru",
+      "createKey": "Kreiraj ključ za Zapier",
+      "bookingNote": "Zapovi mogu da zakazuju termine samo dok je u odeljku Zakazivanje na stranici Agent izabrano Zakazuje termine."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -736,6 +748,10 @@
       "webhooks": {
         "title": "Webhooks",
         "description": "Šaljite pozive, zakazivanja i poruke u svoje alate."
+      },
+      "zapier": {
+        "title": "Zapier",
+        "description": "Povežite {{appName}} sa hiljadama aplikacija bez programiranja."
       }
     },
     "status": {
@@ -1176,6 +1192,8 @@
       "nameLabel": "Naziv",
       "namePlaceholder": "Zapier",
       "scopesLabel": "Pristup",
+      "zapier": "Podesi za Zapier",
+      "zapierHint": "Dozvoljava sve što je Zapieru potrebno za vaše Zapove.",
       "cancel": "Otkaži",
       "submit": "Kreiraj ključ",
       "creating": "Kreiranje…"

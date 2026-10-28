@@ -37,6 +37,9 @@
         },
         "docs": {
           "type": "string"
+        },
+        "zapier": {
+          "type": "string"
         }
       },
       "additionalProperties": false

@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-10-28
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#90](https://github.com/devresponse/lobbystack/pull/90) | Build the images on Node 26.12.1, and take nodemailer 10.1.4 and zod 4.6.6 |  | `2dcc83c` | [docs](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions) |
+
 ### 2026-10-27
 
 | PR | What changed | Migrations | Merge | More |

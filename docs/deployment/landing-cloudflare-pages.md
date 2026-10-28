@@ -13,7 +13,7 @@ Connect a Pages project to this repository with:
 - Build command: `pnpm build`
 - Build output directory: `dist`
 - Node version: `26`
-- pnpm version: `10.30.3`
+- pnpm version: `12.15.0`
 - Automatic production deployments: enabled
 - Preview deployments: all branches
 - Build watch paths:

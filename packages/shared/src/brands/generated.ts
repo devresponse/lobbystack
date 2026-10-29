@@ -32,7 +32,7 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "privacyUrl": "https://alloplace.com/legal/privacy",
       "docsUrl": "https://alloplace.com",
       "contactEmail": "support@alloplace.com",
-      "zapierUrl": null,
+      "zapierUrl": "https://zapier.com/developer/public-invite/248757/519757/3b7d782a7813340d4cbcb4f8fa6f3294/",
       "makeUrl": null
     },
     "environments": [

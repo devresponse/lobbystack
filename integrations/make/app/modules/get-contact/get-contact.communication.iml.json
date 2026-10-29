@@ -1,0 +1,7 @@
+{
+  "url": "/contacts/{{parameters.contact_id}}",
+  "method": "GET",
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

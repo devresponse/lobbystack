@@ -1,12 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, KeyRound, Zap } from "lucide-react";
+import { Check, Copy, KeyRound, Workflow, Zap } from "lucide-react";
 import { useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { BUSINESS_HEADER, offeredApiKeyScopes, zapierApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
+import { BUSINESS_HEADER, makeApiKeyScopes, offeredApiKeyScopes, zapierApiKeyScopes, type ApiKeyScope } from "@lobbystack/shared";
 
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
@@ -40,8 +40,10 @@ type ApiKeyRecord = {
 const scopeKey = (scope: ApiKeyScope) => scope.replace(":", "_");
 
 // "Set up for Zapier" names a new key Zapier, unless it already has a name,
-// and allows what every Zapier trigger, action and search calls.
+// and allows what every Zapier trigger, action and search calls. "Set up for
+// Make" does the same for every module of the Make app.
 const ZAPIER_KEY_NAME = "Zapier";
+const MAKE_KEY_NAME = "Make";
 
 export function LiveApiKeysSurface() {
   const { i18n, t } = useTranslation("settings");
@@ -58,14 +60,19 @@ export function LiveApiKeysSurface() {
     setScopes([...zapierApiKeyScopes]);
     setName((current) => current.trim() ? current : ZAPIER_KEY_NAME);
   }, []);
-  // The Integrations page's Zapier card links here with ?setup=zapier.
+  const setUpForMake = useCallback(() => {
+    setScopes([...makeApiKeyScopes]);
+    setName((current) => current.trim() ? current : MAKE_KEY_NAME);
+  }, []);
+  // The Integrations page's Zapier and Make cards link here with ?setup=zapier and ?setup=make.
   useSetupAction(canManage, useCallback((action: string) => {
-    if (action !== "zapier") return false;
+    const setUp = action === "zapier" ? setUpForZapier : action === "make" ? setUpForMake : null;
+    if (!setUp) return false;
     setCreated(null);
-    setUpForZapier();
+    setUp();
     setCreateOpen(true);
     return true;
-  }, [setUpForZapier]));
+  }, [setUpForMake, setUpForZapier]));
   const formatDate = (value: string) => new Intl.DateTimeFormat(intlLocale(i18n.resolvedLanguage ?? i18n.language), { dateStyle: "medium" }).format(new Date(value));
 
   const create = useMutation({
@@ -171,6 +178,10 @@ export function LiveApiKeysSurface() {
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <Button onClick={setUpForZapier} size="sm" type="button" variant="outline"><Zap data-icon="inline-start" />{t("apiKeys.create.zapier")}</Button>
                     <span className="text-xs text-muted-foreground">{t("apiKeys.create.zapierHint")}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <Button onClick={setUpForMake} size="sm" type="button" variant="outline"><Workflow data-icon="inline-start" />{t("apiKeys.create.make")}</Button>
+                    <span className="text-xs text-muted-foreground">{t("apiKeys.create.makeHint")}</span>
                   </div>
                   {offeredApiKeyScopes.map((scope) => (
                     <div className="flex items-start gap-3 text-sm" key={scope}>

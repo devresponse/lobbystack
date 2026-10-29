@@ -1,0 +1,12 @@
+[
+  {
+    "name": "starts_at",
+    "type": "date",
+    "label": "Start time"
+  },
+  {
+    "name": "ends_at",
+    "type": "date",
+    "label": "End time"
+  }
+]

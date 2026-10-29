@@ -740,6 +740,18 @@
       "createKey": "Kreiraj ključ za Zapier",
       "bookingNote": "Zapovi mogu da zakazuju termine samo dok je u odeljku Zakazivanje na stranici Agent izabrano Zakazuje termine."
     },
+    "make": {
+      "title": "Povežite Make",
+      "description": "Scenariji mogu da se pokrenu kada se poziv završi, kada se termin zakaže, pomeri ili otkaže, kada se primi poruka ili kada se doda kontakt. Mogu i da pronađu pozive, termine i kontakte, da dodaju i menjaju kontakte, da zakazuju, pomeraju i otkazuju termine i da dodaju znanje vašem agentu.",
+      "steps": {
+        "invite": "Instalirajte {{appName}} u svoju Make organizaciju preko linka pozivnice. Make će prvo tražiti da se prijavite ili napravite besplatan nalog.",
+        "key": "Kreirajte API ključ za Make. Videćete ga samo jednom, zato ga kopirajte pre nego što zatvorite prozor.",
+        "scenario": "U Make-u dodajte {{appName}} modul u scenario i izaberite Create a connection. Nalepite ključ u polje „API key” i proverite da polje „{{appName}} URL” sadrži {{url}}."
+      },
+      "openInvite": "Otvori {{appName}} u Make-u",
+      "createKey": "Kreiraj ključ za Make",
+      "bookingNote": "Scenariji mogu da zakazuju termine samo dok je u odeljku Zakazivanje na stranici Agent izabrano Zakazuje termine."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -752,6 +764,10 @@
       "zapier": {
         "title": "Zapier",
         "description": "Povežite {{appName}} sa hiljadama aplikacija bez programiranja."
+      },
+      "make": {
+        "title": "Make",
+        "description": "Pravite vizuelne scenarije koji povezuju {{appName}} sa vašim drugim aplikacijama."
       }
     },
     "status": {
@@ -1194,6 +1210,8 @@
       "scopesLabel": "Pristup",
       "zapier": "Podesi za Zapier",
       "zapierHint": "Dozvoljava sve što je Zapieru potrebno za vaše Zapove.",
+      "make": "Podesi za Make",
+      "makeHint": "Dozvoljava sve što je Make-u potrebno za vaše scenarije.",
       "cancel": "Otkaži",
       "submit": "Kreiraj ključ",
       "creating": "Kreiranje…"

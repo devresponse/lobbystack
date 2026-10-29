@@ -1,0 +1,8 @@
+{
+  "url": "/knowledge",
+  "method": "POST",
+  "body": "{{if(parameters.type == 'text', pick(parameters, 'type', 'title', 'content'), pick(parameters, 'type', 'question', 'answer'))}}",
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

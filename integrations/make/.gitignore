@@ -1,0 +1,6 @@
+# The build writes each brand's app to brands/<brand>/. Git keeps only its
+# makecomapp.json, which a deploy fills with the ID Make gave each component.
+brands/*/*
+!brands/*/makecomapp.json
+# The Make API token the editor saves for a deploy.
+.secrets/

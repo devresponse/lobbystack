@@ -1,0 +1,4 @@
+{
+  "condition": "{{body.type == 'appointment.rescheduled'}}",
+  "output": "{{body.data}}"
+}

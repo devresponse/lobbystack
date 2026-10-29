@@ -1,0 +1,51 @@
+[
+  {
+    "label": "Triggers",
+    "modules": [
+      "watchCompletedCalls",
+      "watchNewAppointments",
+      "watchRescheduledAppointments",
+      "watchCancelledAppointments",
+      "watchNewMessages",
+      "watchNewContacts"
+    ]
+  },
+  {
+    "label": "Calls",
+    "modules": [
+      "getCall"
+    ]
+  },
+  {
+    "label": "Appointments",
+    "modules": [
+      "searchAppointments",
+      "getAppointment",
+      "listOpenTimes",
+      "bookAppointment",
+      "rescheduleAppointment",
+      "cancelAppointment"
+    ]
+  },
+  {
+    "label": "Contacts",
+    "modules": [
+      "searchContacts",
+      "getContact",
+      "createContact",
+      "updateContact"
+    ]
+  },
+  {
+    "label": "Knowledge",
+    "modules": [
+      "addKnowledgeEntry"
+    ]
+  },
+  {
+    "label": "Other",
+    "modules": [
+      "makeApiCall"
+    ]
+  }
+]

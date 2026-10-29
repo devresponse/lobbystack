@@ -1,0 +1,48 @@
+[
+  {
+    "name": "service_id",
+    "type": "select",
+    "label": "Service",
+    "options": "rpc://listServices",
+    "required": true
+  },
+  {
+    "name": "starts_at",
+    "type": "date",
+    "label": "Start time",
+    "required": true,
+    "help": "An open time, such as a Start time from List open appointment times."
+  },
+  {
+    "name": "contact_id",
+    "type": "select",
+    "label": "Contact ID",
+    "options": "rpc://listContacts",
+    "mode": "edit",
+    "help": "An existing contact with a phone number. Enter a contact ID or a contact phone."
+  },
+  {
+    "name": "contact_phone",
+    "type": "text",
+    "label": "Contact phone",
+    "help": "Used when no contact ID is given. For example, +14165550134. A 10-digit number is read as North American."
+  },
+  {
+    "name": "contact_name",
+    "type": "text",
+    "label": "Contact name"
+  },
+  {
+    "name": "staff_id",
+    "type": "select",
+    "label": "Staff member",
+    "options": "rpc://listStaff",
+    "help": "Book with this staff member. If left empty, someone who is free is picked."
+  },
+  {
+    "name": "sms_consent",
+    "type": "boolean",
+    "label": "Customer agreed to texts",
+    "help": "Yes only if the customer agreed to get confirmation and reminder texts. Used only when the business texts from its own number."
+  }
+]

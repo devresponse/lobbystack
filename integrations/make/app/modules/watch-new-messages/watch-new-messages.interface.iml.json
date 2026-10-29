@@ -1,0 +1,72 @@
+[
+  {
+    "name": "id",
+    "type": "text",
+    "label": "Message ID"
+  },
+  {
+    "name": "status",
+    "type": "text",
+    "label": "Status"
+  },
+  {
+    "name": "title",
+    "type": "text",
+    "label": "Title"
+  },
+  {
+    "name": "body",
+    "type": "text",
+    "label": "Message"
+  },
+  {
+    "name": "caller_name",
+    "type": "text",
+    "label": "Caller name"
+  },
+  {
+    "name": "callback_phone",
+    "type": "text",
+    "label": "Callback phone"
+  },
+  {
+    "name": "urgency",
+    "type": "text",
+    "label": "Urgency"
+  },
+  {
+    "name": "callback_window",
+    "type": "text",
+    "label": "Callback window"
+  },
+  {
+    "name": "channel",
+    "type": "text",
+    "label": "Channel"
+  },
+  {
+    "name": "call_id",
+    "type": "text",
+    "label": "Call ID"
+  },
+  {
+    "name": "request",
+    "type": "text",
+    "label": "Request"
+  },
+  {
+    "name": "appointment_id",
+    "type": "text",
+    "label": "Appointment ID"
+  },
+  {
+    "name": "created_at",
+    "type": "date",
+    "label": "Created at"
+  },
+  {
+    "name": "updated_at",
+    "type": "date",
+    "label": "Updated at"
+  }
+]

@@ -1,0 +1,15 @@
+{
+  "temp": {
+    "contact_phoneDigits": "{{replace(parameters.contact_phone, '/[^0-9]/g', '')}}",
+    "contact_phoneText": "{{trim(parameters.contact_phone)}}"
+  },
+  "url": "/appointments",
+  "method": "POST",
+  "body": {
+    "{{...}}": "{{omit(parameters, 'contact_phone')}}",
+    "contact_phone": "{{if(parameters.contact_phone, if(length(temp.contact_phoneDigits) == 10 && indexOf(temp.contact_phoneText, '+') != 0, '+1' + temp.contact_phoneDigits, if(indexOf(temp.contact_phoneText, '00') == 0, '+' + substring(temp.contact_phoneDigits, 2), '+' + temp.contact_phoneDigits)), undefined)}}"
+  },
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

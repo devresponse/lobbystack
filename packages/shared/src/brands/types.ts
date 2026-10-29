@@ -35,6 +35,7 @@ export type BrandDefinition = {
     docsUrl: string | null;
     contactEmail: string | null;
     zapierUrl: string | null;
+    makeUrl: string | null;
   };
   environments: BrandEnvironment[];
 };

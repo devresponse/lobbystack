@@ -1,0 +1,22 @@
+{
+  "url": "/webhooks",
+  "method": "POST",
+  "body": {
+    "url": "{{webhook.url}}",
+    "events": [
+      "contact.created"
+    ],
+    "description": "Make: Watch new contacts"
+  },
+  "response": {
+    "data": {
+      "externalHookId": "{{body.data.id}}"
+    }
+  },
+  "log": {
+    "sanitize": [
+      "request.headers.authorization",
+      "response.body.data.secret"
+    ]
+  }
+}

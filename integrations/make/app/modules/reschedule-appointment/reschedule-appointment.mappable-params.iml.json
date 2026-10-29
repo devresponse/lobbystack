@@ -1,0 +1,25 @@
+[
+  {
+    "name": "appointment_id",
+    "type": "select",
+    "label": "Appointment ID",
+    "options": "rpc://listAppointments",
+    "mode": "edit",
+    "required": true,
+    "help": "Map the ID from a trigger or a search, or switch off Map to pick an upcoming appointment."
+  },
+  {
+    "name": "starts_at",
+    "type": "date",
+    "label": "Start time",
+    "required": true,
+    "help": "An open time, such as a Start time from List open appointment times."
+  },
+  {
+    "name": "staff_id",
+    "type": "select",
+    "label": "Staff member",
+    "options": "rpc://listStaff",
+    "help": "Move it to this staff member. If left empty, the current one keeps it."
+  }
+]

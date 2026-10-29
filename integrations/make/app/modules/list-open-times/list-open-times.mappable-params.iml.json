@@ -1,0 +1,36 @@
+[
+  {
+    "name": "service_id",
+    "type": "select",
+    "label": "Service",
+    "options": "rpc://listServices",
+    "required": true
+  },
+  {
+    "name": "start_date",
+    "type": "text",
+    "label": "First day",
+    "required": true,
+    "help": "As YYYY-MM-DD in the business's time zone, such as 2026-11-03. To map a date, format it with formatDate(date; YYYY-MM-DD)."
+  },
+  {
+    "name": "end_date",
+    "type": "text",
+    "label": "Last day",
+    "help": "As YYYY-MM-DD, up to 6 days after the first day. If left empty, only the first day is searched."
+  },
+  {
+    "name": "staff_id",
+    "type": "select",
+    "label": "Staff member",
+    "options": "rpc://listStaff",
+    "help": "Only times this staff member is free. If left empty, times anyone who takes the service is free."
+  },
+  {
+    "name": "limit",
+    "type": "uinteger",
+    "label": "Limit",
+    "help": "Maximum number of results to return and work with during one execution cycle.",
+    "default": 10
+  }
+]

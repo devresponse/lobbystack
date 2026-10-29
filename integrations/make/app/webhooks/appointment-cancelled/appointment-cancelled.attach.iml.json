@@ -1,0 +1,22 @@
+{
+  "url": "/webhooks",
+  "method": "POST",
+  "body": {
+    "url": "{{webhook.url}}",
+    "events": [
+      "appointment.cancelled"
+    ],
+    "description": "Make: Watch cancelled appointments"
+  },
+  "response": {
+    "data": {
+      "externalHookId": "{{body.data.id}}"
+    }
+  },
+  "log": {
+    "sanitize": [
+      "request.headers.authorization",
+      "response.body.data.secret"
+    ]
+  }
+}

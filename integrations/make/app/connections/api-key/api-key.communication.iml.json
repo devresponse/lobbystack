@@ -1,0 +1,34 @@
+{
+  "temp": {
+    "dashboardUrl": "https://{{replace(replace(trim(parameters.url), '/^[a-zA-Z]+:/*/', ''), '/[/?#].*/', '')}}"
+  },
+  "url": "{{temp.dashboardUrl}}/api/v1/me",
+  "method": "GET",
+  "headers": {
+    "authorization": "Bearer {{parameters.apiKey}}"
+  },
+  "response": {
+    "valid": {
+      "condition": "{{body.data.business}}",
+      "message": "{{if(body.data.platform, 'This is a __APP_NAME__ platform key. Make needs an API key from Settings > API keys, which starts with lsk_.', 'That address did not answer like a __APP_NAME__ dashboard. Check the __APP_NAME__ URL.')}}"
+    },
+    "data": {
+      "dashboardUrl": "{{temp.dashboardUrl}}"
+    },
+    "metadata": {
+      "type": "text",
+      "value": "{{body.data.business.name}}"
+    },
+    "error": {
+      "401": {
+        "message": "[401] This API key is invalid or was revoked. Create a key in __APP_NAME__ under Settings > API keys with Set up for Make."
+      },
+      "message": "[{{statusCode}}] {{ifempty(body.error.message, 'The key could not be checked.')}}"
+    }
+  },
+  "log": {
+    "sanitize": [
+      "request.headers.authorization"
+    ]
+  }
+}

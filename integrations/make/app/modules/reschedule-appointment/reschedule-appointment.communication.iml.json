@@ -1,0 +1,8 @@
+{
+  "url": "/appointments/{{parameters.appointment_id}}/reschedule",
+  "method": "POST",
+  "body": "{{omit(parameters, 'appointment_id')}}",
+  "response": {
+    "output": "{{body.data}}"
+  }
+}

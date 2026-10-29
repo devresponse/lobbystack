@@ -1,0 +1,81 @@
+[
+  {
+    "name": "url",
+    "type": "text",
+    "label": "URL",
+    "required": true,
+    "help": "Enter a path relative to the dashboard's `/api`. For example: `/v1/services`. Every path is listed in the API reference at `/api/v1/openapi.json` on the dashboard, such as `__DASHBOARD_URL__/api/v1/openapi.json`."
+  },
+  {
+    "name": "method",
+    "type": "select",
+    "label": "Method",
+    "required": true,
+    "default": "GET",
+    "options": [
+      {
+        "label": "GET",
+        "value": "GET"
+      },
+      {
+        "label": "POST",
+        "value": "POST"
+      },
+      {
+        "label": "PATCH",
+        "value": "PATCH"
+      },
+      {
+        "label": "DELETE",
+        "value": "DELETE"
+      }
+    ]
+  },
+  {
+    "name": "headers",
+    "type": "array",
+    "label": "Headers",
+    "help": "You don't have to add the Authorization header; the connection's API key is sent for you.",
+    "default": [
+      {
+        "key": "Content-Type",
+        "value": "application/json"
+      }
+    ],
+    "spec": [
+      {
+        "name": "key",
+        "type": "text",
+        "label": "Key"
+      },
+      {
+        "name": "value",
+        "type": "text",
+        "label": "Value"
+      }
+    ]
+  },
+  {
+    "name": "qs",
+    "type": "array",
+    "label": "Query string",
+    "spec": [
+      {
+        "name": "key",
+        "type": "text",
+        "label": "Key"
+      },
+      {
+        "name": "value",
+        "type": "text",
+        "label": "Value"
+      }
+    ]
+  },
+  {
+    "name": "body",
+    "type": "any",
+    "label": "Body",
+    "help": "JSON for POST and PATCH requests."
+  }
+]

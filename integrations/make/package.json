@@ -1,0 +1,14 @@
+{
+  "name": "lobbystack-make",
+  "version": "1.0.0",
+  "description": "Make app for a LobbyStack dashboard, named per deployment.",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node --test"
+  }
+}

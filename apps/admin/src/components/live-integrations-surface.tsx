@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, KeyRound, RefreshCcw, Trash2, Webhook, Zap } from "lucide-react";
+import { ExternalLink, KeyRound, RefreshCcw, Trash2, Webhook, Workflow, Zap } from "lucide-react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
@@ -37,9 +37,10 @@ export function LiveIntegrationsSurface() {
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [zapierOpen, setZapierOpen] = useState(false);
+  const [makeOpen, setMakeOpen] = useState(false);
   const [selectedCalendarId, setSelectedCalendarId] = useState("");
-  // The brand's own Zapier integration; a brand without one shows no Zapier card.
-  const { zapierUrl } = brandLinks();
+  // The brand's own Zapier integration and Make app; a brand without one shows no card for it.
+  const { makeUrl, zapierUrl } = brandLinks();
   const { business } = useActiveBusiness();
   const canManage = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const integrations = useQuery({ queryKey: ["integrations", business?.businessId], queryFn: () => requestJson<IntegrationsViewModel>(`/api/integrations?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId && canManage), refetchInterval: (query) => query.state.data?.calendarConnections.some((connection) => connection.status === "syncing") ? 2000 : false });
@@ -54,8 +55,9 @@ export function LiveIntegrationsSurface() {
   useSetupAction(canManage, useCallback((action: string) => {
     if (action === "calendar") { setDialogOpen(true); return true; }
     if (action === "zapier" && zapierUrl) { setZapierOpen(true); return true; }
+    if (action === "make" && makeUrl) { setMakeOpen(true); return true; }
     return false;
-  }, [zapierUrl]));
+  }, [makeUrl, zapierUrl]));
   useEffect(() => {
     const calendar = searchParams.get("calendar"); const status = searchParams.get("status"); const key = `${calendar}:${status}`;
     if (calendar !== "google" || !status || handledCallback.current === key) return;
@@ -93,6 +95,9 @@ export function LiveIntegrationsSurface() {
       </li>{zapierUrl ? <li className={`${surfaceClassName} p-4`}>
         <div className="mb-8 flex items-center justify-between gap-3"><div className="flex size-10 shrink-0 items-center justify-center"><Zap aria-hidden="true" className="size-7" /></div><Button disabled={!canManage} onClick={() => setZapierOpen(true)} size="sm" type="button" variant="outline">{t("integrations.actions.connect")}</Button></div>
         <div className="flex flex-col gap-1"><h2 className="type-section-title text-lg">{t("integrations.cards.zapier.title")}</h2><p className="type-body-muted line-clamp-2">{t("integrations.cards.zapier.description")}</p></div>
+      </li> : null}{makeUrl ? <li className={`${surfaceClassName} p-4`}>
+        <div className="mb-8 flex items-center justify-between gap-3"><div className="flex size-10 shrink-0 items-center justify-center"><Workflow aria-hidden="true" className="size-7" /></div><Button disabled={!canManage} onClick={() => setMakeOpen(true)} size="sm" type="button" variant="outline">{t("integrations.actions.connect")}</Button></div>
+        <div className="flex flex-col gap-1"><h2 className="type-section-title text-lg">{t("integrations.cards.make.title")}</h2><p className="type-body-muted line-clamp-2">{t("integrations.cards.make.description")}</p></div>
       </li> : null}</ul>
     </div>
     {zapierUrl ? <Dialog onOpenChange={setZapierOpen} open={zapierOpen}><DialogContent className="w-full gap-0 p-0 sm:max-w-md">
@@ -103,6 +108,15 @@ export function LiveIntegrationsSurface() {
         <li><p>{t("integrations.zapier.steps.zap", { url: typeof window === "undefined" ? "" : window.location.origin })}</p></li>
       </ol>
       <p className="type-body-muted px-6 pb-6">{t("integrations.zapier.bookingNote")}</p>
+    </DialogContent></Dialog> : null}
+    {makeUrl ? <Dialog onOpenChange={setMakeOpen} open={makeOpen}><DialogContent className="w-full gap-0 p-0 sm:max-w-md">
+      <DialogHeader className="flex-row items-center gap-3 p-6 pb-4"><Workflow aria-hidden="true" className="size-7 shrink-0" /><div className="flex flex-col gap-1"><DialogTitle>{t("integrations.make.title")}</DialogTitle><DialogDescription>{t("integrations.make.description")}</DialogDescription></div></DialogHeader>
+      <ol className="flex list-decimal flex-col gap-4 px-6 pb-4 pl-11 text-sm">
+        <li><p>{t("integrations.make.steps.invite")}</p><a className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} href={makeUrl} rel="noopener noreferrer" target="_blank"><ExternalLink data-icon="inline-start" />{t("integrations.make.openInvite")}</a></li>
+        <li><p>{t("integrations.make.steps.key")}</p><Link className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} href="/settings/api-keys?setup=make"><KeyRound data-icon="inline-start" />{t("integrations.make.createKey")}</Link></li>
+        <li><p>{t("integrations.make.steps.scenario", { url: typeof window === "undefined" ? "" : window.location.origin })}</p></li>
+      </ol>
+      <p className="type-body-muted px-6 pb-6">{t("integrations.make.bookingNote")}</p>
     </DialogContent></Dialog> : null}
     <Dialog onOpenChange={setDialogOpen} open={dialogOpen}><DialogContent className="w-full gap-0 p-0 sm:max-w-md">
       <DialogHeader className="flex-row items-center gap-3 p-6 pb-4"><GoogleCalendarLogo /><div className="flex flex-col gap-1"><DialogTitle>{t("integrations.google.sheetTitle")}</DialogTitle><DialogDescription>{t("integrations.google.sheetDescription")}</DialogDescription></div></DialogHeader>

@@ -1,0 +1,51 @@
+[
+  {
+    "name": "id",
+    "type": "text",
+    "label": "Entry ID"
+  },
+  {
+    "name": "type",
+    "type": "text",
+    "label": "Type"
+  },
+  {
+    "name": "title",
+    "type": "text",
+    "label": "Title or question"
+  },
+  {
+    "name": "content",
+    "type": "text",
+    "label": "Content or answer"
+  },
+  {
+    "name": "tags",
+    "type": "array",
+    "label": "Tags",
+    "spec": {
+      "type": "text",
+      "label": "Tag"
+    }
+  },
+  {
+    "name": "priority",
+    "type": "integer",
+    "label": "Priority"
+  },
+  {
+    "name": "active",
+    "type": "boolean",
+    "label": "Active"
+  },
+  {
+    "name": "created_at",
+    "type": "date",
+    "label": "Created at"
+  },
+  {
+    "name": "updated_at",
+    "type": "date",
+    "label": "Updated at"
+  }
+]

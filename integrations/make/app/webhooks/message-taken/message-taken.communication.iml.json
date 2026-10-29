@@ -1,0 +1,4 @@
+{
+  "condition": "{{body.type == 'message.taken'}}",
+  "output": "{{body.data}}"
+}

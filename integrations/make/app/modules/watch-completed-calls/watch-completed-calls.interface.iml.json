@@ -1,0 +1,72 @@
+[
+  {
+    "name": "id",
+    "type": "text",
+    "label": "Call ID"
+  },
+  {
+    "name": "channel",
+    "type": "text",
+    "label": "Channel"
+  },
+  {
+    "name": "status",
+    "type": "text",
+    "label": "Status"
+  },
+  {
+    "name": "outcome",
+    "type": "text",
+    "label": "Outcome"
+  },
+  {
+    "name": "summary",
+    "type": "text",
+    "label": "Summary"
+  },
+  {
+    "name": "end_reason",
+    "type": "text",
+    "label": "End reason"
+  },
+  {
+    "name": "contact_id",
+    "type": "text",
+    "label": "Contact ID"
+  },
+  {
+    "name": "caller_name",
+    "type": "text",
+    "label": "Caller name"
+  },
+  {
+    "name": "caller_phone",
+    "type": "text",
+    "label": "Caller phone"
+  },
+  {
+    "name": "duration_seconds",
+    "type": "uinteger",
+    "label": "Duration in seconds"
+  },
+  {
+    "name": "recording_available",
+    "type": "boolean",
+    "label": "Recording available"
+  },
+  {
+    "name": "started_at",
+    "type": "date",
+    "label": "Started at"
+  },
+  {
+    "name": "ended_at",
+    "type": "date",
+    "label": "Ended at"
+  },
+  {
+    "name": "created_at",
+    "type": "date",
+    "label": "Created at"
+  }
+]

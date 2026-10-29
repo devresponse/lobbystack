@@ -1,0 +1,25 @@
+{
+  "temp": {
+    "phoneDigits": "{{replace(parameters.phone, '/[^0-9]/g', '')}}",
+    "phoneText": "{{trim(parameters.phone)}}"
+  },
+  "url": "/contacts",
+  "method": "GET",
+  "qs": {
+    "phone": "{{if(parameters.phone, if(length(temp.phoneDigits) == 10 && indexOf(temp.phoneText, '+') != 0, '+1' + temp.phoneDigits, if(indexOf(temp.phoneText, '00') == 0, '+' + substring(temp.phoneDigits, 2), '+' + temp.phoneDigits)), undefined)}}",
+    "email": "{{parameters.email}}",
+    "name": "{{parameters.name}}",
+    "limit": "{{if(parameters.limit > 0 && parameters.limit < 100, parameters.limit, 100)}}"
+  },
+  "response": {
+    "iterate": "{{body.data}}",
+    "output": "{{item}}",
+    "limit": "{{parameters.limit}}"
+  },
+  "pagination": {
+    "qs": {
+      "cursor": "{{body.next_cursor}}"
+    },
+    "condition": "{{body.has_more}}"
+  }
+}

@@ -65,6 +65,21 @@ jobs:
       - run: npm ci
       - run: npm test
 
+  # The Make app is JSON for Make's Apps Editor plus a build script, with no
+  # dependencies. Its tests check the files and the build without Make.
+  make:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: integrations/make
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - run: npm test
+
   database:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -156,7 +171,7 @@ jobs:
 
   validate:
     if: always()
-    needs: [checks, zapier, database, e2e, images]
+    needs: [checks, zapier, make, database, e2e, images]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:

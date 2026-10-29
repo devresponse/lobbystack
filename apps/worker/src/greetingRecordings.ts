@@ -1,6 +1,6 @@
 import { GREETING_RECORDING_TTL_SECONDS, greetingRecordingKey, LIVE_VOICE, recordGreeting, recordingMs } from "@lobbystack/agent-core";
 import { getCachedBusinessSnapshot, type DomainContext } from "@lobbystack/domain";
-import { callOpening } from "@lobbystack/shared";
+import { callOpening, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import type OpenAI from "openai";
 
@@ -15,8 +15,12 @@ export type GreetingRecordingStore = {
 // A recording loads while the caller's browser connects. Past this, the call
 // opens with the greeting command instead.
 const LOAD_TIMEOUT_MS = 1_000;
-// How long the speech API gets to render one.
-const RECORD_TIMEOUT_MS = 20_000;
+// How long GPT-Live gets to record one, over all its tries.
+const RECORD_TIMEOUT_MS = 90_000;
+// After every try failed, the same opening isn't tried again for this long,
+// so the calls of a business whose opening GPT-Live won't say don't each
+// start three more sessions.
+const FAILED_RETRY_SECONDS = 6 * 60 * 60;
 
 export type GreetingRecordings = ReturnType<typeof createGreetingRecordings>;
 
@@ -27,17 +31,24 @@ export type GreetingRecordings = ReturnType<typeof createGreetingRecordings>;
 export function createGreetingRecordings(input: { store: GreetingRecordingStore; client: OpenAI }) {
   // Greetings this worker is recording, so calls that overlap render each once.
   const recording = new Set<string>();
-  /** Records the greeting for the calls after this one, unless it already is. Never throws. */
-  async function record(greeting: string): Promise<void> {
+  /**
+   * Records the greeting for the calls after this one, unless it already is,
+   * in a session with the business's instructions. Never throws.
+   */
+  async function record(greeting: string, snapshot: BusinessContextSnapshot): Promise<void> {
     const key = greetingRecordingKey(greeting, LIVE_VOICE);
+    const failedKey = `${key}:failed`;
     if (recording.has(key)) return;
     recording.add(key);
     try {
-      if (await input.store.exists(key)) return;
+      if (await input.store.exists(key) || await input.store.exists(failedKey)) return;
       const startedAt = performance.now();
-      const audio = await recordGreeting(input.client, greeting, LIVE_VOICE, { signal: AbortSignal.timeout(RECORD_TIMEOUT_MS) });
-      await input.store.set(key, audio, "EX", GREETING_RECORDING_TTL_SECONDS);
-      logEvent("info", "live.greeting_recorded", { recordingMs: recordingMs(audio), renderMs: Math.round(performance.now() - startedAt) });
+      const recorded = await recordGreeting(input.client, { greeting, voice: LIVE_VOICE, snapshot }, { signal: AbortSignal.timeout(RECORD_TIMEOUT_MS) }).catch(async (error: unknown) => {
+        await input.store.set(failedKey, "1", "EX", FAILED_RETRY_SECONDS).catch(() => undefined);
+        throw error;
+      });
+      await input.store.set(key, recorded.audio, "EX", GREETING_RECORDING_TTL_SECONDS);
+      logEvent("info", "live.greeting_recorded", { recordingMs: recordingMs(recorded.audio), renderMs: Math.round(performance.now() - startedAt), tries: recorded.tries });
     } catch (error) {
       logEvent("warn", "live.greeting_recording_failed", { error });
     } finally {
@@ -72,10 +83,10 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
      * Keeps the greeting recorded for calls to come: another week for a
      * recording already made, or a new one. Never throws.
      */
-    async keep(greeting: string): Promise<void> {
+    async keep(greeting: string, snapshot: BusinessContextSnapshot): Promise<void> {
       // EXPIRE answers 0 for a recording that's gone.
       const kept = await input.store.expire(greetingRecordingKey(greeting, LIVE_VOICE), GREETING_RECORDING_TTL_SECONDS).then((count) => Number(count) === 1, () => false);
-      if (!kept) await record(greeting);
+      if (!kept) await record(greeting, snapshot);
     },
   };
 }
@@ -90,7 +101,7 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
 export async function keepOpeningRecorded(recordings: GreetingRecordings, domain: DomainContext, businessId: string): Promise<boolean> {
   const snapshot = await getCachedBusinessSnapshot(domain, { businessId });
   const opening = snapshot?.contactChannels.phoneNumber ? callOpening(snapshot) : "";
-  if (!opening) return false;
-  await recordings.keep(opening);
+  if (!snapshot || !opening) return false;
+  await recordings.keep(opening, snapshot);
   return true;
 }

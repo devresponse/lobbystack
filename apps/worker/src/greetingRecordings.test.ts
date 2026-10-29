@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  recordGreeting: vi.fn(async (..._args: unknown[]) => "UklGRg=="),
+  recordGreeting: vi.fn(async (..._args: unknown[]) => ({ audio: "UklGRg==", tries: 1 })),
   getCachedBusinessSnapshot: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown> | null> => null),
 }));
 
@@ -30,6 +30,9 @@ function store(entries: Record<string, string> = {}) {
 }
 
 const logLines = (spy: { mock: { calls: unknown[][] } }) => spy.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+
+// The business whose calls open with the greeting: the recording session has its instructions.
+const business = { greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: { phoneNumber: "+15551234567" } } as never;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -62,39 +65,45 @@ describe("greeting recordings", () => {
     expect(logLines(warn)).toEqual([expect.objectContaining({ message: "live.greeting_recording_unread", error: expect.stringContaining("Connection is closed.") })]);
   });
 
-  it("records a greeting once, in the voice calls speak with, even when calls overlap", async () => {
+  it("records a greeting once, in the voice calls speak with and the business's session, even when calls overlap", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const redis = store();
     const client = {} as never;
     const recordings = createGreetingRecordings({ store: redis, client });
-    await Promise.all([recordings.record("Thanks for calling."), recordings.record("Thanks for calling.")]);
+    await Promise.all([recordings.record("Thanks for calling.", business), recordings.record("Thanks for calling.", business)]);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
-    expect(mocks.recordGreeting).toHaveBeenCalledWith(client, "Thanks for calling.", "marin", { signal: expect.any(AbortSignal) });
+    expect(mocks.recordGreeting).toHaveBeenCalledWith(client, { greeting: "Thanks for calling.", voice: "marin", snapshot: business }, { signal: expect.any(AbortSignal) });
     expect(redis.set).toHaveBeenCalledWith("recording:marin:Thanks for calling.", "UklGRg==", "EX", 604_800);
-    expect(logLines(info)).toEqual([expect.objectContaining({ message: "live.greeting_recorded", recordingMs: 2_400, renderMs: expect.any(Number) })]);
+    expect(logLines(info)).toEqual([expect.objectContaining({ message: "live.greeting_recorded", recordingMs: 2_400, renderMs: expect.any(Number), tries: 1 })]);
     // Another worker recorded it already.
-    await recordings.record("Thanks for calling.");
+    await recordings.record("Thanks for calling.", business);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
   });
 
-  it("logs a recording that fails without failing the call", async () => {
+  // Each failure was three GPT-Live sessions.
+  it("logs a recording that fails without failing the call, and doesn't try that opening again for 6 hours", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    mocks.recordGreeting.mockRejectedValueOnce(new Error("The greeting recording came back silent."));
+    mocks.recordGreeting.mockRejectedValueOnce(new Error("GPT-Live didn't record the opening in 3 tries."));
     const redis = store();
     const recordings = createGreetingRecordings({ store: redis, client: {} as never });
-    await expect(recordings.record("Thanks for calling.")).resolves.toBeUndefined();
-    expect(redis.set).not.toHaveBeenCalled();
-    expect(logLines(warn)).toEqual([expect.objectContaining({ message: "live.greeting_recording_failed", error: expect.stringContaining("came back silent") })]);
+    await expect(recordings.record("Thanks for calling.", business)).resolves.toBeUndefined();
+    expect(redis.set.mock.calls).toEqual([["recording:marin:Thanks for calling.:failed", "1", "EX", 21_600]]);
+    expect(logLines(warn)).toEqual([expect.objectContaining({ message: "live.greeting_recording_failed", error: expect.stringContaining("in 3 tries") })]);
+    await recordings.record("Thanks for calling.", business);
+    expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
+    // A changed opening is a new one.
+    await recordings.record("Thanks for calling Ace Plumbing.", business);
+    expect(mocks.recordGreeting).toHaveBeenCalledTimes(2);
   });
 
   it("keeps a recording another week, and records one that's gone", async () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined);
     const redis = store({ "recording:marin:Thanks for calling.": "UklGRg==" });
     const recordings = createGreetingRecordings({ store: redis, client: {} as never });
-    await recordings.keep("Thanks for calling.");
+    await recordings.keep("Thanks for calling.", business);
     expect(redis.expire).toHaveBeenCalledWith("recording:marin:Thanks for calling.", 604_800);
     expect(mocks.recordGreeting).not.toHaveBeenCalled();
-    await recordings.keep("Hello there.");
+    await recordings.keep("Hello there.", business);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
     expect(redis.set).toHaveBeenCalledWith("recording:marin:Hello there.", "UklGRg==", "EX", 604_800);
   });
@@ -109,6 +118,7 @@ describe("greeting recordings", () => {
     await expect(keepOpeningRecorded(recordings, domain, "business_1")).resolves.toBe(true);
     expect(mocks.getCachedBusinessSnapshot).toHaveBeenCalledWith(domain, { businessId: "business_1" });
     expect(redis.keys.get("recording:marin:Thanks for calling.")).toBe("UklGRg==");
+    expect(mocks.recordGreeting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ snapshot: business }), expect.anything());
     // A business without a phone number only has browser calls, which record their opening as they end.
     mocks.getCachedBusinessSnapshot.mockResolvedValueOnce({ ...business, contactChannels: {} });
     await expect(keepOpeningRecorded(recordings, domain, "business_2")).resolves.toBe(false);

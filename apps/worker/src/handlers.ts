@@ -764,7 +764,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       for (const business of await dependencies.listBusinesses()) {
         // A dormant business's next call records its opening, as before.
         if (!business.active) continue;
-        // One at a time, so the first sweep after a deploy doesn't flood the speech API.
+        // One at a time, so the first sweep after a deploy doesn't open a GPT-Live session for every business at once.
         if (await withCallContext({ businessId: business.id }, async () => await keepOpeningAhead(dependencies, business.id))) kept += 1;
       }
       return { status: kept > 0 ? "completed" : "skipped", entityId: String(kept) };

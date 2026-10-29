@@ -3117,7 +3117,7 @@ These turned up while the entry files were read for this catalog. Each was check
 | `PUT /api/hours` | Every error from saving the hours, database failures included, answers 400 with the raw message. | `apps/admin/app/api/hours/route.ts:45-49` |
 | `GET /api/contacts/{contactId}`; `PATCH /api/messages` | An unknown contact answers 200 with `contact: null`; an unknown conversation answers `{ ok: true }`. | `packages/domain/src/server/contacts.ts:100`, `packages/domain/src/server/conversations.ts:300` |
 | `POST /api/webhooks/twilio/status` | A payload that fails its schema answers 503 with `Retry-After: 60`, the answer meant for a failed save, where 400 fits. | `apps/admin/app/api/webhooks/twilio/status/route.ts:20, 47-50` |
-| `POST /api/webhooks/openai/live` | Without `OPENAI_API_KEY`, the 503 response it builds is thrown outside any `try`, so the request ends in an unhandled error. | `apps/admin/app/api/webhooks/openai/live/route.ts:37` |
+| `POST /api/webhooks/openai/live` | Without `OPENAI_API_KEY`, the 503 response it builds is thrown outside any `try`, so the request ends in an unhandled error. | `apps/admin/app/api/webhooks/openai/live/route.ts:39` |
 | `POST /api/widget/session` and the other widget routes | A disabled or revoked key answers 404 `widget_key_invalid`, never 403 `widget_disabled`, because the key lookup returns active keys only. | `packages/db/migrations/0038_website_chat_widget.sql:87`, `apps/admin/src/lib/widget-access.ts:70` |
 | `GET /api/calendar/google/callback` | Early failures (rate limit, missing or invalid state) answer raw JSON to a browser coming back from Google. A signed-out browser gets the error redirect instead of a sign-in page. | `apps/admin/app/api/calendar/google/callback/route.ts:28-40, 60-62` |
 

@@ -5,6 +5,7 @@ import type { LiveTransportIncomingWebhookEvent } from "openai/resources/webhook
 import { buildPhoneSessionConfig } from "@lobbystack/agent-core/live/session";
 import { finishLiveCall, getCachedBusinessSnapshot, recordAiTrace, startLivePhoneCall } from "@lobbystack/domain";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
+import { runAfterResponse } from "@/lib/after-response";
 import { getAppDatabase } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
 import { reportServerError } from "@/lib/error-reporting";
@@ -106,22 +107,41 @@ async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomin
   }
 }
 
-// The caller hears ringing until the call is accepted, so each step before
-// accepting is logged as `live.incoming` with its time since the webhook arrived.
+// The caller hears ringing until the call is accepted, so each step is logged
+// as `live.incoming` with its time since the webhook arrived. The worker's
+// attach finishes after the response, and the line waits for it.
 function createTiming() {
   const receivedAt = performance.now();
   const steps: Record<string, number> = {};
+  let finishing: Promise<void> | undefined;
   return {
     eventAgeMs: undefined as number | undefined,
     // The header whose number picked the business.
     routedBy: undefined as string | undefined,
     // With LIVE_RECORDED_GREETING=true, whether the call opened with a recording.
     greetingRecording: undefined as boolean | undefined,
+    // Another delivery's decision on the call came before this one's accept.
+    decisionAlreadyMade: undefined as true | undefined,
     mark(step: string) {
       steps[`${step}Ms`] = Math.round(performance.now() - receivedAt);
     },
+    // Runs `task` once the response is sent, and reports what it throws as
+    // the call's failure.
+    afterResponse(task: () => Promise<void>) {
+      finishing = new Promise((resolve) => runAfterResponse(async () => {
+        try {
+          await task();
+        } catch (error) {
+          void reportServerError(error, { operation: "live.incoming" });
+        } finally {
+          resolve();
+        }
+      }));
+    },
     log() {
-      logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, greetingRecording: this.greetingRecording, ...steps });
+      const write = () => logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, greetingRecording: this.greetingRecording, decisionAlreadyMade: this.decisionAlreadyMade, ...steps });
+      if (finishing) void finishing.then(write);
+      else write();
     },
   };
 }
@@ -181,7 +201,7 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // accepting an accepted session just fails, and attaching is idempotent.
   if (call.duplicate) {
     await client.live.sessions.accept(input.sessionId, { session: buildPhoneSessionConfig(snapshot) }).catch(() => undefined);
-    await attach({ resume: true }).catch(() => undefined);
+    input.timing.afterResponse(async () => { await attach({ resume: true }).catch(() => undefined); });
     return new NextResponse(null, { status: 200 });
   }
   // With a recording of the opening, the session starts with it as already
@@ -196,17 +216,32 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
     // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
     void recordAiTrace(domain, { businessId: input.businessId, kind: "voice_session", channel: "voice", callId: call.callId, ...(call.conversationId ? { conversationId: call.conversationId } : {}), model: sessionConfig.model, snapshot, instructions: sessionConfig.instructions ?? undefined }).catch((error: unknown) => logEvent("warn", "live.ai_trace_unsaved", { errorType: error instanceof Error ? error.name : typeof error }));
   } catch (error) {
+    // OpenAI's answer when another decision on the call came first, in
+    // practice a retried delivery's accept. The call goes on as that
+    // delivery's, which opened it with the greeting command, so this one
+    // attaches the same way and leaves the record open for the worker to finish.
+    if (error !== null && typeof error === "object" && "code" in error && error.code === "decision_already_made") {
+      input.timing.decisionAlreadyMade = true;
+      if (recordedGreeting) input.timing.greetingRecording = false;
+      input.timing.afterResponse(async () => { await attach({ resume: true }).catch(() => undefined); });
+      return new NextResponse(null, { status: 200 });
+    }
     await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed" });
     throw error;
   }
-  try {
-    await attach(recordedGreeting ? { recordedGreeting } : {});
-    input.timing.mark("attach");
-  } catch (error) {
-    // Without the worker nobody answers delegations, so end the call cleanly.
-    await client.live.sessions.hangup(input.sessionId).catch(() => undefined);
-    await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed" });
-    throw error;
-  }
+  // OpenAI delivers the webhook again when it isn't answered within a few
+  // seconds, and the worker answers the attach once it has loaded the
+  // business, so the attach finishes after the response.
+  input.timing.afterResponse(async () => {
+    try {
+      await attach(recordedGreeting ? { recordedGreeting } : {});
+      input.timing.mark("attach");
+    } catch (error) {
+      // Without the worker nobody answers delegations, so end the call cleanly.
+      await client.live.sessions.hangup(input.sessionId).catch(() => undefined);
+      await finishLiveCall(domain, { businessId: input.businessId, callId: call.callId, seconds: 0, end: "setup_failed" });
+      throw error;
+    }
+  });
   return new NextResponse(null, { status: 200 });
 }

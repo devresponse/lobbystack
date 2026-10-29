@@ -161,7 +161,7 @@ describe("call openings recorded ahead of calls", () => {
     const dependencies = { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings };
     await expect(handleJob(job("snapshot.refresh"), dependencies)).resolves.toEqual({ status: "completed", entityId: "version_2" });
     expect(vi.mocked(refreshBusinessSnapshot)).toHaveBeenCalledWith(dependencies.domain, { businessId });
-    expect(greetingRecordings.keep).toHaveBeenCalledWith("Thanks for calling Ace Plumbing.");
+    expect(greetingRecordings.keep).toHaveBeenCalledWith("Thanks for calling Ace Plumbing.", expect.objectContaining({ greeting: "Thanks for calling Ace Plumbing." }));
     // A failure only means the next call opens with the greeting command.
     vi.mocked(getCachedBusinessSnapshot).mockRejectedValueOnce(new Error("connection reset"));
     await expect(handleJob(job("snapshot.refresh"), dependencies)).resolves.toEqual({ status: "completed", entityId: "version_2" });

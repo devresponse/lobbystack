@@ -46,8 +46,8 @@ if (values["recorded-greeting"] && !values.browser) throw new Error("--recorded-
 const scenarios = findScenarios(values.scenario);
 const snapshot: BusinessContextSnapshot = values.snapshot ? JSON.parse(readFileSync(values.snapshot, "utf8")) : demoSnapshot;
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-// Rendered once, as the worker does for the calls after the first.
-const greetingRecording = values["recorded-greeting"] ? await recordGreeting(client, callOpening(snapshot), LIVE_VOICE) : undefined;
+// Recorded once, as the worker does for the calls after the first.
+const greetingRecording = values["recorded-greeting"] ? (await recordGreeting(client, { greeting: callOpening(snapshot), voice: LIVE_VOICE, snapshot })).audio : undefined;
 const model = createAgentModel(liveDelegationEnvironment());
 if (!model) throw new Error("No delegation model: set OPENAI_API_KEY or the AI_CHAT_* variables.");
 

@@ -1,6 +1,6 @@
 # Weigh a cloned voice for calls
 
-On 2026-10-25 a study asked whether calls could speak in a clone of the maintainer's own voice through GPT-Live, what LobbyStack would need, and what to do if OpenAI says no. It read the code on `main` at `62517d2` and OpenAI's, other voice platforms' and lawyers' pages as published that day, and changed no code. **Its answer: yes, with conditions.** OpenAI enables cloned voices only for eligible customers through its sales team, they speak English accents only on GPT-Live, and callers must be told the voice is an AI. Once OpenAI turns them on, one voice for every call is about two days of work. Nothing is built; [give calls a custom voice](../roadmap/custom-voices.md) tracks the plan and the seven decisions it waits on. Since the study, fork PR #84 added a notice after every call's greeting that the call is with an AI and recorded. This is research, not legal advice.
+On 2026-10-25 a study asked whether calls could speak in a clone of the maintainer's own voice through GPT-Live, what LobbyStack would need, and what to do if OpenAI says no. It read the code on `main` at `62517d2` and OpenAI's, other voice platforms' and lawyers' pages as published that day, and changed no code. **Its answer: yes, with conditions.** OpenAI enables cloned voices only for eligible customers through its sales team, they speak English accents only on GPT-Live, and callers must be told the voice is an AI. Once OpenAI turns them on, one voice for every call is about two days of work. Nothing is built; [give calls a custom voice](../roadmap/custom-voices.md) tracks the plan and the seven decisions it waits on. Since the study, fork PR #84 added a notice after every call's greeting that the call is with an AI and recorded, and fork PR #97 records the greeting with GPT-Live itself. This is research, not legal advice.
 
 ## Know what OpenAI offers
 
@@ -39,8 +39,8 @@ A deleted or revoked voice, a consent from another project or missing access com
 
 OpenAI shows custom voices on browser and WebSocket sessions but gives no phone example, so the first test should be a real phone call. Two facts matter beyond the voice:
 
-- **The recorded greeting's speech model is going away.** `gpt-4o-mini-tts` shuts down on 2027-01-06, and OpenAI's replacement is `gpt-realtime-2.1-mini` through the Realtime API, not the Speech API ([open items](../project/open-items.md#do-these-before-a-date)).
-- **A prompt voice can't record the greeting at all,** since it works only inside GPT-Live.
+- **The recorded greeting's speech model is going away.** `gpt-4o-mini-tts` shuts down on 2027-01-06, and OpenAI's replacement is `gpt-realtime-2.1-mini` through the Realtime API, not the Speech API. Since fork PR #97 a short GPT-Live session records the greeting instead ([voice runtime](../voice/runtime.md#make-a-recording)).
+- **A prompt voice couldn't record the greeting,** since it works only inside GPT-Live. Since fork PR #97 GPT-Live records it, so a prompt voice can.
 
 ## Know how calls picked a voice
 
@@ -48,7 +48,7 @@ Every call spoke with one hard-coded voice, `marin` (`LIVE_VOICE` in `packages/a
 
 - **Phone calls:** `buildPhoneSessionConfig(snapshot, voice = LIVE_VOICE)` takes a voice, but the webhook in `apps/admin/app/api/webhooks/openai/live/route.ts` never passes one.
 - **Browser calls:** `buildBrowserSessionConfig` writes `LIVE_VOICE` in directly.
-- **The recorded greeting:** `recordGreeting` renders it with `gpt-4o-mini-tts` in `LIVE_VOICE` and caches it in Redis under a key made from the words and the voice (`packages/agent-core/src/live/greetingRecording.ts`).
+- **The recorded greeting:** `recordGreeting` rendered it with `gpt-4o-mini-tts` in `LIVE_VOICE` and cached it in Redis under a key made from the words and the voice (`packages/agent-core/src/live/greetingRecording.ts`). Since fork PR #97 it records it in a GPT-Live session with the voice it's given (`greetingRecorder.ts`).
 - **Voice tests:** `scripts/voice/live-call-eval.ts` uses `LIVE_VOICE` for the receptionist.
 - **Data:** `receptionist_profiles` keeps the business's written call rules, `voice_instructions`, but no voice, and the snapshot, the public API and the dashboard have no voice setting.
 
@@ -73,7 +73,7 @@ Making the voice is a one-off: two requests with the speaker's recordings, and t
 | One voice for every call, with the fallback, tests and docs | About 2 days, plus test calls |
 | A built-in voice picker for each business | About 3 to 4 days |
 | A cloned voice for each business, with the consent page | About 8 to 12 days in all, including the picker |
-| Moving the recorded greeting off `gpt-4o-mini-tts` to `gpt-realtime-2.1-mini` | About 1 to 2 days, needed before 2027-01-06 in any case |
+| Moving the recorded greeting off `gpt-4o-mini-tts` to `gpt-realtime-2.1-mini` | About 1 to 2 days, needed before 2027-01-06 in any case. Done in fork PR #97, with GPT-Live itself |
 | Telling callers they are speaking with an AI | About half a day; fork PR #84 has since added a notice after the greeting |
 
 ## Know the ways out if OpenAI says no
@@ -82,7 +82,7 @@ GPT-Live can't speak through another company's voice, since its sessions have no
 
 | Route | Cloning | A minute | How a phone call reaches it | What LobbyStack needs |
 | --- | --- | --- | --- | --- |
-| GPT-Live with a prompt voice | Not a clone; no consent | $0.05, as today | As today | The one-voice option, without the recorded greeting |
+| GPT-Live with a prompt voice | Not a clone; no consent | $0.05, as today | As today | The one-voice option, without the recorded greeting, which since fork PR #97 can use it too |
 | Ultravox, part of Inworld since about 2026-10-01 | 1 clone on pay-as-you-go and 5 on Pro, from a 30 to 60 second sample | $0.05; 5 calls at once on pay-as-you-go | Native SIP | The voice provider seam and an adapter; Ultravox's own model replaces GPT-Live |
 | ElevenLabs Agents | Instant clones from about 1 to 3 minutes of audio; professional clones of one's own voice from 30 minutes or more, with a check that the speaker is present | $0.08 plus the language model | Twilio integration or a SIP trunk | The seam and an adapter; its custom LLM option can keep LobbyStack's own receptionist agent |
 | Cartesia | Instant clones from 10 to 60 seconds, each in one language | $0.06 plus the language model | A SIP trunk | The seam and an adapter; tools become webhooks |
@@ -103,7 +103,7 @@ On a four-minute call, before Twilio's charges, GPT-Live and Ultravox cost about
 1. Ask OpenAI's sales team to enable recorded custom voices, and ask at the same time whether cloned voices will speak French on GPT-Live, whether the limit of 20 can be raised, and how to delete a voice through the API.
 2. Try prompt voices meanwhile in OpenAI's voice playground: they are free to create and work on GPT-Live today.
 3. Build the one-voice option with an AI disclosure, about two and a half days. With the accent line or the voice's description as a setting too, it can ship a prompt voice now and the clone later by changing settings only.
-4. Move the recorded greeting off `gpt-4o-mini-tts` before 2027-01-06, whatever is decided.
+4. Move the recorded greeting off `gpt-4o-mini-tts` before 2027-01-06, whatever is decided. Done in fork PR #97.
 5. Hold the other platforms unless OpenAI refuses, or a French clone matters more than staying on GPT-Live.
 
 A clone for each business should also wait for counsel to review the legal points.

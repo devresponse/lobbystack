@@ -672,7 +672,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     // Without the business the call can't go on; the controller ends the
     // session, and the admin records the failed attach.
     await business;
-    if (recorded && !recorded.play) void recordings?.record(recorded.text);
+    const snapshot = await snapshotLoad;
+    if (recorded && !recorded.play && snapshot) void recordings?.record(recorded.text, snapshot);
   }
 
   /** Ends a browser session: over its sideband when this worker holds it, otherwise over a new one. */

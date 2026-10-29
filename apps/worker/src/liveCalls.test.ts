@@ -22,7 +22,7 @@ const mocks = vi.hoisted(() => ({
   hangup: vi.fn(async (..._args: unknown[]) => undefined),
   lastLiveCallSequence: vi.fn(async (..._args: unknown[]) => 0),
   extendLiveCallReservation: vi.fn(async (..._args: unknown[]) => 300),
-  recordGreeting: vi.fn(async (..._args: unknown[]) => "UklGRg=="),
+  recordGreeting: vi.fn(async (..._args: unknown[]) => ({ audio: "UklGRg==", tries: 1 })),
 }));
 
 vi.mock("@lobbystack/agent-core", () => ({
@@ -604,6 +604,8 @@ describe("greeting recordings", () => {
     expect(setup).toMatchObject({ greeting: "Thanks for calling." });
     expect(setup).not.toHaveProperty("greetingRecording");
     await vi.waitFor(() => expect(store.set).toHaveBeenCalledWith("recording:Thanks for calling.", "UklGRg==", "EX", 604_800));
+    // In a session with the instructions of the business the call is for.
+    expect(mocks.recordGreeting).toHaveBeenCalledWith(expect.anything(), { greeting: "Thanks for calling.", voice: "marin", snapshot: expect.objectContaining({ businessId: "biz_1" }) }, expect.anything());
   });
 
   // The call opened with the greeting as already said, so the command must go out at once.

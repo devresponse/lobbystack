@@ -122,7 +122,7 @@ The admin also links to pages outside itself: the website, the terms of service 
 | Contact address | `contactEmail` | The original project's address for each place: its support address in the feedback panel, its sales address for Enterprise plans, and its general address in text messages. |
 | Zapier integration | `links.zapier` | None. The original project's integration connects to its own hosted dashboard, so a brand gets no Zapier link but its own. |
 
-**Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all five, with alloplace.com's home page standing in for docs.
+**Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all six, with alloplace.com's home page standing in for docs and its Zapier integration's invite link (fork PR #94).
 
 Where each one appears:
 

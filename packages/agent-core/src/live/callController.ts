@@ -144,7 +144,7 @@ export type GreetingEvent = {
    * What the step is about: the recording of the greeting, the first
    * fallback command, a retry after an acknowledged command went unspoken,
    * or the command to say the opening before answering a caller who spoke
-   * before the recording could play.
+   * before hearing it.
    */
   trigger?: "recording" | "fallback" | "retry" | "caller_spoke";
   /** Milliseconds since the worker attached to the call. */
@@ -245,14 +245,16 @@ export type LiveCallControllerOptions = {
 // The caller's last words can arrive just after the delegation event.
 const TRANSCRIPT_WAIT_MS = 300;
 // GPT-Live speaks the greeting from the session's starting history about 2
-// seconds in. With no voice by this long after the worker sees the session
-// start, it sends the greeting command once more.
+// seconds in. With no voice this far into the session, the worker sends the
+// greeting command once more. The session's clock comes from its events, so
+// a sideband that attaches late doesn't add its delay.
 const GREETING_FALLBACK_MS = 4_000;
 // GPT-Live can acknowledge a greeting command and still wait for the caller:
 // on calls from October 3 to 8, 8 of 16 acknowledged commands went unspoken
 // until the caller spoke, or for good. A command it did follow was spoken
 // within 4 seconds of the acknowledgment, so after 4.5 seconds of silence the
-// worker sends it again, up to this many commands in all.
+// worker sends it again, up to this many commands in all, besides the one
+// for a caller who speaks before hearing the opening.
 const GREETING_RETRY_MS = 4_500;
 const GREETING_COMMANDS = 3;
 // OpenAI confirms a recording it plays with session.output_audio.fixture.playing
@@ -284,6 +286,10 @@ const STILL_WORKING_MS = 4_000;
 const DELEGATION_TIMEOUT_MS = 30_000;
 // Past the sideband's 3-second replay window, session.started can't arrive.
 const LATE_ATTACH_MS = 3_500;
+// The replay arrives as the sideband opens. An attach the replay shows to be
+// late waits this long after the opening for the rest of it, in which voice
+// from either side stops the fallback, instead of the whole LATE_ATTACH_MS.
+const REPLAY_WAIT_MS = 1_000;
 // An attach can fail at OpenAI's edge, for example with a 504, while the
 // session itself is fine. The SDK retries it after about 250 ms, 500 ms and
 // 1 second, but only until the session sends its first event: a new
@@ -498,6 +504,15 @@ export class LiveCallController {
   // When the worker saw session.started, and when the sideband last opened, in performance.now() time.
   private startedSeenAt: number | undefined;
   private openedAt: number | undefined;
+  // When the session started, in performance.now() time, from where its
+  // events sit on the session timeline: the smallest gap between an event's
+  // arrival and its position, which is 0 for session.started. Before anyone
+  // speaks, the receptionist's audio gives positions, since it runs through
+  // silence, and the replay a sideband gets when it attaches has the last 3
+  // seconds' worth, so a late attach has the clock at once. Audio generated
+  // ahead of playback (observeTimeline) would put the start, and so the
+  // fallback, early.
+  private sessionStartAt: number | undefined;
   // The session has sent this sideband an event, so a dropped connection is no
   // longer retried.
   private sessionEventSeen = false;
@@ -505,6 +520,8 @@ export class LiveCallController {
   private greetingAttempts = 0;
   private greetingFallbackStarted = false;
   private greetingSpoken = false;
+  // The command to say the opening before answering a caller who spoke first went out.
+  private openingAfterCallerSent = false;
   // The recording of the greeting OpenAI was asked to play: its words, for
   // the transcript, how long it plays, and whether OpenAI started it.
   private recording: { text: string; ms: number; playing?: boolean } | undefined;
@@ -656,39 +673,24 @@ export class LiveCallController {
     // history (see session.ts). It ignored that command on about 4 calls in
     // 10 from October 3 to 8, and an appended one about half the time, so the
     // worker sends the command when no voice follows, and again after each
-    // one that goes unspoken. The
-    // sideband replays the last 3 seconds of events, so an attach within 3
-    // seconds still sees session.started; the fallback timer also starts when
-    // the connection opens, for a later attach.
+    // one that goes unspoken. The sideband replays the last 3 seconds of
+    // events, so an attach within 3 seconds still sees session.started. A
+    // later attach knows it missed it from the replayed events' positions
+    // (observeAttach), or 3.5 seconds after the connection opens without it.
     socket.on("session.started", () => {
       if (this.started) return;
       this.started = true;
       this.startedSeenAt = performance.now();
+      // An event that arrived before it already set an earlier start.
+      this.sessionStartAt ??= this.startedSeenAt;
       clearTimeout(this.lateAttachTimer);
-      // A recording already sent, as on a phone call, has its own fallback.
-      if (!this.recording) {
-        clearTimeout(this.greetingTimer);
-        this.greetingTimer = setTimeout(() => this.sendGreetingFallback(), GREETING_FALLBACK_MS);
-      }
+      // A session that starts after the late-attach check started after the sideband opened.
+      this.lateAttach = false;
+      this.scheduleGreetingFallback();
       // A phone call's recording waits from the sideband's opening instead.
       if (!this.options.phone) this.playRecordingWhenReady();
       this.options.onStarted?.();
     });
-    // A phone call's session starts before the worker attaches, so an attach
-    // past the replay window never sees session.started. A browser call's
-    // session starts after the attach, so it always does.
-    const lateAttach = () => {
-      // A retried attach can see session.started before it reports the reconnect.
-      if (!this.options.phone || this.started) return;
-      clearTimeout(this.lateAttachTimer);
-      this.lateAttachTimer = setTimeout(() => {
-        if (this.started) return;
-        this.lateAttach = true;
-        // A call that opens with a recording sends the command itself if the
-        // recording doesn't play, also when the business loads after this.
-        void this.ready.then((setup) => { if (!setup.greetingRecording) this.sendGreetingFallback(); }, () => undefined);
-      }, LATE_ATTACH_MS);
-    };
     // A re-attach's wait for the first event runs from when the connection
     // opens, so a slow connection isn't taken for a silent session.
     const awaitFirstEvent = () => {
@@ -698,7 +700,7 @@ export class LiveCallController {
     };
     const opened = () => {
       this.openedAt = performance.now();
-      lateAttach();
+      this.checkLateAttach();
       awaitFirstEvent();
       // A phone call's audio has connected by now, so its recording can play.
       if (this.options.phone) this.playRecordingWhenReady();
@@ -761,15 +763,38 @@ export class LiveCallController {
     this.scheduleDurationLimit();
   }
 
-  // The sideband replays only the last 3 seconds. Without session.started, a
-  // first event this far into the session means the attach missed the start
-  // of the conversation.
+  // Each event's position on the session timeline sets the session's clock.
+  // The sideband replays only the last 3 seconds, so without session.started,
+  // an event this far into the session means the attach missed the start of
+  // the conversation.
   private observeAttach(event: { start_ms?: unknown; offset_ms?: unknown }): void {
-    if (this.firstEventMs !== undefined) return;
     const position = typeof event.start_ms === "number" ? event.start_ms : event.offset_ms;
     if (typeof position !== "number") return;
-    this.firstEventMs = position;
-    if (!this.started && position > LATE_ATTACH_MS) this.lateAttach = true;
+    this.firstEventMs ??= position;
+    if (!this.started && !this.lateAttach && position > LATE_ATTACH_MS) {
+      this.lateAttach = true;
+      this.checkLateAttach(REPLAY_WAIT_MS);
+    }
+    const startAt = performance.now() - position;
+    if (startAt >= (this.sessionStartAt ?? Number.POSITIVE_INFINITY)) return;
+    this.sessionStartAt = startAt;
+    this.scheduleGreetingFallback();
+  }
+
+  // A phone call's session starts before the worker attaches, so an attach
+  // past the replay window never sees session.started. A browser call's
+  // session starts after the attach, so it always does. Without it by
+  // `afterOpenMs` after the sideband opens, the attach missed the start, and
+  // the greeting fallback goes out.
+  private checkLateAttach(afterOpenMs = LATE_ATTACH_MS): void {
+    // A retried attach can see session.started before it reports the reconnect.
+    if (!this.options.phone || this.started) return;
+    clearTimeout(this.lateAttachTimer);
+    this.lateAttachTimer = setTimeout(() => {
+      if (this.started) return;
+      this.lateAttach = true;
+      this.greetingFallbackDue();
+    }, Math.max(0, afterOpenMs - (performance.now() - (this.openedAt ?? this.attachedAt))));
   }
 
   // Retries an attach that failed before the session sent anything. After
@@ -816,6 +841,10 @@ export class LiveCallController {
     if (!pending) return;
     if (pending.kind === "greeting") {
       this.reportGreeting("failed", undefined, error.message);
+      // A command rejected before the session started, as a late-attach one
+      // can be, doesn't use up the fallback: it goes out again once the
+      // session starts. Otherwise a rejected command isn't sent again.
+      if (!this.started) this.greetingFallbackStarted = false;
       return;
     }
     // GPT-Live won't say the greeting on its own, so the command goes out at once.
@@ -840,6 +869,23 @@ export class LiveCallController {
     if (typeof endMs === "number") this.lastSpeechEndMs = Math.max(this.lastSpeechEndMs, endMs);
   }
 
+  // The first greeting command goes out GREETING_FALLBACK_MS into the
+  // session, by its clock. An attach that missed the start sends it from
+  // checkLateAttach instead.
+  private scheduleGreetingFallback(): void {
+    if (!this.started || this.recording || this.greetingFallbackStarted || this.greetingSpoken) return;
+    clearTimeout(this.greetingTimer);
+    const dueMs = this.sessionStartAt! + GREETING_FALLBACK_MS - performance.now();
+    this.greetingTimer = setTimeout(() => this.greetingFallbackDue(), Math.max(0, dueMs));
+  }
+
+  // A call that opens with a recording sends the command itself if the
+  // recording doesn't play (playGreetingRecording), so the fallback doesn't
+  // go out ahead of one that's still loading.
+  private greetingFallbackDue(): void {
+    void this.ready.then((setup) => { if (!setup.greetingRecording) this.sendGreetingFallback(); }, () => undefined);
+  }
+
   // The first greeting command, when the greeting from the starting history wasn't heard.
   private sendGreetingFallback(): void {
     if (this.greetingFallbackStarted) return;
@@ -847,12 +893,28 @@ export class LiveCallController {
     this.sendGreeting("fallback");
   }
 
-  // The caller spoke before the opening, on a call whose starting history has
-  // it as already said, so GPT-Live is told to say it before answering them.
+  // The caller spoke before hearing the opening, so GPT-Live is told to say
+  // it before answering them: unasked, it would answer without it, or the
+  // notice that the call is with an AI and recorded. It goes out once.
   private sendOpeningAfterCaller(): void {
-    if (this.greetingFallbackStarted) return;
+    if (this.openingAfterCallerSent) return;
+    this.openingAfterCallerSent = true;
     this.greetingFallbackStarted = true;
     this.sendGreeting("caller_spoke");
+  }
+
+  // The caller spoke before the receptionist did, so GPT-Live is told to say
+  // the opening first, unless it has spoken by the time the business loads:
+  // its first words may be the opening its greeting command asked for. A
+  // recording still to come deals with that itself if it can't play
+  // (playGreetingRecording). Without one, an attach that missed the session's
+  // start can't tell whether GPT-Live said the opening before the replay.
+  private callerSpokeFirst(): void {
+    if (this.greetingSpoken || this.openingAfterCallerSent || this.finished || this.ending || !this.callerSpoke()) return;
+    void this.ready.then((setup) => {
+      if (this.greetingSpoken || (setup.greetingRecording ? !this.greetingFallbackStarted : !this.started)) return;
+      this.sendOpeningAfterCaller();
+    }, () => undefined);
   }
 
   // The recording didn't play. The session's starting history has the
@@ -874,10 +936,11 @@ export class LiveCallController {
 
   // Stops once either side has spoken or the call is ending, so a greeting
   // never talks over the caller or a goodbye. The opening for a caller who
-  // spoke first waits for them: GPT-Live says it before its answer.
+  // spoke first waits for them: GPT-Live says it before its answer. It goes
+  // out even after GREETING_COMMANDS unspoken commands.
   private sendGreeting(trigger: NonNullable<GreetingEvent["trigger"]>): void {
     const afterCaller = trigger === "caller_spoke";
-    const stopped = () => (!afterCaller && (this.greetingSpoken || this.callerSpoke())) || this.finished || this.ending || this.greetingAttempts >= GREETING_COMMANDS;
+    const stopped = () => (!afterCaller && (this.greetingSpoken || this.callerSpoke() || this.greetingAttempts >= GREETING_COMMANDS)) || this.finished || this.ending;
     if (stopped()) return;
     void this.ready.then((setup) => {
       const greeting = setup.greeting?.trim();
@@ -1429,6 +1492,7 @@ export class LiveCallController {
     }
     if (role !== "caller") return;
     if (delta.trim()) this.heardCaller(startMs ?? endMs);
+    this.callerSpokeFirst();
     this.transcriptWaiters = this.transcriptWaiters.filter((waiter) => {
       if (endMs < waiter.offsetMs) return true;
       waiter.resolve();

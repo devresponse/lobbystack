@@ -88,6 +88,14 @@ function startSession(socket: FakeSocket) {
   socket.emit("session.started", {});
 }
 
+// Like the SDK: "event" for every message, then the event by its type.
+const receive = (socket: FakeSocket, event: Record<string, unknown>) => {
+  socket.emit("event", event);
+  socket.emit(event.type as string, event);
+};
+// Each live.greeting step, with its trigger.
+const steps = (events: GreetingEvent[]) => events.map((event) => [event.step, event.trigger].filter(Boolean).join(" "));
+
 // What the SDK asks before it retries a dropped sideband connection.
 const retryAttach = (socket: FakeSocket) => socket.options.reconnect!.onReconnecting({ attempt: 1, maxAttempts: 3, delay: 250, closeCode: 1006, parameters: undefined });
 
@@ -169,9 +177,10 @@ describe("LiveCallController greeting", () => {
     expect(greetingEvents.at(-1)).toMatchObject({ step: "spoken", attempt: 1 });
   });
 
-  it("stops sending the command once the caller speaks", async () => {
+  it("stops sending the command once the caller speaks, and has GPT-Live say the opening before answering", async () => {
     fakeTimers();
-    const { socket } = setup();
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket } = setup({ onGreeting: (event) => greetingEvents.push(event) });
     socket.socket.emit("open");
     startSession(socket);
     await vi.advanceTimersByTimeAsync(4_000);
@@ -179,7 +188,41 @@ describe("LiveCallController greeting", () => {
     await vi.advanceTimersByTimeAsync(3_000);
     socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 6_500, end_ms: 7_000 });
     await vi.advanceTimersByTimeAsync(30_000);
-    expect(greetings(socket)).toHaveLength(1);
+    expect(greetings(socket).map((event) => event.event_id)).toEqual(["greeting_1", "greeting_2"]);
+    expect(greetings(socket)[1]?.content).toContain("before responding to the caller: Thanks for calling Northside Plumbing.");
+    expect(steps(greetingEvents)).toEqual(["sent fallback", "acknowledged", "sent caller_spoke"]);
+  });
+
+  // The command for a caller who spoke first doesn't count toward the 3.
+  it("has GPT-Live say the opening when the caller speaks after three unspoken commands", async () => {
+    fakeTimers();
+    const { socket } = setup();
+    socket.socket.emit("open");
+    startSession(socket);
+    await vi.advanceTimersByTimeAsync(4_000);
+    for (const id of ["greeting_1", "greeting_2", "greeting_3"]) {
+      socket.emit("session.instructions.appended", { client_event_id: id });
+      await vi.advanceTimersByTimeAsync(4_500);
+    }
+    expect(greetings(socket)).toHaveLength(3);
+    socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 18_000, end_ms: 18_500 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(greetings(socket).map((event) => event.event_id)).toEqual(["greeting_1", "greeting_2", "greeting_3", "greeting_4"]);
+    expect(greetings(socket)[3]?.content).toContain("before responding to the caller");
+  });
+
+  // Its first words may be the opening it was asked for.
+  it("doesn't ask for the opening when the receptionist spoke before the business loaded", async () => {
+    fakeTimers();
+    let resolveSetup!: (value: LiveCallSetup) => void;
+    const { socket } = setup({ setup: new Promise((resolve) => { resolveSetup = resolve; }) });
+    socket.socket.emit("open");
+    startSession(socket);
+    socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 500, end_ms: 1_000 });
+    socket.emit("session.output_transcript.delta", { delta: "Thanks for calling Northside Plumbing.", start_ms: 1_200, end_ms: 3_000 });
+    resolveSetup({ agent: { generate: vi.fn() } as never, greeting: "Thanks for calling Northside Plumbing." });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(greetings(socket)).toHaveLength(0);
   });
 
   // OpenAI's guide: an acknowledgment stays pending while the session timeline
@@ -249,35 +292,16 @@ describe("LiveCallController greeting", () => {
     expect(greetings(socket)).toHaveLength(1);
   });
 
-  it("doesn't send the fallback once the caller has spoken", async () => {
-    fakeTimers();
-    const { socket } = setup();
-    socket.socket.emit("open");
-    startSession(socket);
-    socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 1_000, end_ms: 1_500 });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(greetings(socket)).toHaveLength(0);
-  });
-
-  it("still sends the fallback after a sound on the line, which isn't the caller speaking", async () => {
-    fakeTimers();
-    const { socket } = setup();
-    socket.socket.emit("open");
-    startSession(socket);
-    socket.emit("session.input_transcript.delta", { delta: "[static]", start_ms: 800, end_ms: 1_000 });
-    await vi.advanceTimersByTimeAsync(4_000);
-    expect(greetings(socket)).toHaveLength(1);
-  });
-
-  it("doesn't retry a fallback OpenAI rejected", async () => {
+  it("doesn't send again a fallback OpenAI rejected once the session had started", async () => {
     fakeTimers();
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const greetingEvents: GreetingEvent[] = [];
     const { socket } = setup({ onGreeting: (event) => greetingEvents.push(event) });
     socket.socket.emit("open");
+    startSession(socket);
     await vi.advanceTimersByTimeAsync(4_000);
-    socket.emit("error", Object.assign(new Error("Session not ready"), { error: { type: "error", client_event_id: "greeting_1" } }));
-    await vi.advanceTimersByTimeAsync(10_000);
+    socket.emit("error", Object.assign(new Error("Invalid content"), { error: { type: "error", client_event_id: "greeting_1" } }));
+    await vi.advanceTimersByTimeAsync(20_000);
     expect(greetings(socket)).toHaveLength(1);
     expect(greetingEvents.map((event) => event.step)).toEqual(["sent", "failed"]);
   });
@@ -306,12 +330,119 @@ describe("LiveCallController greeting", () => {
   });
 });
 
+// The five call timings from the investigation of phone calls that opened in
+// silence, A to E, with what the worker does now.
+describe("LiveCallController greeting timing", () => {
+  const opening = "Thanks for calling Northside Plumbing.";
+  // The receptionist's reflected audio, silence included, as the replay brings it.
+  const silence = (socket: FakeSocket, fromMs: number, toMs: number) => {
+    for (let startMs = fromMs; startMs < toMs; startMs += 100) receive(socket, { type: "session.output_audio.delta", delta: pcm(20), start_ms: startMs, end_ms: startMs + 100 });
+  };
+
+  it("A: has GPT-Live say the opening at once, and once, when the caller speaks before any greeting", async () => {
+    fakeTimers();
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket } = setup({ onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    receive(socket, { type: "session.started" });
+    await vi.advanceTimersByTimeAsync(2_500);
+    receive(socket, { type: "session.input_transcript.delta", delta: "Hello?", start_ms: 2_000, end_ms: 2_500 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(greetings(socket)).toEqual([expect.objectContaining({ event_id: "greeting_1", content: expect.stringContaining(`before responding to the caller: ${opening}`) })]);
+    receive(socket, { type: "session.input_transcript.delta", delta: " Is anyone there?", start_ms: 3_000, end_ms: 3_800 });
+    socket.emit("session.instructions.appended", { client_event_id: "greeting_1" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(greetings(socket)).toHaveLength(1);
+    expect(steps(greetingEvents)).toEqual(["sent caller_spoke", "acknowledged"]);
+  });
+
+  it("B: sends the fallback 4 seconds into the session by its clock, so an attach late in the replay window doesn't add its delay", async () => {
+    fakeTimers();
+    const { socket, closed } = setup();
+    socket.socket.emit("open");
+    // The sideband attached 2.9 seconds in, so the replay has session.started.
+    receive(socket, { type: "session.started" });
+    silence(socket, 200, 2_900);
+    await vi.advanceTimersByTimeAsync(1_199);
+    expect(greetings(socket)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(greetings(socket)).toEqual([expect.objectContaining({ event_id: "greeting_1", content: expect.stringContaining(`say exactly "${opening}"`) })]);
+    socket.emit("session.closed", { reason: "remote_hangup" });
+    expect(closed[0]).toMatchObject({ lateAttach: false, firstEventMs: 200 });
+  });
+
+  it("C: sends the fallback a second after the sideband opens when the replay shows the attach missed the start", async () => {
+    fakeTimers();
+    const { socket, closed } = setup();
+    socket.socket.emit("open");
+    // The sideband attached 5 seconds in, so the replay starts 2 seconds in, after session.started.
+    silence(socket, 2_000, 5_000);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(greetings(socket)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(greetings(socket)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(greetings(socket)).toHaveLength(1);
+    socket.emit("session.closed", { reason: "remote_hangup" });
+    expect(closed[0]).toMatchObject({ lateAttach: true, firstEventMs: 2_000 });
+  });
+
+  // An attach that missed the start can't tell whether GPT-Live said the
+  // opening before the replay, so a conversation under way gets no greeting.
+  it("C: waits for the rest of the replay, in which a conversation under way stops the fallback", async () => {
+    fakeTimers();
+    const { socket } = setup();
+    socket.socket.emit("open");
+    silence(socket, 2_000, 4_000);
+    await vi.advanceTimersByTimeAsync(300);
+    receive(socket, { type: "session.input_transcript.delta", delta: "and it's leaking under the sink.", start_ms: 4_000, end_ms: 4_900 });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(greetings(socket)).toHaveLength(0);
+  });
+
+  // GPT-Live's transcription marks sounds on the line in square brackets.
+  it("D: still sends the fallback after a sound on the line, which isn't the caller speaking", async () => {
+    fakeTimers();
+    const { socket } = setup();
+    socket.socket.emit("open");
+    receive(socket, { type: "session.started" });
+    await vi.advanceTimersByTimeAsync(1_000);
+    receive(socket, { type: "session.input_transcript.delta", delta: "[static]", start_ms: 800, end_ms: 1_000 });
+    await vi.advanceTimersByTimeAsync(2_999);
+    expect(greetings(socket)).toHaveLength(0);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(greetings(socket)).toEqual([expect.objectContaining({ content: expect.stringContaining(`say exactly "${opening}"`) })]);
+  });
+
+  // A session that hadn't started takes no command: OpenAI answers "Session not ready".
+  it("E: sends the fallback again 4 seconds after session.started when OpenAI rejected the late-attach one", async () => {
+    fakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket, closed } = setup({ onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    await vi.advanceTimersByTimeAsync(3_500);
+    expect(greetings(socket)).toHaveLength(1);
+    socket.emit("error", Object.assign(new Error("Session not ready"), { error: { type: "error", client_event_id: "greeting_1" } }));
+    await vi.advanceTimersByTimeAsync(1_000);
+    receive(socket, { type: "session.started" });
+    await vi.advanceTimersByTimeAsync(3_999);
+    expect(greetings(socket)).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(greetings(socket).map((event) => event.event_id)).toEqual(["greeting_1", "greeting_2"]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(steps(greetingEvents)).toEqual(["sent fallback", "failed", "sent fallback"]);
+    // The session started after the sideband opened, so the attach missed nothing.
+    socket.emit("session.closed", { reason: "remote_hangup" });
+    expect(closed[0]?.lateAttach).toBe(false);
+  });
+});
+
 describe("LiveCallController greeting recording", () => {
   const greeting = "Thanks for calling Northside Plumbing.";
   // 100 ms of audio stands in for the recording.
   const recorded = (recording: LiveCallSetup["greetingRecording"] = { audio: pcm(3_000) }): Promise<LiveCallSetup> => Promise.resolve({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: recording });
   const sentIds = (socket: FakeSocket) => greetings(socket).map((event) => event.event_id);
-  const steps = (events: GreetingEvent[]) => events.map((event) => [event.step, event.trigger].filter(Boolean).join(" "));
   // The caller's browser has connected its audio: OpenAI reflects it to the sideband, silence included.
   const callerAudio = (socket: FakeSocket) => socket.emit("session.input_audio.append", { audio: pcm(20) });
 
@@ -587,6 +718,48 @@ describe("LiveCallController greeting recording", () => {
     callerAudio(socket);
     await vi.advanceTimersByTimeAsync(0);
     expect(sentIds(socket)).toEqual(["greeting_recording"]);
+  });
+
+  // By the session's clock the fallback comes due 1.2 seconds after this
+  // attach, before the business has loaded.
+  it("doesn't send the fallback ahead of a phone call's recording when the business loads after it came due", async () => {
+    fakeTimers();
+    let resolveSetup!: (value: LiveCallSetup) => void;
+    const { socket } = setup({ setup: new Promise((resolve) => { resolveSetup = resolve; }) });
+    socket.socket.emit("open");
+    receive(socket, { type: "session.started" });
+    receive(socket, { type: "session.output_audio.delta", delta: pcm(20), start_ms: 2_800, end_ms: 2_900 });
+    callerAudio(socket);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(socket.sent).toEqual([]);
+    resolveSetup({ agent: { generate: vi.fn() } as never, greeting, greetingRecording: { audio: pcm(3_000) } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
+    socket.emit("session.output_audio.fixture.playing", { client_event_id: "greeting_recording" });
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(sentIds(socket)).toEqual(["greeting_recording"]);
+  });
+
+  it("has GPT-Live say the opening when the caller speaks after the command that replaced a rejected recording went unspoken", async () => {
+    fakeTimers();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const greetingEvents: GreetingEvent[] = [];
+    const { socket } = setup({ phone: false, setup: recorded(), onGreeting: (event) => greetingEvents.push(event) });
+    socket.socket.emit("open");
+    startSession(socket);
+    callerAudio(socket);
+    await vi.advanceTimersByTimeAsync(0);
+    socket.emit("error", Object.assign(new Error("Invalid audio"), { error: { type: "error", client_event_id: "greeting_recording" } }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentIds(socket)).toEqual(["greeting_recording", "greeting_1"]);
+    socket.emit("session.instructions.appended", { client_event_id: "greeting_1" });
+    await vi.advanceTimersByTimeAsync(2_000);
+    socket.emit("session.input_transcript.delta", { delta: "Hello?", start_ms: 1_500, end_ms: 2_000 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sentIds(socket)).toEqual(["greeting_recording", "greeting_1", "greeting_2"]);
+    expect(greetings(socket)[2]?.content).toContain(`before responding to the caller: ${greeting}`);
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(steps(greetingEvents)).toEqual(["sent recording", "failed recording", "sent fallback", "acknowledged", "sent caller_spoke"]);
   });
 });
 
@@ -1715,12 +1888,6 @@ describe("LiveCallController transfer", () => {
 });
 
 describe("LiveCallController late attach", () => {
-  // Like the SDK: "event" for every message, then the event by its type.
-  const receive = (socket: FakeSocket, event: Record<string, unknown>) => {
-    socket.emit("event", event);
-    socket.emit(event.type as string, event);
-  };
-
   it("notices an attach that missed the start of the call, and tells the agent", async () => {
     const { socket, generate, closed } = setup();
     receive(socket, { type: "session.input_transcript.delta", delta: "and it's leaking under the sink.", start_ms: 8_200, end_ms: 9_000 });

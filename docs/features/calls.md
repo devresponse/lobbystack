@@ -1,6 +1,6 @@
 # Understand phone and browser calls
 
-OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with fork PR #84's and fork PR #96's changes.
+OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with the changes of fork PRs #84, #96, #97 and #98.
 
 ## Follow a call
 
@@ -24,6 +24,12 @@ Since fork PR #96, phone calls open with the recording too:
 - **Turn it off for phone calls only** with `LIVE_RECORDED_GREETING_PHONE=false` on the admin. `LIVE_RECORDED_GREETING=false` turns it off for both.
 
 Since fork PR #97, GPT-Live records the opening itself, in a short session with the calls' voice and the business's instructions, instead of OpenAI's speech model, which shuts down on 2027-01-06. A recording is kept only when GPT-Live's transcript matches the opening, so the notice is never cut short. The worker tries up to three sessions, and after three failures waits 6 hours before trying that opening again. After the deploy every opening is recorded again, since a recording's key names how it was made.
+
+Since fork PR #98, the spoken greeting that a call without a recording relies on is sturdier:
+
+- **On time:** the worker asks GPT-Live for the greeting 4 seconds into the call by the call's own clock, so a worker that connected late no longer adds its delay. A worker that connected after OpenAI's 3-second replay asks a second after it connects, once the replay shows nobody was speaking.
+- **A caller who speaks first** hears the whole opening before the answer, as on a call with a recording.
+- **A request OpenAI refused** because the call's session hadn't started yet goes out again 4 seconds after it starts.
 
 To check a call, the worker's `live.greeting` log says how the greeting went, and the admin's `live.incoming` (phone) or `live.browser_start` (browser) says whether the call opened with a recording (`greetingRecording`). [The voice runtime](../voice/runtime.md#open-calls-with-a-recording) has the details.
 
@@ -75,9 +81,10 @@ GPT-Live has no language setting. The call's instructions name the language to s
 
 ## Know what hasn't been tried
 
-- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78, #84, #96 and #97, because the environment that built them had no OpenAI key. Nobody has heard fork PR #84's notice after the greeting on a call yet: whether GPT-Live says the whole opening once, and whether a recorded opening still plays on the caller's first audio. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
+- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78, #84, #96, #97 and #98, because the environment that built them had no OpenAI key. Nobody has heard fork PR #84's notice after the greeting on a call yet: whether GPT-Live says the whole opening once, and whether a recorded opening still plays on the caller's first audio. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
 - No real call has typed a keypad PIN ([caller authentication](caller-authentication.md)).
 - The [phone call review](../reviews/phone-calls-2026-10-06.md) of 2026-10-06 lists what was open then. Several findings were fixed since, such as calls recovered after a worker crash, withheld numbers and the drain during a deploy, so check a finding against the code before acting on it.
 - No real phone call has opened with the recorded greeting yet (fork PR #96): whether the caller hears it at once, and whether GPT-Live says the opening when the caller speaks first. The first calls after the deploy will tell: `live.greeting` with `trigger` `recording` and `step` `spoken`, and `inputAudioMs` above 0 at `sent`.
 - GPT-Live hasn't recorded an opening yet (fork PR #97): how many sessions one takes, and whether its quiet and transcripts work as the recorder expects. The worker's `live.greeting_recorded` lines (with `tries`) and `live.greeting_recording_failed` lines after the deploy will tell, and a test call will tell how it sounds.
+- No real call has tried fork PR #98's spoken greeting: whether the command 4 seconds into the call by its own clock comes before GPT-Live's own late greeting often enough to say the greeting twice, and whether GPT-Live says the opening before answering a caller who spoke first on a call without a recording. `live.greeting` with `trigger` `fallback` or `caller_spoke` will tell.
 - A website call reserving minutes in slices instead of its whole length isn't built.

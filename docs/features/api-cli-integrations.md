@@ -1,6 +1,6 @@
 # Use the API, the CLI and integrations
 
-Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, and how Zapier, Make and n8n connect. Checked against `main` at `e788004`, with fork PRs #94 and #95's changes.
+Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, and how Zapier, Make and n8n connect. Checked against `main` at `5682041`, with fork PR #95's changes.
 
 ## Know the pieces
 

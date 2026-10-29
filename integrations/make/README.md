@@ -85,7 +85,7 @@ These steps use AlloPlace's values; another brand uses its own folder under `bra
 10. Create the production app the same way, with Name `alloplace` and Label `AlloPlace`. Build with `--app-id alloplace --zone eu1`, deploy as in step 6, choosing that app when the editor asks which one, and commit `makecomapp.json` again: it now names both apps.
 11. In the production app's **Modules**, switch every module from hidden to visible. A hidden module works only for the app's author.
 12. Select **Publish** on the app's page. **It can't be undone**: Make won't delete a published app or make it private again, and nothing can be deleted from it afterwards. Publishing creates the invite link, which works for organizations in every Make zone.
-13. Put the invite link in `brands/alloplace/brand.json` as `links.make`, run `pnpm brands:build`, and deploy the dashboard. Its **Integrations** page then shows a Make card whose dialog opens the invite and links to a key set up for Make, and the help link of Make's API key field opens that dialog (`/integrations?setup=make`).
+13. Put the invite link in `brands/alloplace/brand.json` as `links.make` and run `pnpm brands:build`. Give AlloPlace's `makeUrl` that link in `packages/shared/src/brandLinks.test.ts` too, count it in `docs/branding.md` among the links AlloPlace's brand file sets, and release the dashboard. Its **Integrations** page then shows a Make card whose dialog opens the invite and links to a key set up for Make, and the help link of Make's API key field opens that dialog (`/integrations?setup=make`).
 
 ### Change it later
 

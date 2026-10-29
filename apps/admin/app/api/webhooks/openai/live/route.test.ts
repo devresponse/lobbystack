@@ -2,12 +2,13 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn() }));
+const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn(), sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1", instructions: "Answer calls." })), recordedGreeting: vi.fn() }));
 
-vi.mock("@lobbystack/agent-core/live/session", () => ({ buildPhoneSessionConfig: vi.fn(() => ({ model: "gpt-live-1", instructions: "Answer calls." })) }));
+vi.mock("@lobbystack/agent-core/live/session", () => ({ buildPhoneSessionConfig: mocks.sessionConfig }));
 vi.mock("@lobbystack/domain", () => ({ finishLiveCall: mocks.finishLiveCall, getCachedBusinessSnapshot: mocks.snapshot, recordAiTrace: vi.fn(async () => null), startLivePhoneCall: mocks.startLivePhoneCall }));
 vi.mock("@/lib/api-helpers", () => ({ getAppDatabase: () => ({ db: { execute: mocks.execute } }) }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
+vi.mock("@/lib/live-greeting", () => ({ recordedGreetingFor: mocks.recordedGreeting }));
 vi.mock("@/lib/live-prototype", () => ({
   attachWorkerToLiveSession: mocks.attach,
   getLiveClient: () => ({ webhooks: { unwrap: mocks.unwrap }, live: { sessions: { reject: mocks.reject, accept: mocks.accept, hangup: mocks.hangup } } }),
@@ -22,6 +23,8 @@ beforeEach(() => {
   for (const key of ["POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_API_KEY"]) vi.stubEnv(key, undefined);
   mocks.reject.mockResolvedValue(undefined);
   mocks.execute.mockResolvedValue({ rows: [{ business_id: null, position: 1 }] });
+  // LIVE_RECORDED_GREETING is off unless a test says otherwise.
+  mocks.recordedGreeting.mockResolvedValue(undefined);
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
@@ -69,6 +72,82 @@ describe("POST /api/webhooks/openai/live", () => {
     // It keeps the limit the first delivery reserved, and the worker continues the saved transcript.
     expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "live_1", callId: "call_1", channel: "voice", maxDurationMs: 500_000, resume: true }));
     expect(mocks.finishLiveCall).not.toHaveBeenCalled();
+  });
+
+  // The first delivery may already be playing it, and a call under way gets no greeting.
+  it("doesn't open a retried delivery's call with the recording", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: true });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: true, blocked: false });
+    mocks.accept.mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(mocks.sessionConfig).toHaveBeenCalledWith({ businessId: "biz_1", greeting: "Hi" });
+    expect(mocks.attach.mock.calls[0]![0]).not.toHaveProperty("recordedGreeting");
+  });
+
+  // OpenAI's guide recommends a recording for predictable greeting playback.
+  it("opens a call with the recording of its opening once the worker has made one", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const snapshot = { businessId: "biz_1", greeting: "Hi" };
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue(snapshot);
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi. You're speaking with an AI assistant.", play: true });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+    mocks.accept.mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(mocks.recordedGreeting).toHaveBeenCalledWith(snapshot, { phone: true });
+    // The session starts with the opening as already said, and the worker plays it.
+    expect(mocks.sessionConfig).toHaveBeenCalledWith(snapshot, { greetingRecorded: true });
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ callId: "call_1", recordedGreeting: { text: "Hi. You're speaking with an AI assistant.", play: true } }));
+    const logged = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>).find((line) => line.message === "live.incoming");
+    expect(logged).toMatchObject({ greetingRecording: true });
+  });
+
+  it("opens a call as before until the recording is made, and has the worker make it", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.recordedGreeting.mockResolvedValue({ text: "Hi", play: false });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+    mocks.accept.mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.anything(), { greetingRecorded: false });
+    expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ recordedGreeting: { text: "Hi", play: false } }));
+    const logged = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>).find((line) => line.message === "live.incoming");
+    expect(logged).toMatchObject({ greetingRecording: false });
+  });
+
+  it("opens a call as before when the recording check fails or the setting is off", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
+    mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+    mocks.accept.mockResolvedValue(undefined);
+    mocks.attach.mockResolvedValue(undefined);
+    mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+
+    mocks.recordedGreeting.mockRejectedValueOnce(new Error("Connection is closed."));
+    const failed = await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+    await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(failed.status).toBe(200);
+    expect(mocks.sessionConfig.mock.calls).toEqual([[expect.anything(), { greetingRecorded: false }], [expect.anything(), { greetingRecorded: false }]]);
+    for (const [attached] of mocks.attach.mock.calls) expect(attached).not.toHaveProperty("recordedGreeting");
+    const logged = info.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>).filter((line) => line.message === "live.incoming");
+    expect(logged.map((line) => line.greetingRecording)).toEqual([undefined, undefined]);
   });
 
   it("accepts a call, hands it to the worker, and logs how long each step took", async () => {

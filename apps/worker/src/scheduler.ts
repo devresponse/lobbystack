@@ -42,6 +42,8 @@ export async function configureSchedulers(
     { queue: "maintenance", name: "billing-sweep", type: "billing.sweep", every: 5 * 60_000, businessId: null },
     // A call whose worker died keeps talking with nobody answering, so look every minute.
     { queue: "critical", name: "live-orphan-recovery", type: "live.recoverOrphans", every: 60_000, businessId: null },
+    // Keeps each phone business's opening recorded, so calls after a quiet week still open with it.
+    { queue: "maintenance", name: "live-greeting-recordings", type: "live.recordGreetings", every: 24 * 60 * 60_000, businessId: null },
   ];
   for (const { id: businessId, active } of businesses) {
     for (const schedule of tenantSchedules) {

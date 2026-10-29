@@ -18,7 +18,7 @@ describe("worker schedulers", () => {
 
     await configureSchedulers(queues, [{ id: "business-a", active: true }, { id: "business-b", active: true }]);
 
-    expect(upsertJobScheduler).toHaveBeenCalledTimes(25);
+    expect(upsertJobScheduler).toHaveBeenCalledTimes(26);
     const tenantCalls = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId !== null);
     expect(tenantCalls).toHaveLength(20);
     expect(tenantCalls.filter((call) => call[2].data.type === "api.retention")).toHaveLength(2);
@@ -41,6 +41,10 @@ describe("worker schedulers", () => {
     // And one sweep for billing work that never finished, every five minutes.
     expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.type === "billing.sweep").map((call) => [call[0], call[1], call[2].data.queue, call[2].data.businessId])).toEqual([
       ["billing-sweep", { every: 5 * 60_000 }, "maintenance", null],
+    ]);
+    // And one daily pass that keeps every phone business's call opening recorded.
+    expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.type === "live.recordGreetings").map((call) => [call[0], call[1], call[2].data.queue, call[2].data.businessId])).toEqual([
+      ["live-greeting-recordings", { every: 24 * 60 * 60_000 }, "maintenance", null],
     ]);
   });
 
@@ -104,7 +108,7 @@ describe("worker schedulers", () => {
     upsertJobScheduler.mockClear();
 
     await configureSchedulers(queues, [], applied);
-    expect(upsertJobScheduler.mock.calls.map((call) => call[0])).toEqual(["prospect-demo-expiry", "affiliate-payout", "billing-verify", "billing-sweep", "live-orphan-recovery"]);
+    expect(upsertJobScheduler.mock.calls.map((call) => call[0])).toEqual(["prospect-demo-expiry", "affiliate-payout", "billing-verify", "billing-sweep", "live-orphan-recovery", "live-greeting-recordings"]);
   });
 
   it("does not register tenant jobs when no businesses are available", async () => {
@@ -113,12 +117,13 @@ describe("worker schedulers", () => {
 
     await configureSchedulers(queues as never);
 
-    expect(upsertJobScheduler).toHaveBeenCalledTimes(4);
+    expect(upsertJobScheduler).toHaveBeenCalledTimes(5);
     expect(upsertJobScheduler.mock.calls.map((call) => call[2].data)).toEqual(expect.arrayContaining([
       expect.objectContaining({ type: "affiliate.generatePayoutRun", businessId: null }),
       expect.objectContaining({ type: "prospectDemo.expire", businessId: null }),
       expect.objectContaining({ type: "billing.verifyCatalog", businessId: null }),
       expect.objectContaining({ type: "billing.sweep", businessId: null }),
+      expect.objectContaining({ type: "live.recordGreetings", businessId: null }),
     ]));
   });
 });

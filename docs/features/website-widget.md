@@ -20,7 +20,7 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 | `TRUSTED_CLIENT_IP_HEADER` | Admin | The header that holds the visitor's real IP, such as `x-real-ip` on Railway or `cf-connecting-ip` behind Cloudflare. Without it, no per-IP limit runs. |
 | `LIVE_PROTOTYPE_ENABLED=true`, `OPENAI_API_KEY` | Admin and worker | Needed for "Say Allo!". |
 | `WEB_CALL_MAX_DURATION_MS` | Admin | Shortens website calls below the 30-minute default. |
-| `LIVE_RECORDED_GREETING=true` | Admin | Opens browser calls with a recording of the greeting ([calls](calls.md#open-browser-calls-with-a-recorded-greeting)). |
+| `LIVE_RECORDED_GREETING=true` | Admin | Opens browser calls, and phone calls, with a recording of the greeting ([calls](calls.md#open-calls-with-a-recorded-greeting)). |
 
 Then, in the dashboard, open **Widget** in the menu, create a key, list the websites allowed to use it, set the look (colour, position, greeting) and copy the snippet. A key's **Live chat** setting is off until the business turns it on.
 

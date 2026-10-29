@@ -189,6 +189,10 @@ async function main(): Promise<void> {
     storage,
     ...(openai ? { liveSessions: openai.live.sessions } : {}),
     recoverLiveCall: liveCalls.recover,
+    // With LIVE_RECORDED_GREETING=true here as on the admin, each phone
+    // business's opening is recorded ahead of its calls.
+    ...(liveCalls.greetingRecordings && process.env.LIVE_RECORDED_GREETING === "true" ? { greetingRecordings: liveCalls.greetingRecordings } : {}),
+    listBusinesses: async () => await listSchedulerBusinesses(dispatcherDatabase.db),
     ...(polar ? { polar } : {}),
     ...(polarCatalog ? { polarCatalog } : {}),
     enqueueProductEventRetentionContinuation: async (input) => {
@@ -235,6 +239,13 @@ async function main(): Promise<void> {
   // holds up neither jobs nor the health check.
   void (async () => {
     await refreshSchedulers();
+    // The daily recording of call openings also runs as the worker starts,
+    // so a deploy, or a Redis that lost them, doesn't wait a day. Workers
+    // starting within the same hour share one run.
+    const maintenanceQueue = queues.get("maintenance");
+    if (dependencies.greetingRecordings && maintenanceQueue) {
+      await enqueueJob(maintenanceQueue, { type: "live.recordGreetings", payload: {}, idempotencyKey: `live-greeting-recordings:${new Date().toISOString().slice(0, 13)}` });
+    }
     // Existing businesses got summaries before AI wrote them, so write one for
     // each business that still has the sign-up placeholder and has knowledge.
     // Knowledge changes queue their own refresh, so other businesses need none.

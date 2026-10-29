@@ -1,20 +1,29 @@
 # Understand phone and browser calls
 
-OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with fork PR #84's changes.
+OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with fork PR #84's and fork PR #96's changes.
 
 ## Follow a call
 
-1. A phone call arrives at OpenAI through the SIP trunk, and OpenAI posts `realtime.call.incoming` to the admin's `/api/webhooks/openai/live`. A browser call asks the admin's `/api/voice/live/session`.
+1. A phone call arrives at OpenAI through the SIP trunk, and OpenAI posts `live.transport.incoming` to the admin's `/api/webhooks/openai/live`. A browser call asks the admin's `/api/voice/live/session`.
 2. The admin finds the business by the dialled number (or the widget key), checks the plan's minutes, loads the business's context snapshot, records the call and accepts it with the business's instructions.
 3. The admin hands the call to the worker at `/internal/live/attach`. The worker opens the session's control connection and runs the call: it answers GPT-Live's delegated requests with the agent core (`packages/agent-core`), takes keypad presses, enforces the time limit, and finishes the call with a transcript and a summary, which queues the [email after each call](email.md#email-the-team-after-each-call) for those who turned it on. Since fork PR #80, the transcript leaves out the sounds GPT-Live's transcription marks in square brackets, such as `[tongue click]`, and keeps the worker's own notes, such as `[pressed 1]`.
 
 Only three admin routes must be reachable from the internet for calls and texts: `/api/webhooks/openai/live`, `/api/webhooks/twilio/sms` and `/api/webhooks/twilio/status`. The worker only connects out.
 
-## Open browser calls with a recorded greeting
+## Open calls with a recorded greeting
 
-GPT-Live sometimes ignores the greeting in a browser call's starting history, and the worker's fallback waits 4 seconds before asking again, so some callers heard nothing for several seconds.
+GPT-Live sometimes ignores the greeting in a call's starting history: it greeted on 8 of 15 phone calls and 16 of 25 browser calls in October. The worker's fallback waits 4 seconds before asking again, so some callers heard nothing for several seconds. A phone caller who heard nothing often said "Hello?", which stopped the fallback, and GPT-Live answered the hello without the greeting or the notice after it. That was the reported "no greeting until the caller says hello", more often on the first call after a quiet spell.
 
-With `LIVE_RECORDED_GREETING=true` on the admin (fork PR #45), a browser call opens with a recording of the business's greeting instead. The worker records the greeting during the first call, keeps it in Redis for a week after the last call that played it, and plays it on later calls. Since fork PR #52 it plays on the caller's first audio, or 3 seconds after the session starts, so it no longer plays before the caller's browser connects, and the widget shows it as the first caption. Phone calls are unchanged. To check a call, the worker's `live.greeting` log says how the greeting went; set the variable to `false` to go back.
+With `LIVE_RECORDED_GREETING=true` on the admin (fork PR #45), a browser call opens with a recording of the business's greeting instead. The worker records the greeting during the first call, keeps it in Redis for a week after the last call that played it, and plays it on later calls. Since fork PR #52 it plays on the caller's first audio, or 3 seconds after the session starts, so it no longer plays before the caller's browser connects, and the widget shows it as the first caption.
+
+Since fork PR #96, phone calls open with the recording too:
+
+- **When it plays:** on the caller's first audio, which on a phone call reaches the worker as soon as it connects, or 1 second after the worker connects without it, so a late worker still opens with the recording.
+- **A caller who speaks first** doesn't get the recording played over them. The worker tells GPT-Live to say the whole opening before it answers, so the caller still hears the greeting and the notice. A sound on the line, such as `[static]`, doesn't count as speaking.
+- **Recorded ahead:** with `LIVE_RECORDED_GREETING=true` on the worker too, the worker records a business's opening when its snapshot refreshes, and checks every active business with a phone number once a day and when it starts, so the first call after a greeting change, or after a week without calls, still opens with the recording. Without it, that call opens with the greeting command, as before.
+- **Turn it off for phone calls only** with `LIVE_RECORDED_GREETING_PHONE=false` on the admin. `LIVE_RECORDED_GREETING=false` turns it off for both.
+
+To check a call, the worker's `live.greeting` log says how the greeting went, and the admin's `live.incoming` (phone) or `live.browser_start` (browser) says whether the call opened with a recording (`greetingRecording`). [The voice runtime](../voice/runtime.md#open-calls-with-a-recording) has the details.
 
 ## Tell callers they're speaking with an AI and the call is recorded
 
@@ -22,7 +31,7 @@ Since fork PR #84, every phone and browser call says, right after the greeting: 
 
 - **Turn it off** under **AI settings** with **Tell callers about AI and recording**, or with `recording_notice: false` on the v1 API's `PATCH /receptionist`. Migration `0118` adds `receptionist_profiles.recording_notice`, true by default, and a change reaches the next call once the business's snapshot refreshes. Many places require telling callers that a call is recorded, so turn it off only when the business tells them another way.
 - **How it works:** `callOpening` joins the greeting and the notice, and everything that used the greeting uses it: the greeting command in the session's starting history, the greeting line in the instructions, the worker's fallback when GPT-Live doesn't greet, and the recorded greeting.
-- **The recorded greeting** is kept under its words. After the deploy, and after the switch changes, a business's first browser call opens without a recording while the worker records the new opening for the calls after it.
+- **The recorded greeting** is kept under its words. After the deploy, and after the switch changes, a business's first browser call opens without a recording while the worker records the new opening for the calls after it. Since fork PR #96, a worker with `LIVE_RECORDED_GREETING=true` records the new opening when the snapshot refreshes, before that call.
 - **The website widget** shows "Calls are answered by an AI assistant, and they're recorded and transcribed." under **Say Allo!** in the widget's language while the switch is on (`recordingNotice` from `/api/widget/config`).
 - **The greeting's language:** the notice follows the call's language, and the greeting plays as written. A French business that kept the English starter greeting opens in English, then French, so write the greeting in the call's language.
 
@@ -64,7 +73,8 @@ GPT-Live has no language setting. The call's instructions name the language to s
 
 ## Know what hasn't been tried
 
-- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78 and #84, because the environment that built them had no OpenAI key. Nobody has heard fork PR #84's notice after the greeting on a call yet: whether GPT-Live says the whole opening once, and whether a recorded opening still plays on the caller's first audio. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
+- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78, #84 and #96, because the environment that built them had no OpenAI key. Nobody has heard fork PR #84's notice after the greeting on a call yet: whether GPT-Live says the whole opening once, and whether a recorded opening still plays on the caller's first audio. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
 - No real call has typed a keypad PIN ([caller authentication](caller-authentication.md)).
 - The [phone call review](../reviews/phone-calls-2026-10-06.md) of 2026-10-06 lists what was open then. Several findings were fixed since, such as calls recovered after a worker crash, withheld numbers and the drain during a deploy, so check a finding against the code before acting on it.
-- A recording played to a phone caller, and a website call reserving minutes in slices instead of its whole length, aren't built.
+- No real phone call has opened with the recorded greeting yet (fork PR #96): whether the caller hears it at once, and whether GPT-Live says the opening when the caller speaks first. The first calls after the deploy will tell: `live.greeting` with `trigger` `recording` and `step` `spoken`, and `inputAudioMs` above 0 at `sent`.
+- A website call reserving minutes in slices instead of its whole length isn't built.

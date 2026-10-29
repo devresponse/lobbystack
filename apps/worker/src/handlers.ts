@@ -27,6 +27,7 @@ import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provi
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import type OpenAI from "openai";
 import { extractDocumentTextInThread, type OcrRecorder } from "./documentExtraction";
+import { keepOpeningRecorded, type GreetingRecordings } from "./greetingRecordings";
 import { isLivePrototypeEnabled, type LiveRecoveryOutcome } from "./liveCalls";
 import { reconcileBusinessCalendar, syncAppointmentCalendar, type CalendarOperations } from "./calendarJobs";
 import { getMeter, logEvent, reportError, reportWarning, withCallContext } from "@lobbystack/telemetry/node";
@@ -87,6 +88,10 @@ export type WorkerDependencies = {
   liveSessions?: Pick<OpenAI["live"]["sessions"], "downloadRecording">;
   /** Takes over an open GPT-Live call in this worker process, when its own worker died. */
   recoverLiveCall?: (call: OpenLiveCall) => Promise<LiveRecoveryOutcome>;
+  /** Records each phone business's call opening ahead of its calls; set with LIVE_RECORDED_GREETING=true. */
+  greetingRecordings?: GreetingRecordings;
+  /** Every business, and whether it's active (listSchedulerBusinesses), for sweeps that cover them all. */
+  listBusinesses?: () => Promise<Array<{ id: string; active: boolean }>>;
   /** Writes the one-line call summary. Without it, calls keep the transcript heuristic. */
   callSummarizer?: CallSummarizer;
   businessSummarizer?: BusinessSummarizer;
@@ -125,6 +130,17 @@ async function handleMissingPrice(dependencies: WorkerDependencies, job: JobEnve
   }
   await reportWarning(input.missing, { operation: `job.${input.topic}`, jobType: input.topic, ...(execution.queueJobId ? { jobId: execution.queueJobId } : {}), rechecks: recheck });
   return { status: "skipped", entityId: input.entityId };
+}
+
+// Keeps a phone business's call opening recorded ahead of its calls. A
+// failure only means its next call opens with the greeting command. Without
+// Redis there's nowhere to keep the recording.
+async function keepOpeningAhead(dependencies: WorkerDependencies, businessId: string): Promise<boolean> {
+  if (!dependencies.greetingRecordings || !isLivePrototypeEnabled() || dependencies.realtime?.status !== "ready") return false;
+  return await keepOpeningRecorded(dependencies.greetingRecordings, dependencies.domain, businessId).catch(async (error: unknown) => {
+    await reportWarning(error, { operation: "live.keep_greeting_recording", businessId });
+    return false;
+  });
 }
 
 function businessIdOrThrow(job: JobEnvelope): string {
@@ -398,8 +414,13 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       if (usageEventId) await enqueueBillingUsageSync(dependencies.domain, { businessId, usageEventId: await correctAlertSmsUsage(dependencies.domain, { businessId, sourceKey: usageSourceKey, segments }) });
       return { status: "completed", entityId: attemptId };
     }
-    case "snapshot.refresh":
-      return { status: "completed", entityId: await refreshBusinessSnapshot(dependencies.domain, { businessId: businessIdOrThrow(job) }) };
+    case "snapshot.refresh": {
+      const businessId = businessIdOrThrow(job);
+      const version = await refreshBusinessSnapshot(dependencies.domain, { businessId });
+      // A changed opening is recorded before the business's next phone call.
+      await keepOpeningAhead(dependencies, businessId);
+      return { status: "completed", entityId: version };
+    }
     case "business.generateSummary":
       return await generateBusinessSummary(dependencies, { businessId: businessIdOrThrow(job), force: job.payload.force === true });
     case "business.extractHours":
@@ -735,6 +756,18 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       }
       const acted = outcomes.filter((outcome) => outcome === "attached" || outcome === "finished").length;
       return { status: acted > 0 ? "completed" : "skipped", entityId: String(acted) };
+    }
+    case "live.recordGreetings": {
+      // One job for every business, once a day and as the worker starts.
+      if (job.businessId || !dependencies.greetingRecordings || !dependencies.listBusinesses || !isLivePrototypeEnabled() || dependencies.realtime?.status !== "ready") return { status: "skipped" };
+      let kept = 0;
+      for (const business of await dependencies.listBusinesses()) {
+        // A dormant business's next call records its opening, as before.
+        if (!business.active) continue;
+        // One at a time, so the first sweep after a deploy doesn't flood the speech API.
+        if (await withCallContext({ businessId: business.id }, async () => await keepOpeningAhead(dependencies, business.id))) kept += 1;
+      }
+      return { status: kept > 0 ? "completed" : "skipped", entityId: String(kept) };
     }
     case "billing.syncUsage": {
       if (!dependencies.polar) {

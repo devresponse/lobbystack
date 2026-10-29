@@ -8,6 +8,7 @@ import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemet
 import { getAppDatabase } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
 import { reportServerError } from "@/lib/error-reporting";
+import { recordedGreetingFor, type RecordedGreeting } from "@/lib/live-greeting";
 import { attachWorkerToLiveSession, getLiveClient } from "@/lib/live-prototype";
 
 export const runtime = "nodejs";
@@ -114,11 +115,13 @@ function createTiming() {
     eventAgeMs: undefined as number | undefined,
     // The header whose number picked the business.
     routedBy: undefined as string | undefined,
+    // With LIVE_RECORDED_GREETING=true, whether the call opened with a recording.
+    greetingRecording: undefined as boolean | undefined,
     mark(step: string) {
       steps[`${step}Ms`] = Math.round(performance.now() - receivedAt);
     },
     log() {
-      logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, ...steps });
+      logEvent("info", "live.incoming", { eventAgeMs: this.eventAgeMs, routedBy: this.routedBy, greetingRecording: this.greetingRecording, ...steps });
     },
   };
 }
@@ -129,12 +132,15 @@ type LiveClient = ReturnType<typeof getLiveClient>;
 
 // Reserves minutes and records the call before accepting it, the same way the
 // Twilio media path does, so billing and limits behave identically. The
-// snapshot loads at the same time, since the caller is still hearing it ring.
+// snapshot loads at the same time, and then the check for the opening's
+// recording, since the caller is still hearing it ring.
 async function answerCall(client: LiveClient, input: { sessionId: string; businessId: string; from: string | undefined; to: string; timing: Timing; twilioCallSid?: string }) {
   const domain = createWorkerDomainContext();
-  const [loaded, started] = await Promise.allSettled([
-    getCachedBusinessSnapshot(domain, { businessId: input.businessId }),
+  const loading = getCachedBusinessSnapshot(domain, { businessId: input.businessId });
+  const [loaded, started, greeting] = await Promise.allSettled([
+    loading,
     startLivePhoneCall(domain, { businessId: input.businessId, sessionId: input.sessionId, from: input.from, to: input.to, ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}) }),
+    loading.then(async (snapshot) => (snapshot ? await recordedGreetingFor(snapshot, { phone: true }) : undefined)),
   ]);
   input.timing.mark("record");
   if (started.status === "rejected") {
@@ -169,17 +175,22 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   // A retried delivery's limit is read back from the call's reservation, which
   // top-ups may have grown. Its call may be under way, so it attaches as a resume:
   // the worker numbers turns after the saved ones and skips the greeting.
-  const attach = (resume = false) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...(resume ? { resume } : {}) });
+  const attach = (options: { resume?: boolean; recordedGreeting?: RecordedGreeting } = {}) => attachWorkerToLiveSession({ sessionId: input.sessionId, businessId: input.businessId, callId: call.callId, conversationId: call.conversationId, channel: "voice", ...(input.from ? { callerPhone: input.from } : {}), ...(call.maxDurationMs !== undefined ? { maxDurationMs: call.maxDurationMs } : {}), ...options });
   // A retried delivery. The first one may have died before accepting or before
   // the worker attached, so finish the job without touching the call record:
   // accepting an accepted session just fails, and attaching is idempotent.
   if (call.duplicate) {
     await client.live.sessions.accept(input.sessionId, { session: buildPhoneSessionConfig(snapshot) }).catch(() => undefined);
-    await attach(true).catch(() => undefined);
+    await attach({ resume: true }).catch(() => undefined);
     return new NextResponse(null, { status: 200 });
   }
+  // With a recording of the opening, the session starts with it as already
+  // said and the worker plays it. Without one, the worker records it for the
+  // next call. A failed check opens the call as before.
+  const recordedGreeting = greeting.status === "fulfilled" ? greeting.value : undefined;
+  if (recordedGreeting) input.timing.greetingRecording = recordedGreeting.play;
   try {
-    const sessionConfig = buildPhoneSessionConfig(snapshot);
+    const sessionConfig = buildPhoneSessionConfig(snapshot, { greetingRecorded: recordedGreeting?.play === true });
     await client.live.sessions.accept(input.sessionId, { session: sessionConfig });
     input.timing.mark("accept");
     // The instructions the call's voice model starts with, for its AI debug trace (ADR 0009). The call doesn't wait for it.
@@ -189,7 +200,7 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
     throw error;
   }
   try {
-    await attach();
+    await attach(recordedGreeting ? { recordedGreeting } : {});
     input.timing.mark("attach");
   } catch (error) {
     // Without the worker nobody answers delegations, so end the call cleanly.

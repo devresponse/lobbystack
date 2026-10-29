@@ -565,7 +565,7 @@ describe("what a call opens with", () => {
   });
 });
 
-describe("greeting recordings on browser calls", () => {
+describe("greeting recordings", () => {
   // Redis with the recording of "Thanks for calling." when `audio` is given.
   function recordingStore(audio?: string) {
     return { get: vi.fn(async (_key: string): Promise<string | null> => audio ?? null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 1), exists: vi.fn(async () => (audio ? 1 : 0)) };
@@ -589,6 +589,13 @@ describe("greeting recordings on browser calls", () => {
     await expect(setup).resolves.toMatchObject({ greeting: "Thanks for calling.", greetingRecording: { audio: "UklGRg==" } });
     expect(store.get).toHaveBeenCalledWith("recording:Thanks for calling.");
     expect(mocks.recordGreeting).not.toHaveBeenCalled();
+  });
+
+  it("plays the recording a phone call opened with", async () => {
+    const store = recordingStore("UklGRg==");
+    const { setup } = await attach({ sessionId: "live_phone_recorded", channel: "voice", callerPhone: "+14165550134", recordedGreeting: { text: "Thanks for calling.", play: true } }, store);
+    await expect(setup).resolves.toMatchObject({ greeting: "Thanks for calling.", greetingRecording: { audio: "UklGRg==" } });
+    expect(mocks.controllers_.at(-1)!.options).toMatchObject({ phone: true });
   });
 
   it("records the greeting for the next call when the call opened without a recording", async () => {

@@ -19,7 +19,10 @@ beforeEach(() => {
   mocks.waitForRedis.mockReset().mockResolvedValue(undefined);
   vi.stubEnv("LIVE_RECORDED_GREETING", "true");
 });
-afterEach(() => { vi.unstubAllEnvs(); });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllEnvs();
+});
 
 describe("recordedGreetingFor", () => {
   it("plays the opening's recording once the worker has made one", async () => {
@@ -41,6 +44,26 @@ describe("recordedGreetingFor", () => {
     await expect(recordedGreetingFor(snapshot)).resolves.toMatchObject({ play: false });
     mocks.waitForRedis.mockRejectedValueOnce(new Error("Redis readiness timed out."));
     await expect(recordedGreetingFor(snapshot)).resolves.toMatchObject({ play: false });
+  });
+
+  // A phone caller hears it ring while the admin checks.
+  it("opens the call as before when Redis doesn't answer within a second", async () => {
+    vi.useFakeTimers();
+    mocks.redis!.exists.mockReturnValueOnce(new Promise(() => undefined));
+    const checking = recordedGreetingFor(snapshot, { phone: true });
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(checking).resolves.toEqual({ text: opening, play: false });
+  });
+
+  // Phone calls follow LIVE_RECORDED_GREETING, and their own switch turns off only them.
+  it("opens phone calls with the recording too, unless LIVE_RECORDED_GREETING_PHONE is false", async () => {
+    await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toEqual({ text: opening, play: true });
+    vi.stubEnv("LIVE_RECORDED_GREETING_PHONE", "false");
+    await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toBeUndefined();
+    await expect(recordedGreetingFor(snapshot)).resolves.toEqual({ text: opening, play: true });
+    vi.stubEnv("LIVE_RECORDED_GREETING_PHONE", "true");
+    vi.stubEnv("LIVE_RECORDED_GREETING", "false");
+    await expect(recordedGreetingFor(snapshot, { phone: true })).resolves.toBeUndefined();
   });
 
   it("does nothing unless LIVE_RECORDED_GREETING is true, the call opens with something to say and Redis is set up", async () => {

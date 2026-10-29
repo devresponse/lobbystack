@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#95](https://github.com/devresponse/lobbystack/pull/95) | Build the Make app under each brand's own name |  | `7f1f3c1` | [docs](../features/api-cli-integrations.md#connect-make) |
 | [#94](https://github.com/devresponse/lobbystack/pull/94) | Publish the Zapier integration under each brand's own name |  | `5682041` | [docs](../features/api-cli-integrations.md#connect-zapier) |
 
 ### 2026-10-28

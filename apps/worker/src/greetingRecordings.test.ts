@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const mocks = vi.hoisted(() => ({ recordGreeting: vi.fn(async (..._args: unknown[]) => "UklGRg==") }));
+const mocks = vi.hoisted(() => ({
+  recordGreeting: vi.fn(async (..._args: unknown[]) => "UklGRg=="),
+  getCachedBusinessSnapshot: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown> | null> => null),
+}));
 
 vi.mock("@lobbystack/agent-core", () => ({
   GREETING_RECORDING_TTL_SECONDS: 604_800,
@@ -10,7 +13,9 @@ vi.mock("@lobbystack/agent-core", () => ({
   recordGreeting: mocks.recordGreeting,
 }));
 
-import { createGreetingRecordings } from "./greetingRecordings";
+vi.mock("@lobbystack/domain", () => ({ getCachedBusinessSnapshot: mocks.getCachedBusinessSnapshot }));
+
+import { createGreetingRecordings, keepOpeningRecorded } from "./greetingRecordings";
 
 // A Redis-like store with the slice greeting recordings use.
 function store(entries: Record<string, string> = {}) {
@@ -30,6 +35,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   mocks.recordGreeting.mockClear();
+  mocks.getCachedBusinessSnapshot.mockReset();
 });
 
 describe("greeting recordings", () => {
@@ -79,5 +85,37 @@ describe("greeting recordings", () => {
     await expect(recordings.record("Thanks for calling.")).resolves.toBeUndefined();
     expect(redis.set).not.toHaveBeenCalled();
     expect(logLines(warn)).toEqual([expect.objectContaining({ message: "live.greeting_recording_failed", error: expect.stringContaining("came back silent") })]);
+  });
+
+  it("keeps a recording another week, and records one that's gone", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const redis = store({ "recording:marin:Thanks for calling.": "UklGRg==" });
+    const recordings = createGreetingRecordings({ store: redis, client: {} as never });
+    await recordings.keep("Thanks for calling.");
+    expect(redis.expire).toHaveBeenCalledWith("recording:marin:Thanks for calling.", 604_800);
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+    await recordings.keep("Hello there.");
+    expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
+    expect(redis.set).toHaveBeenCalledWith("recording:marin:Hello there.", "UklGRg==", "EX", 604_800);
+  });
+
+  it("keeps the opening of a business with a phone number recorded", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const redis = store();
+    const recordings = createGreetingRecordings({ store: redis, client: {} as never });
+    const domain = { db: {} as never };
+    const business = { greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: { phoneNumber: "+15551234567" } };
+    mocks.getCachedBusinessSnapshot.mockResolvedValueOnce(business);
+    await expect(keepOpeningRecorded(recordings, domain, "business_1")).resolves.toBe(true);
+    expect(mocks.getCachedBusinessSnapshot).toHaveBeenCalledWith(domain, { businessId: "business_1" });
+    expect(redis.keys.get("recording:marin:Thanks for calling.")).toBe("UklGRg==");
+    // A business without a phone number only has browser calls, which record their opening as they end.
+    mocks.getCachedBusinessSnapshot.mockResolvedValueOnce({ ...business, contactChannels: {} });
+    await expect(keepOpeningRecorded(recordings, domain, "business_2")).resolves.toBe(false);
+    mocks.getCachedBusinessSnapshot.mockResolvedValueOnce({ ...business, greeting: " " });
+    await expect(keepOpeningRecorded(recordings, domain, "business_3")).resolves.toBe(false);
+    mocks.getCachedBusinessSnapshot.mockResolvedValueOnce(null);
+    await expect(keepOpeningRecorded(recordings, domain, "business_4")).resolves.toBe(false);
+    expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
   });
 });

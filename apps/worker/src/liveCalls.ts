@@ -58,10 +58,11 @@ type AttachRequest = {
    */
   resume?: boolean;
   /**
-   * The greeting a browser call opened with, when LIVE_RECORDED_GREETING is
-   * on. `play`: the session's starting history has it as already said, and
-   * the worker plays its recording as the call connects. Otherwise the call
-   * opened as before, and the worker records it for the next one.
+   * The greeting a call opened with, when LIVE_RECORDED_GREETING is on (for a
+   * phone call, unless LIVE_RECORDED_GREETING_PHONE is false). `play`: the
+   * session's starting history has it as already said, and the worker plays
+   * its recording as the call connects. Otherwise the call opened as before,
+   * and the worker records it for the next one.
    */
   recordedGreeting?: { text: string; play: boolean };
   /** Set when this worker took the call over after its owner died. Never parsed from HTTP. */
@@ -556,7 +557,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
       return { agent, callerDone: (conversation: string, abortSignal: AbortSignal) => inCall(callerDone, conversation, abortSignal), ...(phone && normalizeAppointmentChangePolicy(snapshot.appointmentChangePolicy).verificationMode === "passcode_required" ? { maskKeypad: true } : {}), ...(recovery || saved > 0 ? {} : { greeting: recorded?.text ?? callOpening(snapshot) }) };
     });
     // The attach answers once the business has loaded, so the recording can
-    // finish loading while the caller's browser connects.
+    // finish loading while the caller's browser connects, or a phone call's
+    // sideband opens.
     const setup: Promise<LiveCallSetup> = recorded?.play
       ? Promise.all([business, recordingLoad]).then(([ready, audio]) => ({ ...ready, greetingRecording: audio ? { audio } : {} }))
       : business;
@@ -736,6 +738,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
   return {
     handle,
     recover,
+    /** The greeting recordings calls play and make, for the jobs that record openings ahead of calls. */
+    ...(recordings ? { greetingRecordings: recordings } : {}),
     activeCalls: () => active.size,
     /**
      * Stops taking attaches and lets calls end on their own for up to

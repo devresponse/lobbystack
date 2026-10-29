@@ -52,13 +52,15 @@ export function buildBrowserSessionConfig(snapshot: BusinessContextSnapshot, opt
   };
 }
 
-export function buildPhoneSessionConfig(snapshot: BusinessContextSnapshot, voice = LIVE_VOICE): SessionAcceptParams.Session {
+// Phone calls. `greetingRecorded`: the worker plays a recording of the
+// greeting, in this voice, as soon as its sideband opens.
+export function buildPhoneSessionConfig(snapshot: BusinessContextSnapshot, options: { greetingRecorded?: boolean; voice?: string } = {}): SessionAcceptParams.Session {
   return {
     type: "live",
     model: LIVE_MODEL,
     instructions: buildLiveInstructions(snapshot, DateTime.now(), "voice"),
-    ...openingHistory(snapshot, false),
-    audio: { output: { voice } },
+    ...openingHistory(snapshot, options.greetingRecorded === true),
+    audio: { output: { voice: options.voice ?? LIVE_VOICE } },
     delegation: { type: "client" },
     // Keep OpenAI's recording so the worker can copy it into our storage.
     store: true,

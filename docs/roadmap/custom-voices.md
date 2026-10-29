@@ -21,7 +21,7 @@ GPT-Live costs the same $0.05 a minute with any of them. A call's voice can't ch
 
 One voice for every call:
 
-- A setting such as `LIVE_VOICE_ID`: when it is set, both session builders in `packages/agent-core/src/live/session.ts` send `{ "id": … }` instead of `marin`. `buildPhoneSessionConfig` already takes a voice; `buildBrowserSessionConfig` needs the parameter.
+- A setting such as `LIVE_VOICE_ID`: when it is set, both session builders in `packages/agent-core/src/live/session.ts` send `{ "id": … }` instead of `marin`. `buildPhoneSessionConfig` already takes a `voice` option; `buildBrowserSessionConfig` needs one.
 - A fallback to `marin` when OpenAI refuses the voice, since a refused accept ends a phone call as `setup_failed`.
 - An accent line in the live instructions, such as "Speak American English", as OpenAI asks for cloned voices; a prompt voice's description goes there instead.
 - The recorded greeting keyed and recorded with the voice, or `LIVE_RECORDED_GREETING` left off for a prompt voice.

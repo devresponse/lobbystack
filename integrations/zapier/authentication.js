@@ -1,6 +1,6 @@
 'use strict';
 
-const { APP_NAME, DEFAULT_BASE_URL, DOCS_URL } = require('./lib/brand');
+const { APP_NAME, DEFAULT_BASE_URL, HELP_URL } = require('./lib/brand');
 const { apiUrl } = require('./lib/client');
 
 // GET /me works for any valid key, whatever its scopes, so a key made only
@@ -31,7 +31,7 @@ module.exports = {
       type: 'password',
       required: true,
       helpText:
-        `In ${APP_NAME}, go to **Settings > API keys** and create a key for Zapier. It starts with \`lsk_\`. Any key connects; give it the scopes for the steps you plan to use. Triggers need \`webhooks:manage\` plus the read scope for their data, such as \`calls:read\` for new calls. [Learn more](${DOCS_URL}/api/authentication).`,
+        `In ${APP_NAME}, go to **Settings > API keys**, select **Create API key**, then **Set up for Zapier**, which allows every trigger, action and search here. The key starts with \`lsk_\`. A key with less access connects too, but the steps it doesn't allow fail; triggers need \`webhooks:manage\` plus the read scope for their data, such as \`calls:read\` for new calls. [Learn more](${HELP_URL}).`,
     },
     {
       // Required, so every connection stores its address and never depends on

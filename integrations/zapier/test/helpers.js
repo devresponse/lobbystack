@@ -39,4 +39,10 @@ const page = (data, extra = {}) => ({ data, next_cursor: null, has_more: false, 
 
 const apiError = (code, message, details) => ({ error: { code, message, ...(details ? { details } : {}) } });
 
-module.exports = { App, BASE, TEST_API_KEY, api, apiError, appTester, bundleWith, nock, page };
+// A sample's keys as Zapier names its fields: a nested value is parent__child.
+const flatKeys = (object, prefix = '') =>
+  Object.entries(object).flatMap(([key, value]) =>
+    value && typeof value === 'object' && !Array.isArray(value) ? flatKeys(value, `${prefix}${key}__`) : [`${prefix}${key}`],
+  );
+
+module.exports = { App, BASE, TEST_API_KEY, api, apiError, appTester, bundleWith, flatKeys, nock, page };

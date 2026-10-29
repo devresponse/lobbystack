@@ -6,6 +6,7 @@ import {
   normalizeEmailAddress,
   normalizePageUrl,
   normalizeSiteUrl,
+  normalizeZapierUrl,
   resolveBrandLinks,
 } from "./brandLinks";
 import { resolveBrand } from "./brands/resolve";
@@ -46,6 +47,23 @@ describe("normalizePageUrl", () => {
   });
 });
 
+describe("normalizeZapierUrl", () => {
+  it("keeps an invite link or a directory page on zapier.com", () => {
+    expect(normalizeZapierUrl(" https://zapier.com/developer/public-invite/123456/0a1b2c3d4e5f/ ")).toBe("https://zapier.com/developer/public-invite/123456/0a1b2c3d4e5f/");
+    expect(normalizeZapierUrl("https://zapier.com/apps/alloplace/integrations")).toBe("https://zapier.com/apps/alloplace/integrations");
+    expect(normalizeZapierUrl("https://developer.zapier.com/app/123456")).toBe("https://developer.zapier.com/app/123456");
+  });
+
+  it("refuses any other site, plain http and credentials", () => {
+    expect(normalizeZapierUrl("http://zapier.com/apps/alloplace/integrations")).toBeNull();
+    expect(normalizeZapierUrl("https://notzapier.com/apps/alloplace")).toBeNull();
+    expect(normalizeZapierUrl("https://zapier.com.example.com/apps/alloplace")).toBeNull();
+    expect(normalizeZapierUrl("https://user@zapier.com/apps/alloplace")).toBeNull();
+    expect(normalizeZapierUrl("javascript:alert(1)")).toBeNull();
+    expect(normalizeZapierUrl(undefined)).toBeNull();
+  });
+});
+
 describe("normalizeEmailAddress", () => {
   it("accepts plain addresses", () => {
     expect(normalizeEmailAddress(" support@alloplace.com ")).toBe("support@alloplace.com");
@@ -65,7 +83,7 @@ describe("normalizeEmailAddress", () => {
 describe("resolveBrandLinks", () => {
   it("links to LobbyStack's site, docs and addresses without a brand", () => {
     const links = resolveBrandLinks();
-    expect(links).toEqual({ siteUrl: "https://lobbystack.com", termsUrl: null, privacyUrl: null, docsUrl: "https://docs.lobbystack.com", contactEmail: null });
+    expect(links).toEqual({ siteUrl: "https://lobbystack.com", termsUrl: null, privacyUrl: null, docsUrl: "https://docs.lobbystack.com", contactEmail: null, zapierUrl: null });
     expect(contactEmailFor(links, "support")).toBe("support@lobbystack.com");
     expect(contactEmailFor(links, "sales")).toBe("hello@lobbystack.ai");
     expect(contactEmailFor(links, "sms")).toBe("hello@lobbystack.com");
@@ -79,20 +97,23 @@ describe("resolveBrandLinks", () => {
       privacyUrl: "https://alloplace.com/legal/privacy",
       docsUrl: "https://alloplace.com",
       contactEmail: "support@alloplace.com",
+      zapierUrl: "https://zapier.com/developer/public-invite/248757/58a2d90f08ed088e15d28ee05541d2e6/",
     });
     for (const purpose of Object.keys(LOBBYSTACK_CONTACT_EMAILS) as Array<keyof typeof LOBBYSTACK_CONTACT_EMAILS>) {
       expect(contactEmailFor(links, purpose)).toBe("support@alloplace.com");
     }
   });
 
-  it("fills in LobbyStack's site and docs where the brand has none", () => {
-    expect(resolveBrandLinks({ siteUrl: null, termsUrl: "https://example.com/terms", privacyUrl: null, docsUrl: null, contactEmail: null })).toEqual({
+  it("fills in LobbyStack's site and docs where the brand has none, but never a Zapier link", () => {
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: "https://example.com/terms", privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: null })).toEqual({
       siteUrl: "https://lobbystack.com",
       termsUrl: "https://example.com/terms",
       privacyUrl: null,
       docsUrl: "https://docs.lobbystack.com",
       contactEmail: null,
+      zapierUrl: null,
     });
+    expect(resolveBrandLinks({ siteUrl: null, termsUrl: null, privacyUrl: null, docsUrl: null, contactEmail: null, zapierUrl: "https://zapier.com/apps/example/integrations" }).zapierUrl).toBe("https://zapier.com/apps/example/integrations");
   });
 });
 

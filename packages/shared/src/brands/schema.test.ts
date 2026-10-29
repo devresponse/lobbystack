@@ -21,7 +21,7 @@ function sources(overrides: { index?: unknown; brands?: BrandSources["brands"] }
     index: overrides.index ?? { default: "lobbystack", domains: { "alloplace.com": "alloplace" } },
     brands: overrides.brands ?? {
       lobbystack: { file: { appName: "LobbyStack" }, assets: {} },
-      alloplace: { file: { appName: "AlloPlace", logo: "logo.svg", accentColor: "#FD0", links: { site: "https://alloplace.com/" }, contactEmail: "support@alloplace.com" }, assets: { "logo.svg": svg } },
+      alloplace: { file: { appName: "AlloPlace", logo: "logo.svg", accentColor: "#FD0", links: { site: "https://alloplace.com/", zapier: "https://zapier.com/developer/public-invite/123456/0a1b2c3d4e5f/" }, contactEmail: "support@alloplace.com" }, assets: { "logo.svg": svg } },
     },
   };
 }
@@ -32,9 +32,10 @@ describe("compileBrands", () => {
     expect(compiled.brands.alloplace).toMatchObject({
       appName: "AlloPlace",
       accentColor: "#ffdd00",
-      links: { siteUrl: "https://alloplace.com", termsUrl: null, contactEmail: "support@alloplace.com" },
+      links: { siteUrl: "https://alloplace.com", termsUrl: null, contactEmail: "support@alloplace.com", zapierUrl: "https://zapier.com/developer/public-invite/123456/0a1b2c3d4e5f/" },
       environments: [],
     });
+    expect(compiled.brands.lobbystack!.links.zapierUrl).toBeNull();
     expect(compiled.brands.alloplace!.logoUrl).toMatch(/^\/brand\/alloplace\/logo\.svg\?v=[0-9a-f]{12}$/);
     expect(Object.keys(compiled.publicAssets)).toEqual(["/brand/alloplace/logo.svg"]);
     expect(compiled.brands.lobbystack!.logoUrl).toBeNull();
@@ -44,13 +45,14 @@ describe("compileBrands", () => {
     const run = () => compileBrands(sources({
       index: { default: "missing", domains: { "Alloplace.com": "alloplace", "dev.alloplace.com": "ghost" } },
       brands: {
-        alloplace: { file: { appName: "x".repeat(41), logo: "logo.svg", accentColor: "yellow", links: { site: "ftp://x" }, colour: "#fff" }, assets: {} },
+        alloplace: { file: { appName: "x".repeat(41), logo: "logo.svg", accentColor: "yellow", links: { site: "ftp://x", zapier: "https://example.com/zapier" }, colour: "#fff" }, assets: {} },
       },
     }));
     expect(run).toThrow(/brands\/index\.json domains/);
     expect(run).toThrow(/brands\/alloplace\/brand\.json appName/);
     expect(run).toThrow(/accentColor/);
     expect(run).toThrow(/links\.site/);
+    expect(run).toThrow(/links\.zapier: an https link on zapier\.com/);
   });
 
   it("refuses a missing or unsafe logo", () => {

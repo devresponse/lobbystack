@@ -2,8 +2,9 @@ import { desc, eq, inArray } from "drizzle-orm";
 
 // Local fixture for testing the Zapier integration (integrations/zapier)
 // against a development stack. It creates one business that books instantly,
-// with a service, a staff member, opening hours, an API key with every scope,
-// and a second key with only knowledge:write. The keys below are fixed local
+// with a service, a staff member, opening hours, an API key with the scopes
+// Settings > API keys sets up for Zapier, so a run shows that key allows every
+// step, and a second key with only knowledge:write. The keys below are fixed local
 // test values: they only work against a database this script seeded, and the
 // script refuses any non-local database.
 //
@@ -25,7 +26,7 @@ async function main(): Promise<void> {
     throw new Error("seed-zapier-local only writes to a database on localhost.");
   }
   const { apiKeys, businessHours, businesses, createDatabaseClient, receptionistProfiles, services, staff, webhookDeliveries, webhookEndpoints, webhookEvents } = await import("@lobbystack/db");
-  const { businessApiKeyScopes } = await import("@lobbystack/shared");
+  const { zapierApiKeyScopes } = await import("@lobbystack/shared");
   const { hashApiKey } = await import("@lobbystack/domain");
   const database = createDatabaseClient("lobbystack_migrator", { DATABASE_URL: raw });
   try {
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
     });
     await database.db.delete(apiKeys).where(inArray(apiKeys.prefix, [PREFIX, NARROW_PREFIX]));
     await database.db.insert(apiKeys).values([
-      { businessId, name: "Zapier local test", prefix: PREFIX, keyHash: hashApiKey(ZAPIER_LOCAL_API_KEY), scopes: [...businessApiKeyScopes] },
+      { businessId, name: "Zapier local test", prefix: PREFIX, keyHash: hashApiKey(ZAPIER_LOCAL_API_KEY), scopes: [...zapierApiKeyScopes] },
       { businessId, name: "Zapier local test (knowledge only)", prefix: NARROW_PREFIX, keyHash: hashApiKey(ZAPIER_LOCAL_NARROW_API_KEY), scopes: ["knowledge:write"] },
     ]);
     console.log(JSON.stringify({ status: "seeded", businessId, keyPrefix: PREFIX }));

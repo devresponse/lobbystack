@@ -1,7 +1,7 @@
 /* globals describe, it, expect, afterEach */
 'use strict';
 
-const { App, api, appTester, bundleWith, nock, page } = require('./helpers');
+const { App, api, appTester, bundleWith, flatKeys, nock, page } = require('./helpers');
 const { samples } = require('../lib/resources');
 const { cursorPage } = require('../triggers/dropdowns');
 const { sign, verifyDelivery } = require('../lib/signature');
@@ -51,7 +51,7 @@ describe.each(hookTriggers)('$key trigger', ({ key, event, resource, list }) => 
   it('is a REST hook with a sample whose keys are all output fields', () => {
     expect(trigger.operation.type).toBe('hook');
     const outputKeys = trigger.operation.outputFields.map((field) => field.key);
-    expect(Object.keys(trigger.operation.sample).sort()).toEqual([...outputKeys].sort());
+    expect(flatKeys(trigger.operation.sample).sort()).toEqual([...outputKeys].sort());
     expect(trigger.display.description).toMatch(/^Triggers when .+\.$/);
   });
 

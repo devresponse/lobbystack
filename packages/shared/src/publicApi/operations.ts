@@ -245,6 +245,33 @@ export const apiScopesInUse: readonly ApiKeyScope[] = apiKeyScopes.filter((scope
 export const offeredApiKeyScopes: readonly BusinessApiKeyScope[] = businessApiKeyScopes.filter((scope) => apiScopesInUse.includes(scope));
 
 /**
+ * Every operation the Zapier integration in integrations/zapier calls. Add one
+ * here when the integration starts calling it, so the key that Settings > API
+ * keys sets up for Zapier still allows every trigger, action and search.
+ */
+export const zapierOperationIds = [
+  "getMe",
+  "listServices",
+  "listStaff",
+  "listCalls",
+  "listContacts",
+  "createContact",
+  "updateContact",
+  "listAppointments",
+  "getAvailability",
+  "createAppointment",
+  "cancelAppointment",
+  "rescheduleAppointment",
+  "listMessages",
+  "createKnowledgeEntry",
+  "createWebhook",
+  "deleteWebhook",
+] as const satisfies readonly ApiOperationId[];
+
+/** The scopes those operations need, in the order Settings > API keys lists them. */
+export const zapierApiKeyScopes: readonly BusinessApiKeyScope[] = offeredApiKeyScopes.filter((scope) => zapierOperationIds.some((id) => (apiOperations[id] as ApiOperation).scope === scope));
+
+/**
  * The schema behind each component name the operations use, each with its own
  * type, so a typed client such as packages/cli sends and reads what the server checks.
  */

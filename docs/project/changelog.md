@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#93](https://github.com/devresponse/lobbystack/pull/93) | Port the original's database audit fixes | `0120`, `0121`, `0122`, `0123`, `0124`, `0125`, `0126`, `0127` | `e788004` | [docs](../deployment/guide/part-7-operations.md#73-database-migrations) |
 | [#92](https://github.com/devresponse/lobbystack/pull/92) | Skip Comcast's support site in the landing link check |  | `e301aae` | [docs](../deployment/guide/appendix-f-sites.md) |
 | [#91](https://github.com/devresponse/lobbystack/pull/91) | Move to pnpm 12.15.0, and have Dependabot wait 3 days for a new version |  | `18a1ca4` | [docs](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions) |
 | [#90](https://github.com/devresponse/lobbystack/pull/90) | Build the images on Node 26.12.1, and take nodemailer 10.1.4 and zod 4.6.6 |  | `2dcc83c` | [docs](../deployment/guide/part-7-operations.md#722-upgrade-pinned-versions) |

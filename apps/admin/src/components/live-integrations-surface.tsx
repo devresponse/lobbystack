@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { RefreshCcw, Trash2, Webhook } from "lucide-react";
+import { ExternalLink, KeyRound, RefreshCcw, Trash2, Webhook, Zap } from "lucide-react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "next/navigation";
@@ -10,10 +10,12 @@ import { useSetupAction } from "@/lib/use-setup-action";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
+import { brandLinks } from "@lobbystack/shared";
+
 import type { IntegrationsViewModel } from "@/lib/page-view-models";
 import { requestJson } from "@/lib/request-json";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { PageHeader } from "@/components/page-header";
@@ -21,6 +23,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Skeleton } from "@/components/ui/skeleton";
 import { surfaceClassName } from "@/components/ui/surface";
 import { useTelemetry } from "@/components/product-analytics";
+import { cn } from "@/lib/utils";
 
 function GoogleCalendarLogo() {
   return <svg aria-hidden="true" className="size-7" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5 4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z" fill="currentColor" /></svg>;
@@ -33,7 +36,10 @@ export function LiveIntegrationsSurface() {
   const handledCallback = useRef<string | null>(null);
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [zapierOpen, setZapierOpen] = useState(false);
   const [selectedCalendarId, setSelectedCalendarId] = useState("");
+  // The brand's own Zapier integration; a brand without one shows no Zapier card.
+  const { zapierUrl } = brandLinks();
   const { business } = useActiveBusiness();
   const canManage = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const integrations = useQuery({ queryKey: ["integrations", business?.businessId], queryFn: () => requestJson<IntegrationsViewModel>(`/api/integrations?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId && canManage), refetchInterval: (query) => query.state.data?.calendarConnections.some((connection) => connection.status === "syncing") ? 2000 : false });
@@ -45,7 +51,11 @@ export function LiveIntegrationsSurface() {
   const needsAttention = Boolean(google && (!(connected || syncing) || google.lastSyncError || discoveryFailed));
 
   useEffect(() => { setSelectedCalendarId(google?.selectedCalendarId ?? ""); }, [google?.id, google?.selectedCalendarId]);
-  useSetupAction(canManage, useCallback((action: string) => { if (action !== "calendar") return false; setDialogOpen(true); return true; }, []));
+  useSetupAction(canManage, useCallback((action: string) => {
+    if (action === "calendar") { setDialogOpen(true); return true; }
+    if (action === "zapier" && zapierUrl) { setZapierOpen(true); return true; }
+    return false;
+  }, [zapierUrl]));
   useEffect(() => {
     const calendar = searchParams.get("calendar"); const status = searchParams.get("status"); const key = `${calendar}:${status}`;
     if (calendar !== "google" || !status || handledCallback.current === key) return;
@@ -80,8 +90,20 @@ export function LiveIntegrationsSurface() {
       </li><li className={`${surfaceClassName} p-4`}>
         <div className="mb-8 flex items-center justify-between gap-3"><div className="flex size-10 shrink-0 items-center justify-center"><Webhook aria-hidden="true" className="size-7" /></div><Button disabled={!canManage} nativeButton={false} render={<Link href="/integrations/webhooks" />} size="sm" variant="outline">{t("integrations.actions.manage")}</Button></div>
         <div className="flex flex-col gap-1"><h2 className="type-section-title text-lg">{t("integrations.cards.webhooks.title")}</h2><p className="type-body-muted line-clamp-2">{t("integrations.cards.webhooks.description")}</p></div>
-      </li></ul>
+      </li>{zapierUrl ? <li className={`${surfaceClassName} p-4`}>
+        <div className="mb-8 flex items-center justify-between gap-3"><div className="flex size-10 shrink-0 items-center justify-center"><Zap aria-hidden="true" className="size-7" /></div><Button disabled={!canManage} onClick={() => setZapierOpen(true)} size="sm" type="button" variant="outline">{t("integrations.actions.connect")}</Button></div>
+        <div className="flex flex-col gap-1"><h2 className="type-section-title text-lg">{t("integrations.cards.zapier.title")}</h2><p className="type-body-muted line-clamp-2">{t("integrations.cards.zapier.description")}</p></div>
+      </li> : null}</ul>
     </div>
+    {zapierUrl ? <Dialog onOpenChange={setZapierOpen} open={zapierOpen}><DialogContent className="w-full gap-0 p-0 sm:max-w-md">
+      <DialogHeader className="flex-row items-center gap-3 p-6 pb-4"><Zap aria-hidden="true" className="size-7 shrink-0" /><div className="flex flex-col gap-1"><DialogTitle>{t("integrations.zapier.title")}</DialogTitle><DialogDescription>{t("integrations.zapier.description")}</DialogDescription></div></DialogHeader>
+      <ol className="flex list-decimal flex-col gap-4 px-6 pb-4 pl-11 text-sm">
+        <li><p>{t("integrations.zapier.steps.invite")}</p><a className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} href={zapierUrl} rel="noopener noreferrer" target="_blank"><ExternalLink data-icon="inline-start" />{t("integrations.zapier.openInvite")}</a></li>
+        <li><p>{t("integrations.zapier.steps.key")}</p><Link className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2")} href="/settings/api-keys?setup=zapier"><KeyRound data-icon="inline-start" />{t("integrations.zapier.createKey")}</Link></li>
+        <li><p>{t("integrations.zapier.steps.zap", { url: typeof window === "undefined" ? "" : window.location.origin })}</p></li>
+      </ol>
+      <p className="type-body-muted px-6 pb-6">{t("integrations.zapier.bookingNote")}</p>
+    </DialogContent></Dialog> : null}
     <Dialog onOpenChange={setDialogOpen} open={dialogOpen}><DialogContent className="w-full gap-0 p-0 sm:max-w-md">
       <DialogHeader className="flex-row items-center gap-3 p-6 pb-4"><GoogleCalendarLogo /><div className="flex flex-col gap-1"><DialogTitle>{t("integrations.google.sheetTitle")}</DialogTitle><DialogDescription>{t("integrations.google.sheetDescription")}</DialogDescription></div></DialogHeader>
       <div className="flex flex-col gap-4 px-6 pb-6">

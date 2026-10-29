@@ -728,6 +728,18 @@
       "syncNeedsAttention": "Attention requise",
       "discoveryFailed": "L’accès au calendrier ou sa synchronisation n’a pas pu être vérifié. Réessayez la synchronisation ou reconnectez votre compte Google."
     },
+    "zapier": {
+      "title": "Connecter Zapier",
+      "description": "Les Zaps peuvent démarrer à la fin d'un appel, quand un rendez-vous est réservé, déplacé ou annulé, quand un message est pris ou quand un contact est ajouté. Ils peuvent aussi ajouter et modifier des contacts, réserver, déplacer et annuler des rendez-vous, et ajouter des connaissances pour votre agent.",
+      "steps": {
+        "invite": "Acceptez l'invitation à utiliser {{appName}} dans Zapier. Zapier vous demande d'abord de vous connecter ou de créer un compte gratuit.",
+        "key": "Créez une clé API pour Zapier. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
+        "zap": "Dans Zapier, créez un Zap et choisissez {{appName}}. Quand Zapier vous demande de vous connecter, collez la clé dans «\u00a0API Key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+      },
+      "openInvite": "Ouvrir {{appName}} dans Zapier",
+      "createKey": "Créer une clé pour Zapier",
+      "bookingNote": "Les Zaps ne peuvent réserver des rendez-vous que si la section Rendez-vous de la page Agent est réglée sur Réserve les rendez-vous."
+    },
     "cards": {
       "google": {
         "title": "Google Calendar",
@@ -736,6 +748,10 @@
       "webhooks": {
         "title": "Webhooks",
         "description": "Envoyez les appels, les réservations et les messages à vos outils."
+      },
+      "zapier": {
+        "title": "Zapier",
+        "description": "Connectez {{appName}} à des milliers d'applications, sans code."
       }
     },
     "status": {
@@ -1176,6 +1192,8 @@
       "nameLabel": "Nom",
       "namePlaceholder": "Zapier",
       "scopesLabel": "Accès",
+      "zapier": "Configurer pour Zapier",
+      "zapierHint": "Autorise tout ce dont Zapier a besoin pour vos Zaps.",
       "cancel": "Annuler",
       "submit": "Créer la clé",
       "creating": "Création…"

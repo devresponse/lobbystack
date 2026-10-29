@@ -72,6 +72,20 @@ describe('deployment name', () => {
       process.env = saved;
     }
   });
+
+  it('links the API key help to the page a deployment names', () => {
+    const saved = { ...process.env };
+    Object.assign(process.env, { ZAPIER_APP_NAME: 'AlloPlace', ZAPIER_HELP_URL: 'https://demo.alloplace.com/integrations?setup=zapier', ZAPIER_DOCS_URL: 'https://docs.alloplace.com' });
+    try {
+      jest.isolateModules(() => {
+        const authentication = require('../authentication');
+        expect(authentication.fields[0].helpText).toContain('[Learn more](https://demo.alloplace.com/integrations?setup=zapier)');
+        expect(authentication.fields[0].helpText).not.toContain('docs.alloplace.com');
+      });
+    } finally {
+      process.env = saved;
+    }
+  });
 });
 
 describe('base URL', () => {

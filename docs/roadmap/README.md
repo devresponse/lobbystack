@@ -39,7 +39,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Publish the n8n and Zapier integrations](n8n-and-zapier.md) | A dedicated n8n node, and a Zapier app anyone can install from Zapier's directory | 3 to 5 days for the node; Zapier not estimated | Ready when needed | 2026-10-13, in [integrations](../features/api-cli-integrations.md#connect-n8n) |
+| [Publish the n8n and Zapier integrations](n8n-and-zapier.md) | A dedicated n8n node, and the brands' private Zapier integration (fork PR #94) listed in Zapier's directory | 3 to 5 days for the node; 1.5 to 2.5 days for the listing | Ready when needed | 2026-10-13, in [integrations](../features/api-cli-integrations.md#connect-n8n) |
 | [Offer a QR place guide](qr-place-guide.md) | A no-login guide at a place, paid for by the place's owner | A pilot with no code; a minimum product in 16 to 23 days at the time | Waiting on a decision | [2026-10-10](../research/qr-place-guide-market.md) |
 
 ## Know the smaller items

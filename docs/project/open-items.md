@@ -15,6 +15,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 7. **Check that the website chat answers.** On 2026-10-25 OpenAI refused the key the chat used (401 `invalid_api_key`), so the widget answered every message with "Your message couldn't be sent.". The chat, the AI behind phone calls and the call summaries use `AI_CHAT_API_KEY` when it's set, and `OPENAI_API_KEY` otherwise ([guide, Appendix A](../deployment/guide/appendix-a-variables.md)). Give the admin and the worker a working key, or leave `AI_CHAT_API_KEY` unset, then send a message on the widget. Once fork PR #79 is live, a reply that fails shows an Error ID to look up ([website widget](../features/website-widget.md#find-out-why-a-reply-failed)).
 8. **Listen to a call after fork PR #84,** which migrations `0117` and `0118` come with. Every business's calls then say "You're speaking with an AI assistant, and this call is recorded and transcribed." after the greeting, in the call's language. Make a test call and check that the whole opening is said once; turn **Tell callers about AI and recording** off in **AI settings** only for a business that tells callers another way. To get an email after each call, turn on **Call summary** under **Settings > Notifications**; its button uses the worker's `APP_BASE_URL` (item 5) ([calls](../features/calls.md#tell-callers-theyre-speaking-with-an-ai-and-the-call-is-recorded), [email](../features/email.md#email-the-team-after-each-call)).
 9. **Read migrate's log after fork PR #93,** which brings migrations `0120` to `0127`. It should show `Users: <n> unused password hash copies cleared.` and `Expired calls: <n> session and <n> conversation summaries cleared.`; a line starting `Skipping the` means those repairs didn't run, because migrate didn't sign in as `postgres`. If the worker went live before migrate finished, it logs `startup scheduling failed`: redeploy it ([guide 7.3](../deployment/guide/part-7-operations.md#73-database-migrations), steps 5 and 6).
+10. **Make a test Zap after fork PR #94.** The **Integrations** page should show a Zapier card. Open it, accept the invite, create a key with **Set up for Zapier**, and turn on a Zap for New Call in Zapier; a test call should start it ([integrations](../features/api-cli-integrations.md#connect-zapier)).
 
 ## Do these before a date
 
@@ -69,7 +70,7 @@ The demo was last seen running `fa0aa11` (fork PR #70) on 2026-10-23. Fork PRs #
 - Extra public plans in the plan screens and checkout ([billing](../billing/README.md#know-the-known-problems)).
 - Changing a business's public page slug, and custom domains per business ([public page](../features/public-profile-and-qr.md)).
 - The v1 API's remaining gaps against the database ([API gaps](../reference/api-gaps.md)).
-- A dedicated n8n node, and the Zapier app published under the brand's own account ([API, CLI and integrations](../features/api-cli-integrations.md), [roadmap](../roadmap/n8n-and-zapier.md)).
+- A dedicated n8n node, and the Zapier integration listed in Zapier's directory once the brand is public ([API, CLI and integrations](../features/api-cli-integrations.md#connect-zapier), [roadmap](../roadmap/n8n-and-zapier.md)).
 - An automatic check after each deploy.
 - The website chat's words when only the reply fails: it says the message couldn't be sent, though it was saved and the team alerted ([website widget](../features/website-widget.md#know-the-gaps)).
 - A card or ID number said across two turns of a call is still in the email after the call, which takes numbers out one turn at a time ([email](../features/email.md#email-the-team-after-each-call)).
@@ -82,7 +83,7 @@ The docs no longer link to the original project's sites, but some code and confi
 - `NEXT_PUBLIC_POSTHOG_HOST` defaults to the original's PostHog relay in `docker-compose.yml` and `.env.example`; on Railway, leave it unset.
 - `packages/shared/src/brandLinks.ts` and `brands/lobbystack/brand.json` name the original's site, docs and email addresses for the `lobbystack` brand, and the affiliate route falls back to the original's dashboard address. Since fork PR #87 a deployment of this code shows that brand only with `BRAND_PRESET=lobbystack`.
 - `scripts/production-smoke.ts` expects the original's phone numbers unless `SMOKE_EXPECTED_NUMBERS` is set, and `scripts/write-openapi.ts` writes the original's server address into the OpenAPI file.
-- The Zapier app (`integrations/zapier/`) connects to the original's dashboard and docs unless `ZAPIER_DEFAULT_URL` and `ZAPIER_DOCS_URL` are set; the CLI's onboarding help links to the original's docs.
+- The Zapier integration (`integrations/zapier/`) still names LobbyStack and points at the original's dashboard and docs when it's pushed without `npm run push`, which sets the brand's own name, dashboard and help link (fork PR #94); the CLI's onboarding help links to the original's docs.
 - `.railway/railway.ts` allows the original's site as a website-call origin; the fork's deployments don't use that file.
 - `apps/landing/`, `mintlify/` and `research/` are the original's site, help pages and articles, full of its links. The fork doesn't publish them.
 

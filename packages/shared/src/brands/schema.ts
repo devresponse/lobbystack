@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { billingProfileSchema, canonicalBillingProfileJson, resolveBillingPlans, type BillingProfile } from "../billingProfile";
 import { MAX_APP_NAME_LENGTH, brandLogoContentType, normalizeAccentColor, normalizeAppName } from "../branding";
-import { normalizeEmailAddress, normalizePageUrl, normalizeSiteUrl } from "../brandLinks";
+import { normalizeEmailAddress, normalizePageUrl, normalizeSiteUrl, normalizeZapierUrl } from "../brandLinks";
 import type { BrandBillingPlan, BrandDefinition, BrandImage, BrandIndex } from "./types";
 
 // The files under brands/ and how `pnpm brands:build` turns them into
@@ -38,6 +38,7 @@ export const brandFileSchema = z.strictObject({
     terms: checked(normalizePageUrl, "an http or https URL").optional(),
     privacy: checked(normalizePageUrl, "an http or https URL").optional(),
     docs: checked(normalizeSiteUrl, "an http or https URL with no query or fragment").optional(),
+    zapier: checked(normalizeZapierUrl, "an https link on zapier.com: the brand's Zapier invite link, or its page in Zapier's app directory").optional(),
   }).optional(),
   contactEmail: checked(normalizeEmailAddress, "a plain email address").optional(),
   environments: z.record(
@@ -189,6 +190,7 @@ export function compileBrands(sources: BrandSources): CompiledBrands {
         privacyUrl: file.links?.privacy ? normalizePageUrl(file.links.privacy) : null,
         docsUrl: file.links?.docs ? normalizeSiteUrl(file.links.docs) : null,
         contactEmail: file.contactEmail ? normalizeEmailAddress(file.contactEmail) : null,
+        zapierUrl: file.links?.zapier ? normalizeZapierUrl(file.links.zapier) : null,
       },
       environments,
     };

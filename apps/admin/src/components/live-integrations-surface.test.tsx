@@ -68,7 +68,10 @@ describe("original integration permissions and setup navigation", () => {
   it("does not request administrator calendar connections for viewers", () => {
     const fetchMock = setup("viewer");
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "integrations.actions.connect" }).hasAttribute("disabled")).toBe(true);
+    // Every card's Connect button, Zapier's too when the brand has its own Zapier integration.
+    const connect = screen.getAllByRole("button", { name: "integrations.actions.connect" });
+    expect(connect.length).toBeGreaterThan(0);
+    expect(connect.every((button) => button.hasAttribute("disabled"))).toBe(true);
   });
   it("opens the calendar dialog and consumes only the setup parameter", async () => {
     route.search = new URLSearchParams("setup=calendar&keep=value");

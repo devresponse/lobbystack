@@ -114,7 +114,7 @@ describe("resolveBrandLinks", () => {
       privacyUrl: "https://alloplace.com/legal/privacy",
       docsUrl: "https://alloplace.com",
       contactEmail: "support@alloplace.com",
-      zapierUrl: "https://zapier.com/developer/public-invite/248757/519757/3b7d782a7813340d4cbcb4f8fa6f3294/",
+      zapierUrl: "https://zapier.com/developer/public-invite/248757/58a2d90f08ed088e15d28ee05541d2e6/",
       makeUrl: null,
     });
     for (const purpose of Object.keys(LOBBYSTACK_CONTACT_EMAILS) as Array<keyof typeof LOBBYSTACK_CONTACT_EMAILS>) {

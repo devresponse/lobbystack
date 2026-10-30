@@ -1,10 +1,10 @@
 import { and, count, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
-import { appointments, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
+import { appointments, auditLogs, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
 import { billableVoiceSeconds, isNonBillableCallDisposition } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem, type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
-import { requireBusinessMembership } from "../authz";
+import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { findOrCreateContactByPhone } from "./contacts";
 import type { DomainContext } from "./context";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
@@ -447,7 +447,8 @@ export async function listCalls(
     const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
     const search = input.search?.trim();
     const transcriptPreview = sql<string | null>`(select ${transcripts.text} from ${transcripts} where ${transcripts.callId} = ${calls.id} order by ${transcripts.sequence} desc limit 1)`;
-    const filter = and(eq(calls.businessId, input.businessId), ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []));
+    // Archived calls leave the list and its count.
+    const filter = and(eq(calls.businessId, input.businessId), isNull(calls.archivedAt), ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []));
     const rows = await tx.select({
        id: calls.id,
       providerCallId: calls.providerCallId,
@@ -531,6 +532,7 @@ export async function getCallDetail(
       providerDurationSeconds: calls.providerDurationSeconds,
       gatewaySessionId: calls.gatewaySessionId,
       twilioCallSid: calls.twilioCallSid,
+      archivedAt: calls.archivedAt,
       contactId: calls.contactId,
       recordingObjectId: calls.recordingObjectId,
       recordingStatus: storageObjects.status,
@@ -574,6 +576,7 @@ export async function getCallDetail(
         gatewaySessionId: row.gatewaySessionId,
         // A Twilio call's own ID is its SID.
         twilioCallSid: row.twilioCallSid ?? (row.provider === "twilio" ? row.providerCallId : null),
+        archivedAt: row.archivedAt,
       },
       contact: row.contactId ? { id: row.contactId, name: row.contactName, phone: row.contactPhone, email: row.contactEmail, blockedAt: row.contactBlockedAt } : null,
       outcome: row.reason === row.disposition ? null : row.reason,
@@ -588,6 +591,32 @@ export async function getCallDetail(
       appointments: appointmentRows,
       followUpTasks,
     };
+  });
+}
+
+/**
+ * Archives a call, or restores it. Archiving only hides the call from the
+ * Calls list and Home's recent calls: its transcript, recording and
+ * follow-ups stay, and its page still opens. Owners and admins only, since it
+ * hides the call from the whole team. Null when the business has no such call.
+ */
+export async function setCallArchived(
+  context: DomainContext,
+  input: { userId: string; businessId: string; callId: string; archived: boolean },
+): Promise<{ archivedAt: Date | null } | null> {
+  return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, input);
+    const [call] = await tx.update(calls).set({
+      // Archiving again keeps the first time.
+      archivedAt: input.archived ? sql`coalesce(${calls.archivedAt}, now())` : null,
+      revision: sql`${calls.revision} + 1`,
+      updatedAt: new Date(),
+    }).where(and(eq(calls.id, input.callId), eq(calls.businessId, input.businessId))).returning({ id: calls.id, archivedAt: calls.archivedAt, revision: calls.revision });
+    if (!call) return null;
+    await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: input.archived ? "call.archived" : "call.restored", entityType: "call", entityId: call.id });
+    // Other open dashboards drop the call from their lists, or bring it back.
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "call", aggregateId: call.id, dedupeKey: `call:${call.id}:archive:${call.revision}`, payload: { type: "call.updated", entityId: call.id, revision: call.revision } });
+    return { archivedAt: call.archivedAt };
   });
 }
 

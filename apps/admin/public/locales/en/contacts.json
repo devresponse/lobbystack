@@ -82,6 +82,7 @@
       "callCompleted": "completed",
       "callFailed": "failed",
       "callInProgress": "in progress",
+      "callArchived": "Archived",
       "smsInbound": "Inbound SMS",
       "smsOutbound": "Outbound SMS",
       "messageSent": "Sent",

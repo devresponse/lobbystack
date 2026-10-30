@@ -1,8 +1,11 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
+  Archive,
+  ArchiveRestore,
   CheckCircle2,
   Circle,
   FileText,
@@ -12,8 +15,10 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 import { CallRecordingPlayer } from "@/components/audio/call-recording-player";
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { BackLink, DetailSection, MetadataField, truncateId, useCopiedField } from "@/components/detail-fields";
 import { SectionBlock } from "@/components/section-block";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +53,8 @@ type Detail = {
     providerDurationSeconds: number | null;
     gatewaySessionId: string | null;
     twilioCallSid?: string | null;
+    /** When an owner or admin archived the call, which hides it from the Calls list. */
+    archivedAt?: string | null;
   };
   contact: { id: string; name: string | null; phone: string | null; email: string | null; blockedAt: string | null } | null;
   outcome: string | null;
@@ -92,10 +99,14 @@ function CallEventTimeline({ events, locale }: { events: Detail["timeline"]; loc
 
 export function LiveCallDetailSurface({ callId }: { callId: string }) {
   const { i18n, t } = useTranslation("calls");
+  const router = useRouter();
   const telemetry = useTelemetry();
   const queryClient = useQueryClient();
   const { copiedField, copy } = useCopiedField();
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const { businesses, business } = useActiveBusiness();
+  // Archiving hides the call from the whole team, so the server lets only owners and admins do it.
+  const canArchive = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const detail = useQuery({
     queryKey: ["call", business?.businessId, callId],
     queryFn: () => requestJson<Detail>(`/api/calls/${encodeURIComponent(callId)}?businessId=${encodeURIComponent(business!.businessId)}`),
@@ -105,6 +116,24 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
     queryKey: ["call-recording", callId],
     queryFn: () => requestJson<{ url: string }>(`/api/calls/${encodeURIComponent(callId)}/recording`),
     enabled: detail.data?.recording.state === "available",
+  });
+  const setArchived = useMutation({
+    mutationFn: (archived: boolean) => requestJson<{ archivedAt: string | null }>(`/api/calls/${encodeURIComponent(callId)}?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ action: archived ? "archive" : "restore" }) }),
+    onSuccess: async (_, archived) => {
+      toast.success(t(archived ? "detail.archive.done" : "detail.archive.restored"));
+      if (archived) {
+        // Back to the list, which mustn't show the call from its cache while it reloads.
+        queryClient.setQueriesData<{ calls: Array<{ id: string }> }>({ queryKey: ["calls", business?.businessId] }, (data) => data && { ...data, calls: data.calls.filter((row) => row.id !== callId) });
+        router.push("/calls");
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["call", business?.businessId, callId] }),
+        queryClient.invalidateQueries({ queryKey: ["calls", business?.businessId] }),
+        queryClient.invalidateQueries({ queryKey: ["contact", business?.businessId] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      ]);
+    },
+    onError: (_, archived) => { toast.error(t(archived ? "detail.archive.failed" : "detail.archive.restoreFailed")); },
   });
   const completeFollowUp = useMutation({ mutationFn: (inboxItemId: string) => requestJson<{ completed: number }>(`/api/calls/${encodeURIComponent(callId)}?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ action: "complete_follow_up", inboxItemId }) }), onSuccess: async (_, inboxItemId) => { if (business) telemetry.track("web.voice.follow_up_completed", { businessId: business.businessId, callId, inboxItemId }); await Promise.all([queryClient.invalidateQueries({ queryKey: ["call", business?.businessId, callId] }), queryClient.invalidateQueries({ queryKey: ["dashboard"] })]); } });
 
@@ -147,7 +176,17 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
               <span className="type-body-muted">{t("detail.blocking.blockedAtInline", { time: formatDate(contact?.blockedAt ?? call.endedAt ?? call.startedAt, i18n.language) })}</span>
             </div>
           ) : null}
+          {call.archivedAt ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{t("detail.archive.badge")}</Badge>
+              <span className="type-body-muted">{t("detail.archive.archivedAtInline", { time: formatDate(call.archivedAt, i18n.language) })}</span>
+            </div>
+          ) : null}
         </div>
+        {canArchive ? call.archivedAt
+          ? <Button className="self-start" disabled={setArchived.isPending} onClick={() => setArchived.mutate(false)} size="sm" variant="outline"><ArchiveRestore data-icon="inline-start" />{t("detail.archive.restore")}</Button>
+          : <Button className="self-start" onClick={() => setArchiveOpen(true)} size="sm" variant="outline"><Archive data-icon="inline-start" />{t("detail.archive.action")}</Button>
+          : null}
       </div>
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -179,6 +218,8 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
           <DetailsTab detail={detail.data} marking={completeFollowUp.isPending ? completeFollowUp.variables : undefined} onCompleteFollowUp={(inboxItemId) => completeFollowUp.mutate(inboxItemId)} />
         </TabsContent>
       </Tabs>
+
+      <ConfirmActionDialog cancelLabel={t("detail.archive.cancel")} confirmLabel={t("detail.archive.confirm")} description={t("detail.archive.description")} onConfirm={async () => { await setArchived.mutateAsync(true); }} onOpenChange={(open) => { if (!setArchived.isPending) setArchiveOpen(open); }} open={archiveOpen} pending={setArchived.isPending} title={t("detail.archive.title")} />
     </div>
   );
 }

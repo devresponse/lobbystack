@@ -607,6 +607,9 @@ export const calls = pgTable(
     providerPriceUnit: varchar("provider_price_unit", { length: 16 }),
     providerCostUsd: doublePrecision("provider_cost_usd"),
     recordingObjectId: uuid("recording_object_id"),
+    // Set when an owner or admin archives the call, which hides it from the
+    // Calls list and Home's recent calls. Nothing is deleted.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,

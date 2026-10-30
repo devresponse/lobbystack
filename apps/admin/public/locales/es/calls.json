@@ -153,6 +153,20 @@
       "badge": "Bloqueada",
       "blockedAtInline": "Bloqueada el {{time}}"
     },
+    "archive": {
+      "action": "Archivar",
+      "title": "¿Archivar esta llamada?",
+      "description": "Dejará de aparecer en Llamadas y en Inicio. No se elimina nada: se conservan su transcripción y su grabación, y podrá restaurarla desde esta página.",
+      "cancel": "Cancelar",
+      "confirm": "Archivar llamada",
+      "done": "Llamada archivada.",
+      "failed": "No se pudo archivar la llamada.",
+      "badge": "Archivada",
+      "archivedAtInline": "Archivada el {{time}}",
+      "restore": "Restaurar",
+      "restored": "Llamada restaurada.",
+      "restoreFailed": "No se pudo restaurar la llamada."
+    },
     "details": {
       "outcomeTitle": "Resultado",
       "followUpTitle_one": "Tarea de seguimiento",

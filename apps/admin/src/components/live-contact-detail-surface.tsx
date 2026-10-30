@@ -58,7 +58,8 @@ type Detail = {
   channels?: string[];
   /** The contact's keypad PIN for appointment changes; older API responses omit it. */
   passcode?: ContactPasscodeStatus;
-  calls: Array<{ id: string; status: string; disposition: string | null; transport: string; startedAt: string; endedAt: string | null; providerDurationSeconds: number | null }>;
+  /** Archived calls stay here, marked, though the Calls list leaves them out. */
+  calls: Array<{ id: string; status: string; disposition: string | null; transport: string; startedAt: string; endedAt: string | null; providerDurationSeconds: number | null; archivedAt?: string | null }>;
   messages: Array<{ id: string; conversationId: string; direction: string; channel: string; body: string; status: string; createdAt: string }>;
   appointments: Array<{ id: string; startsAt: string; endsAt: string; timezone: string; status: string; sourceChannel: string; calendarSyncState: string; serviceName: string; staffName: string }>;
   activityCounts: { calls: number; messages: number; appointments: number; conversations: number };
@@ -224,7 +225,7 @@ function ActivityTab({ data, locale }: { data: Detail; locale: string }) {
       if (row.kind === "call") {
         const duration = formatDuration(row.call.providerDurationSeconds);
         const callStatus = resolveCallStatus(row.call.status, row.call.disposition);
-        summary = <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="type-body border-b border-dashed border-muted-foreground/40 pb-0.5 transition-colors hover:border-current">{channel === "web_call" ? getChannelLabel(row.call.transport, t) : t("detail.activity.callInbound")}</span><span className="type-body-muted">{duration}</span><span className={cn("type-meta", callStatus === "completed" && "text-emerald-600 dark:text-emerald-400", callStatus === "failed" && "text-destructive")}>{t(callStatus === "completed" ? "detail.activity.callCompleted" : callStatus === "failed" ? "detail.activity.callFailed" : callStatus === "blocked" ? "detail.activity.callBlocked" : "detail.activity.callInProgress")}</span></div>;
+        summary = <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5"><span className="type-body border-b border-dashed border-muted-foreground/40 pb-0.5 transition-colors hover:border-current">{channel === "web_call" ? getChannelLabel(row.call.transport, t) : t("detail.activity.callInbound")}</span><span className="type-body-muted">{duration}</span><span className={cn("type-meta", callStatus === "completed" && "text-emerald-600 dark:text-emerald-400", callStatus === "failed" && "text-destructive")}>{t(callStatus === "completed" ? "detail.activity.callCompleted" : callStatus === "failed" ? "detail.activity.callFailed" : callStatus === "blocked" ? "detail.activity.callBlocked" : "detail.activity.callInProgress")}</span>{row.call.archivedAt ? <Badge variant="secondary">{t("detail.activity.callArchived")}</Badge> : null}</div>;
       } else if (row.kind === "message") {
         summary = channel === "sms" || !channel
           ? <span className="type-body">{t(row.message.direction === "outbound" ? "detail.activity.smsOutbound" : "detail.activity.smsInbound")}</span>

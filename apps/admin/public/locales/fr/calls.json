@@ -153,6 +153,20 @@
       "badge": "Bloqué",
       "blockedAtInline": "Bloqué le {{time}}"
     },
+    "archive": {
+      "action": "Archiver",
+      "title": "Archiver cet appel ?",
+      "description": "Il n'apparaîtra plus dans Appels ni sur l'Accueil. Rien n'est supprimé : sa transcription et son enregistrement sont conservés, et vous pourrez le restaurer depuis cette page.",
+      "cancel": "Annuler",
+      "confirm": "Archiver l'appel",
+      "done": "Appel archivé.",
+      "failed": "Impossible d'archiver l'appel.",
+      "badge": "Archivé",
+      "archivedAtInline": "Archivé le {{time}}",
+      "restore": "Restaurer",
+      "restored": "Appel restauré.",
+      "restoreFailed": "Impossible de restaurer l'appel."
+    },
     "details": {
       "outcomeTitle": "Résultat",
       "followUpTitle_one": "Tâche de suivi",

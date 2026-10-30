@@ -37,7 +37,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 
 | Page | What it covers |
 | --- | --- |
-| [Phone and browser calls](features/calls.md) | GPT-Live, the recorded greeting, the time limit, AI traces |
+| [Phone and browser calls](features/calls.md) | GPT-Live, the recorded greeting, the time limit, AI traces, archiving a call |
 | [Caller authentication](features/caller-authentication.md) | The four ways to verify a caller before an appointment change, including keypad PINs |
 | [Phone numbers](features/phone-numbers.md) | Picking or claiming a business's Twilio number, and debugging a failed pick |
 | [Text messages](features/sms.md) | Texts in and out: hand replies, consent, alerts and who they come from |

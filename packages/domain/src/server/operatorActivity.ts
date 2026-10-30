@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, ne } from "drizzle-orm";
 
 import { appointments, calls, contacts, services, staff, type DatabaseTransaction } from "@lobbystack/db";
 
@@ -8,7 +8,7 @@ import { appointments, calls, contacts, services, staff, type DatabaseTransactio
  * saved name. Callers run these inside an operator business transaction.
  */
 
-/** The most recent calls for the home page. */
+/** The most recent calls for the home page, leaving out archived ones. */
 export async function listRecentCalls(tx: DatabaseTransaction, businessId: string, limit = 5) {
   return await tx.select({
     id: calls.id,
@@ -20,7 +20,7 @@ export async function listRecentCalls(tx: DatabaseTransaction, businessId: strin
     contactName: contacts.name,
     contactPhone: contacts.phone,
     contactEmail: contacts.email,
-  }).from(calls).leftJoin(contacts, eq(calls.contactId, contacts.id)).where(eq(calls.businessId, businessId)).orderBy(desc(calls.startedAt)).limit(limit);
+  }).from(calls).leftJoin(contacts, eq(calls.contactId, contacts.id)).where(and(eq(calls.businessId, businessId), isNull(calls.archivedAt))).orderBy(desc(calls.startedAt)).limit(limit);
 }
 
 /** The next appointments that start at or after `from` and aren't cancelled, for the home page. */

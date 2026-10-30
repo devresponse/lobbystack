@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#99](https://github.com/devresponse/lobbystack/pull/99) | Answer OpenAI's call webhook once the call is accepted |  | `23883d2` | [docs](../voice/runtime.md#follow-a-phone-call) |
 | [#98](https://github.com/devresponse/lobbystack/pull/98) | Time the greeting fallback by the session's clock, and open for a caller who speaks first |  | `524d641` | [docs](../voice/runtime.md#greet-the-caller-before-they-speak) |
 | [#97](https://github.com/devresponse/lobbystack/pull/97) | Record call openings with GPT-Live instead of the speech model |  | `2312ae2` | [docs](../voice/runtime.md#make-a-recording) |
 | [#96](https://github.com/devresponse/lobbystack/pull/96) | Open phone calls with the recorded greeting |  | `4493bc8` | [docs](../features/calls.md#open-calls-with-a-recorded-greeting) |

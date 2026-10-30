@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { completeVoiceFollowUpTasks, getCallDetail } from "@lobbystack/domain";
+import { completeVoiceFollowUpTasks, getCallDetail, setCallArchived } from "@lobbystack/domain";
 import { isUuid } from "@lobbystack/shared";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
@@ -24,12 +24,17 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ ca
   try {
     const { session, businessId } = await requireOperatorBusiness(request);
     const body = await readJson(request) as { action?: string; inboxItemId?: unknown };
-    if (!body || body.action !== "complete_follow_up") return jsonError("action must be complete_follow_up.", 400);
+    if (!body || !["complete_follow_up", "archive", "restore"].includes(body.action ?? "")) return jsonError("action must be complete_follow_up, archive or restore.", 400);
     // With inboxItemId, only that follow-up; without, every one on the call.
     const { inboxItemId } = body;
     if (inboxItemId !== undefined && !isUuid(inboxItemId)) return jsonError("inboxItemId must be a UUID.", 400, "invalid_request");
     const { callId } = await params;
     if (!isUuid(callId)) return jsonError("Call not found.", 404, "not_found");
+    if (body.action !== "complete_follow_up") {
+      // Archiving hides the call from the Calls list and Home; nothing is deleted.
+      const archived = await setCallArchived(createDomainContext(), { userId: session.user.id, businessId, callId, archived: body.action === "archive" });
+      return archived ? NextResponse.json(archived) : jsonError("Call not found.", 404, "not_found");
+    }
     return NextResponse.json(await completeVoiceFollowUpTasks(createDomainContext(), { userId: session.user.id, businessId, callId, ...(inboxItemId ? { inboxItemId } : {}) }));
   } catch (error) {
     return asApiResponse(error);

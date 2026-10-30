@@ -82,6 +82,7 @@
       "callCompleted": "završen",
       "callFailed": "neuspešan",
       "callInProgress": "u toku",
+      "callArchived": "Arhiviran",
       "smsInbound": "Dolazni SMS",
       "smsOutbound": "Odlazni SMS",
       "messageSent": "Poslato",

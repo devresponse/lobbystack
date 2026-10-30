@@ -35,13 +35,13 @@ Since fork PR #104, the admin writes one line for each sign-in and account step.
 | --- | --- |
 | `auth.signed_in` | Someone signs in, with the session's `authSessionId` |
 | `auth.sign_in_failed` | A sign-in is refused. `INVALID_EMAIL_OR_PASSWORD` with `accountFound` true is a wrong password; with `accountFound` false, no account has that address. `EMAIL_NOT_VERIFIED` is an address not yet confirmed |
-| `auth.rate_limited` | A lockout. `limit` is `route` for Better Auth's limit on a route, such as 5 sign-in tries a minute, or `recipient` for the limit on codes and reset emails sent to one address. At most one line a minute for each route, limit and address |
+| `auth.rate_limited` | A lockout. `limit` is `route` for Better Auth's limit on a route, such as 5 sign-in tries a minute, or `recipient` for the limit on codes emailed to one address. At most one line a minute for each route, limit and address |
 | `auth.signed_up` | A new account is created |
 | `auth.sign_up_existing_account` | Someone signs up with an address that already has an account. They see the same answer as for a new account, and `verified` says whether a sign-in reminder or a new code went out |
 | `auth.sign_up_failed` | A sign-up is refused, such as for a weak password or a failed challenge |
-| `auth.password_reset_requested`, `auth.password_reset_request_failed` | Someone asks for a reset by emailed link or code (`method`). `accountFound` false means no account has the address, so nothing was sent |
-| `auth.password_reset`, `auth.password_reset_failed` | A reset finishes, which signs out every session, or is refused: `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS` or `INVALID_TOKEN` |
-| `auth.password_changed`, `auth.password_change_failed` | A password change in **Settings > Account**, with `revokedOtherSessions`. `INVALID_PASSWORD` is a wrong current password |
+| `auth.password_reset_requested`, `auth.password_reset_request_failed` | Someone asks for a reset code by email. `accountFound` false means no account has the address, so nothing was sent |
+| `auth.password_reset`, `auth.password_reset_failed` | A reset finishes, which signs out every session, or is refused, such as with `INVALID_OTP`, `OTP_EXPIRED`, `TOO_MANY_ATTEMPTS`, or `INVALID_PASSWORD` for a weak new password |
+| `auth.password_changed`, `auth.password_change_failed` | A password change in **Settings > Account**, with `revokedOtherSessions`. `INVALID_PASSWORD` is a wrong current password or a weak new one |
 | `auth.email_change_requested`, `auth.email_change_failed` | An email change is asked for in **Settings > Account** |
 | `auth.email_change_confirmed`, `auth.email_changed` | The current address approves the change, then the new address confirms it |
 | `auth.email_verified`, `auth.email_verification_failed` | An address is confirmed by code or link (`method`), or the code or link is refused, with `emailChange` true during a change |

@@ -14,6 +14,7 @@ describe("phoneNumberErrorMessage", () => {
     ["daily_claim_quota_reached", "phoneNumber.errors.dailyClaimQuota"],
     ["number_search_rate_limited", "phoneNumber.errors.searchRateLimited"],
     ["paid_plan_required", "phoneNumber.errors.paidPlanRequired"],
+    ["phone_numbers_unavailable", "phoneNumber.errors.numbersUnavailable"],
   ])("explains %s", (code, key) => {
     expect(phoneNumberErrorMessage(Object.assign(new Error("English server text."), { code }), t, "Fallback.")).toBe(key);
   });
@@ -30,7 +31,7 @@ describe("phoneNumberErrorMessage", () => {
 
   it("has English copy for every key it uses", () => {
     const errors = en.phoneNumber.errors as Record<string, string>;
-    for (const code of ["number_offer_expired", "number_offer_invalid", "number_offer_mismatch", "number_claim_in_progress", "number_claim_rate_limited", "daily_claim_quota_reached", "monthly_claim_quota_reached", "business_number_exists", "invalid_onboarding_stage", "paid_plan_required", "replacement_used", "active_number_required", "replacement_number_must_differ", "unsupported_country", "number_search_rate_limited", "number_search_invalid", "number_search_unsupported"]) {
+    for (const code of ["number_offer_expired", "number_offer_invalid", "number_offer_mismatch", "number_claim_in_progress", "number_claim_rate_limited", "daily_claim_quota_reached", "monthly_claim_quota_reached", "business_number_exists", "invalid_onboarding_stage", "paid_plan_required", "replacement_used", "active_number_required", "replacement_number_must_differ", "unsupported_country", "number_search_rate_limited", "number_search_invalid", "number_search_unsupported", "phone_numbers_unavailable"]) {
       const key = phoneNumberErrorMessage({ code }, (value) => value, "")!;
       expect(errors[key.replace("phoneNumber.errors.", "")], code).toEqual(expect.any(String));
     }

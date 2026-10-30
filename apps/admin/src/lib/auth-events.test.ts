@@ -100,7 +100,7 @@ describe("password and email lines", () => {
     });
 
     expect(mocks.log).toHaveBeenCalledExactlyOnceWith("warn", "auth.password_reset_failed", {
-      path: "/email-otp/reset-password", method: "code", userId: "user-1", accountFound: true, status: 403, code: "TOO_MANY_ATTEMPTS",
+      path: "/email-otp/reset-password", userId: "user-1", accountFound: true, status: 403, code: "TOO_MANY_ATTEMPTS",
     });
     expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("123456");
   });

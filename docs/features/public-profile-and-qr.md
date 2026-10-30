@@ -4,7 +4,7 @@ Each business can publish a public page at `/profile/<slug>` on its deployment, 
 
 ## Publish the public profile
 
-An owner or admin opens **Settings > Public profile** (`/settings/profile`), fills in what the page shows and publishes it. The page lives at `<dashboard domain>/profile/<slug>`, where `<slug>` is the business's existing unique slug.
+An owner or admin opens **Settings > Public profile** (`/settings/profile`), fills in what the page shows and publishes it. The page lives at `<dashboard domain>/profile/<slug>`, where `<slug>` is the business's existing unique slug. A new business's slug is made from its name. When another business has it, the new one gets a 12-character suffix, and since fork PR #105 so does a business whose slug another sign-up is creating at the same moment, instead of waiting for that sign-up to finish (`insertBusinessInTransaction` in `packages/domain/src/server/tenancy.ts`).
 
 The page shows, in the deployment brand's colour:
 

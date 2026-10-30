@@ -633,6 +633,7 @@
       "searchRateLimited": "Trop de recherches. Patientez quelques minutes, puis réessayez.",
       "searchInvalid": "L'opérateur n'a pas pu lancer la recherche avec cet indicatif régional. Vérifiez-le et réessayez.",
       "searchUnsupported": "L'opérateur n'a aucun numéro de ce type dans ce pays.",
+      "numbersUnavailable": "Les numéros de téléphone ne sont pas encore configurés sur ce tableau de bord. Demandez à la personne qui le gère de connecter un fournisseur de téléphonie.",
       "withErrorId": "{{message}} ID de l'erreur : {{errorId}}"
     },
     "toast": {

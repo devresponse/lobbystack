@@ -29,11 +29,9 @@ const ROUTE_EVENTS: Record<string, { succeeded?: string; failed: string; method?
   "/sign-in/email": { succeeded: "auth.signed_in", failed: "auth.sign_in_failed" },
   // A repeated sign-up answers like a new one, so the user-create hook logs auth.signed_up.
   "/sign-up/email": { failed: "auth.sign_up_failed" },
-  "/request-password-reset": { succeeded: "auth.password_reset_requested", failed: "auth.password_reset_request_failed", method: "link" },
-  "/email-otp/request-password-reset": { succeeded: "auth.password_reset_requested", failed: "auth.password_reset_request_failed", method: "code" },
+  "/email-otp/request-password-reset": { succeeded: "auth.password_reset_requested", failed: "auth.password_reset_request_failed" },
   // onPasswordReset logs auth.password_reset, since only it knows the account.
-  "/reset-password": { failed: "auth.password_reset_failed", method: "link" },
-  "/email-otp/reset-password": { failed: "auth.password_reset_failed", method: "code" },
+  "/email-otp/reset-password": { failed: "auth.password_reset_failed" },
   "/change-password": { succeeded: "auth.password_changed", failed: "auth.password_change_failed" },
   "/change-email": { succeeded: "auth.email_change_requested", failed: "auth.email_change_failed" },
   "/verify-email": { succeeded: "auth.email_verified", failed: "auth.email_verification_failed", method: "link" },
@@ -45,7 +43,7 @@ export function authPath(pathname: string): string {
   return pathname.startsWith("/api/auth/") ? pathname.slice("/api/auth".length) : pathname;
 }
 
-/** The route's path and, for resets and verification, whether it took an emailed link or a code. */
+/** The route's path and, for email verification, whether it took an emailed link or a code. */
 export function routeFields(path: string | undefined): { path?: string; method?: "link" | "code" } {
   if (!path) return {};
   const method = ROUTE_EVENTS[path]?.method;

@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { EmailVerificationRateLimitError } from "@/lib/email-verification-policy";
 import { issueEmailVerificationCode } from "@/lib/auth";
+import { logAuthEvent, logRateLimited } from "@/lib/auth-events";
+import { reportServerError } from "@/lib/error-reporting";
 import { trustedClientIp } from "@/lib/trusted-client-ip";
 import { verifyTurnstile } from "@/lib/turnstile";
 import { attachVerificationFlow, hasVerificationFlow } from "@/lib/verification-flow";
@@ -14,17 +16,24 @@ const requestSchema = z.object({
   turnstileToken: z.string().trim().min(1).optional(),
 });
 
+const path = "/email-otp/send-verification-otp";
+
 const successResponse = () => Response.json({ success: true });
+
+function refused(request: Request, code: "INVALID_REQUEST" | "CHALLENGE_FAILED", message: string): Response {
+  logAuthEvent("warn", "auth.verification_code_request_failed", { path, status: 400, code }, request.headers);
+  return Response.json({ code, message }, { status: 400 });
+}
 
 export async function POST(request: Request): Promise<Response> {
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return Response.json({ code: "INVALID_REQUEST", message: "Invalid request." }, { status: 400 });
+    return refused(request, "INVALID_REQUEST", "Invalid request.");
   }
   const parsed = requestSchema.safeParse(body);
-  if (!parsed.success) return Response.json({ code: "INVALID_REQUEST", message: "Invalid request." }, { status: 400 });
+  if (!parsed.success) return refused(request, "INVALID_REQUEST", "Invalid request.");
 
   const email = parsed.data.email.trim().toLowerCase();
   // Shared trusted-IP derivation: only an explicitly configured, ingress-
@@ -34,7 +43,7 @@ export async function POST(request: Request): Promise<Response> {
   try {
     if (!hasProof) await verifyTurnstile({ token: parsed.data.turnstileToken, ...(remoteIp ? { remoteIp } : {}) });
   } catch {
-    return Response.json({ code: "CHALLENGE_FAILED", message: "Verification challenge failed." }, { status: 400 });
+    return refused(request, "CHALLENGE_FAILED", "Verification challenge failed.");
   }
 
   try {
@@ -44,11 +53,14 @@ export async function POST(request: Request): Promise<Response> {
     return response;
   } catch (error) {
     if (error instanceof EmailVerificationRateLimitError) {
+      logRateLimited({ path, limit: "recipient", ...(remoteIp ? { ip: remoteIp } : {}) });
       return Response.json(
         { code: "RATE_LIMITED", message: "Please wait before requesting another verification code." },
         { status: 429, headers: { "retry-after": "60" } },
       );
     }
-    return Response.json({ code: "SERVICE_UNAVAILABLE", message: "Verification service unavailable." }, { status: 503 });
+    const errorId = crypto.randomUUID();
+    void reportServerError(error, { operation: "auth.verification_code", errorId, route: `/api/auth${path}` });
+    return Response.json({ code: "SERVICE_UNAVAILABLE", message: "Verification service unavailable.", errorId }, { status: 503, headers: { "x-error-id": errorId } });
   }
 }

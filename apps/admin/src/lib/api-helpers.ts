@@ -54,7 +54,10 @@ export async function requireApiSession(request: Request): Promise<NonNullable<S
     if (error instanceof Response) {
       throw error;
     }
-    throw jsonError("Authentication service unavailable.", 503, "auth_unavailable");
+    // The session store or database is down: every dashboard request fails here, so report it with an Error ID.
+    const errorId = crypto.randomUUID();
+    runAfterResponse(async () => reportServerError(error, { operation: "auth.session_check", errorId, ...await requestRoute() }));
+    throw NextResponse.json({ error: "Authentication service unavailable.", code: "auth_unavailable", errorId }, { status: 503, headers: { "x-error-id": errorId } });
   }
 }
 

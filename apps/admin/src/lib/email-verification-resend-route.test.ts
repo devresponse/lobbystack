@@ -7,6 +7,8 @@ const mocks = vi.hoisted(() => {
     assertAllowed: vi.fn(),
     issueCode: vi.fn(),
     verifyTurnstile: vi.fn(),
+    log: vi.fn(),
+    report: vi.fn(),
   };
 });
 
@@ -16,6 +18,8 @@ vi.mock("@/lib/email-verification-policy", () => ({
 }));
 vi.mock("@/lib/auth", () => ({ issueEmailVerificationCode: mocks.issueCode }));
 vi.mock("@/lib/turnstile", () => ({ verifyTurnstile: mocks.verifyTurnstile }));
+vi.mock("@/lib/error-reporting", () => ({ reportServerError: mocks.report }));
+vi.mock("@lobbystack/telemetry/node", async (original) => ({ ...await original<typeof import("@lobbystack/telemetry/node")>(), logEvent: mocks.log }));
 
 import { POST } from "../../app/api/auth/email-otp/send-verification-otp/route";
 import { attachVerificationFlow } from "./verification-flow";
@@ -101,6 +105,35 @@ describe("email verification resend route", () => {
     const response = await POST(resendRequest({ email: "missing@example.invalid", type: "email-verification", turnstileToken: "challenge" }));
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });
+  });
+
+  it("logs each refused request and the recipient cooldown, without the address", async () => {
+    const ip = { "x-real-ip": "203.0.113.99" };
+    await POST(resendRequest({ email: "not-an-email", type: "email-verification" }, ip));
+    mocks.verifyTurnstile.mockRejectedValueOnce(new Error("failed"));
+    await POST(resendRequest({ email: "owner@example.invalid", type: "email-verification", turnstileToken: "invalid" }, ip));
+    mocks.issueCode.mockRejectedValueOnce(new mocks.RateLimitError());
+    await POST(resendRequest({ email: "owner@example.invalid", type: "email-verification", turnstileToken: "challenge" }, ip));
+
+    const path = "/email-otp/send-verification-otp";
+    expect(mocks.log.mock.calls).toEqual([
+      ["warn", "auth.verification_code_request_failed", { path, status: 400, code: "INVALID_REQUEST", ip: "203.0.113.99" }],
+      ["warn", "auth.verification_code_request_failed", { path, status: 400, code: "CHALLENGE_FAILED", ip: "203.0.113.99" }],
+      ["warn", "auth.rate_limited", { path, limit: "recipient", ip: "203.0.113.99" }],
+    ]);
+    expect(JSON.stringify(mocks.log.mock.calls)).not.toContain("owner@example.invalid");
+  });
+
+  it("reports an outage with the Error ID it answers with", async () => {
+    const outage = new Error("connect ECONNREFUSED");
+    mocks.issueCode.mockRejectedValueOnce(outage);
+    const response = await POST(resendRequest({ email: "owner@example.invalid", type: "email-verification", turnstileToken: "challenge" }));
+
+    expect(response.status).toBe(503);
+    const body = await response.json() as { code: string; errorId: string };
+    expect(body).toEqual({ code: "SERVICE_UNAVAILABLE", message: "Verification service unavailable.", errorId: expect.any(String) });
+    expect(response.headers.get("x-error-id")).toBe(body.errorId);
+    expect(mocks.report).toHaveBeenCalledExactlyOnceWith(outage, { operation: "auth.verification_code", errorId: body.errorId, route: "/api/auth/email-otp/send-verification-otp" });
   });
 
   it("returns a generic recipient cooldown without issuing a code", async () => {

@@ -12,6 +12,7 @@ import { deploymentAppName } from "@lobbystack/domain";
 import { accounts, sessions, users, verifications } from "@lobbystack/db";
 
 import { configuredAppOrigins } from "./app-origins";
+import { authPath, betterAuthLogger, logAuthEvent, logAuthOutcome, logRateLimited, logRefusals, routeFields } from "./auth-events";
 import { getDatabase } from "./databases";
 import { SUPPORTED_LOCALES, resolveLocale, type SupportedLocale } from "./locale";
 import { ensureMcpResource, isDisabledOAuthEndpoint, mcpOAuthPlugins, needsMcpResource, oauthProviderSchema, registrationWithApplicationType } from "./oauth-provider";
@@ -179,7 +180,7 @@ async function enqueueAuthEmail(input: {
   });
 }
 
-async function enqueueEmailVerificationCode(input: { userId: string; email: string; otp: string; issuanceId: string; locale: SupportedLocale }): Promise<boolean> {
+async function enqueueEmailVerificationCode(input: { userId: string; email: string; otp: string; issuanceId: string; locale: SupportedLocale }): Promise<void> {
   await enqueueAuthEmailOutbox({
     userId: input.userId,
     dedupeKey: `auth-email:verification-code:${input.userId}:${input.issuanceId}`,
@@ -190,7 +191,6 @@ async function enqueueEmailVerificationCode(input: { userId: string; email: stri
       variables: { code: input.otp, locale: input.locale },
     },
   });
-  return true;
 }
 
 export async function issueEmailVerificationCode(email: string, remoteIp?: string | null): Promise<boolean> {
@@ -200,20 +200,27 @@ export async function issueEmailVerificationCode(email: string, remoteIp?: strin
   // Serialize generation and delivery across processes, including slow requests
   // that outlive the Redis cooldown. Bind the OTP adapter to this transaction
   // so concurrent issuances cannot exhaust the pool waiting for a second slot.
-  return await getAuthDatabase().db.transaction(async (tx) => {
+  const sentTo = await getAuthDatabase().db.transaction(async (tx) => {
     const lock = await tx.execute<{ acquired: boolean }>(sql`select pg_try_advisory_xact_lock(hashtextextended(${`email-verification:${normalizedEmail}`}, 0)) as acquired`);
     if (!lock.rows[0]?.acquired) throw new EmailVerificationRateLimitError();
     await assertEmailVerificationSendAllowed({ email: normalizedEmail, ...(remoteIp ? { remoteIp } : {}) });
     const user = (await tx.select({ id: users.id, emailVerified: users.emailVerified, preferredLocale: users.preferredLocale }).from(users).where(eq(users.email, normalizedEmail)).limit(1))[0];
-    if (!user || user.emailVerified) return false;
+    if (!user || user.emailVerified) {
+      logAuthEvent("info", "auth.verification_code_skipped", user ? { userId: user.id, reason: "already_verified" } : { reason: "no_account" });
+      return undefined;
+    }
     const issuanceId = randomUUID();
     const issuer = createAuth(tx);
     const { adapter } = await issuer.$context;
     // Signup runs inside Better Auth's adapter AsyncLocalStorage. A nested
     // instance alone does not replace that adapter for internal writes.
     const otp = await runWithAdapter(adapter, () => issuer.api.createVerificationOTP({ body: { email: normalizedEmail, type: "email-verification" } }));
-    return await enqueueEmailVerificationCode({ userId: user.id, email: normalizedEmail, otp, issuanceId, locale: resolveLocale(user.preferredLocale) });
+    await enqueueEmailVerificationCode({ userId: user.id, email: normalizedEmail, otp, issuanceId, locale: resolveLocale(user.preferredLocale) });
+    return user.id;
   });
+  if (!sentTo) return false;
+  logAuthEvent("info", "auth.verification_code_sent", { userId: sentTo, ...(remoteIp ? { ip: remoteIp } : {}) });
+  return true;
 }
 
 async function rehashLegacyPassword(userId: string, password: string): Promise<void> {
@@ -259,6 +266,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
     baseURL: process.env.APP_BASE_URL ?? "http://localhost:3000",
     trustedOrigins: trustedOrigins.length > 0 ? trustedOrigins : ["http://localhost:3000"],
     secret: process.env.BETTER_AUTH_SECRET ?? process.env.SESSION_ENCRYPTION_KEY ?? "development-only-change-me",
+    logger: betterAuthLogger,
     ...(secondaryStorage ? { secondaryStorage } : {}),
     advanced: {
       useSecureCookies: secureCookies,
@@ -292,6 +300,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
       requireEmailVerification: process.env.REQUIRE_EMAIL_VERIFICATION === "true",
       onExistingUserSignUp: async ({ user }, request) => {
         const { assertEmailVerificationSendAllowed, EmailVerificationRateLimitError } = await import("./email-verification-policy");
+        logAuthEvent("info", "auth.sign_up_existing_account", { userId: user.id, verified: user.emailVerified }, request?.headers);
         try {
           const remoteIp = request ? trustedClientIp(request) : undefined;
           if (!user.emailVerified) {
@@ -311,6 +320,8 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
           });
         } catch (error) {
           if (!(error instanceof EmailVerificationRateLimitError)) throw error;
+          const remoteIp = request ? trustedClientIp(request) : undefined;
+          logRateLimited({ path: "/sign-up/email", limit: "recipient", ...(remoteIp ? { ip: remoteIp } : {}) });
         }
       },
       password: {
@@ -318,6 +329,9 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         verify: async ({ hash, password }: { hash: string; password: string }) => await verifyLegacyPassword(hash, password),
       },
       revokeSessionsOnPasswordReset: true,
+      onPasswordReset: async ({ user }: { user: { id: string } }, request?: Request) => {
+        logAuthEvent("info", "auth.password_reset", { userId: user.id, ...routeFields(request ? authPath(new URL(request.url).pathname) : undefined) }, request?.headers);
+      },
     },
     emailVerification: {
       sendOnSignUp: true,
@@ -336,6 +350,8 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
             // Sign-up/sign-in keep their normal response when a prior issuance
             // already covers this recipient. Other failures remain fail-closed.
             if (!(error instanceof EmailVerificationRateLimitError)) throw error;
+            const remoteIp = request ? trustedClientIp(request) : undefined;
+            logRateLimited({ ...routeFields(request ? authPath(new URL(request.url).pathname) : undefined), limit: "recipient", ...(remoteIp ? { ip: remoteIp } : {}) });
           }
           return;
         }
@@ -363,6 +379,16 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         },
       },
     },
+    databaseHooks: {
+      user: {
+        create: {
+          // Only a new account reaches here; a repeated sign-up logs auth.sign_up_existing_account.
+          after: async (user, context) => {
+            logAuthEvent("info", "auth.signed_up", { userId: user.id, ...routeFields(context?.path) }, context?.headers);
+          },
+        },
+      },
+    },
     session: {
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24,
@@ -387,7 +413,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
       },
     },
     hooks: {
-      before: createAuthMiddleware(async (ctx) => {
+      before: createAuthMiddleware(async (ctx) => await logRefusals(ctx, async () => {
         await assertAuthDatabaseRoles();
         // Enable verification and recovery only; the OTP plugin must not
         // introduce passwordless sign-in or email-change endpoints.
@@ -414,6 +440,7 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
             await assertEmailVerificationSendAllowed({ email: ctx.body.email, scope: "password-reset", ...(remoteIp ? { remoteIp } : {}) });
           } catch (error) {
             if (!(error instanceof EmailVerificationRateLimitError)) throw error;
+            logRateLimited({ ...routeFields(ctx.path), limit: "recipient", ...(remoteIp ? { ip: remoteIp } : {}) });
             // Answer as if sent, matching the endpoint's own success body.
             return ctx.json({ success: true });
           }
@@ -439,8 +466,9 @@ function createAuth(adapterDatabase?: Parameters<typeof drizzleAdapter>[0]) {
         } catch (error) {
           throw new APIError("BAD_REQUEST", { message: error instanceof Error ? error.message : "Turnstile verification failed." });
         }
-      }),
+      })),
       after: createAuthMiddleware(async (ctx) => {
+        await logAuthOutcome(ctx);
         if (ctx.path !== "/sign-in/email") {
           return;
         }

@@ -34,6 +34,7 @@
   ],
   "localizedPortRoutes": [
     "/[locale]/accept-invite",
+    "/[locale]/cancel-account",
     "/[locale]/claim-demo",
     "/[locale]/confirm-email-change",
     "/[locale]/demo",
@@ -554,6 +555,12 @@
     },
     {
       "path": "/reset-password",
+      "fixtureState": "public",
+      "state": "default",
+      "comparison": "port-baseline"
+    },
+    {
+      "path": "/cancel-account",
       "fixtureState": "public",
       "state": "default",
       "comparison": "port-baseline"

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import enCommon from "../../public/locales/en/common.json";
 import en from "../../public/locales/en/dashboard.json";
 import frCommon from "../../public/locales/fr/common.json";
+import enKnowledge from "../../public/locales/en/knowledge.json";
+import frKnowledge from "../../public/locales/fr/knowledge.json";
 import fr from "../../public/locales/fr/dashboard.json";
 import { LiveOverviewSurface } from "./live-overview-surface";
 vi.mock("next/dynamic", () => ({ default: () => () => null }));
@@ -14,21 +16,24 @@ vi.mock("next/dynamic", () => ({ default: () => () => null }));
 vi.mock("./dashboard-activation-card", () => ({ DashboardActivationCard: () => null }));
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); });
-type Overrides = { upcoming?: Array<Record<string, unknown>>; recentCalls?: Array<Record<string, unknown>>; actionRequired?: Array<Record<string, unknown>>; role?: string };
+type Overrides = { upcoming?: Array<Record<string, unknown>>; recentCalls?: Array<Record<string, unknown>>; actionRequired?: Array<Record<string, unknown>>; role?: string; unansweredCount?: number };
 async function setup(locale: "en" | "fr", callId: string | null, overrides: Overrides = {}) {
   vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn(), removeItem: vi.fn() });
   vi.stubGlobal("EventSource", class { addEventListener() {} removeEventListener() {} close() {} });
+  const fetchMock = vi.fn(async (_url: string) => Response.json({ error: "Not found." }, { status: 404 }));
+  vi.stubGlobal("fetch", fetchMock);
   const i18n = createInstance();
-  await i18n.init({ lng: locale, defaultNS: "dashboard", resources: { en: { dashboard: en, common: enCommon }, fr: { dashboard: fr, common: frCommon } } });
+  await i18n.init({ lng: locale, defaultNS: "dashboard", resources: { en: { dashboard: en, common: enCommon, knowledge: enKnowledge }, fr: { dashboard: fr, common: frCommon, knowledge: frKnowledge } } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["dashboard"], {
     businessId: "business", kpis: { calls: { total: 1, deltaPercent: 0 }, appointments: { total: 1, deltaPercent: 0 }, averageDuration: { totalSeconds: 20, deltaSeconds: 0 } }, monthlyCalls: [], recentCalls: overrides.recentCalls ?? [],
     actionRequired: overrides.actionRequired ?? [{ id: "follow-up", kind: "voice_message", title: "Voice message from Alex", body: "Please call back.\nCallback: +14165550199\nUrgency: high", callId, createdAt: "2026-09-04T14:30:00Z" }],
     upcoming: overrides.upcoming ?? [{ id: "appointment", startsAt: "2026-09-07T14:30:00Z", timezone: "UTC", status: "confirmed", sourceChannel: "voice", contactName: "Alex", serviceName: "Consultation" }],
   });
+  if (overrides.unansweredCount !== undefined) client.setQueryData(["unanswered-questions", "business"], { questions: [], openCount: overrides.unansweredCount });
   if (overrides.role) client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Clinic", role: overrides.role, active: true }] });
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><LiveOverviewSurface /></QueryClientProvider></I18nextProvider>);
-  return i18n;
+  return Object.assign(i18n, { fetchMock });
 }
 describe("dashboard voice follow-up parity", () => {
   it.each(["en", "fr"] as const)("links the follow-up to its call and shows localized metadata in %s", async locale => {
@@ -45,6 +50,45 @@ describe("dashboard voice follow-up parity", () => {
     await setup("en", null);
     expect(screen.queryByRole("link")).toBeNull();
     expect(screen.getByText(/Please call back.*Alex/)).toBeTruthy();
+  });
+});
+describe("dashboard unanswered questions", () => {
+  it.each(["en", "fr"] as const)("links open questions to the knowledge page in %s", async locale => {
+    const i18n = await setup(locale, null, { role: "business_admin", unansweredCount: 3 });
+    const link = screen.getByRole("link", { name: new RegExp(i18n.t("knowledge:unansweredQuestions.home.count", { count: 3 })) });
+    expect(link.getAttribute("href")).toBe("/agent/knowledge#unanswered-questions");
+  });
+  it("counts the open questions as an action and drops the empty state", async () => {
+    const i18n = await setup("en", null, { role: "business_owner", unansweredCount: 2, actionRequired: [] });
+    expect(screen.queryByText(i18n.t("dashboard:home.actionRequired.emptyTitle"))).toBeNull();
+    const heading = screen.getByRole("heading", { name: i18n.t("dashboard:home.actionRequired.title") });
+    expect(heading.parentElement?.textContent).toBe(`${i18n.t("dashboard:home.actionRequired.title")}1`);
+  });
+  it("shows nothing when every question is handled", async () => {
+    await setup("en", null, { role: "business_owner", unansweredCount: 0 });
+    expect(screen.queryByRole("link")).toBeNull();
+  });
+});
+describe("dashboard unanswered questions by access", () => {
+  const questionRequests = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/knowledge/questions"));
+
+  it("loads and counts the questions for an admin", async () => {
+    const i18n = await setup("en", null, { role: "business_admin", actionRequired: [] });
+    await waitFor(() => expect(questionRequests(i18n.fetchMock)).toHaveLength(1));
+    expect(questionRequests(i18n.fetchMock)[0]![0]).toBe("/api/knowledge/questions?businessId=business");
+  });
+
+  it.each([
+    ["a viewer", { role: "viewer" }],
+    ["a scheduler", { role: "scheduler" }],
+  ])("neither loads nor shows the questions for %s", async (_who, access) => {
+    const i18n = await setup("en", null, { ...access, unansweredCount: 2, actionRequired: [] });
+    expect(screen.queryByText(i18n.t("knowledge:unansweredQuestions.home.count", { count: 2 }))).toBeNull();
+    const heading = screen.getByRole("heading", { name: i18n.t("dashboard:home.actionRequired.title") });
+    expect(heading.parentElement?.textContent).toBe(`${i18n.t("dashboard:home.actionRequired.title")}0`);
+    expect(screen.getByText(i18n.t("dashboard:home.actionRequired.emptyTitle"))).toBeTruthy();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(questionRequests(i18n.fetchMock)).toHaveLength(0);
   });
 });
 describe("dashboard contact and channel labels", () => {

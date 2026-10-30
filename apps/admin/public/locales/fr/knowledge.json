@@ -27,5 +27,34 @@
     "generating": "Génération...",
     "emptyResponse": "Les réponses d'aperçu apparaîtront ici après avoir lancé la réceptionniste.",
     "disabled": "Connectez-vous et créez une entreprise pour lancer le vrai flux d'aperçu."
+  },
+  "unansweredQuestions": {
+    "title": "Questions sans réponse",
+    "timesAsked_one": "Posée {{count}} fois",
+    "timesAsked_many": "Posée {{count}} fois",
+    "timesAsked_other": "Posée {{count}} fois",
+    "lastAsked": "Dernière fois le {{date}}",
+    "askedSummary": "{{asked}} · {{lastAsked}}",
+    "answer": "Répondre",
+    "answerLabel": "Réponse à : {{question}}",
+    "answerPlaceholder": "Écrivez ce que votre réceptionniste doit répondre.",
+    "answerTooLong": "Raccourcissez votre réponse à {{max}} caractères ou moins.",
+    "saveAnswer": "Enregistrer la réponse",
+    "cancel": "Annuler",
+    "dismiss": "Ignorer",
+    "toast": {
+      "answered": "Réponse ajoutée à vos connaissances.",
+      "dismissed": "Question ignorée.",
+      "alreadyHandled": "Quelqu'un a déjà répondu à cette question ou l'a ignorée."
+    },
+    "emptyTitle": "Aucune question sans réponse",
+    "emptyDescription": "Quand votre réceptionniste ne trouve pas de réponse dans vos connaissances, la question apparaît ici.",
+    "loadFailed": "Nous n'avons pas pu charger vos questions sans réponse. Actualisez la page pour réessayer.",
+    "home": {
+      "count_one": "{{count}} question à laquelle votre réceptionniste n'a pas su répondre",
+      "count_many": "{{count}} questions auxquelles votre réceptionniste n'a pas su répondre",
+      "count_other": "{{count}} questions auxquelles votre réceptionniste n'a pas su répondre",
+      "description": "Ajoutez les réponses dans la page Connaissances."
+    }
   }
 }

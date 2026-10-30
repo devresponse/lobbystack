@@ -51,6 +51,8 @@ Export keeps these ID values whole, while it still redacts phone numbers and ema
 
 Telemetry must not contain transcripts, message bodies, phone numbers, email addresses, uploaded filenames, signed URLs, access tokens, or provider credentials. Use the redaction helpers in `packages/telemetry` and stable internal identifiers for correlation.
 
+Sign-in and account lines (`auth.*`) name the account by `userId` and never carry its email address, password, code or token. They carry the caller's IP address as `ip` only when `TRUSTED_CLIENT_IP_HEADER` names a header the ingress overwrites ([follow a sign-in](../features/observability.md#follow-a-sign-in)).
+
 ## Product analytics and session replay
 
 The landing page records sessions after cookie consent. The admin dashboard records operator sessions only when the active business has telemetry enabled, and never on authentication, prospect demo, or widget routes (`/login`, `/signup`, `/forgot-password`, `/reset-password/*`, `/confirm-email-change`, `/accept-invite`, `/claim-demo`, `/demo/*`, `/demos`, `/embed/*`). `ProductAnalytics` owns that decision. Loading it starts the SDK opted out (`apps/admin/src/lib/client-analytics.ts`), so nothing is collected before the decision is made. The widget's page never loads `ProductAnalytics`, so visitors on a business's website don't download PostHog at all.

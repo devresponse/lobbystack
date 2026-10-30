@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { getCurrentAdapter, runWithAdapter } from "@better-auth/core/context";
+import { APIError } from "better-auth/api";
 
 const mocks = vi.hoisted(() => ({
   config: undefined as any,
   createOtp: vi.fn(), enqueue: vi.fn(), allowed: vi.fn(), role: vi.fn(), challenge: vi.fn(),
   select: vi.fn(), acquired: true, lockHeld: false, adapter: vi.fn(), emailOtp: undefined as any,
+  log: vi.fn(), report: vi.fn(),
 }));
 vi.mock("server-only", () => ({}));
+vi.mock("@lobbystack/telemetry/node", async importOriginal => ({ ...await importOriginal<typeof import("@lobbystack/telemetry/node")>(), logEvent: mocks.log }));
+vi.mock("./error-reporting", () => ({ reportServerError: mocks.report }));
 vi.mock("better-auth", () => ({ betterAuth: (config: unknown) => {
   mocks.config = config;
   return { $context: Promise.resolve({ adapter: (config as any).database }), api: { createVerificationOTP: mocks.createOtp } };
@@ -254,4 +258,62 @@ it("names the new address in an email change and sends both emails in the accoun
   const second = mocks.enqueue.mock.calls[1]![1].payload;
   expect(second).toMatchObject({ template: "verify_email", to: "new@example.invalid", subject: expect.stringContaining("Potvrdite novu imejl adresu"), variables: { locale: "sr", url: expect.stringContaining("/sr/confirm-email-change?token=t2") } });
   expect(second.variables).not.toHaveProperty("purpose");
+});
+
+it("logs sign-ins and their failures from Better Auth's after hook", async () => {
+  const { getAuth } = await import("./auth"); getAuth();
+  await mocks.config.hooks.after({
+    path: "/sign-in/email", body: { email: "owner@example.invalid", password: "not-my-password" }, headers: new Headers({ "x-real-ip": "203.0.113.10" }),
+    context: { returned: APIError.from("UNAUTHORIZED", { code: "INVALID_EMAIL_OR_PASSWORD", message: "Invalid email or password" }) },
+  });
+  await mocks.config.hooks.after({ path: "/sign-in/email", body: {}, context: { returned: {}, newSession: { session: { id: "session-1" }, user: { id: "user-1" } } } });
+  expect(mocks.log.mock.calls).toEqual([
+    ["warn", "auth.sign_in_failed", { path: "/sign-in/email", userId: "user-1", accountFound: true, status: 401, code: "INVALID_EMAIL_OR_PASSWORD", ip: "203.0.113.10" }],
+    ["info", "auth.signed_in", { path: "/sign-in/email", userId: "user-1", authSessionId: "session-1" }],
+  ]);
+});
+
+it("logs what the before hook refuses and the reset requests the recipient cooldown holds", async () => {
+  const { getAuth } = await import("./auth"); getAuth();
+  const { EmailVerificationRateLimitError } = await import("./email-verification-policy");
+  await expect(mocks.config.hooks.before({ path: "/sign-up/email", body: { password: "short" }, headers: new Headers() })).rejects.toThrow("Invalid password");
+  mocks.allowed.mockRejectedValueOnce(new EmailVerificationRateLimitError());
+  await mocks.config.hooks.before({ path: "/email-otp/request-password-reset", body: { email: "owner@example.invalid" }, headers: new Headers({ "x-real-ip": "203.0.113.10" }), json: (body: unknown) => body });
+  expect(mocks.log.mock.calls).toEqual([
+    ["warn", "auth.sign_up_failed", { path: "/sign-up/email", status: 400, code: "INVALID_PASSWORD" }],
+    ["warn", "auth.rate_limited", { path: "/email-otp/request-password-reset", method: "code", limit: "recipient", ip: "203.0.113.10" }],
+  ]);
+});
+
+it("logs new and repeated sign-ups and finished resets from Better Auth's callbacks", async () => {
+  const { getAuth } = await import("./auth"); getAuth();
+  mocks.select.mockResolvedValue([{ preferredLocale: "en" }]);
+  await mocks.config.databaseHooks.user.create.after({ id: "user-2" }, { path: "/sign-up/email", headers: new Headers({ "x-real-ip": "203.0.113.10" }) });
+  await mocks.config.emailAndPassword.onExistingUserSignUp({ user: { id: "user-1", email: "owner@example.invalid", emailVerified: true } });
+  await mocks.config.emailAndPassword.onPasswordReset({ user: { id: "user-1" } }, new Request("https://app.example.test/api/auth/email-otp/reset-password", { method: "POST" }));
+  expect(mocks.log.mock.calls).toEqual([
+    ["info", "auth.signed_up", { userId: "user-2", path: "/sign-up/email", ip: "203.0.113.10" }],
+    ["info", "auth.sign_up_existing_account", { userId: "user-1", verified: true }],
+    ["info", "auth.password_reset", { userId: "user-1", path: "/email-otp/reset-password", method: "code" }],
+  ]);
+});
+
+it("logs each verification code it sends or skips", async () => {
+  const { issueEmailVerificationCode } = await import("./auth");
+  await issueEmailVerificationCode("owner@example.invalid", "203.0.113.10");
+  mocks.select.mockResolvedValueOnce([]).mockResolvedValueOnce([{ id: "user-1", emailVerified: true }]);
+  await issueEmailVerificationCode("missing@example.invalid");
+  await issueEmailVerificationCode("owner@example.invalid");
+  expect(mocks.log.mock.calls).toEqual([
+    ["info", "auth.verification_code_sent", { userId: "user-1", ip: "203.0.113.10" }],
+    ["info", "auth.verification_code_skipped", { reason: "no_account" }],
+    ["info", "auth.verification_code_skipped", { userId: "user-1", reason: "already_verified" }],
+  ]);
+});
+
+it("sends Better Auth's own errors, such as a database outage behind a sign-in, to error tracking", async () => {
+  const { getAuth } = await import("./auth"); getAuth();
+  const failure = new Error("connect ECONNREFUSED");
+  mocks.config.logger.log("error", "Error", failure);
+  expect(mocks.report).toHaveBeenCalledExactlyOnceWith(failure, { operation: "auth.better_auth", detail: "Error" });
 });

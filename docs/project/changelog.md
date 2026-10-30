@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#102](https://github.com/devresponse/lobbystack/pull/102) | Let an owner cancel their account's last business, deleting nothing | `0130` | `ea56853` | [docs](../features/account-cancellation.md) |
 | [#101](https://github.com/devresponse/lobbystack/pull/101) | Let owners delete a business, never an account's first | `0129` | `4194360` | [docs](../features/business-deletion.md) |
 | [#100](https://github.com/devresponse/lobbystack/pull/100) | Archive calls from the call page after a confirmation dialog | `0128` | `50de45a` | [docs](../features/calls.md#archive-a-call) |
 

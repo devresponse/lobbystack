@@ -1,6 +1,6 @@
 # Answer the questions the receptionist couldn't
 
-Since fork PR #104, when the receptionist looks something up in a business's knowledge and finds nothing, LobbyStack saves the question. The business's team sees the open ones on the Knowledge page, and an owner or admin answers each once, which saves the answer as a text entry the receptionist uses from then on, or dismisses it. The feature was ported from the original project's October 2026 release (its PR #345), with migration `0131` in the fork's numbering. Checked against the code of fork PR #104.
+Since fork PR #105, when the receptionist looks something up in a business's knowledge and finds nothing, LobbyStack saves the question. The business's team sees the open ones on the Knowledge page, and an owner or admin answers each once, which saves the answer as a text entry the receptionist uses from then on, or dismisses it. The feature was ported from the original project's October 2026 release (its PR #345), with migration `0131` in the fork's numbering. Checked against the code of fork PR #105.
 
 ## Know what gets saved
 
@@ -40,4 +40,4 @@ A question repeats what a caller or visitor said, so it expires like a follow-up
 
 ## Know the limit on text entries
 
-An answer is useful only if it reaches the receptionist. Calls and chats read text entries from the business's snapshot, which since fork PR #104 holds 50 active entries: the highest priority first, then the most recently changed. Before, it held 8, so a business's ninth entry, and any answer saved here once a business had 8, never reached a call. Prompts still list only the 8 with the highest priority; the knowledge search covers all 50. A business with more than 50 active entries should raise the priority of the ones that matter most, or move long reference text into a document ([knowledge](../knowledge/architecture.md#use-text-entries-in-calls-and-chats)).
+An answer is useful only if it reaches the receptionist. Calls and chats read text entries from the business's snapshot, which since fork PR #105 holds 50 active entries: the highest priority first, then the most recently changed. Before, it held 8, so a business's ninth entry, and any answer saved here once a business had 8, never reached a call. Prompts still list only the 8 with the highest priority; the knowledge search covers all 50. A business with more than 50 active entries should raise the priority of the ones that matter most, or move long reference text into a document ([knowledge](../knowledge/architecture.md#use-text-entries-in-calls-and-chats)).

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -158,5 +158,27 @@ describe("contact detail keypad PIN", () => {
     expect(screen.getByText("detail.passcode.statusSet")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "detail.passcode.changeAction" })).toBeNull();
     expect(screen.queryByRole("button", { name: "detail.passcode.removeAction" })).toBeNull();
+  });
+});
+
+describe("contact detail activity", () => {
+  it("keeps an archived call in the contact's history, marked archived", async () => {
+    language.current = "en";
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Business", active: true, role: "business_owner" }] });
+    const call = (id: string, archivedAt: string | null) => ({ id, status: "completed", disposition: null, transport: "voice", startedAt: "2026-10-29T23:09:00Z", endedAt: "2026-10-29T23:09:15Z", providerDurationSeconds: 15, archivedAt });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json({
+      contact: { id: "contact", legacyConvexId: null, name: "Ana", phone: "+14155550100", email: null, timezone: null, preferredLocale: null, smsConsentStatus: null, smsConsentUpdatedAt: null, smsConsentSource: null, operatorBlockedAt: null, createdAt: "2026-09-01T12:00:00Z" },
+      calls: [call("archived-call", "2026-10-30T06:30:00Z"), call("listed-call", null)],
+      messages: [],
+      appointments: [],
+      activityCounts: { calls: 2, messages: 0, appointments: 0, conversations: 1 },
+    })));
+    const { container } = render(<QueryClientProvider client={client}><LiveContactDetailSurface contactId="contact" /></QueryClientProvider>);
+    await screen.findAllByText("detail.activity.callInbound");
+    const link = (callId: string) => container.querySelector<HTMLElement>(`a[href="/calls/${callId}"]`)!;
+    expect(within(link("archived-call")).getByText("detail.activity.callArchived")).toBeTruthy();
+    expect(within(link("listed-call")).queryByText("detail.activity.callArchived")).toBeNull();
   });
 });

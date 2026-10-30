@@ -1,6 +1,6 @@
 # Understand phone and browser calls
 
-OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with the changes of fork PRs #84, #96, #97, #98 and #99.
+OpenAI's GPT-Live speaks with every caller. Phone calls reach it through a Twilio Elastic SIP trunk; browser calls from the website widget, the dashboard's test call and demos reach it over WebRTC. The admin starts each call and the worker runs it. [The voice runtime](../voice/runtime.md) is the full reference, and [testing voice changes](../voice/testing.md) says how to check a change. This page sums up what the fork changed and what hasn't been tried on a real line. Checked against `main` at `62517d2`, with the changes of fork PRs #84, #96, #97, #98, #99 and #100.
 
 ## Follow a call
 
@@ -31,6 +31,8 @@ Since fork PR #98, the spoken greeting that a call without a recording relies on
 - **A caller who speaks first** hears the whole opening before the answer, as on a call with a recording.
 - **A request OpenAI refused** because the call's session hadn't started yet goes out again 4 seconds after it starts.
 
+On 2026-10-30, the first phone call to the demo after two and a half quiet hours opened with the recording: the worker sent it 0.34 seconds after it attached, GPT-Live played it at 0.56 seconds, and the caller, who said "Hello?", heard the whole opening and the notice.
+
 To check a call, the worker's `live.greeting` log says how the greeting went, and the admin's `live.incoming` (phone) or `live.browser_start` (browser) says whether the call opened with a recording (`greetingRecording`). [The voice runtime](../voice/runtime.md#open-calls-with-a-recording) has the details.
 
 ## Tell callers they're speaking with an AI and the call is recorded
@@ -42,6 +44,17 @@ Since fork PR #84, every phone and browser call says, right after the greeting: 
 - **The recorded greeting** is kept under its words. After the deploy, and after the switch changes, a business's first browser call opens without a recording while the worker records the new opening for the calls after it. Since fork PR #96, a worker with `LIVE_RECORDED_GREETING=true` records the new opening when the snapshot refreshes, before that call.
 - **The website widget** shows "Calls are answered by an AI assistant, and they're recorded and transcribed." under **Say Allo!** in the widget's language while the switch is on (`recordingNotice` from `/api/widget/config`).
 - **The greeting's language:** the notice follows the call's language, and the greeting plays as written. A French business that kept the English starter greeting opens in English, then French, so write the greeting in the call's language.
+
+## Archive a call
+
+Since fork PR #100, an owner or admin can archive a call from its page in the dashboard, such as a test call. **Archive**, beside the caller's name, asks first in a dialog: **Archive call** archives it and goes back to **Calls**, and **Cancel** keeps it. Archiving only hides the call. Migration `0128` adds `calls.archived_at`, and nothing is deleted.
+
+- **Where it goes:** the call leaves the **Calls** list, its search and its page count, and the recent calls on **Home**.
+- **What stays:** the transcript, the recording, the summary and the call's follow-ups. The contact's history still lists the call, marked **Archived**, and its page still opens from there, from a follow-up on **Home** or from the email after the call. Counts, analytics, billing and the v1 API still include it.
+- **Restore** on an archived call's page puts it back in the list.
+- **Who:** owners and admins, since it hides the call from the whole team. Schedulers and viewers don't see the button, and the server refuses them (`setCallArchived` in `packages/domain/src/server/voice.ts`). Each archive and restore goes in `audit_logs` as `call.archived` or `call.restored` with who did it, and other open dashboards drop or bring back the call at once.
+
+There's no list of archived calls yet: reach one from its contact or a link to it.
 
 ## Keep the end of the call in its summary
 
@@ -81,11 +94,11 @@ GPT-Live has no language setting. The call's instructions name the language to s
 
 ## Know what hasn't been tried
 
-- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78, #84, #96, #97, #98 and #99, because the environment that built them had no OpenAI key. Nobody has heard fork PR #84's notice after the greeting on a call yet: whether GPT-Live says the whole opening once, and whether a recorded opening still plays on the caller's first audio. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
+- `pnpm voice:eval` and `pnpm voice:call` haven't been run since fork PRs #13, #18, #45, #50, #52, #54, #78, #84, #96, #97, #98 and #99, because the environment that built them had no OpenAI key. Fork PR #84's notice after the greeting has been heard only in English, in the recorded opening of a phone call on 2026-10-30. The time-limit change has its own eval scenario: `pnpm voice:eval --scenario time-limit`. Fork PR #78's Spanish callers, `spanish-switch` and `spanish-only`, have never run, so nobody knows yet how often a reply slips into English. No call has opened in one of the languages fork PR #82 added either.
 - No real call has typed a keypad PIN ([caller authentication](caller-authentication.md)).
 - The [phone call review](../reviews/phone-calls-2026-10-06.md) of 2026-10-06 lists what was open then. Several findings were fixed since, such as calls recovered after a worker crash, withheld numbers and the drain during a deploy, so check a finding against the code before acting on it.
-- No real phone call has opened with the recorded greeting yet (fork PR #96): whether the caller hears it at once, and whether GPT-Live says the opening when the caller speaks first. The first calls after the deploy will tell: `live.greeting` with `trigger` `recording` and `step` `spoken`, and `inputAudioMs` above 0 at `sent`.
-- GPT-Live hasn't recorded an opening yet (fork PR #97): how many sessions one takes, and whether its quiet and transcripts work as the recorder expects. The worker's `live.greeting_recorded` lines (with `tries`) and `live.greeting_recording_failed` lines after the deploy will tell, and a test call will tell how it sounds.
+- No phone call has had its caller speak before the recording started (fork PR #96), when GPT-Live should say the whole opening before it answers: `live.greeting` with `trigger` `caller_spoke` will show one.
+- GPT-Live's recordings work (fork PR #97), since the phone call of 2026-10-30 played one, but nobody has read how many sessions one takes. The worker's `live.greeting_recorded` lines (with `tries`) and `live.greeting_recording_failed` lines will tell.
 - No real call has tried fork PR #98's spoken greeting: whether the command 4 seconds into the call by its own clock comes before GPT-Live's own late greeting often enough to say the greeting twice, and whether GPT-Live says the opening before answering a caller who spoke first on a call without a recording. `live.greeting` with `trigger` `fallback` or `caller_spoke` will tell.
-- No real call has been answered with fork PR #99's webhook changes yet: how often OpenAI delivered a phone call's webhook twice before them, and whether a repeated delivery still accepts first. On the admin, two `live.incoming` lines for one `sessionId` mark a repeated delivery, and `"decisionAlreadyMade":true` one whose accept came first.
+- Nobody has checked fork PR #99's webhook changes on real calls: how often OpenAI delivers a phone call's webhook twice, and whether a repeated delivery still accepts first. On the admin, two `live.incoming` lines for one `sessionId` mark a repeated delivery, and `"decisionAlreadyMade":true` one whose accept came first.
 - A website call reserving minutes in slices instead of its whole length isn't built.

@@ -153,6 +153,20 @@
       "badge": "Blokiran",
       "blockedAtInline": "Blokiran {{time}}"
     },
+    "archive": {
+      "action": "Arhiviraj",
+      "title": "Arhivirati ovaj poziv?",
+      "description": "Više se neće prikazivati u Pozivima ni na Početnoj. Ništa se ne briše: transkript i snimak ostaju sačuvani, a poziv možete vratiti sa ove stranice.",
+      "cancel": "Otkaži",
+      "confirm": "Arhiviraj poziv",
+      "done": "Poziv je arhiviran.",
+      "failed": "Nije moguće arhivirati poziv.",
+      "badge": "Arhiviran",
+      "archivedAtInline": "Arhiviran {{time}}",
+      "restore": "Vrati",
+      "restored": "Poziv je vraćen.",
+      "restoreFailed": "Nije moguće vratiti poziv."
+    },
     "details": {
       "outcomeTitle": "Ishod",
       "followUpTitle_one": "Zadatak praćenja",

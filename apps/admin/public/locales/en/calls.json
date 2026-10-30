@@ -153,6 +153,20 @@
       "badge": "Blocked",
       "blockedAtInline": "Blocked on {{time}}"
     },
+    "archive": {
+      "action": "Archive",
+      "title": "Archive this call?",
+      "description": "It will no longer show in Calls or on Home. Nothing is deleted: its transcript and recording are kept, and you can restore it from this page.",
+      "cancel": "Cancel",
+      "confirm": "Archive call",
+      "done": "Call archived.",
+      "failed": "Couldn't archive the call.",
+      "badge": "Archived",
+      "archivedAtInline": "Archived on {{time}}",
+      "restore": "Restore",
+      "restored": "Call restored.",
+      "restoreFailed": "Couldn't restore the call."
+    },
     "details": {
       "outcomeTitle": "Outcome",
       "followUpTitle_one": "Follow-up task",

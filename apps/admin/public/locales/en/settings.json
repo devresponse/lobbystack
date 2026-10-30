@@ -621,6 +621,7 @@
       "searchRateLimited": "Too many searches. Wait a few minutes, then try again.",
       "searchInvalid": "The phone carrier couldn't search with that area code. Check it and try again.",
       "searchUnsupported": "The phone carrier has no numbers of this kind in this country.",
+      "numbersUnavailable": "Phone numbers aren't set up on this dashboard yet. Ask whoever runs it to connect a phone provider.",
       "withErrorId": "{{message}} Error ID: {{errorId}}"
     },
     "toast": {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
@@ -31,6 +31,8 @@ type AgentBasicSettingsPageProps = {
   businessId: string;
   canManageTenant: boolean;
 };
+
+type AgentSettings = { business: { defaultLocale: RuntimeLocale; timezone: string } | null; profile: { greeting: string; recordingNotice?: boolean; summary: string; summarySource: "placeholder" | "generated" | "operator"; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null };
 
 export function resolveTransferNumberForSave({
   rawInputValue,
@@ -91,7 +93,7 @@ export function AgentBasicSettingsPage({
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey: ["agent-settings", businessId],
-    queryFn: () => requestJson<{ business: { defaultLocale: RuntimeLocale; timezone: string } | null; profile: { greeting: string; recordingNotice?: boolean; summary: string; summarySource: "placeholder" | "generated" | "operator"; transferNumber: string | null; transferMode: string; appointmentChangePolicy: AppointmentChangePolicy | null; bookingMode: BookingMode } | null }>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
+    queryFn: () => requestJson<AgentSettings>(`/api/agent?businessId=${encodeURIComponent(businessId)}`),
     enabled: Boolean(businessId),
   });
   const configuration = query.data;
@@ -139,26 +141,47 @@ export function AgentBasicSettingsPage({
   const [isTransferSaving, setIsTransferSaving] = useState(false);
   const [isAppointmentChangeSaving, setIsAppointmentChangeSaving] = useState(false);
   const [transferStatusTone, setTransferStatusTone] = useState<"success" | "error">("success");
+  // The profile the text fields last took their values from. Every save refetches the
+  // settings, and so does coming back to the tab, and a refetch that lands while someone is
+  // typing must not undo their edit, so the greeting and summary only take the new value
+  // while they still hold the last one, and the transfer number only while nobody has
+  // edited it since it was saved. Switching business keeps the page mounted, and none of it
+  // carries over to the next one.
+  const syncedBusinessId = useRef(businessId);
+  const syncedProfile = useRef<NonNullable<AgentSettings["profile"]> | null>(null);
+  const transferNumberRef = useRef(transferNumber);
+  transferNumberRef.current = transferNumber;
+  const transferNumberEdited = useRef(false);
   useEffect(() => {
+    if (syncedBusinessId.current !== businessId) {
+      syncedBusinessId.current = businessId;
+      syncedProfile.current = null;
+      transferNumberEdited.current = false;
+    }
     setTimezone(configuration?.business?.timezone ?? "");
     const profile = configuration?.profile;
     if (!profile) {
       return;
     }
-    setGreeting(profile.greeting);
+    const previous = syncedProfile.current;
+    syncedProfile.current = profile;
+    // The sign-up placeholder isn't a summary, so the field starts empty.
+    const shownSummary = (value: NonNullable<AgentSettings["profile"]>) => value.summarySource === "placeholder" ? "" : value.summary;
+    setGreeting((current) => !previous || current === previous.greeting ? profile.greeting : current);
     // A profile saved before the switch existed has it on.
     setRecordingNotice(profile.recordingNotice !== false);
-    // The sign-up placeholder isn't a summary, so the field starts empty.
-    setSummary(profile.summarySource === "placeholder" ? "" : profile.summary);
+    setSummary((current) => !previous || current === shownSummary(previous) ? shownSummary(profile) : current);
     setDefaultLocale(normalizeRuntimeLocale(configuration.business?.defaultLocale) ?? "en");
-    setTransferNumber(profile.transferNumber ?? "");
-    setTransferNumberInputValue(profile.transferNumber ?? "");
+    if (!transferNumberEdited.current) {
+      setTransferNumber(profile.transferNumber ?? "");
+      setTransferNumberInputValue(profile.transferNumber ?? "");
+    }
     setBookingMode(normalizeBookingMode(profile.bookingMode));
     const appointmentChangePolicy = profile.appointmentChangePolicy as AppointmentChangePolicy | null;
     setAllowAppointmentCancel(appointmentChangePolicy?.allowCancel ?? true);
     setAllowAppointmentReschedule(appointmentChangePolicy?.allowReschedule ?? true);
     setAppointmentChangeVerification(savedVerificationMode(appointmentChangePolicy?.verificationMode));
-  }, [configuration]);
+  }, [businessId, configuration]);
 
   useEffect(() => {
     const timeouts: number[] = [];
@@ -258,6 +281,8 @@ export function AgentBasicSettingsPage({
     setTransferStatus(null);
     try {
       await saveProfile({ businessId, transferNumber: transferNumberResolution.value });
+      // Typing that started during the save is still unsaved.
+      if (transferNumberRef.current === (transferNumberResolution.value ?? "")) transferNumberEdited.current = false;
       telemetry.track("web.agent.settings_saved", { businessId, setting: "transfer_number" });
       setTransferStatus(t("agent:actions.saved"));
       setTransferStatusTone("success");
@@ -595,6 +620,7 @@ export function AgentBasicSettingsPage({
                         setTransferStatusTone("success");
                       }}
                       onRawValueChange={(nextRawValue) => {
+                        transferNumberEdited.current = true;
                         setTransferNumberInputValue(nextRawValue);
                         setTransferStatus(null);
                         setTransferStatusTone("success");

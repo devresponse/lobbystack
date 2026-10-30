@@ -170,7 +170,7 @@ import { googleCalendarProvider } from "../google-calendar-provider";
 import { checkPhoneNumberSearchLimit } from "../phone-number-search-limit";
 import { checkPromoCodeLimit } from "../promo-code-limit";
 import { getStorageProvider } from "../storage";
-import { getNumberClaimTokenSecret, getTwilioProvider } from "../twilio-provider";
+import { getNumberClaimTokenSecret, getTwilioProvider, twilioConfigured } from "../twilio-provider";
 import { hasVerifiedPhone } from "../verified-phone";
 import { data, handleApiRequest, pageQuery, queryParam, readApiBody, uuidParam, type ApiCredential, type RestApiCaller } from "./http";
 
@@ -414,6 +414,8 @@ export const v1 = {
   }),
   listPhoneNumbers: (request: Request) => handleApiRequest(request, "listPhoneNumbers", async ({ context, caller }) => ({ body: { data: await listPhoneNumbersForApi(context, caller), next_cursor: null, has_more: false } })),
   searchPhoneNumbers: (request: Request) => handleApiRequest(request, "searchPhoneNumbers", async ({ context, caller }) => {
+    // A deployment without Twilio answers 503 phone_numbers_unavailable, before the search counts against the limit.
+    if (!twilioConfigured()) throw new PublicApiError(503, "phone_numbers_unavailable", "Phone numbers aren't set up on this deployment.");
     const body = await readApiBody(request, apiPhoneNumberSearchSchema);
     const userId = await resolveActingUserId(context, caller);
     return { body: { data: await searchPhoneNumbersForApi(context, caller, body, { userId, provider: getTwilioProvider(), claimTokenSecret: getNumberClaimTokenSecret(), beforeSearch: () => requireNumberSearchAllowed(userId) }), next_cursor: null, has_more: false } };

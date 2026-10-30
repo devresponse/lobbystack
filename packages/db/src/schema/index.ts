@@ -853,6 +853,36 @@ export const knowledgeSnippets = pgTable(
   (table) => [index("knowledge_snippets_business_active_idx").on(table.businessId, table.active)],
 );
 
+// Questions the receptionist found no knowledge for (migration 0131). The same
+// normalized question counts again on its open or dismissed row.
+export const unansweredQuestions = pgTable(
+  "unanswered_questions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    question: text("question").notNull(),
+    normalizedQuestion: text("normalized_question").notNull(),
+    lastChannel: varchar("last_channel", { length: 32 }).notNull(),
+    timesAsked: integer("times_asked").default(1).notNull(),
+    firstAskedAt: timestamp("first_asked_at", { withTimezone: true }).defaultNow().notNull(),
+    lastAskedAt: timestamp("last_asked_at", { withTimezone: true }).defaultNow().notNull(),
+    lastCallId: uuid("last_call_id").references(() => calls.id, { onDelete: "set null" }),
+    lastConversationId: uuid("last_conversation_id").references(() => conversations.id, { onDelete: "set null" }),
+    status: varchar("status", { length: 16 }).default("open").notNull(),
+    answeredAt: timestamp("answered_at", { withTimezone: true }),
+    dismissedAt: timestamp("dismissed_at", { withTimezone: true }),
+    knowledgeSnippetId: uuid("knowledge_snippet_id").references(() => knowledgeSnippets.id, { onDelete: "set null" }),
+    resolvedByUserId: uuid("resolved_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    contentExpiresAt: timestamp("content_expires_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("unanswered_questions_business_question_unique").on(table.businessId, table.normalizedQuestion).where(sql`${table.status} in ('open', 'dismissed')`),
+    index("unanswered_questions_business_status_idx").on(table.businessId, table.status, table.timesAsked.desc(), table.lastAskedAt.desc()),
+    index("unanswered_questions_business_expiry_idx").on(table.businessId, table.contentExpiresAt).where(sql`${table.contentExpiresAt} is not null`),
+  ],
+);
+
 export const agentRules = pgTable(
   "agent_rules",
   {
@@ -2060,6 +2090,7 @@ export const allTenantTables = [
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  unansweredQuestions,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,
@@ -2130,6 +2161,7 @@ export const schema = {
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  unansweredQuestions,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -264,6 +264,91 @@ describe("AgentBasicSettingsPage saves", () => {
     const select = await screen.findByRole("combobox", { name: "agent:appointmentChanges.verification.label" });
     await waitFor(() => expect((select as HTMLSelectElement).value).toBe("operator_only"));
     expect(screen.getByRole("option", { name: "agent:appointmentChanges.verification.options.operator_only" })).toBeTruthy();
+    client.clear();
+  });
+});
+
+describe("AgentBasicSettingsPage refetches", () => {
+  const settings = (overrides: { greeting?: string; transferNumber?: string | null } = {}) => ({
+    business: { defaultLocale: "en" },
+    profile: { greeting: "Thanks for calling.", summary: "Clinic", summarySource: "operator", transferNumber: "+15145550123", transferMode: "on_request", appointmentChangePolicy: null, bookingMode: "instant", ...overrides },
+  });
+  function renderPage(saved: () => ReturnType<typeof settings> = () => settings()) {
+    const patches: unknown[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "PATCH") {
+        patches.push(JSON.parse(String(init.body)));
+        return Response.json({ ok: true });
+      }
+      return Response.json(saved());
+    }));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><AgentBasicSettingsPage businessId="business" canManageTenant /></QueryClientProvider>);
+    return { client, patches };
+  }
+  const transferInput = () => document.getElementById("agent-transfer-number") as HTMLInputElement | null;
+
+  it("keeps a number being typed when a refetch of the saved settings lands", async () => {
+    const { client, patches } = renderPage();
+    const user = userEvent.setup();
+    await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550123"));
+    await user.clear(transferInput()!);
+    await user.type(transferInput()!, "+15145550199");
+    // The refetch an earlier save started arrives late, with the number that save stored.
+    act(() => client.setQueryData(["agent-settings", "business"], settings({ transferNumber: "+15145550177" })));
+    await user.click(screen.getByRole("button", { name: "agent:actions.save" }));
+
+    await waitFor(() => expect(patches).toEqual([{ businessId: "business", transferNumber: "+15145550199" }]));
+    client.clear();
+  });
+
+  it("keeps a cleared number empty when a refetch lands, even if none was saved before", async () => {
+    const { client, patches } = renderPage(() => settings({ transferNumber: null }));
+    const user = userEvent.setup();
+    await waitFor(() => expect(transferInput()).toBeTruthy());
+    await user.type(transferInput()!, "+15145550100");
+    await user.clear(transferInput()!);
+    // The field is empty again, as it was when the page loaded, when a late refetch brings a saved number.
+    act(() => client.setQueryData(["agent-settings", "business"], settings({ transferNumber: "+15145550177" })));
+    expect(transferInput()!.value).toBe("");
+    await user.type(transferInput()!, "+15145550199");
+    await user.click(screen.getByRole("button", { name: "agent:actions.save" }));
+
+    await waitFor(() => expect(patches).toEqual([{ businessId: "business", transferNumber: "+15145550199" }]));
+    client.clear();
+  });
+
+  it("keeps a greeting being edited when a refetch lands, and takes a saved one while the field is untouched", async () => {
+    const { client, patches } = renderPage();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "agent:actions.editField" })[0]?.hasAttribute("disabled")).toBe(false));
+    await user.click(screen.getAllByRole("button", { name: "agent:actions.editField" })[0]!);
+    const field = await screen.findByPlaceholderText("agent:fields.greeting.placeholder");
+    await user.type(field, " Ask away.");
+    // Coming back to the tab refetches the settings; another change saved meanwhile comes with them.
+    act(() => client.setQueryData(["agent-settings", "business"], settings({ transferNumber: "+15145550177" })));
+    expect((field as HTMLTextAreaElement).value).toBe("Thanks for calling. Ask away.");
+    await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550177"));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "agent:actions.save" }));
+
+    await waitFor(() => expect(patches).toEqual([{ businessId: "business", greeting: "Thanks for calling. Ask away." }]));
+    client.clear();
+  });
+
+  it("shows the next business's number, not one typed for the last, after switching business", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => Response.json(settings({ transferNumber: url.includes("business-b") ? "+15145550222" : "+15145550111" }))));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const page = (businessId: string) => <QueryClientProvider client={client}><AgentBasicSettingsPage businessId={businessId} canManageTenant /></QueryClientProvider>;
+    const { rerender } = render(page("business-a"));
+
+    const user = userEvent.setup();
+    await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550111"));
+    await user.clear(transferInput()!);
+    await user.type(transferInput()!, "+15145550199");
+    // The workspace switcher keeps the page mounted and only changes the business.
+    rerender(page("business-b"));
+
+    await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550222"));
     client.clear();
   });
 });

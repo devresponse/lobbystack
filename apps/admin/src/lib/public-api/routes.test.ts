@@ -104,6 +104,7 @@ const domain = vi.hoisted(() => ({
   runIdempotent: vi.fn(async (context: unknown, _scope: unknown, _hash: string, run: (transactional: unknown) => Promise<{ status: number; body: unknown }>) => ({ replayed: false, response: await run(context) })),
 }));
 const numbers = vi.hoisted(() => ({
+  twilio: true,
   provider: { listAvailablePhoneNumbers: vi.fn() },
   searchLimit: vi.fn(async (): Promise<{ allowed: true } | { allowed: false; status: 429 | 503; reason: string }> => ({ allowed: true })),
 }));
@@ -112,7 +113,7 @@ const appContext = vi.hoisted(() => ({ db: "app" }));
 vi.mock("../domain-context", () => ({ createWorkerDomainContext: () => ({ db: {} }), createDomainContext: () => appContext }));
 vi.mock("../error-reporting", () => ({ reportServerError: vi.fn() }));
 vi.mock("../storage", () => ({ getStorageProvider: () => storageProvider }));
-vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret" }));
+vi.mock("../twilio-provider", () => ({ getTwilioProvider: () => numbers.provider, getNumberClaimTokenSecret: () => "number-claim-secret", twilioConfigured: () => numbers.twilio }));
 vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: numbers.searchLimit }));
 const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => true) }));
 vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
@@ -948,6 +949,19 @@ describe("phone numbers", () => {
     }
     expect(numbers.searchLimit).not.toHaveBeenCalled();
     expect(domain.searchPhoneNumbersForApi).not.toHaveBeenCalled();
+  });
+
+  it("answers 503 phone_numbers_unavailable without Twilio, before the search counts against the limit", async () => {
+    numbers.twilio = false;
+    try {
+      const response = await search({ country: "US" });
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({ error: { code: "phone_numbers_unavailable" } });
+      expect(numbers.searchLimit).not.toHaveBeenCalled();
+      expect(domain.searchPhoneNumbersForApi).not.toHaveBeenCalled();
+    } finally {
+      numbers.twilio = true;
+    }
   });
 
   it("claims an offer only with an Idempotency-Key, as the account the key acts as", async () => {

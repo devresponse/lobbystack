@@ -31,6 +31,7 @@ export * from "./demos";
 export * from "./feedback";
 export * from "./email";
 export * from "./knowledge";
+export * from "./unansweredQuestions";
 export * from "./liveCalls";
 export * from "./notifications";
 export * from "./onboarding";

@@ -208,12 +208,14 @@ it("re-checks the database role assertion after a transient failure instead of c
 it("declares explicit per-path recovery rules that preserve plugin semantics", async () => {
   const { getAuth } = await import("./auth"); getAuth();
   expect(mocks.config.rateLimit.customRules).toMatchObject({
-    "/request-password-reset": { window: 60, max: 5 },
     "/email-otp/request-password-reset": { window: 60, max: 3 },
     "/email-otp/reset-password": { window: 60, max: 3 },
     "/email-otp/verify-email": { window: 60, max: 3 },
   });
   expect(Object.keys(mocks.config.rateLimit.customRules)).not.toContain("/email-otp/send-verification-otp");
+  // Resets go by code only: Better Auth has no link reset to send or limit.
+  expect(Object.keys(mocks.config.rateLimit.customRules)).not.toContain("/request-password-reset");
+  expect(mocks.config.emailAndPassword.sendResetPassword).toBeUndefined();
 });
 
 it("caps reset sends per recipient and answers a capped request as if it were sent", async () => {
@@ -227,7 +229,7 @@ it("caps reset sends per recipient and answers a capped request as if it were se
   for (let n = 0; n < 3; n++) await expect(request("/email-otp/request-password-reset")).resolves.toBeUndefined();
   // A returned body short-circuits Better Auth, so the 4th request creates no code.
   await expect(request("/email-otp/request-password-reset")).resolves.toEqual({ success: true });
-  await expect(request("/request-password-reset")).resolves.toMatchObject({ status: true });
+  await expect(request("/request-password-reset")).rejects.toThrow("Endpoint not enabled");
   expect(mocks.allowed).toHaveBeenCalledWith({ email: "owner@example.invalid", remoteIp: "203.0.113.10", scope: "password-reset" });
   mocks.allowed.mockRejectedValueOnce(new Error("offline"));
   await expect(request("/email-otp/request-password-reset")).rejects.toThrow("offline");

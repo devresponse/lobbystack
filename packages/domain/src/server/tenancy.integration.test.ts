@@ -100,6 +100,40 @@ describe.skipIf(!client)("createBusiness", () => {
       await expect(createBusiness(context, { userId, name: "Shop 11", timezone: "UTC", businessType: "test" })).rejects.toMatchObject({ status: 403 });
     });
   });
+
+  it("gives a generated slug that another open transaction is making a suffix, instead of waiting for that transaction", async () => {
+    const name = `Slug Race ${randomUUID()}`;
+    const baseSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    const create = async (tx: DatabaseTransaction) => {
+      const userId = randomUUID();
+      const email = `${userId}@example.invalid`;
+      await tx.insert(users).values({ id: userId, email, normalizedEmail: email, name: "Sam Owner" });
+      await tx.execute(sql`set local role lobbystack_app`);
+      const { businessId } = await createBusiness({ db: tx as unknown as Database }, { userId, name, timezone: "UTC", businessType: "service_company" });
+      await tx.execute(sql`reset role`);
+      const [row] = await tx.select({ slug: businesses.slug }).from(businesses).where(eq(businesses.id, businessId));
+      return row!.slug;
+    };
+    let firstMade!: () => void;
+    const made = new Promise<void>((resolve) => { firstMade = resolve; });
+    let secondDone!: () => void;
+    const secondFinished = new Promise<void>((resolve) => { secondDone = resolve; });
+    const slugs: string[] = [];
+    await Promise.all([
+      rollbackTest(async (tx) => {
+        slugs[0] = await create(tx);
+        firstMade();
+        // This transaction stays open until the second create ends, so a create that waited for its slug never would.
+        await secondFinished;
+      }),
+      rollbackTest(async (tx) => {
+        await made;
+        try { slugs[1] = await create(tx); } finally { secondDone(); }
+      }),
+    ]);
+    expect(slugs[0]).toBe(baseSlug);
+    expect(slugs[1]).toMatch(new RegExp(`^${baseSlug}-[0-9a-f]{12}$`));
+  });
 });
 
 describe.skipIf(!client)("team membership", () => {

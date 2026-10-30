@@ -27,5 +27,32 @@
     "generating": "Generating...",
     "emptyResponse": "Preview responses will appear here after you run the receptionist.",
     "disabled": "Sign in and create a business to run the real preview flow."
+  },
+  "unansweredQuestions": {
+    "title": "Unanswered Questions",
+    "timesAsked_one": "Asked {{count}} time",
+    "timesAsked_other": "Asked {{count}} times",
+    "lastAsked": "Last asked {{date}}",
+    "askedSummary": "{{asked}} · {{lastAsked}}",
+    "answer": "Answer",
+    "answerLabel": "Answer to: {{question}}",
+    "answerPlaceholder": "Write what your receptionist should say.",
+    "answerTooLong": "Shorten your answer to {{max}} characters or fewer.",
+    "saveAnswer": "Save Answer",
+    "cancel": "Cancel",
+    "dismiss": "Dismiss",
+    "toast": {
+      "answered": "Answer added to your knowledge.",
+      "dismissed": "Question dismissed.",
+      "alreadyHandled": "Someone already answered or dismissed this question."
+    },
+    "emptyTitle": "No unanswered questions",
+    "emptyDescription": "When your receptionist can't find an answer in your knowledge, you'll see the question here.",
+    "loadFailed": "We couldn't load your unanswered questions. Refresh the page to try again.",
+    "home": {
+      "count_one": "{{count}} question your receptionist couldn't answer",
+      "count_other": "{{count}} questions your receptionist couldn't answer",
+      "description": "Add the answers on the Knowledge page."
+    }
   }
 }

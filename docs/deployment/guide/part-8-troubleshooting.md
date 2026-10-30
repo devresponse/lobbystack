@@ -138,6 +138,7 @@ Otherwise, a sign-in lasts 30 days, and a password reset or a new `BETTER_AUTH_S
 - The admin hands the code to the worker, which emails it. While the worker isn't running, the code waits, and nothing is logged; it goes out once the worker is back, perhaps after it expired ([7.16](part-7-operations.md#716-worker-crash-and-stuck-calls)). When the worker has no `SMTP_HOST`, or the email service refuses the email, the worker logs a `job.failed` line for `email.send` with the reason ([7.17](part-7-operations.md#717-emails-or-texts-not-going-out)).
 - A failed email is tried for about 15 seconds, then dropped. Once email works, ask for a new code.
 - Each address gets at most 1 code a minute and 3 in a clock hour, the one sent at sign-up included. When the limit stops a code, the code screen still appears, but nothing was sent. **Send a new code** then says "Please wait before requesting another verification code." Reset codes have the same limit, and their screen also moves on without saying so.
+- Resets go by emailed code only. A reset link emailed before fork PR #104, at `/reset-password/<token>`, now says the code is invalid: use **Forgot password?** to get a code instead.
 - A code works for 10 minutes and 3 tries. The messages are "That verification code is invalid. Check the code and try again.", "That verification code has expired. Request a new one." and "Too many incorrect attempts. Request a new code."
 
 **Codes and `REQUIRE_EMAIL_VERIFICATION`**

@@ -32,6 +32,8 @@ Since fork PR #32 the dashboard says why a pick failed: an expired offer, a pick
 1. With an Error ID, search the **admin** service's logs for it. The admin logs each server failure as one JSON line starting with `[admin] exception:`, with the route, the `errorId` and the cause: a database error's SQLSTATE or the carrier's status and code. The number routes run in the admin, not the worker.
 2. For "We couldn't get that number", read the **worker**'s `job.failed` line for the claim. The claim's `last_error` also has the reason, which the v1 API shows and the dashboard doesn't.
 
+Since fork PR #104, a deployment without `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` on the admin answers the dashboard's number searches with 503 `phone_numbers_unavailable`, before the search counts against the limit, and the picker says phone numbers aren't set up on this dashboard yet. The v1 API's search answers the same code. Before, the search failed with an Error ID and logged "Phone verification is not configured.", which named neither variable.
+
 ## Claim numbers through the API
 
 Platform keys can find, claim, replace and release numbers for the businesses they manage, through the v1 API and the `lobbystack` command (fork PR #5, migration `0094`). An onboarding manifest can ask for a number. Leave `plan` out of a self-hosted deployment's manifests. The app can't adopt a number bought outside it.

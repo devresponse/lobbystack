@@ -137,6 +137,28 @@ describe("PolarBillingProvider", () => {
     expect(body(1)).toEqual({ discount_id: null });
   });
 
+  it("ends a subscription now, counting one Polar no longer has or that already ended as ended", async () => {
+    const answer = (status: number, body: unknown = {}) => vi.fn().mockResolvedValue({ ok: status >= 200 && status < 300, status, json: async () => body });
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    const fetchMock = answer(200, { id: "sub 1", status: "canceled" });
+    vi.stubGlobal("fetch", fetchMock);
+    await provider.revokeSubscription("sub 1");
+    expect(fetchMock).toHaveBeenCalledWith("https://polar.example/v1/subscriptions/sub%201", expect.objectContaining({ method: "DELETE" }));
+
+    vi.stubGlobal("fetch", answer(404, { error: "ResourceNotFound" }));
+    await expect(provider.revokeSubscription("sub-gone")).resolves.toBeUndefined();
+    vi.stubGlobal("fetch", answer(403, { error: "AlreadyCanceledSubscription" }));
+    await expect(provider.revokeSubscription("sub-ended")).resolves.toBeUndefined();
+  });
+
+  it("fails to end a subscription on any other refusal, so a token without the scope never passes for an ended plan", async () => {
+    const provider = new PolarBillingProvider({ accessToken: "token", organizationId: "organization", baseUrl: "https://polar.example" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 403, json: async () => ({ error: "insufficient_scope" }) }));
+    await expect(provider.revokeSubscription("sub-1")).rejects.toMatchObject({ status: 403, errorName: "insufficient_scope" });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({}) }));
+    await expect(provider.revokeSubscription("sub-1")).rejects.toThrow("status 500");
+  });
+
   it("reads a pending change's product, and a subscription Polar doesn't know as null", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({ ok: true, json: async () => ({ id: "sub-1", status: "active", product_id: "product-pro", cancel_at_period_end: true, ended_at: null, pending_update: { product_id: "product-starter" } }) })

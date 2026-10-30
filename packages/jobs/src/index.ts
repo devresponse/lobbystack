@@ -58,7 +58,7 @@ export function createQueue(
   });
 }
 
-const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "conversation.finalizeSession"]);
+const longRetryJobTypes: ReadonlySet<JobType> = new Set<JobType>(["billing.syncUsage", "billing.reconcile", "notification.dispatch", "billing.endPromoPlan", "conversation.finalizeSession", "billing.revokeSubscription", "phoneNumber.releaseDeleted", "privacy.deleteStoredObjects"]);
 
 export async function enqueueJob(
   queue: Queue<JobEnvelope>,
@@ -81,7 +81,8 @@ export async function enqueueJob(
   // notifications, a promo plan's ending or discount removal, and a call's
   // summary ride out a provider or database outage, or Polar's "a change is
   // still pending", for about 3 hours instead; the billing sweep queues
-  // billing work again after that.
+  // billing work again after that. So do the jobs a deleted business leaves:
+  // ending its plan, and releasing its numbers and files, which nothing queues again.
   const options: JobsOptions = {
     jobId,
     ...(input.delayMs !== undefined ? { delay: input.delayMs } : {}),

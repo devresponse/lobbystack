@@ -916,6 +916,40 @@
       "resendFailed": "Impossible de renvoyer cette invitation.",
       "revokeSuccess": "Invitation révoquée.",
       "revokeFailed": "Impossible de révoquer cette invitation."
+    },
+    "delete": {
+      "title": "Supprimer l'entreprise",
+      "description": "Supprime définitivement cette entreprise et toutes ses données. Cette action est irréversible.",
+      "blocked": {
+        "accountRoot": "C'est la première entreprise de votre compte, elle ne peut donc pas être supprimée. Vous pouvez supprimer les autres entreprises dont vous êtes propriétaire.",
+        "otherOwnerRoot": "C'est la première entreprise du compte d'un autre propriétaire, elle ne peut donc pas être supprimée.",
+        "onlyBusiness": "C'est la seule entreprise dont vous êtes propriétaire, elle ne peut donc pas être supprimée."
+      },
+      "action": "Supprimer l'entreprise",
+      "dialogTitle": "Supprimer {{name}}\u00a0?",
+      "dialogDescription": "Ses appels et enregistrements, conversations, contacts, rendez-vous, connaissances, paramètres, historique de facturation et les accès de l'équipe sont effacés. Ses numéros de téléphone sont rendus à l'opérateur, la réceptionniste cesse de répondre et un forfait payant est résilié immédiatement.",
+      "permanent": "Cette suppression est définitive. Rien ne peut être restauré, ni par vous ni par le support.",
+      "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",
+      "passwordLabel": "Votre mot de passe",
+      "submit": "Supprimer définitivement",
+      "deleting": "Suppression...",
+      "cancel": "Annuler",
+      "deleted": "{{name}} a été supprimée.",
+      "errors": {
+        "failed": "L'entreprise n'a pas pu être supprimée. Réessayez.",
+        "confirmation_mismatch": "Le nom ne correspond pas. Saisissez-le exactement comme il est affiché.",
+        "invalid_password": "Ce mot de passe n'est pas le bon.",
+        "root_business": "C'est la première entreprise d'un compte, elle ne peut donc pas être supprimée.",
+        "only_business": "C'est la seule entreprise dont vous êtes propriétaire, elle ne peut donc pas être supprimée.",
+        "forbidden": "Seul un propriétaire de cette entreprise peut la supprimer.",
+        "number_in_progress": "Un numéro de téléphone est encore en cours de configuration pour cette entreprise. Réessayez dans quelques minutes.",
+        "call_in_progress": "Un appel est en cours pour cette entreprise. Réessayez quand il sera terminé.",
+        "checkout_open": "Un achat de forfait pour cette entreprise a commencé il y a moins d'une heure. Réessayez une fois qu'il aura expiré.",
+        "managed_plan": "Le forfait de cette entreprise est facturé en dehors de l'application. Contactez le support pour y mettre fin, puis supprimez l'entreprise.",
+        "plan_ending": "Son forfait payant est en cours de résiliation. Sélectionnez de nouveau Supprimer définitivement dans un instant.",
+        "plan_not_ended": "Son forfait payant n'a pas pu être résilié. Contactez le support ou réessayez plus tard.",
+        "rate_limited": "Trop de tentatives. Réessayez plus tard."
+      }
     }
   },
   "hours": {

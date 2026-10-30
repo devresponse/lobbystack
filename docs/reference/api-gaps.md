@@ -22,6 +22,8 @@ What the dashboard can do, or the database holds, that the v1 API can't reach ye
 | More than 100 rules | Adds rules with no cap (`createAgentRule` in `packages/domain/src/server/rules.ts`), while the API refuses a 101st with 409. A reorder must list every rule, and both the dashboard's and the API's reorder take at most 100 ids (`RULES_MAX`), so a business with more than 100 rules can't reorder them anywhere. | Either check `RULES_MAX` in `insertAgentRuleInTransaction`, so the dashboard also refuses rule 101 (this changes the dashboard, not the API), or raise the reorder limit. |
 | A service's name in other languages | Not shown in the dashboard either, but the receptionist and the public page read `services.localized_names`. | An optional, read-only `localized_names` on `Service`. Low priority. |
 
+Deleting a business stays out of the API on purpose. Since fork PR #101 an owner deletes one from **Settings > Team**, confirming with its name and their password, which no API key, OAuth grant or MCP tool can give, and a key that could delete its business would make a leaked key cost everything in it ([delete a business](../features/business-deletion.md)).
+
 ## Know which tables have no API
 
 - **`conversations` and `messages`:** the text and website chat threads that the dashboard's **Messages** page reads, answers and hands to a person (`apps/admin/app/api/messages/route.ts`). The API can't read or answer them, and no webhook fires for an incoming text or chat. The API's own "messages" are something else: the messages the receptionist took for the team, kept in `inbox_items`.

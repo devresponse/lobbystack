@@ -164,9 +164,10 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `billing.sweep` | Every 5 minutes | Queues again a Polar event, usage or checkout request a job left behind, at most once an hour each, and reports work older than an hour (fork PR #71) |
 | `billing.verifyCatalog` | Daily | Compares the file, the tables and Polar; leaves out the webhook, which `pnpm billing verify` checks |
 | `billing.endPromoPlan` | Daily, per business | Ends promo plans whose months ran out, a week ahead |
+| `billing.revokeSubscription` | Each delete of a business that pays | Ends its Polar subscription at once and marks it canceled, so the delete can go ahead (fork PR #101, [delete a business](../features/business-deletion.md)); tries 12 times over about 3 hours, and the delete asks again every 10 minutes |
 | `billing.refreshUnitEconomics` | Hourly, per business | Adds up what the business cost this month in provider, AI and hosting fees (`unit_economics_rollups`) |
 
-`billing.reconcile` and `billing.syncUsage` try 12 times over about 3 hours before the sweep takes over, so nothing needs requeueing by hand.
+`billing.reconcile` and `billing.syncUsage` try 12 times over about 3 hours before the sweep takes over, so nothing needs requeueing by hand. A deleted business's billing account, usage and transactions go with it, so the finance export no longer lists them; Polar keeps the customer and its orders.
 
 ## Watch billing
 

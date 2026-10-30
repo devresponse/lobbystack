@@ -4,12 +4,13 @@ import type { JobQueue } from "@lobbystack/jobs";
 
 import { configureSchedulers, type Schedule } from "./scheduler";
 
-function fakeQueues() {
+function fakeQueues(inRedis: string[] = []) {
   const upsertJobScheduler = vi.fn().mockResolvedValue(undefined);
   const removeJobScheduler = vi.fn().mockResolvedValue(true);
-  const queue = { upsertJobScheduler, removeJobScheduler };
+  const getJobSchedulers = vi.fn().mockResolvedValue(inRedis.map((key) => ({ key, name: "job" })));
+  const queue = { upsertJobScheduler, removeJobScheduler, getJobSchedulers };
   const queues = new Map<JobQueue, never>([["maintenance", queue as never], ["default", queue as never], ["critical", queue as never]]);
-  return { queues: queues as never, upsertJobScheduler, removeJobScheduler };
+  return { queues: queues as never, upsertJobScheduler, removeJobScheduler, getJobSchedulers };
 }
 
 describe("worker schedulers", () => {
@@ -111,9 +112,25 @@ describe("worker schedulers", () => {
     expect(upsertJobScheduler.mock.calls.map((call) => call[0])).toEqual(["prospect-demo-expiry", "affiliate-payout", "billing-verify", "billing-sweep", "live-orphan-recovery", "live-greeting-recordings"]);
   });
 
+  it("drops at boot the schedulers a deleted business left in Redis, and only those", async () => {
+    const { queues, removeJobScheduler, getJobSchedulers } = fakeQueues(["telemetry-flush:gone", "promo-plan-end:gone", "live-orphan-recovery:gone", "telemetry-flush:a", "billing-sweep", "someone-elses:gone"]);
+    const applied = new Map<string, Schedule>();
+
+    await configureSchedulers(queues, [{ id: "a", active: true }], applied);
+    expect(removeJobScheduler.mock.calls.map((call) => call[0]).filter((name) => name.endsWith(":gone")).sort()).toEqual(["live-orphan-recovery:gone", "promo-plan-end:gone", "telemetry-flush:gone"]);
+    expect(removeJobScheduler).not.toHaveBeenCalledWith("telemetry-flush:a");
+    expect(removeJobScheduler).not.toHaveBeenCalledWith("billing-sweep");
+
+    // Once this process has set them, it knows what it set, and Redis isn't read again.
+    getJobSchedulers.mockClear();
+    await configureSchedulers(queues, [{ id: "a", active: true }], applied);
+    expect(getJobSchedulers).not.toHaveBeenCalled();
+  });
+
   it("does not register tenant jobs when no businesses are available", async () => {
     const upsertJobScheduler = vi.fn();
-    const queues = new Map([["maintenance", { upsertJobScheduler }] as never, ["default", { upsertJobScheduler }] as never]);
+    const getJobSchedulers = vi.fn().mockResolvedValue([]);
+    const queues = new Map([["maintenance", { upsertJobScheduler, getJobSchedulers }] as never, ["default", { upsertJobScheduler, getJobSchedulers }] as never]);
 
     await configureSchedulers(queues as never);
 

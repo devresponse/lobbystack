@@ -74,6 +74,8 @@ Make an organization access token for each service in Polar under **Settings** >
 | Admin | `customer_sessions:write`, for the billing portal |
 | Worker | `checkouts:write`, `customers:write`, `events:write` and `subscriptions:write`, and for the daily billing check `organizations:read`, `meters:read`, `products:read` and `discounts:read` |
 
+Since fork PR #101 the worker's `subscriptions:write` also ends, at once, the subscription of a business an owner deletes (`DELETE /v1/subscriptions/{id}`, `revokeSubscription`). The admin's token can't, so the delete waits for the worker, and a business that pays can't be deleted while the worker's token lacks the scope ([delete a business](../features/business-deletion.md)).
+
 Give neither `webhooks:read`. Polar lists each webhook with its signing secret, and whoever has the secret can send events that put any business on any plan. The worker's daily check leaves the webhook out, and `pnpm billing verify`, run with a read token of your own, checks the webhook and its secret. When Polar turns the webhook off, it emails the organization's members.
 
 ## Keep Polar's API version

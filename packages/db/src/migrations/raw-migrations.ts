@@ -132,6 +132,7 @@ export const SCHEMA_MIGRATIONS = [
   "0126_clear_expired_call_summaries.sql",
   "0127_knowledge_chunks_reembed_pending_index.sql",
   "0128_call_archiving.sql",
+  "0129_business_deletion.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

@@ -904,6 +904,40 @@
       "resendFailed": "We couldn't resend that invitation.",
       "revokeSuccess": "Invitation revoked.",
       "revokeFailed": "We couldn't revoke that invitation."
+    },
+    "delete": {
+      "title": "Delete business",
+      "description": "Permanently delete this business and all of its data. This can't be undone.",
+      "blocked": {
+        "accountRoot": "This is the first business on your account, so it can't be deleted. You can delete the other businesses you own.",
+        "otherOwnerRoot": "This is the first business on another owner's account, so it can't be deleted.",
+        "onlyBusiness": "This is the only business you own, so it can't be deleted."
+      },
+      "action": "Delete business",
+      "dialogTitle": "Delete {{name}}?",
+      "dialogDescription": "Its calls and recordings, chats, contacts, appointments, knowledge, settings, billing history and the team's access are erased. Its phone numbers go back to the provider, the receptionist stops answering, and a paid plan is canceled right away.",
+      "permanent": "This is permanent. Nothing can be restored, by you or by support.",
+      "confirmLabel": "Type <name>{{name}}</name> to confirm",
+      "passwordLabel": "Your password",
+      "submit": "Delete permanently",
+      "deleting": "Deleting...",
+      "cancel": "Cancel",
+      "deleted": "{{name}} was deleted.",
+      "errors": {
+        "failed": "The business couldn't be deleted. Try again.",
+        "confirmation_mismatch": "The name doesn't match. Type it exactly as it's shown.",
+        "invalid_password": "That password isn't right.",
+        "root_business": "This is the first business on an account, so it can't be deleted.",
+        "only_business": "This is the only business you own, so it can't be deleted.",
+        "forbidden": "Only an owner of this business can delete it.",
+        "number_in_progress": "A phone number is still being set up for this business. Try again in a few minutes.",
+        "call_in_progress": "A call is in progress on this business. Try again when it ends.",
+        "checkout_open": "A plan purchase for this business started less than an hour ago. Try again once it has expired.",
+        "managed_plan": "This business's plan is billed outside the app. Contact support to end it, then delete the business.",
+        "plan_ending": "Its paid plan is being canceled. Select Delete permanently again in a moment.",
+        "plan_not_ended": "Its paid plan couldn't be canceled. Contact support, or try again later.",
+        "rate_limited": "Too many tries. Try again later."
+      }
     }
   },
   "hours": {

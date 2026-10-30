@@ -18,6 +18,7 @@ import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveC
 import { expireTeamRequest } from "@lobbystack/domain";
 import { runDailyBillingVerify, sweepBillingWork, type BillingSweepOutcome, type DailyBillingVerifyOutcome } from "@lobbystack/domain";
 import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
+import { isBusinessDeleted, recordDeletedBusinessPlanEnded } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import { callTranscriptSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
@@ -76,6 +77,7 @@ export type WorkerDependencies = {
     changeSubscriptionProduct?(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior; discountId?: string | null; metadata?: Record<string, string> }): Promise<PolarSubscription>;
     cancelSubscriptionAtPeriodEnd?(subscriptionId: string): Promise<PolarSubscription>;
     removeSubscriptionDiscount?(subscriptionId: string): Promise<PolarSubscription>;
+    revokeSubscription?(subscriptionId: string): Promise<void>;
   };
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
   polarCatalog?: { readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> };
@@ -1090,6 +1092,8 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const deleted = await deleteExpiredObjectsForBusiness(dependencies.domain, { businessId: businessIdOrThrow(job) }, dependencies.storage);
       return { status: deleted > 0 ? "completed" : "skipped", entityId: String(deleted) };
     }
+    case "privacy.deleteStoredObjects":
+      return await deleteDeletedBusinessFiles(dependencies, job, execution);
     case "phoneNumber.provision": {
       const businessId = businessIdOrThrow(job); const claimId = String(job.payload.claimId ?? "");
       if (!claimId) return { status: "skipped", entityId: claimId };
@@ -1166,6 +1170,8 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         throw error;
       }
     }
+    case "phoneNumber.releaseDeleted":
+      return await releaseDeletedBusinessNumber(dependencies, job, execution);
     case "prospectDemo.expire": {
       const expired = await expireProspectDemos(dependencies.domain);
       return { status: expired > 0 ? "completed" : "skipped", entityId: String(expired) };
@@ -1190,6 +1196,11 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const subscriptionId = typeof job.payload.subscriptionId === "string" ? job.payload.subscriptionId : undefined;
       if (dropDiscount && subscriptionId) return await dropPromoDiscount(dependencies, { businessId, subscriptionId, discountId: dropDiscount });
       return await endPromoPlan(dependencies, { businessId });
+    }
+    case "billing.revokeSubscription": {
+      const subscriptionId = typeof job.payload.subscriptionId === "string" ? job.payload.subscriptionId : "";
+      if (!subscriptionId) return { status: "skipped", entityId: subscriptionId };
+      return await revokeDeletedBusinessPlan(dependencies, { businessId: businessIdOrThrow(job), subscriptionId });
     }
     case "billing.sweep": {
       const outcome = await sweepBillingWork(dependencies.domain);
@@ -1724,6 +1735,94 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
   } finally {
     await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });
   }
+}
+
+/**
+ * Ends a business's Polar subscription at once, for an owner deleting the
+ * business, and records it, so the delete can go ahead; the delete asks again
+ * every 10 minutes while the plan is live. A subscription Polar still shows
+ * live afterwards fails the try. One Polar set to end with its period counts
+ * as ended: it stays until then, but nothing renews it.
+ */
+async function revokeDeletedBusinessPlan(dependencies: WorkerDependencies, input: { businessId: string; subscriptionId: string }): Promise<JobResult> {
+  const { businessId, subscriptionId } = input;
+  const polar = dependencies.polar;
+  if (!polar?.revokeSubscription) {
+    await reportWarning(new Error("A business being deleted still pays for a plan, and the worker has no Polar token to end it with. Set POLAR_ACCESS_TOKEN and POLAR_ORGANIZATION_ID on the worker."), { operation: "job.billing.revokeSubscription", businessId });
+    return { status: "skipped", entityId: businessId };
+  }
+  // A plan change or a promo plan's ending is changing the subscription: this waits for it.
+  const hold = await claimBillingSubscription(dependencies.domain, { businessId });
+  if ("retryAt" in hold) return { status: "deferred", entityId: businessId, retryAt: hold.retryAt };
+  try {
+    await polar.revokeSubscription(subscriptionId);
+    const subscription = polar.getSubscription ? await polar.getSubscription(subscriptionId) : null;
+    if (subscription && !subscription.endedAt && isLiveSubscriptionState(subscription.status) && !subscription.cancelAtPeriodEnd) throw new Error("Polar still shows the subscription live after ending it.");
+  } catch (error) {
+    if (planChangeRefusalFor(error) !== "token_scope") throw error;
+    // Every try would be refused the same way; the operator's to fix, and the delete says the plan couldn't be canceled.
+    await reportWarning(new Error("Polar refused to end the plan of a business being deleted: the worker's POLAR_ACCESS_TOKEN needs subscriptions:write."), { operation: "job.billing.revokeSubscription", businessId });
+    return { status: "skipped", entityId: businessId };
+  } finally {
+    await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });
+  }
+  await recordDeletedBusinessPlanEnded(dependencies.domain, { businessId, subscriptionId });
+  return { status: "completed", entityId: businessId };
+}
+
+/** Twilio's answer for a number it no longer has. */
+function isTwilioNotFound(error: unknown): boolean {
+  return typeof error === "object" && error !== null && ((error as { status?: unknown }).status === 404 || (error as { code?: unknown }).code === 20404);
+}
+
+/**
+ * Gives a deleted business's phone number back to Twilio, so it stops costing
+ * and stops ringing. The business is named in the payload, since the job
+ * outlives it, and the number goes only once the business no longer exists.
+ * The last try that fails tells the operator, who can release it by hand.
+ */
+async function releaseDeletedBusinessNumber(dependencies: WorkerDependencies, job: JobEnvelope, execution: JobExecution): Promise<JobResult> {
+  const businessId = typeof job.payload.businessId === "string" ? job.payload.businessId : "";
+  const providerPhoneId = typeof job.payload.providerPhoneId === "string" ? job.payload.providerPhoneId : "";
+  if (!businessId || !providerPhoneId || !await isBusinessDeleted(dependencies.domain, businessId)) return { status: "skipped", entityId: providerPhoneId };
+  try {
+    if (!dependencies.twilio?.releasePhoneNumber) throw new Error("Twilio phone-number release is not configured.");
+    await dependencies.twilio.releasePhoneNumber({ providerPhoneId });
+    return { status: "completed", entityId: providerPhoneId };
+  } catch (error) {
+    // Released already, as when a release the business scheduled finished first.
+    if (isTwilioNotFound(error)) return { status: "skipped", entityId: providerPhoneId };
+    if (execution.isFinalAttempt) await reportWarning(new Error(`A deleted business's phone number (${providerPhoneId}) couldn't be released. Release it in Twilio's console.`), { operation: "job.phoneNumber.releaseDeleted", businessId });
+    throw error;
+  }
+}
+
+/**
+ * Deletes a deleted business's stored files: recordings, documents and
+ * uploads. Only keys in the business's own folder go, and only once the
+ * business no longer exists. A failed file fails the try, which deletes them
+ * all again: deleting a file that's gone changes nothing.
+ */
+async function deleteDeletedBusinessFiles(dependencies: WorkerDependencies, job: JobEnvelope, execution: JobExecution): Promise<JobResult> {
+  const businessId = typeof job.payload.businessId === "string" ? job.payload.businessId : "";
+  const objectKeys = Array.isArray(job.payload.objectKeys) ? job.payload.objectKeys.filter((key): key is string => typeof key === "string") : [];
+  const keys = businessId ? objectKeys.filter((key) => key.startsWith(`${businessId}/`)) : [];
+  if (keys.length < objectKeys.length) await reportWarning(new Error(`A deleted business's file cleanup skipped ${objectKeys.length - keys.length} keys outside its folder.`), { operation: "job.privacy.deleteStoredObjects", ...(businessId ? { businessId } : {}) });
+  if (keys.length === 0 || !await isBusinessDeleted(dependencies.domain, businessId)) return { status: "skipped", entityId: businessId };
+  if (!dependencies.storage) throw new Error("Storage is not configured.");
+  const failures: unknown[] = [];
+  for (const key of keys) {
+    try {
+      await dependencies.storage.deleteObject({ key });
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (failures.length > 0) {
+    if (execution.isFinalAttempt) await reportWarning(new Error(`${failures.length} of a deleted business's stored files couldn't be deleted.`), { operation: "job.privacy.deleteStoredObjects", businessId });
+    throw failures[0];
+  }
+  return { status: "completed", entityId: `${businessId}:${keys.length}` };
 }
 
 /** The Polar product that sells a plan and interval: the catalog's link, or before one the plan's variable. */

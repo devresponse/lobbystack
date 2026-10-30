@@ -921,7 +921,7 @@
       "title": "Supprimer l'entreprise",
       "description": "Supprime définitivement cette entreprise et toutes ses données. Cette action est irréversible.",
       "blocked": {
-        "accountRoot": "C'est la première entreprise de votre compte, elle ne peut donc pas être supprimée. Vous pouvez supprimer les autres entreprises dont vous êtes propriétaire.",
+        "accountRoot": "C'est la première entreprise de votre compte, elle ne peut donc pas être supprimée. Pour annuler votre compte, supprimez d'abord les autres entreprises dont vous êtes propriétaire. Vous pourrez ensuite annuler celle-ci ici.",
         "otherOwnerRoot": "C'est la première entreprise du compte d'un autre propriétaire, elle ne peut donc pas être supprimée.",
         "onlyBusiness": "C'est la seule entreprise dont vous êtes propriétaire, elle ne peut donc pas être supprimée."
       },
@@ -948,6 +948,28 @@
         "managed_plan": "Le forfait de cette entreprise est facturé en dehors de l'application. Contactez le support pour y mettre fin, puis supprimez l'entreprise.",
         "plan_ending": "Son forfait payant est en cours de résiliation. Sélectionnez de nouveau Supprimer définitivement dans un instant.",
         "plan_not_ended": "Son forfait payant n'a pas pu être résilié. Contactez le support ou réessayez plus tard.",
+        "rate_limited": "Trop de tentatives. Réessayez plus tard."
+      }
+    },
+    "cancelAccount": {
+      "title": "Annuler le compte",
+      "description": "Fermez cette entreprise et arrêtez d'utiliser le service. Rien n'est supprimé, et vous pourrez recommencer plus tard avec une nouvelle entreprise.",
+      "action": "Annuler le compte",
+      "dialogTitle": "Annuler {{name}}\u00a0?",
+      "dialogDescription": "Une fois l'annulation confirmée, plus personne dans l'équipe ne peut l'ouvrir, sa réceptionniste ne répond plus aux appels ni aux textos, son clavardage sur le site web, sa page publique, ses clés d'API et ses applications connectées cessent de fonctionner, et un forfait payant est résilié. Ses numéros de téléphone sont rendus à l'opérateur après 30 jours.",
+      "notice": "Rien n'est supprimé, et rien ne change pour l'instant. Nous vous enverrons par courriel un lien de confirmation, valide pendant 24 heures, qui vous demandera de vous connecter et de saisir votre mot de passe.",
+      "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",
+      "submit": "Demander l'annulation",
+      "sending": "Envoi...",
+      "keep": "Garder mon compte",
+      "sentTitle": "Consultez vos courriels",
+      "sentDescription": "Nous avons envoyé un lien à {{email}}. Ouvrez-le dans les 24 heures et connectez-vous pour annuler l'entreprise. D'ici là, rien ne change.",
+      "done": "Terminé",
+      "errors": {
+        "failed": "L'annulation n'a pas pu être demandée. Réessayez.",
+        "confirmation_mismatch": "Le nom ne correspond pas. Saisissez-le exactement comme il est affiché.",
+        "other_businesses": "Vous êtes propriétaire d'autres entreprises. Supprimez-les d'abord, puis annulez celle-ci.",
+        "forbidden": "Seul un propriétaire de cette entreprise peut l'annuler.",
         "rate_limited": "Trop de tentatives. Réessayez plus tard."
       }
     }

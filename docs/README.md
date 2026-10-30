@@ -47,6 +47,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Time zones and calendars](features/timezone-and-calendar.md) | A business's time zone and Google Calendar, and what each symptom means |
 | [Many businesses on one deployment](features/multitenancy.md) | What each business has to itself and what the deployment shares |
 | [Delete a business](features/business-deletion.md) | An owner deleting one of their businesses for good, never an account's first, and what goes with it |
+| [Cancel an account](features/account-cancellation.md) | An owner closing their account's last business without deleting anything, confirmed by email, and bringing it back |
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |
 | [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar, promo codes, and why it is built this way |

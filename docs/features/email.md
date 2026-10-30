@@ -12,7 +12,7 @@ Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_PASSWORD` an
 
 ## Know the templates
 
-`TemplateName` lists them: `existing_account`, `account_setup`, `verify_email`, `password_reset`, `invitation`, `operator_alert`, `call_transcript`, `feedback_submission`, `onboarding_followup` and `promo_ending`. Each is laid out once, as headings, paragraphs, a button, a code or a quote, and rendered as HTML and as plain text:
+`TemplateName` lists them: `existing_account`, `account_setup`, `verify_email`, `password_reset`, `invitation`, `operator_alert`, `call_transcript`, `feedback_submission`, `onboarding_followup`, `promo_ending`, and since fork PR #102 `cancellation_confirm`, `cancellation_request` and `cancellation_completed` ([cancel an account](account-cancellation.md#know-whos-told)). Each is laid out once, as headings, paragraphs, a button, a code or a quote, and rendered as HTML and as plain text:
 
 - In plain text, parts are separated by a blank line and each link sits on its own line after its label.
 - Every email ends with why it was sent ("You're receiving this email because…").
@@ -28,6 +28,8 @@ Set `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USERNAME`, `SMTP_PASSWORD` an
 | The email after each call | The dashboard language of each person who gets it, English if they have none |
 | Alerts and feedback | English. An alert's subject and body are written when it's queued and shared with its text message. |
 | The founder check-in (`onboarding_followup`) | English, text only |
+| The link to confirm canceling an account (`cancellation_confirm`) | The owner's dashboard language |
+| The deployment's inbox hearing of a cancellation (`cancellation_request`, `cancellation_completed`) | English |
 
 The interface languages are English, French, Spanish and Serbian (Latin script).
 

@@ -129,7 +129,12 @@ async function seed(tx: DatabaseTransaction) {
     await as("lobbystack_worker");
     await releaseCallTexts({ db }, { businessId, callId });
   };
-  return { book, addContact, consent, cancellationTexts, deliver, operatorCancel, callerCancel, apiCancel, pastAppointment, startCall, answerTexts, job, endCall };
+  /** Cancels the business, as its owner's confirmed link does (migration 0130); only its status matters to its texts. */
+  const closeBusiness = async () => {
+    await asOwner();
+    await tx.update(businesses).set({ status: "canceled", canceledAt: new Date() }).where(eq(businesses.id, businessId));
+  };
+  return { book, addContact, consent, cancellationTexts, deliver, operatorCancel, callerCancel, apiCancel, pastAppointment, startCall, answerTexts, job, endCall, closeBusiness };
 }
 
 describe.skipIf(!client)("the answer to texts given while booking", () => {
@@ -233,6 +238,19 @@ describe.skipIf(!client)("the cancellation text", () => {
       const past = await pastAppointment("+14165550101");
       await expect(operatorCancel(past)).resolves.toBe("cancelled");
       expect(await cancellationTexts(past)).toEqual([]);
+    });
+  });
+});
+
+describe.skipIf(!client)("texts from a canceled business", () => {
+  it("sends its customers nothing more, reminders included", async () => {
+    await rollbackTest(async (tx) => {
+      const { book, deliver, closeBusiness } = await seed(tx);
+      const appointmentId = await book("+14165550101", "agreed");
+      expect(await deliver(appointmentId, "appointment_reminder")).toMatchObject({ kind: "ready" });
+      await closeBusiness();
+      expect(await deliver(appointmentId, "appointment_reminder")).toMatchObject({ kind: "skipped" });
+      expect(await deliver(appointmentId, "booking_confirmation")).toMatchObject({ kind: "skipped" });
     });
   });
 });

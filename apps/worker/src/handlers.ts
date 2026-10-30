@@ -21,7 +21,7 @@ import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobb
 import { isBusinessDeleted, recordDeletedBusinessPlanEnded } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
-import { callTranscriptSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
+import { callTranscriptSubject, cancellationSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import { PolarRequestError, type PolarCustomer, type PolarProrationBehavior, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
@@ -568,7 +568,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
         return { status: "skipped" };
       }
       {
-        const template = job.payload.template === "existing_account" || job.payload.template === "account_setup" || job.payload.template === "verify_email" || job.payload.template === "password_reset" || job.payload.template === "invitation" || job.payload.template === "operator_alert" || job.payload.template === "feedback_submission" || job.payload.template === "onboarding_followup" || job.payload.template === "promo_ending"
+        const template = job.payload.template === "existing_account" || job.payload.template === "account_setup" || job.payload.template === "verify_email" || job.payload.template === "password_reset" || job.payload.template === "invitation" || job.payload.template === "operator_alert" || job.payload.template === "feedback_submission" || job.payload.template === "onboarding_followup" || job.payload.template === "promo_ending" || job.payload.template === "cancellation_confirm" || job.payload.template === "cancellation_request" || job.payload.template === "cancellation_completed"
           ? job.payload.template
           : "operator_alert";
         const variables = typeof job.payload.variables === "object" && job.payload.variables !== null
@@ -580,7 +580,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
           const sent = await dependencies.email.sendTemplate({
             template,
             to: String(job.payload.to ?? job.payload.email ?? ""),
-            subject: String(job.payload.subject ?? (template === "invitation" ? invitationSubject(variables, appName) : template === "promo_ending" ? promoEndingSubject(variables) : `${appName} notification`)),
+            subject: String(job.payload.subject ?? (template === "invitation" ? invitationSubject(variables, appName) : template === "promo_ending" ? promoEndingSubject(variables) : template === "cancellation_confirm" || template === "cancellation_request" || template === "cancellation_completed" ? cancellationSubject(template, variables) : `${appName} notification`)),
             variables,
             appName,
             idempotencyKey: job.idempotencyKey,
@@ -1740,7 +1740,8 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
 /**
  * Ends a business's Polar subscription at once, for an owner deleting the
  * business, and records it, so the delete can go ahead; the delete asks again
- * every 10 minutes while the plan is live. A subscription Polar still shows
+ * every 10 minutes while the plan is live. A canceled business's plan ends
+ * the same way, asked once when the owner confirms. A subscription Polar still shows
  * live afterwards fails the try. One Polar set to end with its period counts
  * as ended: it stays until then, but nothing renews it.
  */
@@ -1748,7 +1749,7 @@ async function revokeDeletedBusinessPlan(dependencies: WorkerDependencies, input
   const { businessId, subscriptionId } = input;
   const polar = dependencies.polar;
   if (!polar?.revokeSubscription) {
-    await reportWarning(new Error("A business being deleted still pays for a plan, and the worker has no Polar token to end it with. Set POLAR_ACCESS_TOKEN and POLAR_ORGANIZATION_ID on the worker."), { operation: "job.billing.revokeSubscription", businessId });
+    await reportWarning(new Error("A business being deleted or canceled still pays for a plan, and the worker has no Polar token to end it with. Set POLAR_ACCESS_TOKEN and POLAR_ORGANIZATION_ID on the worker."), { operation: "job.billing.revokeSubscription", businessId });
     return { status: "skipped", entityId: businessId };
   }
   // A plan change or a promo plan's ending is changing the subscription: this waits for it.
@@ -1761,7 +1762,7 @@ async function revokeDeletedBusinessPlan(dependencies: WorkerDependencies, input
   } catch (error) {
     if (planChangeRefusalFor(error) !== "token_scope") throw error;
     // Every try would be refused the same way; the operator's to fix, and the delete says the plan couldn't be canceled.
-    await reportWarning(new Error("Polar refused to end the plan of a business being deleted: the worker's POLAR_ACCESS_TOKEN needs subscriptions:write."), { operation: "job.billing.revokeSubscription", businessId });
+    await reportWarning(new Error("Polar refused to end the plan of a business being deleted or canceled: the worker's POLAR_ACCESS_TOKEN needs subscriptions:write."), { operation: "job.billing.revokeSubscription", businessId });
     return { status: "skipped", entityId: businessId };
   } finally {
     await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });

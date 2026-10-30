@@ -161,10 +161,11 @@ export async function prunePublishedOutbox(
 /**
  * Lists every business for the worker's scheduler, with whether it is active:
  * it has an active member, and it finished onboarding or had a call, a
- * message or a member sign-in in the last 30 days. Runs as the dispatcher.
+ * message or a member sign-in in the last 30 days; and whether it is closed
+ * (canceled), which keeps only its housekeeping jobs. Runs as the dispatcher.
  */
-export async function listSchedulerBusinesses(db: Database): Promise<Array<{ id: string; active: boolean }>> {
-  const result = await withDispatcherTransaction(db, async (tx) => await tx.execute<{ id: string; active: boolean }>(sql`select business_id as id, active from app.list_scheduler_businesses()`));
+export async function listSchedulerBusinesses(db: Database): Promise<Array<{ id: string; active: boolean; closed: boolean }>> {
+  const result = await withDispatcherTransaction(db, async (tx) => await tx.execute<{ id: string; active: boolean; closed: boolean }>(sql`select business_id as id, active, closed from app.list_scheduler_businesses()`));
   return result.rows;
 }
 

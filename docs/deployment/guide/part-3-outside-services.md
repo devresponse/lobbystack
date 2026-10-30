@@ -303,7 +303,7 @@ One sending domain can serve both environments, with a key for each.
 | Password | The `re_` key | `SMTP_PASSWORD` | worker |
 | Sender | `no-reply@notifications.example.com` | `EMAIL_FROM` | worker |
 | Where replies go (optional) | `support@example.com` | `EMAIL_REPLY_TO` | worker |
-| Where dashboard feedback goes (optional) | `you@example.com` | `FEEDBACK_TO_EMAIL` | admin |
+| Where dashboard feedback goes, and account cancellations when the brand has no address of its own (optional) | `you@example.com` | `FEEDBACK_TO_EMAIL` | admin |
 
 - `EMAIL_FROM` must be an address on your verified domain. When a brand file applies ([3.6](#36-your-brand)), LobbyStack puts the brand's name in front of it, so people see "AlloPlace" as the sender. In a copy of the code with no brand of its own, write the name yourself: `Your Business <no-reply@notifications.example.com>`.
 - If `EMAIL_FROM` is empty, the worker sends from `no-reply@localhost`, which Resend refuses because it isn't on your verified domain.

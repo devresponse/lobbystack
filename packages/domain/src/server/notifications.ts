@@ -227,6 +227,7 @@ export async function resolveNotificationDelivery(
       startsAt: appointments.startsAt,
       timezone: appointments.timezone,
       businessName: businesses.name,
+      businessStatus: businesses.status,
       defaultLocale: businesses.defaultLocale,
       serviceName: services.name,
       contactPhone: contacts.phone,
@@ -250,6 +251,8 @@ export async function resolveNotificationDelivery(
     if (!row) {
       return null;
     }
+    // A canceled business sends its customers nothing more, reminders included.
+    if (row.businessStatus !== "active") return { kind: "skipped", notificationId: row.notificationId };
     // Customer texts go out from the number that sends operator alerts.
     const senderPhone = row.channel === "sms" ? await resolveSmsSender(tx, input.businessId) : null;
     // The channel check repeats one in the skip reason so TypeScript narrows row.channel.

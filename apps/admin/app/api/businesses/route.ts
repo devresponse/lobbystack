@@ -3,9 +3,9 @@ import { NextResponse } from "next/server";
 import { attributeBusiness, createBusiness, deleteBusiness, ianaTimeZone, listUserBusinesses, updateBusiness, type BusinessDeletion } from "@lobbystack/domain";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { asApiResponse, businessIdFromRequest, getAppDatabase, jsonError, readJson, requireApiSession, requireOperatorBusiness } from "@/lib/api-helpers";
-import { getAuth } from "@/lib/auth";
 import { createDomainContext } from "@/lib/domain-context";
 import { enforceFixedWindow, fixedWindowLimit } from "@/lib/fixed-window-limit";
+import { passwordMatches } from "@/lib/password-check";
 
 export const dynamic = "force-dynamic";
 
@@ -82,18 +82,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: true });
   } catch (error) {
     return asApiResponse(error);
-  }
-}
-
-/** Whether the password is the signed-in person's own. One longer than sign-up allows can't be. */
-async function passwordMatches(request: Request, password: string): Promise<boolean> {
-  try {
-    await getAuth().api.verifyPassword({ body: { password }, headers: request.headers });
-    return true;
-  } catch (error) {
-    const code = (error as { body?: { code?: unknown } } | null)?.body?.code;
-    if (code === "INVALID_PASSWORD" || code === "PASSWORD_TOO_LONG") return false;
-    throw error;
   }
 }
 

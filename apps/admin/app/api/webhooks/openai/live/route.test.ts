@@ -59,6 +59,40 @@ describe("POST /api/webhooks/openai/live", () => {
     expect(logged).not.toContain("Sam Lee");
   });
 
+  it("turns away a call to a canceled business's number, which is still this deployment's", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: null, closed: true, position: 1 }] });
+    mocks.unwrap.mockResolvedValue({
+      type: "live.transport.incoming",
+      data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }, { name: "From", value: "<sip:+14165550134@example.com>" }] },
+    });
+
+    const response = await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.reject).toHaveBeenCalledWith("live_1", { status_code: 404 });
+    expect(mocks.accept).not.toHaveBeenCalled();
+    expect(mocks.startLivePhoneCall).not.toHaveBeenCalled();
+    expect(new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]![0] as SQL).sql).toContain("app.is_closed_business_phone(phone)");
+    expect(info.mock.calls.flat().join(" ")).toContain("live.incoming_closed_business");
+  });
+
+  it("answers a forwarded call for an open business even when an earlier number belonged to a canceled one", async () => {
+    mocks.execute.mockResolvedValue({ rows: [{ business_id: null, closed: true, position: 1 }, { business_id: "biz_1", closed: false, position: 2 }] });
+    mocks.snapshot.mockResolvedValue(null);
+    mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false, maxDurationMs: 500_000 });
+    mocks.unwrap.mockResolvedValue({
+      type: "live.transport.incoming",
+      data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }, { name: "Diversion", value: "<sip:+15815550122@example.com>" }] },
+    });
+
+    await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    // It reaches the business, and fails there only for want of a snapshot: never the 404 a canceled number gets.
+    expect(mocks.reject).not.toHaveBeenCalledWith("live_1", { status_code: 404 });
+    expect(mocks.snapshot).toHaveBeenCalled();
+  });
+
   it("finishes answering a retried call without touching its record", async () => {
     mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", position: 1 }] });
     mocks.snapshot.mockResolvedValue({ businessId: "biz_1", greeting: "Hi" });

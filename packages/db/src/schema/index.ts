@@ -153,6 +153,9 @@ export const businesses = pgTable(
     hoursSource: varchar("hours_source", { length: 16 }).$type<"none" | "generated" | "operator">().default("none").notNull(),
     hoursFingerprint: varchar("hours_fingerprint", { length: 64 }),
     hoursGeneratedAt: timestamp("hours_generated_at", { withTimezone: true }),
+    // When and by whom an owner canceled the business (status "canceled"), which closes it to its team and deletes nothing. See migration 0130.
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    canceledByUserId: uuid("canceled_by_user_id").references(() => users.id, { onDelete: "set null" }),
     ...legacyId,
     ...timestamps,
   },
@@ -201,6 +204,27 @@ export const businessInvitations = pgTable(
     uniqueIndex("business_invitations_token_hash_unique").on(table.tokenHash),
     index("business_invitations_business_status_idx").on(table.businessId, table.status),
     index("business_invitations_email_idx").on(table.normalizedEmail),
+  ],
+);
+
+/** An owner's request to cancel their account's root business: the emailed link's token, hashed, and until when it works. Migration 0130. */
+export const businessCancellationRequests = pgTable(
+  "business_cancellation_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    requestedByUserId: uuid("requested_by_user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    /** The address the confirmation link went to: the owner's, when they asked. */
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    status: varchar("status", { length: 32 }).$type<"pending" | "confirmed" | "replaced">().default("pending").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("business_cancellation_requests_token_unique").on(table.tokenHash),
+    index("business_cancellation_requests_business_idx").on(table.businessId, table.status),
   ],
 );
 

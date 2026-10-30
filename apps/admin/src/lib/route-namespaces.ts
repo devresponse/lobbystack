@@ -13,7 +13,7 @@ export const DASHBOARD_NAMESPACES = ["common", "nav", "settings", "agent", "dash
 
 export function routeNamespaces(pathname: string): string[] {
   const section = stripLocalePrefix(pathname).split("/")[1] ?? "";
-  if (["login", "signup", "forgot-password", "reset-password", "verify-email", "confirm-email-change", "accept-invite"].includes(section)) return ["common", "auth", "onboarding"];
+  if (["login", "signup", "forgot-password", "reset-password", "verify-email", "confirm-email-change", "accept-invite", "cancel-account"].includes(section)) return ["common", "auth", "onboarding"];
   if (section === "embed") return ["common", "widget"];
   if (section === "profile") return ["common", "profile"];
   if (["demo", "claim-demo"].includes(section)) return ["common", "auth", "demos", "widget"];

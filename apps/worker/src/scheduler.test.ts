@@ -67,6 +67,37 @@ describe("worker schedulers", () => {
     expect(upsertJobScheduler).toHaveBeenCalledWith("telemetry-flush:dormant", { every: 60 * 60_000 }, expect.anything());
   });
 
+  it("keeps only a canceled business's housekeeping jobs, at the dormant pace", async () => {
+    const { queues, upsertJobScheduler, removeJobScheduler } = fakeQueues();
+
+    await configureSchedulers(queues, [{ id: "closed", active: false, closed: true }]);
+
+    // Nothing more reaches its owners, customers, calendar or Polar.
+    expect(removeJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual([
+      "calendar-reconcile:closed",
+      "live-orphan-recovery:closed",
+      "operator-daily-summary:closed",
+      "outbox-backlog-sample:closed",
+      "promo-plan-end:closed",
+    ]);
+    expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId === "closed").map((call) => [call[0], call[1].every]).sort()).toEqual([
+      ["api-retention:closed", 60 * 60_000],
+      ["pending-upload-cleanup:closed", 15 * 60_000],
+      // Its numbers still go back to Twilio when their 30 days are up.
+      ["phone-number-reclaim:closed", 60 * 60_000],
+      ["privacy-retention-sweep:closed", 60 * 60_000],
+      ["telemetry-flush:closed", 60 * 60_000],
+      ["unit-economics-rollup:closed", 60 * 60_000],
+    ]);
+
+    // Brought back, it gets its jobs again on the next refresh.
+    const applied = new Map<string, Schedule>();
+    await configureSchedulers(queues, [{ id: "closed", active: false, closed: true }], applied);
+    upsertJobScheduler.mockClear();
+    await configureSchedulers(queues, [{ id: "closed", active: true, closed: false }], applied);
+    expect(upsertJobScheduler.mock.calls.map((call) => call[0]).sort()).toEqual(["calendar-reconcile:closed", "operator-daily-summary:closed", "outbox-backlog-sample:closed", "promo-plan-end:closed", "telemetry-flush:closed"]);
+  });
+
   it("calls Redis on a refresh only for what changed", async () => {
     const { queues, upsertJobScheduler, removeJobScheduler } = fakeQueues();
     const applied = new Map<string, Schedule>();

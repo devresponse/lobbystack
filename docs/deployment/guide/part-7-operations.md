@@ -1,6 +1,6 @@
 # Part 7. Operational procedures
 
-**Status:** written on 2026-10-19 from the code on `main` at `d18f916`, and from the documentation of Railway, Docker, the server providers and the other services as read that day. [7.4](#74-deploy-without-cutting-off-calls)'s goodbye on a server and [7.13](#713-costs-and-usage-limits)'s browser call length were updated on 2026-10-20 for fork PR #54 (`9b66d01`), and the Polar lines in [7.12](#712-alerts-and-how-to-respond), [7.18](#718-rotate-secrets-and-keys) and [7.23](#723-change-the-domain-or-the-brand) on 2026-10-22 for fork PR #59 (`a44f995`), and [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) again for fork PR #60 (`a6ff674`), and [7.12](#712-alerts-and-how-to-respond) for fork PRs #61 (`b6ba2aa`) and #66 (`d800141`), and [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) for fork PR #69 (`91d5c3a`), and [7.3](#73-database-migrations) for fork PR #70 (`fa0aa11`), and [7.11](#711-logs-error-ids-and-following-one-call), [7.12](#712-alerts-and-how-to-respond), [7.16](#716-worker-crash-and-stuck-calls) and [7.18](#718-rotate-secrets-and-keys) on 2026-10-24 for fork PR #71 (`1d4c172`), and [7.11](#711-logs-error-ids-and-following-one-call), [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) the same day for fork PR #72 (`cc0c65d`), and [7.12](#712-alerts-and-how-to-respond), [7.22](#722-upgrade-pinned-versions) and [7.25](#725-routine-maintenance-calendar) for fork PR #73 (`35af54b`), and [7.12](#712-alerts-and-how-to-respond), [7.14](#714-incident-basics-who-acts-what-to-check-first-how-to-tell-users), [7.18](#718-rotate-secrets-and-keys) and [7.25](#725-routine-maintenance-calendar) for fork PR #74 (`7d20322`), and [7.12](#712-alerts-and-how-to-respond) and [7.16](#716-worker-crash-and-stuck-calls) for fork PR #75 (`24e211d`), and [7.3](#73-database-migrations) for fork PRs #71, #72 and #75 at `24e211d`, and [7.11](#711-logs-error-ids-and-following-one-call) on 2026-10-25 for fork PR #79, and [7.3](#73-database-migrations) and [7.9](#79-data-retention-and-deletion-requests) on 2026-10-26 for fork PR #84, and [7.23](#723-change-the-domain-or-the-brand)'s brand order on 2026-10-27 for fork PR #87, and [7.3](#73-database-migrations) the same day for fork PR #89, and [7.22](#722-upgrade-pinned-versions)'s Node.js version on 2026-10-28 for fork PR #90, and its pnpm version the same day for fork PR #91, and [7.23](#723-change-the-domain-or-the-brand)'s Zapier step the same day for fork PR #94, and its Make step for fork PR #95, and [7.11](#711-logs-error-ids-and-following-one-call)'s `live.incoming` line on 2026-10-29 for fork PR #99, and [7.9](#79-data-retention-and-deletion-requests), [7.18](#718-rotate-secrets-and-keys) and [7.19](#719-manage-operators-api-keys-and-platform-keys) on 2026-10-30 for fork PR #101, which deletes a business. A run of migrate against a throwaway database checked how a failed migration behaves ([7.3](#73-database-migrations)). Nothing else in this part has been run on a deployed instance yet, so where a provider's docs don't name a control, it's marked *(not confirmed)*.
+**Status:** written on 2026-10-19 from the code on `main` at `d18f916`, and from the documentation of Railway, Docker, the server providers and the other services as read that day. [7.4](#74-deploy-without-cutting-off-calls)'s goodbye on a server and [7.13](#713-costs-and-usage-limits)'s browser call length were updated on 2026-10-20 for fork PR #54 (`9b66d01`), and the Polar lines in [7.12](#712-alerts-and-how-to-respond), [7.18](#718-rotate-secrets-and-keys) and [7.23](#723-change-the-domain-or-the-brand) on 2026-10-22 for fork PR #59 (`a44f995`), and [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) again for fork PR #60 (`a6ff674`), and [7.12](#712-alerts-and-how-to-respond) for fork PRs #61 (`b6ba2aa`) and #66 (`d800141`), and [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) for fork PR #69 (`91d5c3a`), and [7.3](#73-database-migrations) for fork PR #70 (`fa0aa11`), and [7.11](#711-logs-error-ids-and-following-one-call), [7.12](#712-alerts-and-how-to-respond), [7.16](#716-worker-crash-and-stuck-calls) and [7.18](#718-rotate-secrets-and-keys) on 2026-10-24 for fork PR #71 (`1d4c172`), and [7.11](#711-logs-error-ids-and-following-one-call), [7.12](#712-alerts-and-how-to-respond) and [7.18](#718-rotate-secrets-and-keys) the same day for fork PR #72 (`cc0c65d`), and [7.12](#712-alerts-and-how-to-respond), [7.22](#722-upgrade-pinned-versions) and [7.25](#725-routine-maintenance-calendar) for fork PR #73 (`35af54b`), and [7.12](#712-alerts-and-how-to-respond), [7.14](#714-incident-basics-who-acts-what-to-check-first-how-to-tell-users), [7.18](#718-rotate-secrets-and-keys) and [7.25](#725-routine-maintenance-calendar) for fork PR #74 (`7d20322`), and [7.12](#712-alerts-and-how-to-respond) and [7.16](#716-worker-crash-and-stuck-calls) for fork PR #75 (`24e211d`), and [7.3](#73-database-migrations) for fork PRs #71, #72 and #75 at `24e211d`, and [7.11](#711-logs-error-ids-and-following-one-call) on 2026-10-25 for fork PR #79, and [7.3](#73-database-migrations) and [7.9](#79-data-retention-and-deletion-requests) on 2026-10-26 for fork PR #84, and [7.23](#723-change-the-domain-or-the-brand)'s brand order on 2026-10-27 for fork PR #87, and [7.3](#73-database-migrations) the same day for fork PR #89, and [7.22](#722-upgrade-pinned-versions)'s Node.js version on 2026-10-28 for fork PR #90, and its pnpm version the same day for fork PR #91, and [7.23](#723-change-the-domain-or-the-brand)'s Zapier step the same day for fork PR #94, and its Make step for fork PR #95, and [7.11](#711-logs-error-ids-and-following-one-call)'s `live.incoming` line on 2026-10-29 for fork PR #99, and [7.9](#79-data-retention-and-deletion-requests), [7.18](#718-rotate-secrets-and-keys) and [7.19](#719-manage-operators-api-keys-and-platform-keys) on 2026-10-30 for fork PR #101, which deletes a business, and [7.9](#79-data-retention-and-deletion-requests) and [7.27](#727-reactivate-a-canceled-business) the same day for fork PR #102, which cancels an account. A run of migrate against a throwaway database checked how a failed migration behaves ([7.3](#73-database-migrations)). Nothing else in this part has been run on a deployed instance yet, so where a provider's docs don't name a control, it's marked *(not confirmed)*.
 
 These are the jobs that keep an instance working once it's live. Most steps come in two versions, **On Railway** and **On a server**, for the two ways production runs ([5.2](part-5-production.md#52-production-on-railway), [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose)).
 
@@ -17,6 +17,7 @@ These are the jobs that keep an instance working once it's live. Most steps come
 | A business wants another number, or to give one back | [7.21](#721-buy-change-and-release-numbers) |
 | The instance moves to another address | [7.23](#723-change-the-domain-or-the-brand) |
 | The instance closes | [7.26](#726-shut-down-an-instance) |
+| An owner who canceled their account wants it back | [7.27](#727-reactivate-a-canceled-business) |
 
 **Signing in to the database**
 
@@ -474,7 +475,9 @@ With a key for that business ([6.7](part-6-first-run.md#67-optional-the-api-and-
 
 **A business closes**
 
-Since fork PR #101 one of its owners deletes it, with everything in it, from its **Settings** > **Team**, unless it's an owner's first business: the delete ends its paid plan in Polar, gives its numbers back to Twilio, deletes its files from the bucket and removes its rows ([delete a business](../../features/business-deletion.md)). The copies outside LobbyStack and in the backups (above) remain until they age out. A first business, like an account, can only be deleted in the database, signed in as `postgres`: end its plan in Polar's dashboard, release its numbers in Twilio's console and delete its folder, named by its ID, in the bucket first, then make a backup and delete it in one transaction, as in step 4 above.
+Since fork PR #101 one of its owners deletes it, with everything in it, from its **Settings** > **Team**, unless it's an owner's first business: the delete ends its paid plan in Polar, gives its numbers back to Twilio, deletes its files from the bucket and removes its rows ([delete a business](../../features/business-deletion.md)). The copies outside LobbyStack and in the backups (above) remain until they age out.
+
+Since fork PR #102 an owner whose first business is the only one they own cancels it instead, from the same page, after confirming by email: its plan ends and its numbers go back to Twilio 30 days later, but nothing of it is deleted, and [7.27](#727-reactivate-a-canceled-business) opens it again ([cancel an account](../../features/account-cancellation.md)). Its data stays until someone deletes it. A first business, canceled or not, can only be deleted in the database, signed in as `postgres`: end its plan in Polar's dashboard, release its numbers in Twilio's console and delete its folder, named by its ID, in the bucket first, then make a backup and delete it in one transaction, as in step 4 above.
 
 **Not yet confirmed:**
 
@@ -1480,3 +1483,40 @@ What stays afterwards: the events of past bookings in the businesses' Google Cal
 - How each provider closes an account, and whether a deleted Railway project is billed during its 48 hours.
 
 **[7.22](#722-upgrade-pinned-versions) to [7.26](#726-shut-down-an-instance) were checked against:** `Dockerfile.admin`, `Dockerfile.worker`, `Dockerfile.migrator`, `docker-compose.yml`, `.railway/template.ts`, `.railway/README.md`, `.github/dependabot.yml`, `package.json`, `pnpm-workspace.yaml`, `packages/db/migrations/0000_roles.sql`, `packages/shared/src/brands/resolve.ts`, `packages/domain/src/server/branding.ts`, `apps/admin/instrumentation.ts`, `apps/admin/src/lib/widget-policy.ts`, `apps/admin/src/lib/web-voice-policy.ts`, `apps/admin/app/api/webhooks/twilio/sms/route.ts`, `apps/admin/src/lib/mcp/oauth-config.ts`, `packages/db/src/client.ts`, `packages/domain/src/server/productEvents.ts`, `apps/worker/src/handlers.ts`, `apps/worker/src/scheduler.ts`, `apps/worker/src/calendarJobs.ts`, `packages/providers/src/twilio/twilioProvider.ts`, `packages/embed/src/index.ts`, `scripts/production-smoke.ts`, and Railway's, Docker's, Ubuntu's, PostgreSQL's, Redis's, Node.js's, Hetzner's and DigitalOcean's pages as read on 2026-10-19. [7.22](#722-upgrade-pinned-versions)'s Polar API version and [7.25](#725-routine-maintenance-calendar)'s monthly look at Polar's changelog were added at `35af54b`, checked against `packages/shared/src/billing.ts`, `packages/providers/src/polar/polarBilling.ts` and `polarCatalog.ts`, `packages/domain/src/server/billingPolar.ts` and `docs/providers/polar.md` (fork PR #73). [7.25](#725-routine-maintenance-calendar)'s two Polar token end dates were added at `7d20322` (fork PR #74), and [7.22](#722-upgrade-pinned-versions)'s line numbers in `docs/providers/polar.md` are from `24e211d`.
+
+### 7.27 Reactivate a canceled business
+
+Since fork PR #102 an owner can cancel their account once its first business is the only one they own ([cancel an account](../../features/account-cancellation.md)). Nothing of it is deleted, so you can open it again, such as when the owner changes their mind. Only someone signed in to the database as `postgres` can (the start of Part 7).
+
+1. Find the business's ID. It's in both emails the deployment's inbox got, "Cancellation request" and "Canceled", as **Business ID**. Or list the canceled businesses:
+
+   ```sql
+   select id, name, slug, canceled_at from businesses where status = 'canceled' order by canceled_at desc;
+   ```
+
+2. Open it again:
+
+   ```sql
+   select app.reactivate_business('<business ID>');
+   ```
+
+   It answers an error, and changes nothing, when no canceled business has that ID.
+
+What it does:
+
+- Its team can open it again, from the workspace menu. Someone with no other business opens on it.
+- Its numbers that haven't gone back to Twilio yet stay with it and answer again.
+- The worker picks up its recurring jobs within 5 minutes.
+- Its audit log gets `business.reactivated`.
+
+What it doesn't do:
+
+- **Bring the plan back.** A plan paid through Polar was canceled there, so the business is on the free plan until its owner chooses a plan in **Settings** > **Plan**. A plan set by hand (`managed`) is as you left it.
+- **Bring back numbers already released.** Buy new ones ([7.21](#721-buy-change-and-release-numbers)).
+- **Undo a new start.** An owner who created a business since then keeps it. The reactivated one is older, so it's their first business again, and they can delete the new one from its **Settings** > **Team**.
+
+The cancellation's link stays used. The owner can cancel again from **Settings** > **Team**.
+
+**Not yet confirmed:** a reactivation on a deployed instance. It has been run only by the tests.
+
+**[7.27](#727-reactivate-a-canceled-business) was checked against:** `packages/db/migrations/0130_business_cancellation.sql`, `packages/domain/src/server/businessCancellation.ts` and `packages/domain/src/server/businessCancellation.integration.test.ts` (fork PR #102).

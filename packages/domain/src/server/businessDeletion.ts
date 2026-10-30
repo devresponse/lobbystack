@@ -1,6 +1,6 @@
 import { and, eq, gt, inArray, isNull, min, ne, or, sql } from "drizzle-orm";
 
-import { billingAccounts, billingCheckoutRequests, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction } from "@lobbystack/db";
+import { billingAccounts, billingCheckoutRequests, businessMemberships, businesses, calls, enqueueOutbox, feedbackSubmissions, onboardingNumberClaimEvents, outboxMessages, phoneNumbers, productEvents, providerEvents, rlsContextStatement, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { isManagedBillingAccount, lockBillingAccount, MANAGED_BILLING_SOURCE } from "./billing";
 import type { DomainContext } from "./context";
@@ -103,32 +103,18 @@ export async function deleteBusiness(context: DomainContext, input: { userId: st
       if (input.confirmName.trim() !== business.name.trim()) throw refusal("confirmation_mismatch");
 
       // A number bought after the delete would belong to no business, and keep costing.
-      const [claiming] = await tx.select({ id: onboardingNumberClaimEvents.id }).from(onboardingNumberClaimEvents).where(and(
-        eq(onboardingNumberClaimEvents.businessId, businessId),
-        or(
-          and(eq(onboardingNumberClaimEvents.status, "reserved"), gt(onboardingNumberClaimEvents.reservedAt, sql`now() - interval '15 minutes'`)),
-          and(eq(onboardingNumberClaimEvents.status, "provisioning"), gt(onboardingNumberClaimEvents.updatedAt, sql`now() - interval '30 minutes'`)),
-        ),
-      )).limit(1);
-      const [provisioning] = await tx.select({ id: phoneNumbers.id }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "provisioning"))).limit(1);
-      if (claiming || provisioning) throw refusal("number_in_progress");
-      const [liveCall] = await tx.select({ id: calls.id }).from(calls).where(and(eq(calls.businessId, businessId), isNull(calls.endedAt), gt(calls.startedAt, new Date(Date.now() - LIVE_CALL_MAX_AGE_MS)))).limit(1);
-      if (liveCall) throw refusal("call_in_progress");
-      const [checkout] = await tx.select({ id: billingCheckoutRequests.id }).from(billingCheckoutRequests).where(and(
-        eq(billingCheckoutRequests.businessId, businessId),
-        inArray(billingCheckoutRequests.status, ["pending", "processing", "ready"]),
-        gt(billingCheckoutRequests.updatedAt, new Date(Date.now() - OPEN_CHECKOUT_MS)),
-      )).limit(1);
-      if (checkout) throw refusal("checkout_open");
+      const underWay = await workUnderWay(tx, businessId);
+      if (underWay) throw refusal(underWay);
 
       // Nobody should keep paying for a business that's gone.
       const [account] = await tx.select({ source: billingAccounts.source, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
       if (isManagedBillingAccount(account)) throw refusal("managed_plan");
-      if (account?.subscriptionId && account.source !== MANAGED_BILLING_SOURCE && !ENDED_SUBSCRIPTION_STATES.includes(account.subscriptionState ?? "")) {
-        const revokes = and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.revokeSubscription"), sql`${outboxMessages.payload}->>'subscriptionId' = ${account.subscriptionId}`);
+      const subscriptionId = subscriptionToEnd(account);
+      if (subscriptionId) {
+        const revokes = and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.revokeSubscription"), sql`${outboxMessages.payload}->>'subscriptionId' = ${subscriptionId}`);
         const [asked] = await tx.select({ first: min(outboxMessages.createdAt) }).from(outboxMessages).where(revokes);
         // A failed try is queued again on the next window, so asking later always reaches the worker.
-        await enqueueOutbox(tx, { topic: "billing.revokeSubscription", businessId, aggregateType: "billing_account", aggregateId: businessId, dedupeKey: `billing-revoke:${account.subscriptionId}:${Math.floor(Date.now() / PLAN_END_RETRY_MS)}`, payload: { subscriptionId: account.subscriptionId } });
+        await enqueueOutbox(tx, { topic: "billing.revokeSubscription", businessId, aggregateType: "billing_account", aggregateId: businessId, dedupeKey: `billing-revoke:${subscriptionId}:${Math.floor(Date.now() / PLAN_END_RETRY_MS)}`, payload: { subscriptionId } });
         const waited = asked?.first ? Date.now() - new Date(asked.first).getTime() : 0;
         // Committed with the job, and raised once the transaction ends.
         return { planEnding: refusal(waited > PLAN_END_PATIENCE_MS ? "plan_not_ended" : "plan_ending") };
@@ -164,6 +150,37 @@ export async function deleteBusiness(context: DomainContext, input: { userId: st
   }
   if ("planEnding" in outcome) throw outcome.planEnding;
   return outcome;
+}
+
+/**
+ * What's under way on a business that deleting or canceling it would cut
+ * off: a phone number being bought, a call, or a plan checkout someone could
+ * still pay. A number bought afterwards would belong to no open business and
+ * keep costing; a payment would buy a plan for it.
+ */
+export async function workUnderWay(tx: DatabaseTransaction, businessId: string): Promise<"number_in_progress" | "call_in_progress" | "checkout_open" | null> {
+  const [claiming] = await tx.select({ id: onboardingNumberClaimEvents.id }).from(onboardingNumberClaimEvents).where(and(
+    eq(onboardingNumberClaimEvents.businessId, businessId),
+    or(
+      and(eq(onboardingNumberClaimEvents.status, "reserved"), gt(onboardingNumberClaimEvents.reservedAt, sql`now() - interval '15 minutes'`)),
+      and(eq(onboardingNumberClaimEvents.status, "provisioning"), gt(onboardingNumberClaimEvents.updatedAt, sql`now() - interval '30 minutes'`)),
+    ),
+  )).limit(1);
+  const [provisioning] = await tx.select({ id: phoneNumbers.id }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "provisioning"))).limit(1);
+  if (claiming || provisioning) return "number_in_progress";
+  const [liveCall] = await tx.select({ id: calls.id }).from(calls).where(and(eq(calls.businessId, businessId), isNull(calls.endedAt), gt(calls.startedAt, new Date(Date.now() - LIVE_CALL_MAX_AGE_MS)))).limit(1);
+  if (liveCall) return "call_in_progress";
+  const [checkout] = await tx.select({ id: billingCheckoutRequests.id }).from(billingCheckoutRequests).where(and(
+    eq(billingCheckoutRequests.businessId, businessId),
+    inArray(billingCheckoutRequests.status, ["pending", "processing", "ready"]),
+    gt(billingCheckoutRequests.updatedAt, new Date(Date.now() - OPEN_CHECKOUT_MS)),
+  )).limit(1);
+  return checkout ? "checkout_open" : null;
+}
+
+/** The Polar subscription a business still pays through, which deleting or canceling it ends: none for an ended one, or a plan the operator bills outside Polar. */
+export function subscriptionToEnd(account: { source: string | null; subscriptionId: string | null; subscriptionState: string | null } | undefined): string | null {
+  return account?.subscriptionId && account.source !== MANAGED_BILLING_SOURCE && !ENDED_SUBSCRIPTION_STATES.includes(account.subscriptionState ?? "") ? account.subscriptionId : null;
 }
 
 /**

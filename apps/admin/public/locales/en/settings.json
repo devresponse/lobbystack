@@ -909,7 +909,7 @@
       "title": "Delete business",
       "description": "Permanently delete this business and all of its data. This can't be undone.",
       "blocked": {
-        "accountRoot": "This is the first business on your account, so it can't be deleted. You can delete the other businesses you own.",
+        "accountRoot": "This is the first business on your account, so it can't be deleted. To cancel your account, first delete the other businesses you own. Then you can cancel this one here.",
         "otherOwnerRoot": "This is the first business on another owner's account, so it can't be deleted.",
         "onlyBusiness": "This is the only business you own, so it can't be deleted."
       },
@@ -936,6 +936,28 @@
         "managed_plan": "This business's plan is billed outside the app. Contact support to end it, then delete the business.",
         "plan_ending": "Its paid plan is being canceled. Select Delete permanently again in a moment.",
         "plan_not_ended": "Its paid plan couldn't be canceled. Contact support, or try again later.",
+        "rate_limited": "Too many tries. Try again later."
+      }
+    },
+    "cancelAccount": {
+      "title": "Cancel account",
+      "description": "Close this business and stop using the service. Nothing is deleted, and you can start again later with a new business.",
+      "action": "Cancel account",
+      "dialogTitle": "Cancel {{name}}?",
+      "dialogDescription": "Once you confirm, nobody on the team can open it, its receptionist stops answering calls and texts, its website chat, public page, API keys and connected apps stop working, and a paid plan is canceled. Its phone numbers go back to the provider after 30 days.",
+      "notice": "Nothing is deleted, and nothing changes yet. We'll email you a link to confirm, which works for 24 hours and asks you to sign in and enter your password.",
+      "confirmLabel": "Type <name>{{name}}</name> to confirm",
+      "submit": "Request cancellation",
+      "sending": "Sending...",
+      "keep": "Keep my account",
+      "sentTitle": "Check your email",
+      "sentDescription": "We sent a link to {{email}}. Open it within 24 hours and sign in to cancel the business. Until then, nothing changes.",
+      "done": "Done",
+      "errors": {
+        "failed": "The cancellation couldn't be requested. Try again.",
+        "confirmation_mismatch": "The name doesn't match. Type it exactly as it's shown.",
+        "other_businesses": "You own other businesses. Delete them first, then cancel this one.",
+        "forbidden": "Only an owner of this business can cancel it.",
         "rate_limited": "Too many tries. Try again later."
       }
     }

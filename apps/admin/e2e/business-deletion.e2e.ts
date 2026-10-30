@@ -108,9 +108,9 @@ test("an owner deletes their second business for good, and never their first", a
     expect(await exists(mainId)).toBe(true);
     expect((await database.db.select({ activeBusinessId: users.activeBusinessId }).from(users).where(eq(users.normalizedEmail, email)))[0]?.activeBusinessId).toBe(mainId);
 
-    // Main, the account's root, says why it can't be deleted and offers no button.
+    // Main, the account's root and now the only business its owner owns, offers Cancel account instead.
     await page.goto("/settings/team");
-    await expect(page.getByText(copy.blocked.accountRoot, { exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: settings.workspaceTeam.cancelAccount.action, exact: true })).toBeVisible();
     await expect(remove).toHaveCount(0);
 
     // Now the only business the owner has, and still their root: the API refuses it as well.

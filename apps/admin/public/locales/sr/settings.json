@@ -921,13 +921,13 @@
       "title": "Obriši firmu",
       "description": "Trajno briše ovu firmu i sve njene podatke. Ovo se ne može poništiti.",
       "blocked": {
-        "accountRoot": "Ovo je prva firma na vašem nalogu, pa ne može da se obriše. Možete da obrišete ostale firme čiji ste vlasnik.",
+        "accountRoot": "Ovo je prva firma na Vašem nalogu, pa ne može da se obriše. Da biste otkazali nalog, prvo obrišite ostale firme čiji ste vlasnik. Posle toga ovu možete da otkažete ovde.",
         "otherOwnerRoot": "Ovo je prva firma na nalogu drugog vlasnika, pa ne može da se obriše.",
         "onlyBusiness": "Ovo je jedina firma čiji ste vlasnik, pa ne može da se obriše."
       },
       "action": "Obriši firmu",
       "dialogTitle": "Obrisati {{name}}?",
-      "dialogDescription": "Brišu se njeni pozivi i snimci, razgovori, kontakti, termini, znanje, podešavanja, istorija naplate i pristup tima. Njeni brojevi telefona se vraćaju provajderu, recepcionar prestaje da se javlja, a plaćeni plan se odmah otkazuje.",
+      "dialogDescription": "Brišu se njeni pozivi i snimci, razgovori, kontakti, termini, znanje, podešavanja, istorija naplate i pristup tima. Njeni brojevi telefona se vraćaju provajderu, recepcioner prestaje da se javlja, a plaćeni paket se odmah otkazuje.",
       "permanent": "Ovo je trajno. Ništa ne može da se vrati, ni vi ni podrška.",
       "confirmLabel": "Upišite <name>{{name}}</name> za potvrdu",
       "passwordLabel": "Vaša lozinka",
@@ -948,6 +948,28 @@
         "managed_plan": "Plan ove firme se naplaćuje van aplikacije. Obratite se podršci da ga završi, pa onda obrišite firmu.",
         "plan_ending": "Njen plaćeni plan se otkazuje. Za trenutak ponovo izaberite Obriši trajno.",
         "plan_not_ended": "Njen plaćeni plan nije mogao da se otkaže. Obratite se podršci ili pokušajte kasnije.",
+        "rate_limited": "Previše pokušaja. Pokušajte kasnije."
+      }
+    },
+    "cancelAccount": {
+      "title": "Otkaži nalog",
+      "description": "Zatvorite ovu firmu i prestanite da koristite servis. Ništa se ne briše, a kasnije možete da počnete iznova sa novom firmom.",
+      "action": "Otkaži nalog",
+      "dialogTitle": "Otkazati {{name}}?",
+      "dialogDescription": "Kada potvrdite, niko iz tima više ne može da je otvori, njen recepcioner prestaje da odgovara na pozive i poruke, njen čet na sajtu, javna stranica, API ključevi i povezane aplikacije prestaju da rade, a plaćeni paket se otkazuje. Njeni brojevi telefona se vraćaju provajderu posle 30 dana.",
+      "notice": "Ništa se ne briše i još se ništa ne menja. Poslaćemo Vam imejlom link za potvrdu koji važi 24 sata i traži da se prijavite i unesete lozinku.",
+      "confirmLabel": "Upišite <name>{{name}}</name> za potvrdu",
+      "submit": "Zatraži otkazivanje",
+      "sending": "Slanje...",
+      "keep": "Zadrži nalog",
+      "sentTitle": "Proverite imejl",
+      "sentDescription": "Poslali smo link na {{email}}. Otvorite ga u roku od 24 sata i prijavite se da biste otkazali firmu. Do tada se ništa ne menja.",
+      "done": "Gotovo",
+      "errors": {
+        "failed": "Otkazivanje nije moglo da se zatraži. Pokušajte ponovo.",
+        "confirmation_mismatch": "Naziv se ne poklapa. Upišite ga tačno kako je prikazan.",
+        "other_businesses": "Vlasnik ste i drugih firmi. Prvo ih obrišite, pa onda otkažite ovu.",
+        "forbidden": "Samo vlasnik ove firme može da je otkaže.",
         "rate_limited": "Previše pokušaja. Pokušajte kasnije."
       }
     }

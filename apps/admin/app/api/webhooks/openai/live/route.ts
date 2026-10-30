@@ -75,12 +75,14 @@ async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomin
   // or reject it; until ownership is known, this deployment leaves the call alone.
   let businessId: string | null | undefined;
   let routed: (typeof candidates)[number] | undefined;
+  let closed = false;
   try {
     const phones = sql.join(candidates.map(({ phone }) => sql`${phone}`), sql`, `);
-    const resolved = await getAppDatabase().db.execute<{ business_id: string | null; position: number }>(sql`select app.resolve_business_by_phone(phone) as business_id, position::int from unnest(array[${phones}]::text[]) with ordinality as candidate(phone, position) order by position`);
+    const resolved = await getAppDatabase().db.execute<{ business_id: string | null; closed: boolean | null; position: number }>(sql`select app.resolve_business_by_phone(phone) as business_id, app.is_closed_business_phone(phone) as closed, position::int from unnest(array[${phones}]::text[]) with ordinality as candidate(phone, position) order by position`);
     const match = resolved.rows.find((row) => row.business_id);
     businessId = match?.business_id;
     routed = match && candidates[match.position - 1];
+    closed = resolved.rows.some((row) => row.closed);
     timing.mark("lookup");
   } catch (error) {
     // Ownership is unknown: don't reject a call that may belong to the other
@@ -89,6 +91,13 @@ async function routeIncomingCall(client: LiveClient, event: LiveTransportIncomin
     return new NextResponse(null, { status: 503 });
   }
   if (!businessId || !routed) {
+    if (closed) {
+      // The number is still this deployment's, but its business was canceled:
+      // turn the call away rather than leave it ringing.
+      logEvent("info", "live.incoming_closed_business", { routing });
+      await client.live.sessions.reject(sessionId, { status_code: 404 }).catch(() => undefined);
+      return new NextResponse(null, { status: 200 });
+    }
     logEvent("info", "live.incoming_not_served", { routing });
     return new NextResponse(null, { status: 200 });
   }

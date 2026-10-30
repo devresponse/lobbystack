@@ -2,6 +2,7 @@ import { SUPPORTED_LOCALES, type SupportedLocale } from "./locale";
 
 const publicRouteSections = new Set([
   "accept-invite",
+  "cancel-account",
   "claim-demo",
   "confirm-email-change",
   "demo",

@@ -6,7 +6,7 @@ Since fork PR #101, an owner can delete a business, with everything in it, from 
 
 - **Each account has a root business:** the one its owner has owned longest, their earliest owner membership that's still active, among the businesses their workspace menu shows. For a normal sign-up that's the business made during onboarding. Ties go to the business made first. `app.root_business_id` in migration `0129` decides it.
 - **A root business stays.** A business is refused when it's the root of any of its owners, so a later business of yours that is another co-owner's first can't be deleted by either of you.
-- **An owner with one business can't delete it**, since it's their root. The Team page says why instead of showing the button.
+- **An owner with one business can't delete it**, since it's their root. Since fork PR #102 the Team page offers **Cancel account** on it instead, which closes it without deleting anything ([cancel an account](account-cancellation.md)).
 - **Only owners delete.** The Team page calls owners and admins both "Admin", but only a `business_owner` sees the section and only one can delete; admins, schedulers and viewers can't.
 - **The root moves when its owner leaves.** If an owner hands their first business over or is removed from it, their next oldest business becomes their root.
 
@@ -15,7 +15,7 @@ Nothing in the dashboard, the v1 API, the MCP server or the command line deletes
 ## Delete a business
 
 1. Open the business from the workspace menu at the top of the sidebar.
-2. Open **Settings > Team**. The last section, **Delete business**, either has the button or says why this business can't be deleted.
+2. Open **Settings > Team**. The last section, **Delete business**, either has the button or says why this business can't be deleted. On the only business you own, it's **Cancel account** instead.
 3. Click **Delete business**. The dialog says what goes, and warns in red: "This is permanent. Nothing can be restored, by you or by support."
 4. Type the business's name exactly as it's shown, capitals included, and your password. **Delete permanently** stays off until the name matches and the password is filled in.
 5. Once it's deleted, the dashboard opens Home on another of your businesses.
@@ -65,6 +65,6 @@ The route is `DELETE /api/businesses?businessId=` with `confirmName` and `passwo
 
 - `packages/domain/src/server/businessDeletion.integration.test.ts`, under `pnpm test:reliability` against PostgreSQL with the real roles: root businesses refused in the domain and by the database trigger, another owner's root, the root moving on, owners only, the typed name, everything under way, paid plans, and a delete that leaves no row behind while the root business keeps its own. Breaking the trigger or `app.is_root_business` fails it.
 - The route (`apps/admin/app/api/businesses/route.test.ts`), the Team page (`apps/admin/src/components/live-team-surface.test.tsx`), the worker's three jobs (`apps/worker/src/handlers.businessDeletion.test.ts`), the schedulers dropped at a worker's start (`apps/worker/src/scheduler.test.ts`) and Polar's revoke (`packages/providers/src/polar/polarBilling.test.ts`).
-- A browser journey, `apps/admin/e2e/business-deletion.e2e.ts`: an owner deletes a second business after a wrong password, and their first is refused both on the Team page and through the API.
+- A browser journey, `apps/admin/e2e/business-deletion.e2e.ts`: an owner deletes a second business after a wrong password, and their first is refused through the API, while its Team page offers **Cancel account** instead of a delete.
 
 Not tried yet: a delete on a deployment, a paid plan on Polar's sandbox, and a real Twilio number's release ([open items](../project/open-items.md)).

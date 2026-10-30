@@ -15,6 +15,7 @@ const router = vi.hoisted(() => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.
 vi.mock("next/navigation", () => ({ useRouter: () => router, usePathname: () => "/settings/team" }));
 
 const copy = en.workspaceTeam.delete;
+const cancelCopy = en.workspaceTeam.cancelAccount;
 const clients: QueryClient[] = [];
 beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => "en", setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
@@ -31,13 +32,15 @@ async function setup({ businesses = [main, studio], response = undefined as Resp
   client.setQueryData(["businesses"], { businesses });
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
     if (init?.method === "DELETE") return response ?? Response.json({ ok: true });
+    if (init?.method === "POST") return response ?? Response.json({ email: "owner@example.test", expiresAt: "2026-10-31T15:11:00.000Z" });
     return Response.json({ members: [], invitations: [] });
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><LiveTeamSurface /></QueryClientProvider></I18nextProvider>);
   await screen.findByText(en.workspaceTeam.members.empty);
   const deletes = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "DELETE");
-  return { client, deletes };
+  const posts = () => fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+  return { client, deletes, posts };
 }
 
 async function openDialog() {
@@ -157,5 +160,106 @@ describe("a business that can't be deleted", () => {
     await setup({ businesses: [main, { ...studio, role }] });
     expect(screen.queryByText(copy.title)).toBeNull();
     expect(screen.queryByRole("button", { name: copy.action })).toBeNull();
+  });
+});
+
+// The same owner once Main is the only business they own.
+const onlyMain = [{ ...main, active: true }];
+
+async function openCancelDialog() {
+  await userEvent.click(screen.getByRole("button", { name: cancelCopy.action }));
+  return await screen.findByRole("dialog");
+}
+
+describe("canceling the account from the Team page", () => {
+  it("offers Cancel account instead of Delete on the account's first business once it's the only one the owner owns", async () => {
+    await setup({ businesses: onlyMain });
+    expect(screen.getByRole("button", { name: cancelCopy.action })).toBeTruthy();
+    expect(screen.getByText(cancelCopy.description)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: copy.action })).toBeNull();
+    expect(screen.queryByText(copy.blocked.accountRoot)).toBeNull();
+  });
+
+  it("counts only the businesses the person owns, not ones they help run", async () => {
+    await setup({ businesses: [...onlyMain, { ...studio, role: "business_admin", active: false }] });
+    expect(screen.getByRole("button", { name: cancelCopy.action })).toBeTruthy();
+  });
+
+  it("isn't offered while the owner owns another business, which they delete first", async () => {
+    await setup({ businesses: [{ ...main, active: true }, { ...studio, active: false }] });
+    expect(screen.queryByRole("button", { name: cancelCopy.action })).toBeNull();
+    expect(screen.getByText(copy.blocked.accountRoot)).toBeTruthy();
+  });
+
+  it.each(["business_admin", "viewer"])("isn't offered to a %s, since only owners can cancel", async (role) => {
+    await setup({ businesses: [{ ...main, role, active: true }] });
+    expect(screen.queryByText(cancelCopy.title)).toBeNull();
+    expect(screen.queryByRole("button", { name: cancelCopy.action })).toBeNull();
+  });
+
+  it("says nothing is deleted or changes yet, and asks for the business's name before sending a link", async () => {
+    const { posts } = await setup({ businesses: onlyMain });
+    const dialog = await openCancelDialog();
+    expect(within(dialog).getByText("Cancel Main?")).toBeTruthy();
+    expect(within(dialog).getByText(cancelCopy.dialogDescription)).toBeTruthy();
+    expect(within(dialog).getByTestId("cancel-account-notice").textContent).toBe(cancelCopy.notice);
+    expect(within(dialog).getByText("Main", { selector: "code" })).toBeTruthy();
+
+    const submit = within(dialog).getByRole("button", { name: cancelCopy.submit });
+    expect(submit).toHaveProperty("disabled", true);
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "main");
+    expect(submit).toHaveProperty("disabled", true);
+    await userEvent.clear(within(dialog).getByLabelText(/^Type .* to confirm$/));
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "Main");
+    expect(submit).toHaveProperty("disabled", false);
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("keeps the account when the owner closes the dialog", async () => {
+    const { posts } = await setup({ businesses: onlyMain });
+    const dialog = await openCancelDialog();
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "Main");
+    await userEvent.click(within(dialog).getByRole("button", { name: cancelCopy.keep }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("asks for the link, then says where it went, and leaves the owner where they are", async () => {
+    const { posts } = await setup({ businesses: onlyMain });
+    const dialog = await openCancelDialog();
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "Main");
+    await userEvent.click(within(dialog).getByRole("button", { name: cancelCopy.submit }));
+
+    expect(await within(dialog).findByText(cancelCopy.sentTitle)).toBeTruthy();
+    expect(within(dialog).getByText(cancelCopy.sentDescription.replace("{{email}}", "owner@example.test"))).toBeTruthy();
+    expect(posts()).toEqual([["/api/businesses/cancellation?businessId=main", expect.objectContaining({ method: "POST", body: JSON.stringify({ confirmName: "Main" }) })]]);
+    await userEvent.click(within(dialog).getByRole("button", { name: cancelCopy.done }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(router.refresh).not.toHaveBeenCalled();
+    // Opened again, it asks afresh.
+    expect(within(await openCancelDialog()).getByRole("button", { name: cancelCopy.submit })).toHaveProperty("disabled", true);
+  });
+
+  it.each([
+    ["confirmation_mismatch", 400],
+    ["other_businesses", 403],
+    ["forbidden", 403],
+    ["rate_limited", 429],
+  ] as const)("explains a %s refusal in the dialog, which stays open", async (code, status) => {
+    await setup({ businesses: onlyMain, response: Response.json({ error: "Refused.", code }, { status }) });
+    const dialog = await openCancelDialog();
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "Main");
+    await userEvent.click(within(dialog).getByRole("button", { name: cancelCopy.submit }));
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(cancelCopy.errors[code]);
+    expect(within(dialog).queryByText(cancelCopy.sentTitle)).toBeNull();
+  });
+
+  it("says it couldn't ask on any other failure", async () => {
+    await setup({ businesses: onlyMain, response: Response.json({ error: "Request failed." }, { status: 500 }) });
+    const dialog = await openCancelDialog();
+    await userEvent.type(within(dialog).getByLabelText(/^Type .* to confirm$/), "Main");
+    await userEvent.click(within(dialog).getByRole("button", { name: cancelCopy.submit }));
+    expect((await within(dialog).findByRole("alert")).textContent).toBe(cancelCopy.errors.failed);
   });
 });

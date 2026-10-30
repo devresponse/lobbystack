@@ -1,6 +1,6 @@
 import { intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
-export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript";
+export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript" | "cancellation_confirm" | "cancellation_request" | "cancellation_completed";
 
 type Link = { label: string; url: string };
 
@@ -65,6 +65,12 @@ function emailContent(input: RenderEmailInput): EmailContent {
       return invitation(context, variables);
     case "promo_ending":
       return promoEnding(context, variables);
+    case "cancellation_confirm":
+      return cancellationConfirm(context, variables);
+    case "cancellation_request":
+      return cancellationRequest(input.appName, input.to, variables);
+    case "cancellation_completed":
+      return cancellationCompleted(input.appName, input.to, variables);
     default:
       return operatorAlert({ app: input.appName, heading: input.subject }, variables);
   }
@@ -518,6 +524,138 @@ function promoEnding({ app, locale }: Context, variables: Record<string, string>
       { kind: "button", label: copy.button, url: variables.url ?? "" },
     ],
     reason: { text: copy.reason },
+  };
+}
+
+/** The subject of each email about canceling a business, which the worker sets as it sends it. */
+export function cancellationSubject(template: "cancellation_confirm" | "cancellation_request" | "cancellation_completed", variables: Record<string, string>): string {
+  const business = variables.businessName?.trim() ?? "";
+  if (template === "cancellation_request") return `Cancellation request: ${business}`;
+  if (template === "cancellation_completed") return `Canceled: ${business}`;
+  const locale = normalizeInterfaceLocale(variables.locale) ?? "en";
+  return { en: `Confirm canceling ${business}`, fr: `Confirmez l'annulation de ${business}`, es: `Confirme la cancelación de ${business}`, sr: `Potvrdite otkazivanje firme ${business}` }[locale];
+}
+
+/**
+ * To an owner who asked to cancel their business: the link that confirms
+ * it, once they sign in and give their password, and what canceling does.
+ * Asking changes nothing on its own.
+ */
+function cancellationConfirm({ app, email, locale }: Context, variables: Record<string, string>): EmailContent {
+  const business = variables.businessName?.trim() ?? "";
+  const copy = {
+    en: {
+      intro: `You asked to cancel ${business} on ${app}. Nothing has changed yet. To cancel it, open the link below, sign in with ${email} and confirm with your password.`,
+      effects: `Once you confirm, nobody on the team can open ${business}, its receptionist stops answering calls and texts, its phone numbers go back to the provider after 30 days, and a paid plan is canceled. Nothing is deleted. You can then start again with a new business.`,
+      button: "Confirm the cancellation",
+      expiry: "The link works for 24 hours. After that, you can ask again in Settings > Team.",
+      reason: `You're receiving this email because someone signed in with ${email} asked to cancel ${business} on ${app}. If it wasn't you, change your password. Nothing changes unless the cancellation is confirmed with this link.`,
+    },
+    fr: {
+      intro: `Vous avez demandé l'annulation de ${business} sur ${app}. Rien n'a encore changé. Pour l'annuler, ouvrez le lien ci-dessous, connectez-vous avec ${email} et confirmez avec votre mot de passe.`,
+      effects: `Une fois l'annulation confirmée, plus personne dans l'équipe ne peut ouvrir ${business}, sa réceptionniste ne répond plus aux appels ni aux textos, ses numéros de téléphone retournent au fournisseur après 30 jours et un forfait payant est résilié. Rien n'est supprimé. Vous pourrez ensuite recommencer avec une nouvelle entreprise.`,
+      button: "Confirmer l'annulation",
+      expiry: "Ce lien est valide pendant 24 heures. Ensuite, vous pouvez refaire la demande dans Réglages > Équipe.",
+      reason: `Vous recevez ce courriel parce qu'une personne connectée avec ${email} a demandé l'annulation de ${business} sur ${app}. Si ce n'était pas vous, changez votre mot de passe. Rien ne change tant que l'annulation n'est pas confirmée avec ce lien.`,
+    },
+    es: {
+      intro: `Pidió cancelar ${business} en ${app}. Todavía no ha cambiado nada. Para cancelarlo, abra el enlace de abajo, inicie sesión con ${email} y confirme con su contraseña.`,
+      effects: `Cuando lo confirme, nadie del equipo podrá abrir ${business}, su recepcionista dejará de atender llamadas y mensajes de texto, sus números de teléfono volverán al proveedor después de 30 días y se cancelará un plan de pago. No se elimina nada. Después podrá empezar de nuevo con un negocio nuevo.`,
+      button: "Confirmar la cancelación",
+      expiry: "El enlace es válido durante 24 horas. Después, puede volver a pedirlo en Configuración > Equipo.",
+      reason: `Recibe este correo porque alguien que inició sesión con ${email} pidió cancelar ${business} en ${app}. Si no fue usted, cambie su contraseña. No cambia nada mientras no se confirme la cancelación con este enlace.`,
+    },
+    sr: {
+      intro: `Zatražili ste otkazivanje firme ${business} na servisu ${app}. Još se ništa nije promenilo. Da biste je otkazali, otvorite link ispod, prijavite se sa adresom ${email} i potvrdite lozinkom.`,
+      effects: `Kada potvrdite, niko iz tima više ne može da otvori firmu ${business}, njen recepcioner prestaje da odgovara na pozive i poruke, njeni brojevi telefona se posle 30 dana vraćaju provajderu, a plaćeni paket se otkazuje. Ništa se ne briše. Posle toga možete da počnete iznova sa novom firmom.`,
+      button: "Potvrdi otkazivanje",
+      expiry: "Link važi 24 sata. Posle toga možete ponovo da zatražite otkazivanje u odeljku Podešavanja > Tim.",
+      reason: `Ovaj imejl ste dobili jer je neko ko je prijavljen sa adresom ${email} zatražio otkazivanje firme ${business} na servisu ${app}. Ako to niste bili Vi, promenite lozinku. Ništa se ne menja dok se otkazivanje ne potvrdi preko ovog linka.`,
+    },
+  }[locale];
+  return {
+    locale,
+    eyebrow: business || undefined,
+    heading: cancellationSubject("cancellation_confirm", variables),
+    blocks: [
+      { kind: "paragraph", text: copy.intro },
+      { kind: "paragraph", text: copy.effects },
+      { kind: "button", label: copy.button, url: variables.url ?? "" },
+      { kind: "paragraph", text: copy.expiry },
+    ],
+    reason: { text: copy.reason },
+  };
+}
+
+/** Who asked or confirmed, by name and address. */
+function requesterLabel(variables: Record<string, string>): string {
+  const email = variables.requesterEmail?.trim() ?? "";
+  const name = variables.requesterName?.trim();
+  return name && email ? `${name} (${email})` : name || email || "An owner";
+}
+
+/** The business's details both of the inbox's emails list. A row without a value is left out. */
+function businessFacts(variables: Record<string, string>, extra: Array<{ label: string; value: string | undefined }>): Block {
+  const rows = [
+    { label: "Business", value: variables.businessName },
+    { label: "Business ID", value: variables.businessId },
+    { label: "Slug", value: variables.businessSlug },
+    { label: "Type", value: variables.businessType },
+    { label: "Time zone", value: variables.timeZone },
+    { label: "Website", value: variables.websiteUrl },
+    { label: "Created", value: variables.createdAt },
+    { label: "Owners", value: variables.owners },
+    { label: "Team members", value: variables.teamSize },
+    { label: "Plan", value: variables.plan },
+    { label: "Phone numbers", value: variables.phoneNumbers || "None" },
+    ...extra,
+    { label: "Dashboard", value: variables.appUrl },
+  ];
+  return { kind: "facts", rows: rows.filter((row): row is { label: string; value: string } => Boolean(row.value?.trim())) };
+}
+
+function inboxReason(app: string, to: string): { text: string } {
+  return { text: `You're receiving this email because ${to} is where ${app} sends account cancellations: the brand's contact address, else FEEDBACK_TO_EMAIL.` };
+}
+
+/** To the deployment's inbox when an owner asks to cancel their business: who, which business, and that nothing happens until they confirm. */
+function cancellationRequest(app: string, to: string, variables: Record<string, string>): EmailContent {
+  const business = variables.businessName?.trim() ?? "";
+  return {
+    locale: "en",
+    heading: cancellationSubject("cancellation_request", variables),
+    blocks: [
+      { kind: "paragraph", text: `${requesterLabel(variables)} asked to cancel ${business} on ${app}. They were emailed a link to confirm, which works until ${variables.expiresAt ?? "24 hours from now"}. Nothing changes unless they confirm, and this inbox gets another email if they do.` },
+      businessFacts(variables, [{ label: "Requested by", value: requesterLabel(variables) }, { label: "Requested at", value: variables.requestedAt }, { label: "Link works until", value: variables.expiresAt }]),
+      { kind: "paragraph", text: "Once confirmed, nobody on the team can open the business, its numbers stop answering and go back to Twilio 30 days later, and a plan paid through Polar is canceled. Nothing is deleted." },
+    ],
+    reason: inboxReason(app, to),
+  };
+}
+
+const PLAN_OUTCOMES: Record<string, string> = {
+  polar: "Its paid plan is being canceled in Polar now. If Polar still shows the subscription as active in an hour, cancel it there by hand.",
+  managed: "Its plan is billed outside the app, so end it by hand.",
+  free: "It was on the free plan, so there's no plan to cancel.",
+};
+
+/** To the deployment's inbox once an owner confirms: what happened to the business, its plan and its numbers, and how to bring it back. */
+function cancellationCompleted(app: string, to: string, variables: Record<string, string>): EmailContent {
+  const business = variables.businessName?.trim() ?? "";
+  const numbers = variables.numbersReleasedOn
+    ? `Its phone numbers (${variables.phoneNumbers}) go back to Twilio on ${variables.numbersReleasedOn} unless the business is reactivated before then.`
+    : "It has no phone numbers waiting to go back to Twilio.";
+  return {
+    locale: "en",
+    heading: cancellationSubject("cancellation_completed", variables),
+    blocks: [
+      { kind: "paragraph", text: `${requesterLabel(variables)} confirmed the cancellation of ${business} on ${app}${variables.canceledAt ? ` at ${variables.canceledAt}` : ""}. Nothing was deleted: the business is now inactive, nobody on its team can open it, and its receptionist no longer answers calls or texts.` },
+      { kind: "paragraph", text: PLAN_OUTCOMES[variables.planOutcome ?? ""] ?? "Check its plan in Polar, and cancel it there by hand if it's still active." },
+      { kind: "paragraph", text: numbers },
+      businessFacts(variables, [{ label: "Canceled by", value: requesterLabel(variables) }, { label: "Canceled at", value: variables.canceledAt }]),
+      { kind: "paragraph", text: "To reactivate it, see 7.27, \"Reactivate a canceled business\", in the deployment guide. Its plan stays canceled." },
+    ],
+    reason: inboxReason(app, to),
   };
 }
 

@@ -133,7 +133,7 @@ describe("deployment mode on browser events", () => {
 });
 
 describe("sensitive analytics routes", () => {
-  it.each(["/login", "/signup", "/forgot-password", "/reset-password/token", "/confirm-email-change", "/accept-invite", "/claim-demo", "/demo/private-token", "/demos", "/embed/lobbystack-landing"])(
+  it.each(["/login", "/signup", "/forgot-password", "/reset-password/token", "/confirm-email-change", "/accept-invite", "/cancel-account", "/claim-demo", "/demo/private-token", "/demos", "/embed/lobbystack-landing"])(
     "treats %s as sensitive",
     path => expect(isSensitiveAnalyticsRoute(path)).toBe(true),
   );

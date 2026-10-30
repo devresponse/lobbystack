@@ -130,7 +130,7 @@ The admin signs in with all four roles, and the worker with the worker and dispa
 | `SMTP_PASSWORD` | The worker | The email service's key | [3.4](part-3-outside-services.md#34-email), such as Resend's `re_…` key | Any time ([7.18](part-7-operations.md#718-rotate-secrets-and-keys)) |
 | `EMAIL_FROM` | The worker | The sender | [3.4](part-3-outside-services.md#34-email): an address on your verified domain | Any time |
 | `EMAIL_REPLY_TO` | The worker | Where replies to the emails go | Unset, or an address ([3.4](part-3-outside-services.md#34-email)) | Any time |
-| `FEEDBACK_TO_EMAIL` | The admin | Where feedback sent from the dashboard goes | Unset, or your address ([3.4](part-3-outside-services.md#34-email)). On a server, the override file passes it | Any time |
+| `FEEDBACK_TO_EMAIL` | The admin | Where feedback sent from the dashboard goes, and, when the brand file has no `contactEmail`, the emails about owners canceling their account (fork PR #102, [cancel an account](../../features/account-cancellation.md#know-whos-told)) | Unset, or your address ([3.4](part-3-outside-services.md#34-email)). On a server, the override file passes it | Any time |
 
 **Sign-up and access**
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { callTranscriptSubject, invitationSubject, promoEndingSubject, renderEmail, type CallTranscriptEmail, type RenderEmailInput, type TemplateName } from "./templates";
+import { callTranscriptSubject, cancellationSubject, invitationSubject, promoEndingSubject, renderEmail, type CallTranscriptEmail, type RenderEmailInput, type TemplateName } from "./templates";
 
 const base = "https://app.example.test";
 const locales = ["en", "fr", "es", "sr"] as const;
@@ -23,6 +23,7 @@ function accountEmails(locale: string): { name: string; template: TemplateName; 
     { name: "reset code", template: "password_reset", variables: { locale, code: "482913" }, links: [] },
     { name: "reset link", template: "password_reset", variables: { locale, url: `${base}/reset-password/t` }, links: [`${base}/reset-password/t`] },
     { name: "invitation", template: "invitation", variables: { locale, url: `${base}/accept-invite?token=t`, businessName: "Maple Dental", inviterName: "Yuri", inviterEmail: "yuri@example.test", role: "viewer", transfersOwnership: "false" }, links: [`${base}/accept-invite?token=t`] },
+    { name: "cancellation", template: "cancellation_confirm", variables: { locale, url: `${base}/cancel-account?token=t`, businessName: "Maple Dental" }, links: [`${base}/cancel-account?token=t`] },
   ];
 }
 
@@ -195,6 +196,112 @@ describe("promo endings", () => {
 
   it("fall back to UTC for a time zone the runtime doesn't know", () => {
     expect(promoEndingSubject(ending({ timeZone: "Mars/Olympus" }))).toBe("Your Salons half off plan ends on November 1, 2026");
+  });
+});
+
+describe("emails about canceling a business", () => {
+  const details = { businessName: "Maple Dental", businessId: "b1", businessSlug: "maple-dental", businessType: "dental", timeZone: "America/Toronto", websiteUrl: "https://maple.example.test", createdAt: "2026-01-05 14:00 UTC", owners: "Sam Lee <sam@example.test>, Ana Ruiz <ana@example.test>", teamSize: "3", plan: "pro plan (monthly), paid through Polar (active)", phoneNumbers: "+14165550134, +14165550135", appUrl: base, requesterName: "Sam Lee", requesterEmail: "sam@example.test" };
+  const toInbox = (template: "cancellation_request" | "cancellation_completed", variables: Record<string, string>) => render({ template, to: "cancel@example.test", subject: cancellationSubject(template, variables), variables });
+  const inboxReason = "You're receiving this email because cancel@example.test is where AlloPlace sends account cancellations: the brand's contact address, else FEEDBACK_TO_EMAIL.";
+
+  it("ask the owner to confirm through a link that works for 24 hours, and say what canceling does", () => {
+    const { text, html } = render({ template: "cancellation_confirm", variables: { locale: "en", businessName: "Maple Dental", url: `${base}/cancel-account?token=t` } });
+    expect(text).toBe([
+      "Maple Dental\nConfirm canceling Maple Dental",
+      "You asked to cancel Maple Dental on AlloPlace. Nothing has changed yet. To cancel it, open the link below, sign in with sam@example.test and confirm with your password.",
+      "Once you confirm, nobody on the team can open Maple Dental, its receptionist stops answering calls and texts, its phone numbers go back to the provider after 30 days, and a paid plan is canceled. Nothing is deleted. You can then start again with a new business.",
+      `Confirm the cancellation:\n${base}/cancel-account?token=t`,
+      "The link works for 24 hours. After that, you can ask again in Settings > Team.",
+      "You're receiving this email because someone signed in with sam@example.test asked to cancel Maple Dental on AlloPlace. If it wasn't you, change your password. Nothing changes unless the cancellation is confirmed with this link.",
+    ].join("\n\n"));
+    expect(html).toContain(`<a href="${base}/cancel-account?token=t"`);
+  });
+
+  it("name the business in each subject, and ask the owner in their language", () => {
+    const named = { businessName: " Maple Dental " };
+    expect(cancellationSubject("cancellation_confirm", named)).toBe("Confirm canceling Maple Dental");
+    expect(cancellationSubject("cancellation_confirm", { ...named, locale: "fr" })).toBe("Confirmez l'annulation de Maple Dental");
+    expect(cancellationSubject("cancellation_confirm", { ...named, locale: "es" })).toBe("Confirme la cancelación de Maple Dental");
+    expect(cancellationSubject("cancellation_confirm", { ...named, locale: "sr" })).toBe("Potvrdite otkazivanje firme Maple Dental");
+    // The inbox reads English, whoever asked.
+    expect(cancellationSubject("cancellation_request", { ...named, locale: "fr" })).toBe("Cancellation request: Maple Dental");
+    expect(cancellationSubject("cancellation_completed", { ...named, locale: "fr" })).toBe("Canceled: Maple Dental");
+  });
+
+  it("tell the inbox who asked to cancel which business, with its details, and that nothing changes until they confirm", () => {
+    const { text, html } = toInbox("cancellation_request", { ...details, requestedAt: "2026-10-30 15:11 UTC", expiresAt: "2026-10-31 15:11 UTC" });
+    expect(text).toBe([
+      "Cancellation request: Maple Dental",
+      "Sam Lee (sam@example.test) asked to cancel Maple Dental on AlloPlace. They were emailed a link to confirm, which works until 2026-10-31 15:11 UTC. Nothing changes unless they confirm, and this inbox gets another email if they do.",
+      [
+        "Business: Maple Dental",
+        "Business ID: b1",
+        "Slug: maple-dental",
+        "Type: dental",
+        "Time zone: America/Toronto",
+        "Website: https://maple.example.test",
+        "Created: 2026-01-05 14:00 UTC",
+        "Owners: Sam Lee <sam@example.test>, Ana Ruiz <ana@example.test>",
+        "Team members: 3",
+        "Plan: pro plan (monthly), paid through Polar (active)",
+        "Phone numbers: +14165550134, +14165550135",
+        "Requested by: Sam Lee (sam@example.test)",
+        "Requested at: 2026-10-30 15:11 UTC",
+        "Link works until: 2026-10-31 15:11 UTC",
+        `Dashboard: ${base}`,
+      ].join("\n"),
+      "Once confirmed, nobody on the team can open the business, its numbers stop answering and go back to Twilio 30 days later, and a plan paid through Polar is canceled. Nothing is deleted.",
+      inboxReason,
+    ].join("\n\n"));
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain("Sam Lee &lt;sam@example.test&gt;");
+  });
+
+  it("leave out details the business doesn't have, and say when it has no numbers", () => {
+    const { text } = toInbox("cancellation_request", { businessName: "Maple Dental", businessId: "b1", requesterEmail: "sam@example.test", phoneNumbers: "", websiteUrl: "" });
+    expect(text).toContain("\n\nsam@example.test asked to cancel Maple Dental on AlloPlace. They were emailed a link to confirm, which works until 24 hours from now.");
+    expect(text).toContain("\n\nBusiness: Maple Dental\nBusiness ID: b1\nPhone numbers: None\nRequested by: sam@example.test\n\n");
+    expect(text).not.toContain("Website:");
+  });
+
+  it("tell the inbox once the owner confirms, with what happens to the plan and the numbers, and how to bring the business back", () => {
+    const { text } = toInbox("cancellation_completed", { ...details, canceledAt: "2026-10-30 16:02 UTC", planOutcome: "polar", numbersReleasedOn: "2026-11-29" });
+    expect(text).toBe([
+      "Canceled: Maple Dental",
+      "Sam Lee (sam@example.test) confirmed the cancellation of Maple Dental on AlloPlace at 2026-10-30 16:02 UTC. Nothing was deleted: the business is now inactive, nobody on its team can open it, and its receptionist no longer answers calls or texts.",
+      "Its paid plan is being canceled in Polar now. If Polar still shows the subscription as active in an hour, cancel it there by hand.",
+      "Its phone numbers (+14165550134, +14165550135) go back to Twilio on 2026-11-29 unless the business is reactivated before then.",
+      [
+        "Business: Maple Dental",
+        "Business ID: b1",
+        "Slug: maple-dental",
+        "Type: dental",
+        "Time zone: America/Toronto",
+        "Website: https://maple.example.test",
+        "Created: 2026-01-05 14:00 UTC",
+        "Owners: Sam Lee <sam@example.test>, Ana Ruiz <ana@example.test>",
+        "Team members: 3",
+        "Plan: pro plan (monthly), paid through Polar (active)",
+        "Phone numbers: +14165550134, +14165550135",
+        "Canceled by: Sam Lee (sam@example.test)",
+        "Canceled at: 2026-10-30 16:02 UTC",
+        `Dashboard: ${base}`,
+      ].join("\n"),
+      "To reactivate it, see 7.27, \"Reactivate a canceled business\", in the deployment guide. Its plan stays canceled.",
+      inboxReason,
+    ].join("\n\n"));
+  });
+
+  it("say a plan billed outside the app ends by hand, a free one has nothing to end, and a business without numbers has none to release", () => {
+    const managed = toInbox("cancellation_completed", { ...details, plan: "pro plan, billed outside the app", planOutcome: "managed", phoneNumbers: "" }).text;
+    expect(managed).toContain("\n\nIts plan is billed outside the app, so end it by hand.\n\nIt has no phone numbers waiting to go back to Twilio.\n\n");
+    expect(managed).toContain("\nPhone numbers: None\n");
+    const free = toInbox("cancellation_completed", { ...details, plan: "Free plan", planOutcome: "free" }).text;
+    expect(free).toContain("\n\nIt was on the free plan, so there's no plan to cancel.\n\n");
+    // Queued without who confirmed or what the plan was, it asks to check the plan.
+    const bare = toInbox("cancellation_completed", { businessName: "Maple Dental" }).text;
+    expect(bare).toContain("\n\nAn owner confirmed the cancellation of Maple Dental on AlloPlace. Nothing was deleted:");
+    expect(bare).toContain("\n\nCheck its plan in Polar, and cancel it there by hand if it's still active.\n\n");
   });
 });
 

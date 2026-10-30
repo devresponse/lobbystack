@@ -921,7 +921,7 @@
       "title": "Eliminar negocio",
       "description": "Elimina de forma permanente este negocio y todos sus datos. No se puede deshacer.",
       "blocked": {
-        "accountRoot": "Este es el primer negocio de tu cuenta, así que no se puede eliminar. Puedes eliminar los demás negocios de los que eres propietario.",
+        "accountRoot": "Este es el primer negocio de tu cuenta, así que no se puede eliminar. Para cancelar tu cuenta, elimina primero los demás negocios de los que eres propietario. Después podrás cancelar este aquí.",
         "otherOwnerRoot": "Este es el primer negocio de la cuenta de otro propietario, así que no se puede eliminar.",
         "onlyBusiness": "Este es el único negocio del que eres propietario, así que no se puede eliminar."
       },
@@ -948,6 +948,28 @@
         "managed_plan": "El plan de este negocio se factura fuera de la aplicación. Contacta con soporte para terminarlo y luego elimina el negocio.",
         "plan_ending": "Su plan de pago se está cancelando. Selecciona de nuevo Eliminar para siempre en un momento.",
         "plan_not_ended": "No se pudo cancelar su plan de pago. Contacta con soporte o inténtalo más tarde.",
+        "rate_limited": "Demasiados intentos. Inténtalo más tarde."
+      }
+    },
+    "cancelAccount": {
+      "title": "Cancelar cuenta",
+      "description": "Cierra este negocio y deja de usar el servicio. No se elimina nada, y más adelante puedes empezar de nuevo con un negocio nuevo.",
+      "action": "Cancelar cuenta",
+      "dialogTitle": "¿Cancelar {{name}}?",
+      "dialogDescription": "Cuando lo confirmes, nadie del equipo podrá abrirlo, su recepcionista dejará de atender llamadas y mensajes de texto, su chat del sitio web, su página pública, sus claves de API y sus aplicaciones conectadas dejarán de funcionar, y se cancelará un plan de pago. Sus números de teléfono vuelven al proveedor después de 30 días.",
+      "notice": "No se elimina nada, y todavía no cambia nada. Te enviaremos por correo un enlace para confirmar, válido durante 24 horas, que te pedirá iniciar sesión e introducir tu contraseña.",
+      "confirmLabel": "Escribe <name>{{name}}</name> para confirmar",
+      "submit": "Solicitar la cancelación",
+      "sending": "Enviando...",
+      "keep": "Conservar mi cuenta",
+      "sentTitle": "Revisa tu correo",
+      "sentDescription": "Enviamos un enlace a {{email}}. Ábrelo en las próximas 24 horas e inicia sesión para cancelar el negocio. Hasta entonces, no cambia nada.",
+      "done": "Listo",
+      "errors": {
+        "failed": "No se pudo solicitar la cancelación. Inténtalo de nuevo.",
+        "confirmation_mismatch": "El nombre no coincide. Escríbelo exactamente como se muestra.",
+        "other_businesses": "Eres propietario de otros negocios. Elimínalos primero y luego cancela este.",
+        "forbidden": "Solo un propietario de este negocio puede cancelarlo.",
         "rate_limited": "Demasiados intentos. Inténtalo más tarde."
       }
     }

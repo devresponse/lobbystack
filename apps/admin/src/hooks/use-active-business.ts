@@ -17,6 +17,10 @@ export type Business = {
   websiteUrl?: string | null;
   onboardingStage?: string;
   createdAt?: string;
+  /** Any owner's root business, the one they've owned longest, which can't be deleted. */
+  isRoot?: boolean;
+  /** The signed-in person's own root business. */
+  isAccountRoot?: boolean;
 };
 
 /** Loads the operator's workspaces and picks the server-selected active one. */

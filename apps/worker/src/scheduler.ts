@@ -57,6 +57,18 @@ export async function configureSchedulers(
   for (const schedule of applied.values()) {
     if (!wanted.has(schedule.name)) desired.push({ ...schedule, every: 0 });
   }
+  // After a boot this process knows nothing it set before, so a business
+  // deleted while no worker ran would keep its schedulers: drop each one in
+  // Redis that is per business and names no business on the list.
+  if (applied.size === 0) {
+    const tenantNames = new Set(["live-orphan-recovery", ...tenantSchedules.map((schedule) => schedule.name)]);
+    for (const queue of new Set(queues.values())) {
+      for (const scheduler of await queue.getJobSchedulers()) {
+        const separator = scheduler.key.indexOf(":");
+        if (separator > 0 && tenantNames.has(scheduler.key.slice(0, separator)) && !wanted.has(scheduler.key)) await queue.removeJobScheduler(scheduler.key);
+      }
+    }
+  }
   for (const schedule of desired) {
     const queue = queues.get(schedule.queue);
     if (!queue || applied.get(schedule.name)?.every === schedule.every) continue;

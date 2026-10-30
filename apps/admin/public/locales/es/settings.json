@@ -916,6 +916,40 @@
       "resendFailed": "No pudimos reenviar esa invitación.",
       "revokeSuccess": "Invitación revocada.",
       "revokeFailed": "No pudimos revocar esa invitación."
+    },
+    "delete": {
+      "title": "Eliminar negocio",
+      "description": "Elimina de forma permanente este negocio y todos sus datos. No se puede deshacer.",
+      "blocked": {
+        "accountRoot": "Este es el primer negocio de tu cuenta, así que no se puede eliminar. Puedes eliminar los demás negocios de los que eres propietario.",
+        "otherOwnerRoot": "Este es el primer negocio de la cuenta de otro propietario, así que no se puede eliminar.",
+        "onlyBusiness": "Este es el único negocio del que eres propietario, así que no se puede eliminar."
+      },
+      "action": "Eliminar negocio",
+      "dialogTitle": "¿Eliminar {{name}}?",
+      "dialogDescription": "Se borran sus llamadas y grabaciones, chats, contactos, citas, conocimientos, ajustes, historial de facturación y los accesos del equipo. Sus números de teléfono vuelven al proveedor, la recepcionista deja de responder y un plan de pago se cancela de inmediato.",
+      "permanent": "Esto es permanente. Nada se puede restaurar, ni por ti ni por el soporte.",
+      "confirmLabel": "Escribe <name>{{name}}</name> para confirmar",
+      "passwordLabel": "Tu contraseña",
+      "submit": "Eliminar para siempre",
+      "deleting": "Eliminando...",
+      "cancel": "Cancelar",
+      "deleted": "Se eliminó {{name}}.",
+      "errors": {
+        "failed": "No se pudo eliminar el negocio. Inténtalo de nuevo.",
+        "confirmation_mismatch": "El nombre no coincide. Escríbelo exactamente como se muestra.",
+        "invalid_password": "Esa contraseña no es correcta.",
+        "root_business": "Este es el primer negocio de una cuenta, así que no se puede eliminar.",
+        "only_business": "Este es el único negocio del que eres propietario, así que no se puede eliminar.",
+        "forbidden": "Solo un propietario de este negocio puede eliminarlo.",
+        "number_in_progress": "Todavía se está configurando un número de teléfono para este negocio. Inténtalo de nuevo en unos minutos.",
+        "call_in_progress": "Hay una llamada en curso en este negocio. Inténtalo de nuevo cuando termine.",
+        "checkout_open": "Una compra de plan para este negocio empezó hace menos de una hora. Inténtalo de nuevo cuando haya caducado.",
+        "managed_plan": "El plan de este negocio se factura fuera de la aplicación. Contacta con soporte para terminarlo y luego elimina el negocio.",
+        "plan_ending": "Su plan de pago se está cancelando. Selecciona de nuevo Eliminar para siempre en un momento.",
+        "plan_not_ended": "No se pudo cancelar su plan de pago. Contacta con soporte o inténtalo más tarde.",
+        "rate_limited": "Demasiados intentos. Inténtalo más tarde."
+      }
     }
   },
   "hours": {

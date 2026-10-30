@@ -11,7 +11,7 @@ One deployment of LobbyStack serves many businesses. They share one database, on
 
 ## Know what belongs to each business
 
-- Members, with a role: `business_owner`, `business_admin`, `scheduler` or `viewer`. A person can belong to several businesses, switch between them in the sidebar and create more.
+- Members, with a role: `business_owner`, `business_admin`, `scheduler` or `viewer`. A person can belong to several businesses, switch between them in the sidebar and create more. Since fork PR #101 an owner can delete any business they own but their first, their root ([delete a business](business-deletion.md)).
 - Its phone number, widget keys, public profile, calendar connection, contacts, calls, messages, knowledge, rules and services.
 - Its billing plan, usage and spending cap, and its own Polar customer (fork PR #72).
 

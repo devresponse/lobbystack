@@ -1,6 +1,6 @@
 # Part 6. First run on a new instance
 
-**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s test call length was updated on 2026-10-20 for fork PR #54 (`9b66d01`), and [6.3](#63-set-up-the-first-business)'s opening language on 2026-10-25 for fork PR #82, and [6.3](#63-set-up-the-first-business)'s notice to callers, its alerts and [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s first calls on 2026-10-26 for fork PR #84, and [6.2](#62-the-brand-step)'s conditions on 2026-10-27 for fork PR #87. The onboarding steps were tried on a computer on 2026-10-18 ([2.6](part-2-local-development.md#26-sign-in-for-the-first-time-and-create-a-test-business)); nothing else in this part has been run on a deployed instance yet.
+**Status:** written on 2026-10-19 from the code on `main` at `d18f916`; [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s test call length was updated on 2026-10-20 for fork PR #54 (`9b66d01`), and [6.3](#63-set-up-the-first-business)'s opening language on 2026-10-25 for fork PR #82, and [6.3](#63-set-up-the-first-business)'s notice to callers, its alerts and [6.4](#64-get-a-phone-number-and-make-the-first-calls)'s first calls on 2026-10-26 for fork PR #84, and [6.2](#62-the-brand-step)'s conditions on 2026-10-27 for fork PR #87, and [6.1](#61-create-your-account)'s line on deleting on 2026-10-30 for fork PR #101. The onboarding steps were tried on a computer on 2026-10-18 ([2.6](part-2-local-development.md#26-sign-in-for-the-first-time-and-create-a-test-business)); nothing else in this part has been run on a deployed instance yet.
 
 This part takes a new instance from an empty dashboard to a business whose receptionist answers calls and chats, books appointments and takes messages. Do it on the test environment first ([Part 4](part-4-test-environment.md)), then on production ([Part 5](part-5-production.md)).
 
@@ -30,7 +30,7 @@ This part takes a new instance from an empty dashboard to a business whose recep
 - Your name in the dashboard is the part of your email before the `@`, and invitations you send show it. There's no field to change it.
 - A sign-in lasts 30 days. **Forgot password?** on the sign-in page emails a 6-digit reset code, and a reset signs you out everywhere.
 - Your account settings are in the menu at the bottom of the sidebar: click your name, then **Account**. There you change your email (the confirmation link goes to your current address first, then to the new one) and your password (which signs out your other sessions). The dashboard's language is in **Settings** > **Preferences** > **Dashboard language**.
-- Nothing deletes an account or a business: not the dashboard, the API or the command line ([Appendix E](appendix-e-doc-problems.md)).
+- Nothing deletes an account, or the first business it made: not the dashboard, the API or the command line ([Appendix E](appendix-e-doc-problems.md)). Since fork PR #101 an owner can delete a later business of theirs, with everything in it, from its **Settings** > **Team**, after typing its name and their password ([delete a business](../../features/business-deletion.md)).
 
 **Require the email code on production**
 

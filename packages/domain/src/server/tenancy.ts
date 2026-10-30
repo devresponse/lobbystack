@@ -162,13 +162,18 @@ export async function insertBusinessInTransaction(
   return { businessId, membershipId: membership.id };
 }
 
+/**
+ * The businesses the person belongs to. isRoot marks a business that is any
+ * owner's root business, the one they've owned longest, which can't be
+ * deleted; isAccountRoot marks the person's own (migration 0129).
+ */
 export async function listUserBusinesses(
   db: Database,
   userId: string,
-): Promise<Array<{ businessId: string; name: string; slug: string; role: string; active: boolean; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: string }>> {
+): Promise<Array<{ businessId: string; name: string; slug: string; role: string; active: boolean; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: string; isRoot: boolean; isAccountRoot: boolean }>> {
   return await withBusinessTransaction(db, { userId, actorType: "operator" }, async (tx) => {
     const [user] = await tx.select({ activeBusinessId: users.activeBusinessId }).from(users).where(eq(users.id, userId)).limit(1);
-    const rows = await tx.execute<{ businessId: string; name: string; slug: string; role: string; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: Date }>(sql`select business_id as "businessId", name, slug, role, timezone, business_type as "businessType", default_locale as "defaultLocale", website_url as "websiteUrl", onboarding_stage as "onboardingStage", created_at as "createdAt" from app.list_user_businesses(${userId})`);
+    const rows = await tx.execute<{ businessId: string; name: string; slug: string; role: string; timezone: string; businessType: string; defaultLocale: string; websiteUrl: string | null; onboardingStage: string; createdAt: Date; isRoot: boolean; isAccountRoot: boolean }>(sql`select business_id as "businessId", name, slug, role, timezone, business_type as "businessType", default_locale as "defaultLocale", website_url as "websiteUrl", onboarding_stage as "onboardingStage", created_at as "createdAt", is_root as "isRoot", is_account_root as "isAccountRoot" from app.list_user_businesses(${userId})`);
     return rows.rows.map((row) => ({ ...row, active: row.businessId === user?.activeBusinessId, createdAt: new Date(row.createdAt).toISOString() }));
   });
 }

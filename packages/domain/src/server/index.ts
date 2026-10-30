@@ -14,6 +14,7 @@ export * from "./billingVerify";
 export * from "./branding";
 export * from "./analytics";
 export * from "./booking";
+export * from "./businessDeletion";
 export * from "./businessHours";
 export * from "./businessSummary";
 export * from "./calendar";

@@ -91,6 +91,21 @@ export class PolarBillingProvider {
     return await this.patchSubscription(subscriptionId, { cancel_at_period_end: true });
   }
 
+  /**
+   * Ends a subscription now rather than at the end of its period, as for a
+   * business being deleted. One Polar no longer has, or that has already
+   * ended, counts as ended; any other refusal, such as a token without the
+   * scope, fails. Needs subscriptions:write.
+   */
+  async revokeSubscription(subscriptionId: string): Promise<void> {
+    try {
+      await this.request(`/v1/subscriptions/${encodeURIComponent(subscriptionId)}`, { method: "DELETE" });
+    } catch (error) {
+      if (error instanceof PolarRequestError && (error.status === 404 || (error.status === 403 && error.errorName === "AlreadyCanceledSubscription"))) return;
+      throw error;
+    }
+  }
+
   /** Removes a subscription's discount from its next billing cycle on. Needs subscriptions:write. */
   async removeSubscriptionDiscount(subscriptionId: string): Promise<PolarSubscription> {
     return await this.patchSubscription(subscriptionId, { discount_id: null });

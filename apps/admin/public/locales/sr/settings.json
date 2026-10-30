@@ -916,6 +916,40 @@
       "resendFailed": "Nismo uspeli da ponovo pošaljemo poziv.",
       "revokeSuccess": "Poziv je opozvan.",
       "revokeFailed": "Nismo uspeli da opozovemo poziv."
+    },
+    "delete": {
+      "title": "Obriši firmu",
+      "description": "Trajno briše ovu firmu i sve njene podatke. Ovo se ne može poništiti.",
+      "blocked": {
+        "accountRoot": "Ovo je prva firma na vašem nalogu, pa ne može da se obriše. Možete da obrišete ostale firme čiji ste vlasnik.",
+        "otherOwnerRoot": "Ovo je prva firma na nalogu drugog vlasnika, pa ne može da se obriše.",
+        "onlyBusiness": "Ovo je jedina firma čiji ste vlasnik, pa ne može da se obriše."
+      },
+      "action": "Obriši firmu",
+      "dialogTitle": "Obrisati {{name}}?",
+      "dialogDescription": "Brišu se njeni pozivi i snimci, razgovori, kontakti, termini, znanje, podešavanja, istorija naplate i pristup tima. Njeni brojevi telefona se vraćaju provajderu, recepcionar prestaje da se javlja, a plaćeni plan se odmah otkazuje.",
+      "permanent": "Ovo je trajno. Ništa ne može da se vrati, ni vi ni podrška.",
+      "confirmLabel": "Upišite <name>{{name}}</name> za potvrdu",
+      "passwordLabel": "Vaša lozinka",
+      "submit": "Obriši trajno",
+      "deleting": "Brisanje...",
+      "cancel": "Otkaži",
+      "deleted": "Firma {{name}} je obrisana.",
+      "errors": {
+        "failed": "Firma nije mogla da se obriše. Pokušajte ponovo.",
+        "confirmation_mismatch": "Naziv se ne poklapa. Upišite ga tačno kako je prikazan.",
+        "invalid_password": "Ta lozinka nije tačna.",
+        "root_business": "Ovo je prva firma na nalogu, pa ne može da se obriše.",
+        "only_business": "Ovo je jedina firma čiji ste vlasnik, pa ne može da se obriše.",
+        "forbidden": "Samo vlasnik ove firme može da je obriše.",
+        "number_in_progress": "Broj telefona za ovu firmu se još podešava. Pokušajte ponovo za nekoliko minuta.",
+        "call_in_progress": "Za ovu firmu je u toku poziv. Pokušajte ponovo kada se završi.",
+        "checkout_open": "Kupovina plana za ovu firmu je počela pre manje od sat vremena. Pokušajte ponovo kada istekne.",
+        "managed_plan": "Plan ove firme se naplaćuje van aplikacije. Obratite se podršci da ga završi, pa onda obrišite firmu.",
+        "plan_ending": "Njen plaćeni plan se otkazuje. Za trenutak ponovo izaberite Obriši trajno.",
+        "plan_not_ended": "Njen plaćeni plan nije mogao da se otkaže. Obratite se podršci ili pokušajte kasnije.",
+        "rate_limited": "Previše pokušaja. Pokušajte kasnije."
+      }
     }
   },
   "hours": {

@@ -289,6 +289,11 @@ describe("searchKnowledge", () => {
     await expect(search("What are the parking rates?", snippets, evidence(["Parking", "Rates", "Garage"]))).resolves.toEqual({ outcome: "found", titles: ["Parking", "Rates", "Garage"] });
   });
 
+  it("finds a text entry beyond the few the prompt lists", async () => {
+    const snippets = [...Array.from({ length: 12 }, (_, index) => chatter(`Topic ${index}`)), snippet("Do you offer valet parking?", "Yes, valet parking is free on weekends.", -5)];
+    await expect(search("valet parking", snippets, evidence([]))).resolves.toEqual({ outcome: "found", titles: ["Do you offer valet parking?"] });
+  });
+
   it("returns no snippets for a query of only common words", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const snippets = ["Welcome", "Team", "History"].map(chatter);

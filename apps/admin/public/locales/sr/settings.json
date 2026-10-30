@@ -633,6 +633,7 @@
       "searchRateLimited": "Previše pretraga. Sačekajte nekoliko minuta, pa pokušajte ponovo.",
       "searchInvalid": "Operater nije mogao da pretraži sa tim pozivnim brojem. Proverite ga i pokušajte ponovo.",
       "searchUnsupported": "Operater nema brojeve ove vrste u ovoj zemlji.",
+      "numbersUnavailable": "Brojevi telefona još nisu podešeni na ovoj kontrolnoj tabli. Zamolite osobu koja njome upravlja da poveže telefonskog provajdera.",
       "withErrorId": "{{message}} ID greške: {{errorId}}"
     },
     "toast": {

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
     __loaded: false,
     init: vi.fn(),
     has_opted_out_capturing: vi.fn(() => true),
+    opt_out_capturing: vi.fn(),
     captureException: vi.fn(),
   },
 }));
@@ -52,6 +53,23 @@ describe("client analytics initialization", () => {
       save_referrer: false,
       session_recording: { maskTextSelector: ".ph-mask" },
     });
+  });
+
+  // PostHog keeps an opt-in in localStorage and starts opted in from it, so a
+  // page whose business has telemetry off, or a sign-in page after a business
+  // that has it on, would capture its page view.
+  it("withdraws an opt-in an earlier page stored, before PostHog captures this page", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    mocks.posthog.has_opted_out_capturing.mockReturnValue(false);
+    await start();
+    expect(mocks.posthog.opt_out_capturing).toHaveBeenCalledTimes(1);
+    expect(mocks.posthog.init.mock.invocationCallOrder[0]).toBeLessThan(mocks.posthog.opt_out_capturing.mock.invocationCallOrder[0]!);
+  });
+
+  it("leaves PostHog as it is when it starts opted out", async () => {
+    vi.stubEnv("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "fixture-key");
+    await start();
+    expect(mocks.posthog.opt_out_capturing).not.toHaveBeenCalled();
   });
 
   it("doesn't initialize again once PostHog is loaded", async () => {

@@ -20,6 +20,7 @@ const phoneNumberErrorKeys: Record<string, string> = {
   number_search_rate_limited: "phoneNumber.errors.searchRateLimited",
   number_search_invalid: "phoneNumber.errors.searchInvalid",
   number_search_unsupported: "phoneNumber.errors.searchUnsupported",
+  phone_numbers_unavailable: "phoneNumber.errors.numbersUnavailable",
 };
 
 /**

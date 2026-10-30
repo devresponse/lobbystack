@@ -39,6 +39,14 @@ export function initializeClientAnalytics(): void {
         return event;
       },
     });
+    // PostHog stores an opt-in and starts opted in from it on the next page
+    // load, despite opt_out_capturing_by_default, and captures that page a
+    // tick later. Withdraw it first, so a page whose business has telemetry
+    // off, or a sign-in page after a business that has it on, sends nothing.
+    // ProductAnalytics starts its telemetry opted out, so without this its
+    // opt-out would change nothing. It opts in again where consent allows, and
+    // PostHog then captures the page once.
+    if (!posthog.has_opted_out_capturing()) posthog.opt_out_capturing();
   }
   sendBrowserErrorsTo(posthog);
 }

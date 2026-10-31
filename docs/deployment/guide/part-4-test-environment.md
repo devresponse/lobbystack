@@ -474,8 +474,9 @@ The test environment is also where `pnpm voice:call` places its scripted test ca
 - **To pause the environment** while nobody uses it for weeks: on the admin, the worker, Redis and Postgres, open the newest deployment's menu (the three dots) and choose **Remove**. That stops their running costs. The volumes, the bucket and the variables stay, and still cost a little for what they hold. Calls and texts to the test numbers go unanswered meanwhile, and the numbers keep costing their monthly fee. To start again, deploy in the first order: Postgres and Redis, then migrate, then the admin and the worker *(how to start an image service that has no deployment isn't confirmed)*.
 - **To start over with empty data:**
   1. Release the test numbers first, or they stay in your Twilio account, billed every month. The dashboard has no button for it: use the command line ([6.7](part-6-first-run.md#67-optional-the-api-and-the-command-line)). Or, since the wipe deletes LobbyStack's record of the numbers anyway, release them in Twilio's console *(menu path not confirmed)*.
-  2. Wipe the Postgres volume and the Redis volume: each volume's **Settings** > **Wipe Volume**. This also deletes their backups.
-  3. Deploy migrate, then the admin and the worker. The bucket keeps its files; delete them from its **Files** view if you want it empty.
+  2. Empty the database and Redis with `node devops/reset-database.mjs --redis`, from the code on your computer, then redeploy the admin and the worker ([7.28](part-7-operations.md#728-reset-a-test-environment)). It keeps the tables, the database's roles and the volumes' backups, shows what the database holds, and asks for the database's name before it deletes anything.
+  3. Or wipe the Postgres volume and the Redis volume: each volume's **Settings** > **Wipe Volume**, which also deletes their backups. Then deploy migrate, then the admin and the worker.
+  4. Either way the bucket keeps its files; delete them from its **Files** view if you want it empty.
 
 ## 4.11 Later: set it all up with one command
 

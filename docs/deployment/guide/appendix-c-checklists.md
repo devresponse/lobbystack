@@ -45,6 +45,7 @@ The same list as [5.4](part-5-production.md#54-go-live-checklist). Go through it
 - [ ] Backups run, and a copy is kept outside Railway or off the server ([5.2](part-5-production.md#52-production-on-railway), steps 16 to 22, or [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), steps 27 and 28).
 - [ ] A restore has been practiced: on a server, with the drill ([5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), step 26); on Railway, on the test environment ([7.8](part-7-operations.md#78-restore-from-a-backup-and-practice-it)).
 - [ ] You know how long content is kept ([5.1](part-5-production.md#51-what-changes-from-the-test-environment)), and who answers a request to delete someone's data ([7.9](part-7-operations.md#79-data-retention-and-deletion-requests)).
+- [ ] Production's database is protected from the test environment's reset script: `node devops/reset-database.mjs --protect` with production's `DATABASE_PUBLIC_URL` says `Protected`, or `alter database <its name> set lobbystack.reset_protection = 'on';` ran as `postgres` ([7.28](part-7-operations.md#728-reset-a-test-environment)).
 
 *Watching and money*
 

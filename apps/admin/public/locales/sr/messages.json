@@ -34,6 +34,7 @@
     "filterAll": "Sve",
     "filterWeb": "Veb",
     "filterSms": "SMS",
+    "filterArchived": "Arhivirani",
     "takeOver": "Preuzmi",
     "waitingBadge": "Traži osobu",
     "waitingTitle": "Posetilac čeka",
@@ -66,6 +67,20 @@
       "rejected": "Ovaj broj ne može da prima SMS poruke.",
       "regionBlocked": "Broj Vašeg preduzeća nema dozvolu da šalje SMS poruke u ovu zemlju.",
       "unsent": "SMS poruka nije mogla da se pošalje."
+    },
+    "archive": {
+      "action": "Arhiviraj",
+      "title": "Arhivirati ovaj razgovor?",
+      "description": "Prelazi u Arhivirane i više se neće prikazivati sa ostalim razgovorima. Ništa se ne briše: poruke ostaju sačuvane, razgovor možete vratiti iz Arhiviranih, a nova poruka ga vraća na listu.",
+      "cancel": "Otkaži",
+      "confirm": "Arhiviraj razgovor",
+      "done": "Razgovor je arhiviran.",
+      "failed": "Nije moguće arhivirati razgovor.",
+      "archivedOn": "Nova poruka ga vraća na listu. Arhiviran {{date}}",
+      "restore": "Vrati",
+      "restored": "Razgovor je vraćen.",
+      "restoreFailed": "Nije moguće vratiti razgovor.",
+      "empty": "Nema arhiviranih razgovora."
     }
   },
   "outcome": {

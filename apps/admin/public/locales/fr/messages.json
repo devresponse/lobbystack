@@ -36,6 +36,7 @@
     "filterAll": "Tous",
     "filterWeb": "Web",
     "filterSms": "SMS",
+    "filterArchived": "Archivées",
     "takeOver": "Prendre en charge",
     "waitingBadge": "Demande une personne",
     "waitingTitle": "Visiteur en attente",
@@ -66,6 +67,20 @@
       "rejected": "Ce numéro ne peut pas recevoir de textos.",
       "regionBlocked": "Le numéro de votre entreprise n'est pas autorisé à envoyer des textos vers ce pays.",
       "unsent": "Le texto n'a pas pu être envoyé."
+    },
+    "archive": {
+      "action": "Archiver",
+      "title": "Archiver cette conversation ?",
+      "description": "Elle passera dans Archivées et n'apparaîtra plus avec vos autres conversations. Rien n'est supprimé : ses messages sont conservés, vous pourrez la restaurer depuis Archivées, et un nouveau message la fera revenir.",
+      "cancel": "Annuler",
+      "confirm": "Archiver la conversation",
+      "done": "Conversation archivée.",
+      "failed": "Impossible d'archiver la conversation.",
+      "archivedOn": "Archivée le {{date}}. Un nouveau message la fera revenir.",
+      "restore": "Restaurer",
+      "restored": "Conversation restaurée.",
+      "restoreFailed": "Impossible de restaurer la conversation.",
+      "empty": "Aucune conversation archivée."
     }
   },
   "outcome": {

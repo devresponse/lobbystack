@@ -26,7 +26,7 @@ Deleting a business stays out of the API on purpose. Since fork PR #101 an owner
 
 ## Know which tables have no API
 
-- **`conversations` and `messages`:** the text and website chat threads that the dashboard's **Messages** page reads, answers and hands to a person (`apps/admin/app/api/messages/route.ts`). The API can't read or answer them, and no webhook fires for an incoming text or chat. The API's own "messages" are something else: the messages the receptionist took for the team, kept in `inbox_items`.
+- **`conversations` and `messages`:** the text and website chat threads that the dashboard's **Messages** page reads, answers, hands to a person and, since fork PR #108, archives (`apps/admin/app/api/messages/route.ts`). The API can't read, answer or archive them, and no webhook fires for an incoming text or chat. The API's own "messages" are something else: the messages the receptionist took for the team, kept in `inbox_items`.
 - **`closures`:** the dates a business is closed. Availability and the public page read them, but nothing writes them, neither the dashboard nor the API.
 - **`billing_transactions`:** billing history. Low priority.
 

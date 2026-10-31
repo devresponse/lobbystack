@@ -34,6 +34,7 @@
     "filterAll": "Todos",
     "filterWeb": "Web",
     "filterSms": "SMS",
+    "filterArchived": "Archivadas",
     "takeOver": "Tomar el control",
     "waitingBadge": "Pide una persona",
     "waitingTitle": "Visitante esperando",
@@ -66,6 +67,20 @@
       "rejected": "Este número no puede recibir SMS.",
       "regionBlocked": "El número de su negocio no tiene permiso para enviar SMS a este país.",
       "unsent": "No se pudo enviar el SMS."
+    },
+    "archive": {
+      "action": "Archivar",
+      "title": "¿Archivar esta conversación?",
+      "description": "Pasará a Archivadas y dejará de aparecer con sus otras conversaciones. No se elimina nada: se conservan sus mensajes, podrá restaurarla desde Archivadas y un mensaje nuevo la traerá de vuelta.",
+      "cancel": "Cancelar",
+      "confirm": "Archivar conversación",
+      "done": "Conversación archivada.",
+      "failed": "No se pudo archivar la conversación.",
+      "archivedOn": "Archivada el {{date}}. Un mensaje nuevo la traerá de vuelta.",
+      "restore": "Restaurar",
+      "restored": "Conversación restaurada.",
+      "restoreFailed": "No se pudo restaurar la conversación.",
+      "empty": "No hay conversaciones archivadas."
     }
   },
   "outcome": {

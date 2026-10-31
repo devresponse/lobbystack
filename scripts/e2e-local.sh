@@ -39,6 +39,7 @@ TESTS=(
   e2e/business-deletion.e2e.ts
   e2e/business-timezone.e2e.ts
   e2e/call-archive.e2e.ts
+  e2e/message-archive.e2e.ts
   e2e/onboarding-flow.e2e.ts
   e2e/onboarding-pending.e2e.ts
   e2e/operator-auth.e2e.ts

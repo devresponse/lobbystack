@@ -1,18 +1,19 @@
-import { and, desc, eq, ilike, ne, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { contacts, conversations, messages, widgetVisitors } from "@lobbystack/db";
-import { appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, setAutomationState } from "@lobbystack/domain";
+import { appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, setAutomationState, setConversationArchived } from "@lobbystack/domain";
 import { isUuid, smsFailureReason } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
 export const dynamic = "force-dynamic";
 
-const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, conversationStatus: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt };
+const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, conversationStatus: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt, archivedAt: conversations.archivedAt };
 
 /**
- * Without conversationId: one row per conversation (its latest message), newest first, paged. With it: that thread,
+ * Without conversationId: one row per conversation (its latest message), newest first, paged, leaving out archived
+ * conversations, or only those with archived=true. With it: that thread, archived or not,
  * each text with why it failed when it never went out, and where a reply goes: for a website chat that closed, the
  * visitor's newer chat; for any other conversation, which takes replies by text, why a text can't reach the contact.
  */
@@ -38,9 +39,11 @@ export async function GET(request: Request) {
       const offset = Math.max(Math.trunc(Number(url.searchParams.get("offset")) || 0), 0);
       const search = url.searchParams.get("search")?.trim();
       const channel = url.searchParams.get("channel");
+      const archived = url.searchParams.get("archived") === "true";
       const latest = tx.select({ id: messages.id, body: messages.body, direction: messages.direction, status: messages.status, createdAt: messages.createdAt }).from(messages).where(eq(messages.conversationId, conversations.id)).orderBy(desc(messages.createdAt)).limit(1).as("latest");
       const rows = await tx.select({ id: latest.id, ...conversationFields, body: latest.body, direction: latest.direction, status: latest.status, createdAt: latest.createdAt }).from(conversations).innerJoinLateral(latest, sql`true`).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).where(and(
         eq(conversations.businessId, businessId),
+        archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt),
         channel === "web_chat" ? eq(conversations.channel, "web_chat") : channel === "sms" ? ne(conversations.channel, "web_chat") : undefined,
         search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, `%${search}%`))) : undefined,
       )).orderBy(desc(latest.createdAt), desc(conversations.id)).limit(limit + 1).offset(offset);
@@ -61,8 +64,15 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
-    const body = await readJson(request) as { conversationId?: string; automationState?: "ai_active" | "human_handoff" };
+    const body = await readJson(request) as { conversationId?: string; automationState?: "ai_active" | "human_handoff"; action?: string };
     const businessId = businessIdFromRequest(request);
+    if (body?.action === "archive" || body?.action === "restore") {
+      if (!businessId || !isUuid(body.conversationId)) return jsonError("businessId and a conversationId UUID are required.", 400);
+      const session = await (await import("@/lib/api-helpers")).requireApiSession(request);
+      // Archiving hides the conversation from the Messages list and Home; nothing is deleted.
+      const archived = await setConversationArchived(createDomainContext(), { userId: session.user.id, businessId, conversationId: body.conversationId, archived: body.action === "archive" });
+      return archived ? NextResponse.json(archived) : jsonError("Conversation not found.", 404, "not_found");
+    }
     if (!businessId || !body.conversationId || (body.automationState !== "ai_active" && body.automationState !== "human_handoff")) return jsonError("conversationId and a valid automationState are required.", 400);
     const session = await (await import("@/lib/api-helpers")).requireApiSession(request);
     await setAutomationState(createDomainContext(), { userId: session.user.id, businessId, conversationId: body.conversationId, state: body.automationState });

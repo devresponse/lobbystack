@@ -1,10 +1,10 @@
 import { and, asc, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 
-import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
-import { requireBusinessMembership } from "../authz";
+import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 import { resolveCallOutcome } from "./callOutcome";
 import { queueCallTranscriptEmailsInTransaction } from "./callTranscriptEmails";
@@ -170,7 +170,8 @@ export async function insertMessageInTransaction(tx: DatabaseTransaction, input:
     status: input.direction === "outbound" ? "queued" : "received",
   }).onConflictDoNothing({ target: messages.providerMessageId }).returning({ id: messages.id });
   if (!message) return null;
-  await tx.update(conversations).set({ updatedAt: new Date(), revision: conversations.revision }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
+  // A new message brings an archived conversation back to the Messages list.
+  await tx.update(conversations).set({ updatedAt: new Date(), archivedAt: null, revision: conversations.revision }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId)));
   await enqueueOutbox(tx, {
     topic: "realtime.publish",
     businessId: input.businessId,
@@ -334,6 +335,33 @@ export async function setAutomationState(
   });
   if (input.state !== "human_handoff" || !change) return;
   await recordTakeOver(context, { businessId: input.businessId, conversationId: input.conversationId, ...change });
+}
+
+/**
+ * Archives a conversation, or restores it. Archiving only hides it from the
+ * Messages list and Home's Action required: its messages stay, the Messages
+ * page's Archived filter lists it, and a new message brings it back. Owners
+ * and admins only, since it hides the conversation from the whole team. Null
+ * when the business has no such conversation.
+ */
+export async function setConversationArchived(
+  context: DomainContext,
+  input: { userId: string; businessId: string; conversationId: string; archived: boolean },
+): Promise<{ archivedAt: Date | null } | null> {
+  return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, input);
+    // updatedAt stays as it is: it picks a contact's or visitor's current conversation, which archiving mustn't change.
+    const [conversation] = await tx.update(conversations).set({
+      // Archiving again keeps the first time.
+      archivedAt: input.archived ? sql`coalesce(${conversations.archivedAt}, now())` : null,
+      revision: sql`${conversations.revision} + 1`,
+    }).where(and(eq(conversations.id, input.conversationId), eq(conversations.businessId, input.businessId))).returning({ id: conversations.id, archivedAt: conversations.archivedAt, revision: conversations.revision });
+    if (!conversation) return null;
+    await tx.insert(auditLogs).values({ businessId: input.businessId, actorUserId: input.userId, eventType: input.archived ? "conversation.archived" : "conversation.restored", entityType: "conversation", entityId: conversation.id });
+    // Other open dashboards drop the conversation from their lists, or bring it back.
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "conversation", aggregateId: conversation.id, dedupeKey: `conversation:${conversation.id}:archive:${conversation.revision}`, payload: { type: "conversation.updated", entityId: conversation.id, revision: conversation.revision } });
+    return { archivedAt: conversation.archivedAt };
+  });
 }
 
 export async function registerWidgetVisitor(

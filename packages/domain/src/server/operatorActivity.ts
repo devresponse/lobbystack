@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, isNull, ne } from "drizzle-orm";
 
-import { appointments, calls, contacts, services, staff, type DatabaseTransaction } from "@lobbystack/db";
+import { appointments, calls, contacts, conversations, services, staff, type DatabaseTransaction } from "@lobbystack/db";
 
 /**
  * Lists for the operator dashboard. Each row carries the contact's name, phone,
@@ -21,6 +21,21 @@ export async function listRecentCalls(tx: DatabaseTransaction, businessId: strin
     contactPhone: contacts.phone,
     contactEmail: contacts.email,
   }).from(calls).leftJoin(contacts, eq(calls.contactId, contacts.id)).where(and(eq(calls.businessId, businessId), isNull(calls.archivedAt))).orderBy(desc(calls.startedAt)).limit(limit);
+}
+
+/**
+ * Conversations the team has taken over, newest first, for Action required on
+ * the home page. Closing a conversation ends its take-over; the status check
+ * also drops ones closed before that. Archived ones are left out.
+ */
+export async function listHandoffConversations(tx: DatabaseTransaction, businessId: string, limit = 6) {
+  return await tx.select({
+    id: conversations.id,
+    contactName: contacts.name,
+    summary: conversations.summary,
+    currentIntent: conversations.currentIntent,
+    updatedAt: conversations.updatedAt,
+  }).from(conversations).leftJoin(contacts, eq(conversations.contactId, contacts.id)).where(and(eq(conversations.businessId, businessId), eq(conversations.automationState, "human_handoff"), eq(conversations.status, "open"), isNull(conversations.archivedAt))).orderBy(desc(conversations.updatedAt)).limit(limit);
 }
 
 /** The next appointments that start at or after `from` and aren't cancelled, for the home page. */

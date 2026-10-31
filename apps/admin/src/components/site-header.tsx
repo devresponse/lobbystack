@@ -40,7 +40,9 @@ export function SiteHeader({
   return (
     <header
       className={cn(
-        "z-50 h-16 md:hidden",
+        // Phones only: a slim row for the sidebar button, so page titles start near the top.
+        // shrink-0 keeps it 48px tall on long pages, where the scrolling column would squeeze it.
+        "z-50 h-12 shrink-0 md:hidden",
         fixed && "header-fixed peer/header sticky top-0 w-[inherit]",
         offset > 10 && fixed ? "shadow" : "shadow-none",
         className,
@@ -49,7 +51,7 @@ export function SiteHeader({
     >
       <div
         className={cn(
-          "relative flex h-full items-center gap-3 p-4 sm:gap-4",
+          "relative flex h-full items-center gap-3 px-4 sm:gap-4",
           offset > 10 &&
             fixed &&
             "after:absolute after:inset-0 after:-z-10 after:bg-background/20 after:backdrop-blur-lg",

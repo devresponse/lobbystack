@@ -266,5 +266,5 @@ function Empty({ icon: Icon, label }: { icon: typeof Activity; label: string }) 
 }
 
 function DetailSkeleton() {
-  return <div className="flex flex-1 flex-col gap-6"><Skeleton className="h-5 w-24" /><Skeleton className="h-9 w-64" /><div className="grid grid-cols-2 gap-4 sm:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <Skeleton className="h-12" key={index} />)}</div><Skeleton className="h-28" /><Skeleton className="h-80" /></div>;
+  return <div className="flex flex-1 flex-col gap-6"><Skeleton className="mt-2 h-5 w-24 md:mt-0" /><Skeleton className="h-9 w-64" /><div className="grid grid-cols-2 gap-4 sm:grid-cols-3">{Array.from({ length: 3 }).map((_, index) => <Skeleton className="h-12" key={index} />)}</div><Skeleton className="h-28" /><Skeleton className="h-80" /></div>;
 }

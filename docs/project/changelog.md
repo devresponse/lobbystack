@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#108](https://github.com/devresponse/lobbystack/pull/108) | Archive conversations on the Messages page after a confirmation dialog | `0132` | `15f0b52` | [docs](../features/messages.md) |
 | [#107](https://github.com/devresponse/lobbystack/pull/107) | Move unanswered questions to their own Questions page |  | `fd51424` | [docs](../features/unanswered-questions.md#answer-or-dismiss-a-question) |
 | [#106](https://github.com/devresponse/lobbystack/pull/106) | Save the questions the receptionist said it couldn't answer |  | `94a3058` | [docs](../features/unanswered-questions.md#know-what-gets-saved) |
 

@@ -22,8 +22,9 @@ export function useCopiedField() {
   return { copiedField, copy };
 }
 
+// On phones the page has no top padding (layout/main.tsx), so the link keeps a little space below the sidebar button.
 export function BackLink({ href, label }: { href: string; label: string }) {
-  return <Link className="type-body-muted inline-flex w-fit items-center gap-1.5 transition-colors hover:text-foreground" href={href}><ArrowLeft className="size-4" />{label}</Link>;
+  return <Link className="type-body-muted mt-2 inline-flex w-fit items-center gap-1.5 transition-colors hover:text-foreground md:mt-0" href={href}><ArrowLeft className="size-4" />{label}</Link>;
 }
 
 export function DetailSection({ children, className, title }: { children: React.ReactNode; className?: string; title: string }) {

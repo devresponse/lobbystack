@@ -8,7 +8,8 @@ export function Main({ className, fixed, ...props }: MainProps) {
   return (
     <main
       className={cn(
-        "px-4 pt-4 pb-6 md:px-6 md:pt-6 md:pb-6",
+        // On phones the sidebar button's row sits right above, so the page starts without top padding.
+        "px-4 pt-0 pb-6 md:px-6 md:pt-6 md:pb-6",
         !fixed && "after:block after:h-10 after:shrink-0 after:content-[''] md:after:h-12",
         fixed && "flex min-h-0 grow flex-col overflow-hidden",
         "mx-auto w-full max-w-7xl",

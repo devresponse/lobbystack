@@ -32,6 +32,13 @@ describe("SiteHeader", () => {
     expect(header.className).not.toContain("shadow-none");
     expect(header.firstElementChild?.className).toContain("after:backdrop-blur-lg");
   });
+
+  it("keeps the phone row 48px tall, even on pages long enough to scroll", () => {
+    render(<SiteHeader fixed />);
+
+    // The dashboard's scrolling column is a flex column: without shrink-0 a long page squeezes the row to the button's height.
+    expect(screen.getByRole("banner").className.split(" ")).toEqual(expect.arrayContaining(["h-12", "shrink-0", "md:hidden"]));
+  });
 });
 
 afterEach(cleanup);

@@ -17,7 +17,9 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-4 py-2 sm:flex-row sm:items-start sm:justify-between sm:gap-6",
+        // Phones keep short actions, such as the live call count, on the title's row
+        // and wrap them below only when they don't fit.
+        "flex flex-wrap items-center justify-between gap-x-6 gap-y-4 py-2 sm:flex-nowrap sm:items-start sm:gap-6",
         className
       )}
     >

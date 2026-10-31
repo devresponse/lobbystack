@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#110](https://github.com/devresponse/lobbystack/pull/110) | Add a script that resets a test deployment's database |  | `cf4cb87` | [docs](../deployment/guide/part-7-operations.md#728-reset-a-test-environment) |
 | [#109](https://github.com/devresponse/lobbystack/pull/109) | Reduce the white space above page titles on phones |  | `0f68330` | [docs](../features/dashboard-on-phones.md) |
 | [#108](https://github.com/devresponse/lobbystack/pull/108) | Archive conversations on the Messages page after a confirmation dialog | `0132` | `15f0b52` | [docs](../features/messages.md) |
 | [#107](https://github.com/devresponse/lobbystack/pull/107) | Move unanswered questions to their own Questions page |  | `fd51424` | [docs](../features/unanswered-questions.md#answer-or-dismiss-a-question) |

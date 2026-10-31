@@ -280,5 +280,5 @@ function DetailsTab({ detail, marking, onCompleteFollowUp }: { detail: Detail; m
 }
 
 function DetailPageSkeleton() {
-  return <div className="flex flex-1 flex-col gap-6"><Skeleton className="h-5 w-24" /><Skeleton className="h-9 w-64" /><div className="grid grid-cols-2 gap-4 sm:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <Skeleton className="h-12" key={index} />)}</div><Skeleton className="h-28 w-full" /><Skeleton className="h-80 w-full" /></div>;
+  return <div className="flex flex-1 flex-col gap-6"><Skeleton className="mt-2 h-5 w-24 md:mt-0" /><Skeleton className="h-9 w-64" /><div className="grid grid-cols-2 gap-4 sm:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <Skeleton className="h-12" key={index} />)}</div><Skeleton className="h-28 w-full" /><Skeleton className="h-80 w-full" /></div>;
 }

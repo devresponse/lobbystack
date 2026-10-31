@@ -218,10 +218,11 @@ export function LiveMessagesSurface() {
     if (draft.trim() && !replyBlocked) send.mutate();
   }
 
+  // On phones the page has no top padding (layout/main.tsx); pt-2 keeps the list and the open chat off the sidebar button.
   return (
-    <section className="flex h-full min-w-0 gap-6">
+    <section className="flex h-full min-w-0 gap-6 pt-2 md:pt-0">
       <div className={cn("flex min-w-0 w-full flex-col gap-3 sm:w-56 lg:w-72 2xl:w-80", selected && "hidden sm:flex")}>
-        <div className="sticky top-0 z-10 -mx-4 flex flex-col gap-3 bg-background px-4 py-2 sm:static sm:z-auto sm:mx-0 sm:p-0">
+        <div className="sticky top-0 z-10 -mx-4 flex flex-col gap-3 bg-background px-4 pb-2 sm:static sm:z-auto sm:mx-0 sm:p-0">
           <PageHeader className="py-0" title={t("page.title")} />
           <div className="flex flex-wrap items-center gap-1">
             {(["all", "web_chat", "sms", "archived"] as const).map((key) => <Button key={key} size="sm" variant={listFilter === key ? "secondary" : "ghost"} className="px-2.5 text-xs" onClick={() => setListFilter(key)}>{key === "all" ? t("page.filterAll") : key === "web_chat" ? t("page.filterWeb") : key === "sms" ? t("page.filterSms") : t("page.filterArchived")}</Button>)}

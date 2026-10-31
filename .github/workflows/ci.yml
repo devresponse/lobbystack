@@ -141,6 +141,10 @@ jobs:
         run: pnpm --filter @lobbystack/admin exec vitest run src/lib/auth-issuance.integration.test.ts src/lib/email-verification-policy.test.ts
       - name: Test live-call presence against Redis
         run: pnpm --filter @lobbystack/admin exec vitest run src/lib/voice-presence.integration.test.ts
+      - name: Reset a used database to a freshly migrated one
+        env:
+          LOBBYSTACK_RESET_TEST_DATABASE_URL: postgres://postgres:lobbystack@127.0.0.1:5432/lobbystack_test
+        run: pnpm exec vitest run --config scripts/vitest.config.ts scripts/reset-database.integration.test.ts
 
   e2e:
     runs-on: ubuntu-latest

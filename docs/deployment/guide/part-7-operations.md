@@ -18,6 +18,7 @@ These are the jobs that keep an instance working once it's live. Most steps come
 | The instance moves to another address | [7.23](#723-change-the-domain-or-the-brand) |
 | The instance closes | [7.26](#726-shut-down-an-instance) |
 | An owner who canceled their account wants it back | [7.27](#727-reactivate-a-canceled-business) |
+| A test environment should start again with no data | [7.28](#728-reset-a-test-environment) |
 
 **Signing in to the database**
 
@@ -1522,3 +1523,70 @@ The cancellation's link stays used. The owner can cancel again from **Settings**
 **Not yet confirmed:** a reactivation on a deployed instance. It has been run only by the tests.
 
 **[7.27](#727-reactivate-a-canceled-business) was checked against:** `packages/db/migrations/0130_business_cancellation.sql`, `packages/domain/src/server/businessCancellation.ts` and `packages/domain/src/server/businessCancellation.integration.test.ts` (fork PR #102).
+
+### 7.28 Reset a test environment
+
+`devops/reset-database.mjs` empties a test environment's database so it looks freshly migrated: no accounts, no businesses, no settings and no plans. It's for testing a deployment from its first sign-up again without wiping volumes ([4.10](part-4-test-environment.md#410-keep-the-test-environment-up-to-date)). Never run it on production, and protect production's database from it (below). It came with fork PR #110.
+
+**What it deletes and what it keeps**
+
+- It empties every table in the `public`, `app` and `drizzle` schemas except the two migration histories, `public.__lobbystack_migrations` and `drizzle.__drizzle_migrations`. A fresh migration puts rows in those two and in no other table, so afterwards the database matches one migrate has just set up. CI checks that on every pull request: it migrates a new database, fills it, resets it and compares every table, sequence and both histories with the fresh copy (`scripts/reset-database.integration.test.ts`).
+- Gone: every account and sign-in, business, membership, contact, call, message, appointment, knowledge document, phone number record, plan and Polar link, API and widget key and webhook, the deployment's name and logo, and the plans `pnpm billing apply` wrote.
+- Kept: the tables, functions, row level security policies and grants, the database's roles and their passwords, the volume's backups, and the services' variables, `PLATFORM_API_KEYS` included.
+- Outside the database nothing changes. Numbers stay in your Twilio account and keep costing their monthly fee, subscriptions and customers stay in Polar, and files stay in the bucket. Redis keeps its sign-ins, rate limits and queued jobs unless you add `--redis`: the admin looks sign-ins up in Redis first, so without it a browser signed in before the reset stays signed in as an account that no longer exists (`apps/admin/src/lib/auth.ts:112`).
+
+**Before**
+
+1. Release the test numbers you don't want to keep paying for, with `pnpm lobbystack numbers release` ([7.21](#721-buy-change-and-release-numbers)). Once the database is reset LobbyStack no longer knows them, so release any you forgot in Twilio's console.
+2. On an instance that sells plans, cancel the test subscriptions in Polar's sandbox, so Polar stops sending events about businesses that are gone *(Polar's steps not researched)*.
+3. Have the code on your computer ([Part 2](part-2-local-development.md)), updated, with `pnpm install` done. The script uses the `pg` and `ioredis` packages the install brings, and needs Node.js 18 or later.
+
+**Run it**
+
+4. In Railway, open the test environment and copy two values from the services' **Variables** tabs: `DATABASE_PUBLIC_URL` on `Postgres`, and `REDIS_PUBLIC_URL` on `Redis`. The `DATABASE_URL` the services use, at `postgres.railway.internal`, works only inside Railway. For the copy on your computer, use `DATABASE_URL` and `REDIS_URL` from `.env` ([2.9](part-2-local-development.md#29-stop-reset-and-update)).
+5. In the code folder, run:
+
+   ```sh
+   node devops/reset-database.mjs --redis
+   ```
+
+   It asks for the database's address, then for Redis's, with typing hidden, so their passwords stay out of your terminal's history. Both can go on the command line instead: `node devops/reset-database.mjs <database URL> --redis <Redis URL>`.
+6. It shows the database's name, its server and the user it signed in as, how many migrations it has, and what it holds: the businesses by name, the users, the rows in its tables and the Redis keys. Then it lists what the reset leaves behind: numbers still bought in Twilio, live Polar subscriptions and files in the bucket. Check that the businesses are the test environment's, then type the database's name, `railway` on Railway, to go ahead. Anything else stops it with nothing deleted. With `--dry-run` it shows the same and stops.
+7. It empties the tables in one transaction, so either all of them are emptied or none is, and checks that each is empty before it commits. Then it deletes the Redis keys under `lobbystack:`, every key the admin and the worker make; other keys in the same Redis stay. A table the admin or the worker keeps busy makes it wait up to 10 seconds, three times, and a migration in progress stops it.
+
+**After**
+
+8. Redeploy the admin and the worker, from each one's newest deployment, so neither keeps anything from before in memory, such as the deployment's name.
+9. Sign up. As on a new instance, the first account to finish onboarding picks the deployment's name and logo ([6.2](part-6-first-run.md#62-the-brand-step)).
+10. **Only if the instance sells plans:** the plan screens show the brand's `billing.json` with **Starter** and **Pro** greyed out, as before a first apply. Sign up with the operator key's email and enter the emailed code, since the key works only for a verified account, then run `pnpm billing apply --brand <brand> --polar sandbox` ([3.7](part-3-outside-services.md#37-optional-services), "[Selling plans](part-3-outside-services.md#selling-plans-polar)", steps 5 and 7). It finds the products and the webhook an earlier run made in Polar, by their tags and address, so it should only write the plans back into the database, and `POLAR_WEBHOOK_SECRET` stays as it is *(not yet tried after a reset)*.
+
+**Protect production**
+
+- The script refuses a database linked to Polar's live organization: one with a billing run against Polar production, which `pnpm billing apply --polar live` and the worker's daily check on such an instance record. A test environment's runs say `sandbox`, as long as the admin and the worker have `POLAR_API_BASE_URL` set to Polar's sandbox: without it they count as production (`packages/shared/src/billing.ts:125`). For a test copy of production, `--allow-live-payments` resets it anyway.
+- Mark production's database once, with production's `DATABASE_PUBLIC_URL`: `node devops/reset-database.mjs --protect`. Signed in to the database as `postgres` (the start of Part 7), as on a server, `alter database <its name> set lobbystack.reset_protection = 'on';` makes the same mark. From then on the script refuses it, whether or not it sells plans. `--unprotect` takes the mark off, after asking for the database's name. The mark is a setting on the database, `lobbystack.reset_protection`, which nothing else reads. A backup restored into a new database may not carry it ([7.8](#78-restore-from-a-backup-and-practice-it)), so protect the database again after a restore.
+
+| Option | What it does |
+| --- | --- |
+| `--dry-run` | Shows what would be deleted, and deletes nothing |
+| `--redis [<url>]` | Also deletes the deployment's Redis keys. Without the address it asks for it, with typing hidden |
+| `--redis-prefix <name>` | The deployment's `REDIS_PREFIX`, when it isn't `lobbystack` |
+| `--confirm <database>` | Answers the question with this name, for a run where nobody can type. Another database's name stops it |
+| `--allow-live-payments` | Resets a database linked to Polar's live organization anyway |
+| `--protect`, `--unprotect` | Marks the database so the script refuses it, or takes the mark off, and changes nothing else |
+
+| It stops with | Why | What to do |
+| --- | --- | --- |
+| `isn't a LobbyStack database` | The database has no `__lobbystack_migrations` table | Check the address: the database's name is its last part, `railway` on Railway |
+| `isn't a superuser` | Row level security would hide rows from that user | Use `DATABASE_PUBLIC_URL`, which signs in as `postgres` |
+| `is protected against resets` | Someone marked it with `--protect` | Check that it really is a test database, then run `--unprotect` |
+| `linked to Polar's live organization` | A billing run went to Polar production: real payments, or a test environment whose worker has no `POLAR_API_BASE_URL` | Check the address and the variable. Only for a test environment or a test copy of production, add `--allow-live-payments` |
+| `a migration is running` | migrate holds its lock | Run it again once migrate's deployment has finished |
+| `kept a table busy` | The admin or the worker held a table for about half a minute | Run it again in a quiet moment, or with the admin's and the worker's deployments removed ([4.10](part-4-test-environment.md#410-keep-the-test-environment-up-to-date)) |
+| `couldn't check ... certificate` | `sslmode=require` in the address makes the `pg` package check the certificate, and Railway's is its own | End the address with `?sslmode=no-verify` |
+| `works only inside Railway` | The address is the internal `DATABASE_URL` | Use `DATABASE_PUBLIC_URL` |
+
+Each says `Nothing was deleted.` The script exits with 0 when it finished or a dry run ended, 1 when it stopped, and 2 for a mistake in its options.
+
+**Not yet confirmed:** a run against Railway's Postgres and Redis. The script has run only against a local PostgreSQL 16 and Redis 7, and in CI. Whether Railway's public address needs `?sslmode=no-verify`.
+
+**[7.28](#728-reset-a-test-environment) was checked against:** `devops/reset-database.mjs`, `scripts/reset-database.integration.test.ts`, `packages/db/src/cli.ts`, `packages/db/src/migrations/raw-migrations.ts`, `packages/db/migrations/0098_deployment_branding.sql`, `packages/db/migrations/0108_billing_catalog.sql`, `apps/admin/src/lib/auth.ts`, `apps/admin/src/lib/redis.ts` and `packages/jobs/src/index.ts` (fork PR #110).

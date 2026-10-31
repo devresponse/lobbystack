@@ -24,6 +24,8 @@ The commands this guide uses, in one place. Each one names the section that expl
 | Stop the database and Redis, keeping the data | `docker compose stop` | [2.9](part-2-local-development.md#29-stop-reset-and-update) |
 | Get the newest code | `git pull`, `pnpm install`, `pnpm db:migrate`, the two build commands, then `pnpm dev` | [2.9](part-2-local-development.md#29-stop-reset-and-update) |
 | **Delete all local data** and start over | `docker compose down -v` | [2.9](part-2-local-development.md#29-stop-reset-and-update) |
+| **Empty a test environment's database** and Redis, keeping the tables | `node devops/reset-database.mjs --redis`, then paste the database's and Redis's addresses when it asks | [7.28](part-7-operations.md#728-reset-a-test-environment) |
+| Protect production's database from that | `node devops/reset-database.mjs --protect`, then paste production's database address | [7.28](part-7-operations.md#728-reset-a-test-environment) |
 | Make new local passwords | `pnpm env:generate --force`, then `docker compose down -v` | [2.9](part-2-local-development.md#29-stop-reset-and-update) |
 | Add a brand, after editing `brands/` | `pnpm brands:build` | [3.6](part-3-outside-services.md#36-your-brand) |
 | Build the website chat's loader again | `pnpm widget:embed:build` | [8.7](part-8-troubleshooting.md#87-the-website-chat) |

@@ -182,6 +182,7 @@ pnpm build
 | Stop the database and Redis, keeping the data | `docker compose stop` |
 | Start them again | `docker compose up -d postgres redis` |
 | Delete all local data and start over | `docker compose down -v`, then continue from step 1 of Way A |
+| Empty the database and Redis, keeping the tables and the passwords | `node devops/reset-database.mjs --redis`, and give it `DATABASE_URL` and `REDIS_URL` from `.env` when it asks. Then restart the apps: `pnpm dev`, or `docker compose restart admin worker` for Way B ([7.28](part-7-operations.md#728-reset-a-test-environment)) |
 | Get the newest code | `git pull`, `pnpm install`, `pnpm db:migrate`, the two `build` commands, then `pnpm dev` |
 
 `pnpm env:generate --force` makes new database passwords, but an existing database keeps the old ones, so follow it with `docker compose down -v`.

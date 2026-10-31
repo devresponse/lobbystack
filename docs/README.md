@@ -49,7 +49,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Delete a business](features/business-deletion.md) | An owner deleting one of their businesses for good, never an account's first, and what goes with it |
 | [Cancel an account](features/account-cancellation.md) | An owner closing their account's last business without deleting anything, confirmed by email, and bringing it back |
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |
-| [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist found no knowledge for, and answering them as text entries |
+| [Unanswered questions](features/unanswered-questions.md) | The questions the receptionist couldn't answer, and answering them as text entries |
 | [Logs, errors and alerts](features/observability.md) | Logs, PostHog, following one call, and what to alert on |
 | [Billing](billing/README.md), [its data](billing/data-model.md) and [its design history](billing/design-history.md) | Plans, usage, Polar, promo codes, and why it is built this way |
 | [Sign-in email addresses](auth-email-normalization.md) | How addresses are compared |

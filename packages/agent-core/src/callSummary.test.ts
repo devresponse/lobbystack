@@ -1,7 +1,7 @@
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
-import { boundCallSummaryTranscript, buildCallSummaryPrompt, CALL_SUMMARY_HEAD_CHARACTERS, CALL_SUMMARY_TAIL_CHARACTERS, createCallSummarizer, hasSummarizableTranscript, summarizeCall } from "./callSummary";
+import { boundCallSummaryTranscript, buildCallSummaryPrompt, CALL_SUMMARY_HEAD_CHARACTERS, CALL_SUMMARY_TAIL_CHARACTERS, cleanUnansweredQuestions, createCallSummarizer, hasSummarizableTranscript, MAX_CALL_UNANSWERED_QUESTIONS, summarizeCall } from "./callSummary";
 import { callSummaryEnvironment } from "./model";
 
 type GenerateOptions = Parameters<MockLanguageModelV4["doGenerate"]>[0];
@@ -37,7 +37,7 @@ describe("summarizeCall", () => {
   it("returns the structured summary, caller name, and usage", async () => {
     const calls: GenerateOptions[] = [];
     const result = await summarizeCall({
-      model: mockModel(JSON.stringify({ summary: "Asked about Friday hours; told the office is open 9 to 5.", callerName: "Marie" }), calls),
+      model: mockModel(JSON.stringify({ summary: "Asked about Friday hours; told the office is open 9 to 5.", callerName: "Marie", unansweredQuestions: [] }), calls),
       transcript,
       locale: "en",
       environment: { AI_CHAT_MODEL: "chat-model" },
@@ -45,6 +45,7 @@ describe("summarizeCall", () => {
     expect(result).toMatchObject({
       summary: "Asked about Friday hours; told the office is open 9 to 5.",
       callerName: "Marie",
+      unansweredQuestions: [],
       usage: { provider: "openai", model: "chat-model", inputTokens: 420, outputTokens: 30 },
     });
     expect(calls[0]?.responseFormat).toMatchObject({ type: "json", name: "call_summary" });
@@ -54,7 +55,7 @@ describe("summarizeCall", () => {
   it("asks for a French summary for French businesses", async () => {
     const calls: GenerateOptions[] = [];
     const result = await summarizeCall({
-      model: mockModel(JSON.stringify({ summary: "A demandé les heures du vendredi; ouvert de 9 h à 17 h.", callerName: null }), calls),
+      model: mockModel(JSON.stringify({ summary: "A demandé les heures du vendredi; ouvert de 9 h à 17 h.", callerName: null, unansweredQuestions: [] }), calls),
       transcript: [{ speaker: "caller", text: "Bonjour, êtes-vous ouverts vendredi?" }],
       locale: "fr",
     });
@@ -66,11 +67,22 @@ describe("summarizeCall", () => {
   it("writes the summary in any language a business can pick", async () => {
     const calls: GenerateOptions[] = [];
     await summarizeCall({
-      model: mockModel(JSON.stringify({ summary: "Fragte nach den Öffnungszeiten am Freitag.", callerName: null }), calls),
+      model: mockModel(JSON.stringify({ summary: "Fragte nach den Öffnungszeiten am Freitag.", callerName: null, unansweredQuestions: [] }), calls),
       transcript: [{ speaker: "caller", text: "Guten Tag, haben Sie am Freitag geöffnet?" }],
       locale: "de",
     });
     expect(promptText(calls[0]!)).toContain("in German");
+  });
+
+  it("lists the questions the receptionist couldn't answer, in the business's language", async () => {
+    const calls: GenerateOptions[] = [];
+    const result = await summarizeCall({
+      model: mockModel(JSON.stringify({ summary: "A demandé le numéro du soutien; pas au dossier.", callerName: null, unansweredQuestions: ["  Quel est votre numéro   de soutien ? ", "quel est votre numéro de soutien ?", ""] }), calls),
+      transcript: [{ speaker: "caller", text: "Quel est votre numéro de soutien ?" }, { speaker: "assistant", text: "Je n'ai pas cette information." }],
+      locale: "fr",
+    });
+    expect(result.unansweredQuestions).toEqual(["Quel est votre numéro de soutien ?"]);
+    expect(promptText(calls[0]!)).toContain('List in \\"unansweredQuestions\\" each question about the business that the receptionist said it didn\'t have the information for or couldn\'t answer. Write each in French');
   });
 
   it("rejects output that does not match the schema", async () => {
@@ -80,6 +92,15 @@ describe("summarizeCall", () => {
   it("propagates provider failures so the worker can fall back", async () => {
     const model = new MockLanguageModelV4({ doGenerate: async () => { throw new Error("provider down"); } });
     await expect(summarizeCall({ model, transcript, locale: "en" })).rejects.toThrow("provider down");
+  });
+});
+
+describe("cleanUnansweredQuestions", () => {
+  it("trims, drops blanks and repeats ignoring case, and keeps the first few", () => {
+    expect(cleanUnansweredQuestions(undefined)).toEqual([]);
+    expect(cleanUnansweredQuestions([" Do you validate parking? ", "DO YOU VALIDATE PARKING?", " ", "What is your\nsupport number?"])).toEqual(["Do you validate parking?", "What is your support number?"]);
+    const many = Array.from({ length: 8 }, (_, index) => `Question ${index}?`);
+    expect(cleanUnansweredQuestions(many)).toEqual(many.slice(0, MAX_CALL_UNANSWERED_QUESTIONS));
   });
 });
 

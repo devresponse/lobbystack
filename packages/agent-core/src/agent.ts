@@ -87,8 +87,9 @@ export function createReceptionistAgent(input: {
    */
   directToolAnswers?: boolean;
 }): ReceptionistAgent {
-  // One lookup, maybe a second, then the answer. Voice callers are waiting.
-  const stopWhen: Array<StopCondition<ToolSet>> = [stepCountIs(4)];
+  // One lookup, maybe a second, then the answer. Voice callers are waiting. A
+  // website chat gets one more step to save a question it couldn't answer.
+  const stopWhen: Array<StopCondition<ToolSet>> = [stepCountIs(input.context.channel === "web_chat" ? 5 : 4)];
   if (input.directToolAnswers) stopWhen.push(({ steps }) => directToolAnswer(steps.at(-1)) !== undefined);
   return new ToolLoopAgent({
     model: input.model,

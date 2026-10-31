@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#104](https://github.com/devresponse/lobbystack/pull/104) | Log sign-ins and account changes, and report auth outages with an Error ID |  | `7ae7c43` | [docs](../features/observability.md#follow-a-sign-in) |
 | [#105](https://github.com/devresponse/lobbystack/pull/105) | Port seven small fixes and the unanswered questions inbox from upstream | `0131` | `ea1449b` | [docs](../features/unanswered-questions.md) |
 | [#103](https://github.com/devresponse/lobbystack/pull/103) | Add the cancel-account page to the admin page inventory |  | `3a13e4a` | [docs](../features/account-cancellation.md) |
 | [#102](https://github.com/devresponse/lobbystack/pull/102) | Let an owner cancel their account's last business, deleting nothing | `0130` | `ea56853` | [docs](../features/account-cancellation.md) |

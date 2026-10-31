@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CallSummarizer } from "@lobbystack/agent-core";
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { finalizeConversationSession, loadCallSummaryInput, recordAiGenerationEvent, type CallSummaryInput } from "@lobbystack/domain";
+import { finalizeConversationSession, loadCallSummaryInput, recordAiGenerationEvent, recordUnansweredQuestion, type CallSummaryInput } from "@lobbystack/domain";
 
 vi.mock("@lobbystack/domain", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@lobbystack/domain")>();
@@ -13,6 +13,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     finalizeConversationSession: vi.fn(),
     loadCallSummaryInput: vi.fn(),
     recordAiGenerationEvent: vi.fn(),
+    recordUnansweredQuestion: vi.fn(),
   };
 });
 
@@ -40,6 +41,8 @@ function summaryInput(overrides: Partial<CallSummaryInput> = {}): CallSummaryInp
     ],
     needsSummary: true,
     needsCallerName: true,
+    needsUnansweredQuestions: true,
+    channel: "voice",
     ...overrides,
   };
 }
@@ -58,7 +61,7 @@ describe("conversation.finalizeSession call summaries", () => {
     vi.mocked(loadCallSummaryInput).mockResolvedValue(input);
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
     vi.mocked(recordAiGenerationEvent).mockResolvedValue("event");
-    const callSummarizer = summarizer(async () => ({ summary: "Asked about Friday hours; told the office is open 9 to 5.", callerName: "Marie", usage }));
+    const callSummarizer = summarizer(async () => ({ summary: "Asked about Friday hours; told the office is open 9 to 5.", callerName: "Marie", unansweredQuestions: [], usage }));
 
     await expect(handleJob(finalizeJob(businessId, callId), { domain, callSummarizer })).resolves.toEqual({ status: "completed", entityId: "session" });
 
@@ -70,7 +73,7 @@ describe("conversation.finalizeSession call summaries", () => {
   it("summarizes in the business locale", async () => {
     vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput({ locale: "fr", transcript: [{ speaker: "caller", text: "Bonjour, êtes-vous ouverts vendredi?" }] }));
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
-    const callSummarizer = summarizer(async () => ({ summary: "A demandé les heures du vendredi.", callerName: null, usage }));
+    const callSummarizer = summarizer(async () => ({ summary: "A demandé les heures du vendredi.", callerName: null, unansweredQuestions: [], usage }));
 
     await handleJob(finalizeJob(randomUUID(), randomUUID()), { domain, callSummarizer });
 
@@ -84,23 +87,30 @@ describe("conversation.finalizeSession call summaries", () => {
     vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput());
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
     vi.mocked(recordAiGenerationEvent).mockRejectedValue(new Error("analytics down"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const callSummarizer = summarizer(async () => { throw new Error("provider echoed: Hi, this is Marie"); });
 
     await expect(handleJob(finalizeJob(businessId, callId), { domain, callSummarizer })).resolves.toEqual({ status: "completed", entityId: "session" });
 
     expect(finalizeConversationSession).toHaveBeenCalledWith(domain, { businessId, callId });
     expect(recordAiGenerationEvent).toHaveBeenCalledWith(domain, expect.objectContaining({ operation: "call.summary", isError: true, error: "generation_failed", model: "gpt-6-luna" }));
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([{ level: "warn", message: "call.summary_failed", businessId, callId, error: "generation_failed" }]);
+    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("labels timeouts separately", async () => {
     vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput());
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
     const timeout = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const callSummarizer = summarizer(async () => { throw timeout; });
 
     await handleJob(finalizeJob(randomUUID(), randomUUID()), { domain, callSummarizer });
 
     expect(recordAiGenerationEvent).toHaveBeenCalledWith(domain, expect.objectContaining({ isError: true, error: "generation_timeout" }));
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toContainEqual(expect.objectContaining({ message: "call.summary_failed", error: "generation_timeout" }));
+    warn.mockRestore();
   });
 
   it("does not call the model when no summarizer is configured", async () => {
@@ -116,7 +126,7 @@ describe("conversation.finalizeSession call summaries", () => {
 
   it("skips the model for finalized calls and near-empty transcripts", async () => {
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: false });
-    const callSummarizer = summarizer(async () => ({ summary: "unused", callerName: null, usage }));
+    const callSummarizer = summarizer(async () => ({ summary: "unused", callerName: null, unansweredQuestions: [], usage }));
 
     vi.mocked(loadCallSummaryInput).mockResolvedValueOnce(undefined);
     await expect(handleJob(finalizeJob(randomUUID(), randomUUID()), { domain, callSummarizer })).resolves.toEqual({ status: "skipped", entityId: "session" });
@@ -132,10 +142,64 @@ describe("conversation.finalizeSession call summaries", () => {
     const callId = randomUUID();
     vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput({ needsSummary: false }));
     vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
-    const callSummarizer = summarizer(async () => ({ summary: "Booked a cleaning.", callerName: "Marie", usage }));
+    const callSummarizer = summarizer(async () => ({ summary: "Booked a cleaning.", callerName: "Marie", unansweredQuestions: [], usage }));
 
     await handleJob(finalizeJob(businessId, callId), { domain, callSummarizer });
 
     expect(finalizeConversationSession).toHaveBeenCalledWith(domain, { businessId, callId, generated: { callerName: "Marie" } });
+  });
+
+  it("saves the questions the receptionist couldn't answer once the call is finalized", async () => {
+    const businessId = randomUUID();
+    const callId = randomUUID();
+    const input = summaryInput({ channel: "web_voice" });
+    vi.mocked(loadCallSummaryInput).mockResolvedValue(input);
+    vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
+    vi.mocked(recordUnansweredQuestion).mockResolvedValue({ id: "question", timesAsked: 1, status: "open" });
+    const callSummarizer = summarizer(async () => ({ summary: "Asked for the support number; not on file.", callerName: "Marie", unansweredQuestions: ["What is your support phone number?", "Do you validate parking?"], usage }));
+
+    await expect(handleJob(finalizeJob(businessId, callId), { domain, callSummarizer })).resolves.toEqual({ status: "completed", entityId: "session" });
+
+    expect(recordUnansweredQuestion).toHaveBeenCalledTimes(2);
+    expect(recordUnansweredQuestion).toHaveBeenNthCalledWith(1, domain, { businessId, question: "What is your support phone number?", channel: "web_voice", callId, conversationId: input.conversationId });
+    expect(recordUnansweredQuestion).toHaveBeenNthCalledWith(2, domain, { businessId, question: "Do you validate parking?", channel: "web_voice", callId, conversationId: input.conversationId });
+    expect(vi.mocked(finalizeConversationSession).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(recordUnansweredQuestion).mock.invocationCallOrder[0]!);
+  });
+
+  it("doesn't save them again when another run already finalized the call", async () => {
+    vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput());
+    vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: false });
+    const callSummarizer = summarizer(async () => ({ summary: "Asked for the support number.", callerName: null, unansweredQuestions: ["What is your support phone number?"], usage }));
+
+    await handleJob(finalizeJob(randomUUID(), randomUUID()), { domain, callSummarizer });
+
+    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
+  });
+
+  it("saves nothing from a prospect demo", async () => {
+    vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput({ needsUnansweredQuestions: false }));
+    vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
+    const callSummarizer = summarizer(async () => ({ summary: "Asked for the support number.", callerName: null, unansweredQuestions: ["What is your support phone number?"], usage }));
+
+    await handleJob(finalizeJob(randomUUID(), randomUUID()), { domain, callSummarizer });
+
+    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
+  });
+
+  it("logs a question it couldn't save and still saves the rest", async () => {
+    const businessId = randomUUID();
+    const callId = randomUUID();
+    vi.mocked(loadCallSummaryInput).mockResolvedValue(summaryInput());
+    vi.mocked(finalizeConversationSession).mockResolvedValue({ sessionId: "session", finalized: true });
+    vi.mocked(recordUnansweredQuestion).mockRejectedValueOnce(new Error("database down")).mockResolvedValueOnce({ id: "question", timesAsked: 1, status: "open" });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const callSummarizer = summarizer(async () => ({ summary: "Asked two things.", callerName: null, unansweredQuestions: ["What is your support phone number?", "Do you validate parking?"], usage }));
+
+    await expect(handleJob(finalizeJob(businessId, callId), { domain, callSummarizer })).resolves.toEqual({ status: "completed", entityId: "session" });
+
+    expect(recordUnansweredQuestion).toHaveBeenCalledTimes(2);
+    const logged = warn.mock.calls.map(([line]) => { try { return JSON.parse(String(line)); } catch { return undefined; } });
+    expect(logged).toContainEqual(expect.objectContaining({ message: "knowledge.unanswered_question_failed", businessId, callId }));
+    warn.mockRestore();
   });
 });

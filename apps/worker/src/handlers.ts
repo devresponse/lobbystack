@@ -16,6 +16,7 @@ import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhon
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
 import { expireTeamRequest } from "@lobbystack/domain";
+import { recordUnansweredQuestion, type UnansweredQuestionChannel } from "@lobbystack/domain";
 import { runDailyBillingVerify, sweepBillingWork, type BillingSweepOutcome, type DailyBillingVerifyOutcome } from "@lobbystack/domain";
 import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
 import { isBusinessDeleted, recordDeletedBusinessPlanEnded } from "@lobbystack/domain";
@@ -1022,8 +1023,10 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const callId = String(job.payload.callId ?? "");
       if (!callId) return { status: "skipped" };
       const businessId = businessIdOrThrow(job);
-      const generated = await generateCallSummary(dependencies, { businessId, callId });
-      const result = await finalizeConversationSession(dependencies.domain, { businessId, callId, ...(generated ? { generated } : {}) });
+      const summarized = await generateCallSummary(dependencies, { businessId, callId });
+      const result = await finalizeConversationSession(dependencies.domain, { businessId, callId, ...(summarized?.generated ? { generated: summarized.generated } : {}) });
+      // Only the run that finalizes the call saves them, so a retried job doesn't count them twice.
+      if (result.finalized && summarized?.unanswered) await saveCallUnansweredQuestions(dependencies, { businessId, callId, ...summarized.unanswered });
       return { status: result.finalized ? "completed" : "skipped", entityId: result.sessionId ?? callId };
     }
     case "conversation.expireTeamRequest": {
@@ -1291,15 +1294,18 @@ async function loadKnowledgeSource(db: Database, input: { businessId: string; do
   });
 }
 
+type CallUnansweredQuestions = { channel: UnansweredQuestionChannel; conversationId: string; questions: string[] };
+
 /**
- * Ask the text model for a one-line summary and the caller's name before the
- * call is finalized. Any failure returns undefined and finalization falls back
- * to the transcript heuristic, so a model outage never blocks the call log.
+ * Ask the text model for a one-line summary, the caller's name and the
+ * questions the receptionist couldn't answer before the call is finalized. Any
+ * failure returns undefined and finalization falls back to the transcript
+ * heuristic, so a model outage never blocks the call log.
  */
 async function generateCallSummary(
   dependencies: WorkerDependencies,
   input: { businessId: string; callId: string },
-): Promise<GeneratedCallSummary | undefined> {
+): Promise<{ generated: GeneratedCallSummary; unanswered?: CallUnansweredQuestions } | undefined> {
   if (!dependencies.callSummarizer) return undefined;
   const summaryInput = await loadCallSummaryInput(dependencies.domain, input);
   if (!summaryInput || !hasSummarizableTranscript(summaryInput.transcript)) return undefined;
@@ -1318,12 +1324,20 @@ async function generateCallSummary(
       conversationId: summaryInput.conversationId,
     }).catch(() => undefined);
     return {
-      ...(summaryInput.needsSummary ? { summary: result.summary } : {}),
-      ...(summaryInput.needsCallerName ? { callerName: result.callerName } : {}),
+      generated: {
+        ...(summaryInput.needsSummary ? { summary: result.summary } : {}),
+        ...(summaryInput.needsCallerName ? { callerName: result.callerName } : {}),
+      },
+      ...(summaryInput.needsUnansweredQuestions && result.unansweredQuestions.length
+        ? { unanswered: { channel: summaryInput.channel, conversationId: summaryInput.conversationId, questions: result.unansweredQuestions } }
+        : {}),
     };
   } catch (error) {
     // Only a stable category is recorded: provider errors can echo transcript text.
     const timedOut = error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError");
+    const category = timedOut ? "generation_timeout" : "generation_failed";
+    // The log says why a call has no summary and saved no unanswered questions.
+    logEvent("warn", "call.summary_failed", { businessId: input.businessId, callId: input.callId, error: category });
     await recordAiGenerationEvent(dependencies.domain, {
       ...dependencies.callSummarizer.modelId,
       businessId: input.businessId,
@@ -1332,9 +1346,24 @@ async function generateCallSummary(
       conversationId: summaryInput.conversationId,
       latencyMs: performance.now() - startedAt,
       isError: true,
-      error: timedOut ? "generation_timeout" : "generation_failed",
+      error: category,
     }).catch(() => undefined);
     return undefined;
+  }
+}
+
+/**
+ * Puts what the receptionist couldn't answer on the business's unanswered
+ * questions, for the team to answer on the Knowledge page. A failed save only
+ * logs: the call is already finalized.
+ */
+async function saveCallUnansweredQuestions(
+  dependencies: WorkerDependencies,
+  input: { businessId: string; callId: string } & CallUnansweredQuestions,
+): Promise<void> {
+  for (const question of input.questions) {
+    await recordUnansweredQuestion(dependencies.domain, { businessId: input.businessId, question, channel: input.channel, callId: input.callId, conversationId: input.conversationId })
+      .catch((error: unknown) => logEvent("warn", "knowledge.unanswered_question_failed", { businessId: input.businessId, callId: input.callId, error }));
   }
 }
 

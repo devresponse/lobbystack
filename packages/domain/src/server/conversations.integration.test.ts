@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { businesses, calls, contacts, conversations, conversationSessions, createDatabaseClient, transcripts, widgetVisitors, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 
 import { recordCallOutcomeInTransaction } from "./callOutcome";
 import { finalizeConversationSession, getOrCreateWidgetConversation, loadCallSummaryInput, registerWidgetVisitor } from "./conversations";
@@ -32,7 +33,7 @@ async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
 
 type Fixture = { db: Database; businessId: string; callId: string; contactId: string; conversationId: string };
 
-async function seedCall(tx: DatabaseTransaction, input: { locale?: string; contactName?: string; turns: Array<[string, string]> }): Promise<Fixture> {
+async function seedCall(tx: DatabaseTransaction, input: { locale?: string; contactName?: string; call?: Partial<typeof calls.$inferInsert>; turns: Array<[string, string]> }): Promise<Fixture> {
   const businessId = randomUUID();
   const contactId = randomUUID();
   const conversationId = randomUUID();
@@ -40,7 +41,7 @@ async function seedCall(tx: DatabaseTransaction, input: { locale?: string; conta
   await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Call summary test", timezone: "UTC", businessType: "test", defaultLocale: input.locale ?? "en", telemetryEnabled: false });
   await tx.insert(contacts).values({ id: contactId, businessId, phone: "+15145550100", ...(input.contactName ? { name: input.contactName } : {}) });
   await tx.insert(conversations).values({ id: conversationId, businessId, contactId, channel: "voice" });
-  await tx.insert(calls).values({ id: callId, businessId, conversationId, contactId, providerCallId: `rtc_${callId}`, transport: "phone", status: "completed", startedAt: new Date(Date.now() - 60_000), endedAt: new Date(), disposition: "caller_finished" });
+  await tx.insert(calls).values({ id: callId, businessId, conversationId, contactId, providerCallId: `rtc_${callId}`, transport: "phone", status: "completed", startedAt: new Date(Date.now() - 60_000), endedAt: new Date(), disposition: "caller_finished", ...input.call });
   await tx.insert(transcripts).values(input.turns.map(([speaker, text], index) => ({ businessId, callId, sequence: index + 1, speaker, text, final: true })));
   await tx.execute(sql`set local role lobbystack_worker`);
   return { db: tx as unknown as Database, businessId, callId, contactId, conversationId };
@@ -65,7 +66,7 @@ describe.skipIf(!testUrl)("call summaries against PostgreSQL under worker RLS", 
     await rollbackTest(async (tx) => {
       const fixture = await seedCall(tx, { turns: fridayCall });
       const input = await loadCallSummaryInput({ db: fixture.db }, fixture);
-      expect(input).toMatchObject({ conversationId: fixture.conversationId, locale: "en", disposition: "caller_finished", needsSummary: true, needsCallerName: true });
+      expect(input).toMatchObject({ conversationId: fixture.conversationId, locale: "en", disposition: "caller_finished", needsSummary: true, needsCallerName: true, needsUnansweredQuestions: true, channel: "voice" });
       expect(input?.transcript).toHaveLength(3);
 
       const generated = { summary: "Asked about Friday hours; told the office is open 9 to 5.", callerName: "Marie" };
@@ -107,6 +108,27 @@ describe.skipIf(!testUrl)("call summaries against PostgreSQL under worker RLS", 
       expect(await loadCallSummaryInput({ db: fixture.db }, fixture)).toMatchObject({ needsSummary: false, needsCallerName: true });
       await finalizeConversationSession({ db: fixture.db }, { ...fixture, generated: { callerName: "Marie" } });
       expect(await readBack(fixture)).toMatchObject({ session: { summaryKind: "booked", summary: booked }, contact: { name: "Marie" } });
+    });
+  });
+
+  it("reads every call but a prospect demo for the questions it left unanswered", async () => {
+    const book = async (fixture: Fixture) => await withBusinessTransaction(fixture.db, { businessId: fixture.businessId, actorType: "worker" }, async (workerTx) => {
+      await recordCallOutcomeInTransaction(workerTx, { businessId: fixture.businessId, callId: fixture.callId, outcome: { kind: "booked", serviceName: "Cleaning", startsAt: "2027-01-08T15:00:00.000Z" } });
+    });
+    // A booking and a known name leave the summary nothing else to write.
+    await rollbackTest(async (tx) => {
+      const fixture = await seedCall(tx, { contactName: "Marie Roy", call: { transport: "web_voice" }, turns: fridayCall });
+      await book(fixture);
+      expect(await loadCallSummaryInput({ db: fixture.db }, fixture)).toMatchObject({ needsSummary: false, needsCallerName: false, needsUnansweredQuestions: true, channel: "web_voice" });
+    });
+    await rollbackTest(async (tx) => {
+      const demo = await seedCall(tx, { call: { transport: "web_voice", widgetId: PROSPECT_DEMO_WIDGET_ID, sessionPurpose: "prospect_demo" }, turns: fridayCall });
+      expect(await loadCallSummaryInput({ db: demo.db }, demo)).toMatchObject({ needsSummary: true, needsUnansweredQuestions: false });
+    });
+    await rollbackTest(async (tx) => {
+      const demo = await seedCall(tx, { contactName: "Marie Roy", call: { transport: "web_voice", sessionPurpose: "prospect_demo" }, turns: fridayCall });
+      await book(demo);
+      expect(await loadCallSummaryInput({ db: demo.db }, demo)).toBeUndefined();
     });
   });
 

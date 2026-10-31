@@ -382,9 +382,12 @@ describe("staying on topic", () => {
 
   it("has the agent answer business questions only from its tools and facts, and offer a message when they don't have the answer", () => {
     const line = "Answer questions about the business only from your tools and the business facts below, never from general knowledge or a guess. When they don't have the answer, say you don't have that information and offer to take a message so the team can follow up.";
-    expect(buildAgentInstructions(demoSnapshot, "web_chat")).toContain(line);
     expect(buildAgentInstructions(demoSnapshot, "voice")).toContain(line);
+    expect(buildAgentInstructions(demoSnapshot, "web_voice")).toContain(line);
     expect(buildAgentInstructions(demoSnapshot, "web_chat", { intakeOnly: true })).toContain(line);
+    // A website chat saves the question for the team first, with the tool only it gets.
+    expect(buildAgentInstructions(demoSnapshot, "web_chat")).toContain("When they don't have the answer, save the question with noteUnansweredQuestion, then say you don't have that information and offer to take a message so the team can follow up.");
+    expect(buildAgentInstructions(demoSnapshot, "voice")).not.toContain("noteUnansweredQuestion");
   });
 
   it("has GPT-Live decline off-topic requests itself instead of delegating them", () => {

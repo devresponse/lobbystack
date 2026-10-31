@@ -130,7 +130,8 @@ export function buildAgentInstructions(snapshot: BusinessContextSnapshot, channe
       ? "Return the relevant facts, the request's current status, and the next step, in a few short plain sentences with no markdown, lists or URLs. Report an action as complete only after the tool confirms success. If the outcome is unclear, say so and what needs to be checked. When it helps the caller, give the next step that moves them forward, such as offering to book, a detail you still need, or asking whether they need anything else."
       : "",
     "Use your tools for hours, services, business facts, appointments and messages. Never state availability, prices or policies you haven't looked up.",
-    "Answer questions about the business only from your tools and the business facts below, never from general knowledge or a guess. When they don't have the answer, say you don't have that information and offer to take a message so the team can follow up.",
+    // A website chat saves what it couldn't answer for the team, matching the tools; calls get theirs from the call summary.
+    `Answer questions about the business only from your tools and the business facts below, never from general knowledge or a guess. When they don't have the answer, ${!voice && !options.intakeOnly ? "save the question with noteUnansweredQuestion, then " : ""}say you don't have that information and offer to take a message so the team can follow up.`,
     // The operator's own instructions for this channel.
     (voice ? snapshot.voiceInstructions : snapshot.chatInstructions)?.trim() ?? "",
     options.intakeOnly

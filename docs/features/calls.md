@@ -60,6 +60,8 @@ There's no list of archived calls yet: reach one from its contact or a link to i
 
 Before fork PR #84, the worker saved each finished turn without waiting for it, and the summary job could start before the last turns were saved, so a summary could miss how a call ended. Now the worker finishes a call once its turn writes are saved, after 5 seconds at most. A write that takes longer logs `live.transcript_save_slow`, and the call finishes without it. The summary job (`conversation.finalizeSession`) also retries for about 3 hours, like alert deliveries, where it used to give up after about 15 seconds.
 
+Since fork PR #106, the summary request also lists the questions the receptionist said it couldn't answer, and the job saves them for the team once it has finalized the call ([unanswered questions](unanswered-questions.md)). So every call but a prospect demo gets the request, even one whose booking or message already describes it; the summary shown stays the booking or message.
+
 ## End calls politely at the time limit
 
 Before fork PR #54, website calls stopped after 5 minutes, and the goodbye could start mid-sentence and be cut 4 seconds later. Now:

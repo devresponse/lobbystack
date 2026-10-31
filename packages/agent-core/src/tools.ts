@@ -243,15 +243,14 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
     }
   }
 
-  // A lookup that found nothing goes on the business's list of questions to
-  // answer. In the background: the reply never waits for it, and a failed save
-  // only logs. Prospect demos aren't the business's callers, so they're skipped.
-  function recordKnowledgeMiss(query: string): void {
-    if (context.intakeOnly) return;
+  // A question the receptionist couldn't answer goes on the business's list of
+  // questions to answer. In the background: the reply never waits for it, and
+  // a failed save only logs.
+  function saveUnansweredQuestion(question: string): void {
     void Promise.resolve()
       .then(() => recordUnansweredQuestion(domain, {
         businessId,
-        question: query,
+        question,
         channel,
         ...(context.callId ? { callId: context.callId } : {}),
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
@@ -291,12 +290,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
     searchKnowledge: tool({
       description: "Look up any business-specific fact not in your instructions: prices, policies, parking, payment methods, what to bring, and so on. Never guess. Make the query self-contained.",
       inputSchema: z.object({ query: z.string() }),
-      execute: async ({ query }) => {
-        const result = await searchKnowledge(query);
-        // "empty" means the search ran and found nothing; "unavailable" is our failure, not a gap in the knowledge.
-        if (result.outcome === "empty") recordKnowledgeMiss(query);
-        return result;
-      },
+      execute: async ({ query }) => await searchKnowledge(query),
     }),
 
     takeMessage: tool({
@@ -565,6 +559,22 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   // A website chat with live chat on brings a person into the chat instead of transferring.
   const liveChat = context.liveChat;
   const conversationId = context.conversationId;
+  // A search rarely comes back empty: it returns the closest passages even when
+  // none answers. So the receptionist says what it couldn't answer. Calls get
+  // theirs from the call summary instead (the worker's finalizeSession job),
+  // since GPT-Live can say it doesn't know without asking this agent. Prospect
+  // demos aren't the business's visitors, so they're skipped.
+  if (channel === "web_chat" && !context.intakeOnly) {
+    tools.noteUnansweredQuestion = tool({
+      description: "Save a visitor's question about the business that your tools and the business facts can't answer, so the team can add the answer. Call it before you tell them you don't have that information. Give the question as one short, self-contained sentence.",
+      inputSchema: z.object({ question: z.string() }),
+      execute: async ({ question }) => {
+        saveUnansweredQuestion(question);
+        return { noted: true };
+      },
+    });
+  }
+
   if (offersLiveChat(context) && liveChat && conversationId) {
     tools.requestTeamMember = tool({
       description: "Ask someone from the team to join this chat, when the visitor asks for a person or a rule says to transfer them. The team gets an alert and replies in this chat. Only works during opening hours, or at any time when the business has set none.",

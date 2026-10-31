@@ -1278,7 +1278,7 @@ Related files: `packages/domain/src/server/rules.ts`, `apps/admin/src/components
 | POST | `https://demo.alloplace.com/api/knowledge/snippets` | Add a snippet (`title`, `content`; optional `tags`, `priority`, `active`). Needs `businessId`. | Admin+ | `apps/admin/app/api/knowledge/snippets/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/knowledge/snippets/{snippetId}` | Change a snippet | Admin+ | `apps/admin/app/api/knowledge/snippets/[snippetId]/route.ts` |
 | DELETE | `https://demo.alloplace.com/api/knowledge/snippets/{snippetId}` | Delete a snippet | Admin+ | `apps/admin/app/api/knowledge/snippets/[snippetId]/route.ts` |
-| GET | `https://demo.alloplace.com/api/knowledge/questions` | The open questions the receptionist found no knowledge for, most asked first, and how many are open (fork PR #105) | Member | `apps/admin/app/api/knowledge/questions/route.ts` |
+| GET | `https://demo.alloplace.com/api/knowledge/questions` | The open questions the receptionist couldn't answer, most asked first, and how many are open (fork PR #105) | Member | `apps/admin/app/api/knowledge/questions/route.ts` |
 | PATCH | `https://demo.alloplace.com/api/knowledge/questions/{questionId}` | Answer an open question (`action: "answer"`, `answer`), saving the answer as a text entry, or dismiss it (`action: "dismiss"`) (fork PR #105) | Admin+ | `apps/admin/app/api/knowledge/questions/[questionId]/route.ts` |
 
 #### Entry files

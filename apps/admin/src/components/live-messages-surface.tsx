@@ -5,12 +5,13 @@ import { useActiveBusiness } from "@/hooks/use-active-business";
 import { subscribeRealtimeQuery } from "@/lib/realtime-query";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { ArrowLeft, Bot, CircleAlert, SearchIcon, SendHorizontal, User } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowLeft, Bot, CircleAlert, SearchIcon, SendHorizontal, User } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import type { SmsFailureReason, SmsHoldReason } from "@lobbystack/shared";
 
+import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { PageHeader } from "@/components/page-header";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -24,7 +25,9 @@ import { useTelemetry } from "@/components/product-analytics";
 const PAGE_SIZE = 50;
 
 // channel is the conversation's; messageChannel, in a thread, is how the message itself went, such as "sms" for a text.
-type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; conversationStatus?: string | null; automationState: string | null; teamRequestedAt?: string | null; messageChannel?: string | null; body: string; direction: string; status: string; failureReason?: SmsFailureReason | null; createdAt: string };
+// archivedAt is when an owner or admin archived the conversation, which takes it off the list but for Archived.
+type Message = { id: string; conversationId: string; contactName: string | null; contactPhone: string | null; visitorName: string | null; visitorEmail: string | null; channel: string | null; conversationStatus?: string | null; automationState: string | null; teamRequestedAt?: string | null; archivedAt?: string | null; messageChannel?: string | null; body: string; direction: string; status: string; failureReason?: SmsFailureReason | null; createdAt: string };
+type MessagesPage = { messages: Message[]; hasNext: boolean };
 
 /** A website visitor asked for a person and nobody from the team has joined yet. */
 function waitingForTeam(message: Message): boolean {
@@ -113,13 +116,18 @@ export function LiveMessagesSurface() {
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [channelFilter, setChannelFilter] = useState<"all" | "web_chat" | "sms">("all");
+  // A channel, or Archived: the archived conversations of every channel, which the others leave out.
+  const [listFilter, setListFilter] = useState<"all" | "web_chat" | "sms" | "archived">("all");
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const { business } = useActiveBusiness();
+  // Archiving hides a conversation from the whole team, so the server lets only owners and admins do it.
+  const canArchive = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const query = search.trim();
+  const archivedList = listFilter === "archived";
   // Both keys sit under ["messages", businessId], so realtime and mutation invalidations refresh the list and the open thread.
   const latestMessages = useInfiniteQuery({
-    queryKey: ["messages", business?.businessId, "list", channelFilter, query],
-    queryFn: ({ pageParam }) => requestJson<{ messages: Message[]; hasNext: boolean }>(`/api/messages?limit=${PAGE_SIZE}&offset=${pageParam}&channel=${channelFilter}&search=${encodeURIComponent(query)}`),
+    queryKey: ["messages", business?.businessId, "list", listFilter, query],
+    queryFn: ({ pageParam }) => requestJson<MessagesPage>(`/api/messages?limit=${PAGE_SIZE}&offset=${pageParam}&channel=${archivedList ? "all" : listFilter}&search=${encodeURIComponent(query)}${archivedList ? "&archived=true" : ""}`),
     initialPageParam: 0,
     getNextPageParam: (lastPage, pages) => lastPage.hasNext ? pages.length * PAGE_SIZE : undefined,
     // Keeps the open thread visible while a new search or filter loads.
@@ -161,6 +169,20 @@ export function LiveMessagesSurface() {
       refreshAfterRefusal(error);
     },
   });
+  const setArchived = useMutation({
+    mutationFn: ({ conversationId, archived }: { conversationId: string; archived: boolean }) => requestJson<{ archivedAt: string | null }>(`/api/messages?businessId=${encodeURIComponent(business!.businessId)}`, { method: "PATCH", body: JSON.stringify({ conversationId, action: archived ? "archive" : "restore" }) }),
+    onSuccess: async (_, { conversationId, archived }) => {
+      toast.success(t(archived ? "page.archive.done" : "page.archive.restored"));
+      // The conversation leaves the list it was on, which mustn't show it from its cache while it reloads.
+      queryClient.setQueriesData<InfiniteData<MessagesPage>>({ queryKey: ["messages", business?.businessId, "list"] }, (data) => data && { ...data, pages: data.pages.map((page) => ({ ...page, messages: page.messages.filter((row) => row.conversationId !== conversationId) })) });
+      setSelectedId((current) => current === conversationId ? null : current);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["messages", business?.businessId] }),
+        queryClient.invalidateQueries({ queryKey: ["dashboard"] }),
+      ]);
+    },
+    onError: (_, { archived }) => { toast.error(t(archived ? "page.archive.failed" : "page.archive.restoreFailed")); },
+  });
 
   useEffect(() => {
     if (!business?.businessId) return;
@@ -180,6 +202,7 @@ export function LiveMessagesSurface() {
   const selectedAutomation = selected?.latest.automationState === "human_handoff" ? "human_handoff" : "ai_active";
   const selectedWaiting = selected ? waitingForTeam(selected.latest) : false;
   const selectedClosed = selected ? closedChat(selected.latest) : false;
+  const selectedArchivedAt = selected?.latest.archivedAt ?? null;
   const newerConversationId = selectedClosed ? thread.data?.newerConversationId ?? null : null;
   // Replies outside website chats go by text, voice messages included: why a text can't reach this contact, if it can't.
   const selectedSmsHold = selected && selected.channel !== "web_chat" ? thread.data?.smsReplyHold ?? null : null;
@@ -200,19 +223,21 @@ export function LiveMessagesSurface() {
       <div className={cn("flex min-w-0 w-full flex-col gap-3 sm:w-56 lg:w-72 2xl:w-80", selected && "hidden sm:flex")}>
         <div className="sticky top-0 z-10 -mx-4 flex flex-col gap-3 bg-background px-4 py-2 sm:static sm:z-auto sm:mx-0 sm:p-0">
           <PageHeader className="py-0" title={t("page.title")} />
-          <div className="flex items-center gap-1">
-            {(["all", "web_chat", "sms"] as const).map((key) => <Button key={key} size="sm" variant={channelFilter === key ? "secondary" : "ghost"} className="px-2.5 text-xs" onClick={() => setChannelFilter(key)}>{key === "all" ? t("page.filterAll") : key === "web_chat" ? t("page.filterWeb") : t("page.filterSms")}</Button>)}
+          <div className="flex flex-wrap items-center gap-1">
+            {(["all", "web_chat", "sms", "archived"] as const).map((key) => <Button key={key} size="sm" variant={listFilter === key ? "secondary" : "ghost"} className="px-2.5 text-xs" onClick={() => setListFilter(key)}>{key === "all" ? t("page.filterAll") : key === "web_chat" ? t("page.filterWeb") : key === "sms" ? t("page.filterSms") : t("page.filterArchived")}</Button>)}
           </div>
           <div className="relative"><SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label={t("page.searchPlaceholder")} className="pl-10" onChange={(event) => setSearch(event.target.value)} placeholder={t("page.searchPlaceholder")} value={search} /></div>
         </div>
         <div className="-mx-3 no-scrollbar h-full overflow-y-auto p-3">
           {conversations.map((conversation) => <div key={conversation.id}><button className={cn("group flex w-full rounded-md px-2 py-2 text-start text-sm hover:bg-accent hover:text-accent-foreground", selectedId === conversation.id && "bg-muted")} onClick={() => openConversation(conversation.id, conversation.channel)} type="button"><div className="flex w-full gap-2"><Avatar><AvatarFallback className="ph-mask">{initials(conversation.latest.visitorName ?? conversation.latest.contactName, conversation.displayName)}</AvatarFallback></Avatar><div className="min-w-0 flex-1"><div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-2"><span className="ph-mask truncate font-semibold">{conversation.displayName}</span><span className="text-[11px] text-muted-foreground">{listTime(conversation.latest.createdAt, i18n.language, t)}</span></div><span className="ph-mask line-clamp-2 text-muted-foreground">{conversation.latest.body || t("page.emptyPreview")}</span>{closedChat(conversation.latest) ? <span className="mt-1 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{t("page.closedBadge")}</span> : waitingForTeam(conversation.latest) ? <span className="mt-1 inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><User className="size-3" />{t("page.waitingBadge")}</span> : null}</div>{conversation.channel === "web_chat" ? <span className="mt-0.5 flex size-4 items-center justify-center rounded-full bg-primary/10 text-primary" title="Web chat"><Bot className="size-3" /></span> : null}</div></button><Separator className="my-1" /></div>)}
+          {archivedList && latestMessages.isSuccess && !latestMessages.isPlaceholderData && conversations.length === 0 ? <p className="px-2 py-6 text-center text-sm text-muted-foreground">{t("page.archive.empty")}</p> : null}
           {latestMessages.hasNextPage ? <Button className="w-full" loading={latestMessages.isFetchingNextPage} onClick={() => void latestMessages.fetchNextPage()} size="sm" variant="ghost">{t("page.loadMore")}</Button> : null}
         </div>
       </div>
       <div className={cn("hidden min-w-0 w-full flex-1 flex-col border bg-background sm:flex sm:rounded-md", selected && "flex")}>
-        {selected ? <><div className="flex items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div>{selectedClosed ? <div className="ml-auto flex items-center"><span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{t("page.closedBadge")}</span></div> : selected.channel === "web_chat" ? <div className="ml-auto flex items-center gap-2"><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></div> : null}</div>{selectedClosed ? <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"><p>{t(newerConversationId ? "page.closedNewerDescription" : "page.closedDescription")}</p>{newerConversationId ? <Button onClick={() => openConversation(newerConversationId, "web_chat")} size="sm" variant="outline">{t("page.openNewerChat")}</Button> : null}</div> : selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : selectedSmsHold ? <p className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{t(smsHoldKeys[selectedSmsHold])}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <MessageBubble key={message.id} locale={i18n.language} message={message} t={t} />)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" disabled={replyBlocked} onChange={(event) => setDraft(event.target.value)} placeholder={selectedClosed ? t("page.closedComposerPlaceholder") : selectedSmsHold ? t("page.smsHoldPlaceholder") : selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim() || replyBlocked} loading={send.isPending} size="icon-lg" type="submit"><SendHorizontal /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
+        {selected ? <><div className="flex flex-wrap items-center gap-3 border-b p-4"><Button className="sm:hidden" onClick={() => setSelectedId(null)} size="icon-sm" variant="ghost"><ArrowLeft /></Button><Avatar><AvatarFallback className="ph-mask">{initials(selected.latest.visitorName ?? selected.latest.contactName, selected.displayName)}</AvatarFallback></Avatar><div className="min-w-0"><p className="ph-mask truncate font-semibold">{selected.displayName}</p><p className="ph-mask truncate text-sm text-muted-foreground">{conversationSubtitle(selected.latest, t)}</p></div><div className="ml-auto flex flex-wrap items-center justify-end gap-2">{selectedClosed ? <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground">{t("page.closedBadge")}</span> : selected.channel === "web_chat" ? <><span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium", selectedAutomation === "ai_active" ? "bg-teal-50 text-teal-700" : "bg-amber-50 text-amber-700")}>{selectedAutomation === "ai_active" ? <Bot className="size-3.5" /> : <User className="size-3.5" />}{selectedAutomation === "ai_active" ? t("page.automationAiActive") : selectedWaiting ? t("page.waitingTitle") : t("page.automationHumanHandoff")}</span>{selectedWaiting ? <Button size="sm" onClick={() => toggleAutomation.mutate("human_handoff")} disabled={toggleAutomation.isPending}>{t("page.joinChat")}</Button> : null}<Button size="sm" variant="outline" onClick={() => toggleAutomation.mutate(selectedAutomation === "ai_active" ? "human_handoff" : "ai_active")} disabled={toggleAutomation.isPending}>{selectedAutomation === "ai_active" ? t("page.takeOver") : t("page.automationResumeAi")}</Button></> : null}{canArchive ? selectedArchivedAt ? <Button disabled={setArchived.isPending} onClick={() => setArchived.mutate({ conversationId: selected.id, archived: false })} size="sm" variant="outline"><ArchiveRestore data-icon="inline-start" />{t("page.archive.restore")}</Button> : <Button onClick={() => setArchiveOpen(true)} size="sm" variant="outline"><Archive data-icon="inline-start" />{t("page.archive.action")}</Button> : null}</div></div>{selectedArchivedAt ? <p className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{t("page.archive.archivedOn", { date: formatDateTime(selectedArchivedAt, i18n.language, { year: "numeric", month: "short", day: "numeric" }) })}</p> : null}{selectedClosed ? <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted px-4 py-2 text-xs text-muted-foreground"><p>{t(newerConversationId ? "page.closedNewerDescription" : "page.closedDescription")}</p>{newerConversationId ? <Button onClick={() => openConversation(newerConversationId, "web_chat")} size="sm" variant="outline">{t("page.openNewerChat")}</Button> : null}</div> : selectedWaiting ? <p className="border-b bg-amber-50 px-4 py-2 text-xs text-amber-800">{t("page.waitingDescription")}</p> : selectedSmsHold ? <p className="border-b bg-muted px-4 py-2 text-xs text-muted-foreground">{t(smsHoldKeys[selectedSmsHold])}</p> : null}<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">{selectedMessages.map((message) => <MessageBubble key={message.id} locale={i18n.language} message={message} t={t} />)}</div><form className="flex gap-2 border-t p-4" onSubmit={submit}><Input className="h-11" disabled={replyBlocked} onChange={(event) => setDraft(event.target.value)} placeholder={selectedClosed ? t("page.closedComposerPlaceholder") : selectedSmsHold ? t("page.smsHoldPlaceholder") : selected.channel === "web_chat" ? t("page.composerPlaceholderWeb") : t("page.composerPlaceholderSms")} value={draft} /><Button aria-label={t("page.send")} disabled={!draft.trim() || replyBlocked} loading={send.isPending} size="icon-lg" type="submit"><SendHorizontal /></Button></form></> : <div className="m-auto p-8 text-center text-sm text-muted-foreground">{t("page.selectConversation")}</div>}
       </div>
+      <ConfirmActionDialog cancelLabel={t("page.archive.cancel")} confirmLabel={t("page.archive.confirm")} description={t("page.archive.description")} onConfirm={async () => { if (selected) await setArchived.mutateAsync({ conversationId: selected.id, archived: true }); }} onOpenChange={(open) => { if (!setArchived.isPending) setArchiveOpen(open); }} open={archiveOpen} pending={setArchived.isPending} title={t("page.archive.title")} />
     </section>
   );
 }

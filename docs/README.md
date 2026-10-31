@@ -41,6 +41,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Caller authentication](features/caller-authentication.md) | The four ways to verify a caller before an appointment change, including keypad PINs |
 | [Phone numbers](features/phone-numbers.md) | Picking or claiming a business's Twilio number, and debugging a failed pick |
 | [Text messages](features/sms.md) | Texts in and out: hand replies, consent, alerts and who they come from |
+| [Archive conversations in Messages](features/messages.md) | Taking a conversation off the Messages list without deleting it, finding it under **Archived** and restoring it |
 | [Email](features/email.md) | Every email the worker sends, and its layout |
 | [Website widget](features/website-widget.md) | Chat, browser calls and live chat on a business's website |
 | [Public page and QR code](features/public-profile-and-qr.md) | `/profile/<slug>` and the printable QR code |

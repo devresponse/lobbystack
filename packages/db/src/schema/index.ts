@@ -533,6 +533,9 @@ export const conversations = pgTable(
     automationPausedByUserId: uuid("automation_paused_by_user_id").references(() => users.id, { onDelete: "set null" }),
     // A website visitor asked for a person and is waiting for someone from the team to join.
     teamRequestedAt: timestamp("team_requested_at", { withTimezone: true }),
+    // Set when an owner or admin archives the conversation, which hides it
+    // from the Messages list. A new message clears it. Nothing is deleted.
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     summary: text("summary"),
     currentIntent: text("current_intent"),
     locale: varchar("locale", { length: 8 }),

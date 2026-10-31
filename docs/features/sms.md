@@ -5,7 +5,7 @@ Texts sent to a business's number land in the dashboard's **Messages**, and the 
 ## Receive texts
 
 1. Twilio posts each incoming text to the admin's `/api/webhooks/twilio/sms`. The route checks Twilio's signature against `TWILIO_SMS_WEBHOOK_URL` and finds the business by the number the text was sent to.
-2. `receiveInboundSms` (`packages/domain/src/server/sms.ts`) saves it in the contact's `sms` conversation and queues an alert for the team.
+2. `receiveInboundSms` (`packages/domain/src/server/sms.ts`) saves it in the contact's `sms` conversation and queues an alert for the team. Since fork PR #108, a text in a conversation the team archived puts it back in the **Messages** list ([archiving](messages.md#know-what-brings-one-back-by-itself)).
 3. `STOP` opts the contact out of texts, and `HELP` and `START` get fixed replies. The `HELP` reply carries the brand's name, contact address and website, so a deployment without a brand file sends the original project's ([branding](../branding.md)).
 
 AI replies to texts are left out on purpose: `ai_sms` is a restricted capability in `packages/shared/src/product-capabilities.ts`, and the parity check refuses code that adds one. Adding them would need an `sms` channel in the agent core, a worker job, the **Take over** switch for text threads, a usage cap and, for US local numbers, A2P 10DLC registration.

@@ -1,14 +1,12 @@
-import { and, count, desc, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import {
   dashboardAggregatesQuery,
   type DashboardAggregates,
   calls,
-  contacts,
-  conversations,
 } from "@lobbystack/db";
-import { listOpenVoiceFollowUps, listRecentCalls, listUpcomingAppointments } from "@lobbystack/domain";
+import { listHandoffConversations, listOpenVoiceFollowUps, listRecentCalls, listUpcomingAppointments } from "@lobbystack/domain";
 import { asApiResponse, withOperatorTransaction } from "@/lib/api-helpers";
 
 export const dynamic = "force-dynamic";
@@ -47,8 +45,7 @@ export async function GET(request: Request) {
       const recentCalls = await listRecentCalls(tx, businessId);
       const upcoming = await listUpcomingAppointments(tx, businessId, now);
       const liveCallCount = await tx.select({ count: count() }).from(calls).where(and(eq(calls.businessId, businessId), eq(calls.status, "started")));
-      // Closing a conversation ends its take-over; the status check also drops ones closed before that.
-      const handoffConversations = await tx.select({ id: conversations.id, contactName: contacts.name, summary: conversations.summary, currentIntent: conversations.currentIntent, updatedAt: conversations.updatedAt }).from(conversations).leftJoin(contacts, eq(conversations.contactId, contacts.id)).where(and(eq(conversations.businessId, businessId), eq(conversations.automationState, "human_handoff"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(6);
+      const handoffConversations = await listHandoffConversations(tx, businessId);
       const voiceFollowUps = await listOpenVoiceFollowUps(tx, businessId);
 
       const monthlyTotals = new Map((aggregates?.monthlyCalls ?? []).map((bucket) => [bucket.month, bucket.total]));

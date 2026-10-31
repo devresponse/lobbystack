@@ -34,6 +34,7 @@
     "filterAll": "All",
     "filterWeb": "Web",
     "filterSms": "SMS",
+    "filterArchived": "Archived",
     "takeOver": "Take over",
     "waitingBadge": "Wants a person",
     "waitingTitle": "Visitor waiting",
@@ -66,6 +67,20 @@
       "rejected": "This number can't get texts.",
       "regionBlocked": "Your business's number isn't allowed to text this country.",
       "unsent": "The text couldn't be sent."
+    },
+    "archive": {
+      "action": "Archive",
+      "title": "Archive this conversation?",
+      "description": "It moves to Archived and no longer shows with your other conversations. Nothing is deleted: its messages are kept, you can restore it from Archived, and a new message brings it back.",
+      "cancel": "Cancel",
+      "confirm": "Archive conversation",
+      "done": "Conversation archived.",
+      "failed": "Couldn't archive the conversation.",
+      "archivedOn": "Archived on {{date}}. A new message brings it back.",
+      "restore": "Restore",
+      "restored": "Conversation restored.",
+      "restoreFailed": "Couldn't restore the conversation.",
+      "empty": "No archived conversations."
     }
   },
   "outcome": {

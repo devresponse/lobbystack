@@ -80,7 +80,7 @@ Run these from this folder, on the computer that holds the brand's Zapier sign-i
 ### Push each version
 
 5. `npm run push -- --brand alloplace --url https://demo.alloplace.com`. It reads the name from `brands/alloplace/brand.json`, uploads the version in `package.json`, and sets that version's name, address and help link ([Name and address](#name-and-address)). Add `--dry-run` to see what it would do.
-6. In Zapier's developer dashboard, add the logo, a 256×256 PNG, and check the description and homepage.
+6. In Zapier's developer dashboard, add the logo, the 256×256 PNG `brands/alloplace/logo-zapier.png`, and check the description and homepage.
 
 ### Share it
 

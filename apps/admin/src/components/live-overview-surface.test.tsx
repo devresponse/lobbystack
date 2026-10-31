@@ -53,10 +53,10 @@ describe("dashboard voice follow-up parity", () => {
   });
 });
 describe("dashboard unanswered questions", () => {
-  it.each(["en", "fr"] as const)("links open questions to the knowledge page in %s", async locale => {
+  it.each(["en", "fr"] as const)("links open questions to the Questions page in %s", async locale => {
     const i18n = await setup(locale, null, { role: "business_admin", unansweredCount: 3 });
     const link = screen.getByRole("link", { name: new RegExp(i18n.t("knowledge:unansweredQuestions.home.count", { count: 3 })) });
-    expect(link.getAttribute("href")).toBe("/agent/knowledge#unanswered-questions");
+    expect(link.getAttribute("href")).toBe("/agent/questions");
   });
   it("counts the open questions as an action and drops the empty state", async () => {
     const i18n = await setup("en", null, { role: "business_owner", unansweredCount: 2, actionRequired: [] });

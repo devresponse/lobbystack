@@ -93,6 +93,10 @@
         }
       }
     },
+    "questions": {
+      "title": "Questions",
+      "description": "Les questions auxquelles votre réceptionniste n'a pas su répondre. Chaque réponse devient une connaissance qu'elle utilise ensuite."
+    },
     "services": {
       "title": "Services",
       "description": "Détails des services que votre réceptionniste peut utiliser pour expliquer vos offres et aider à réserver le bon rendez-vous.",

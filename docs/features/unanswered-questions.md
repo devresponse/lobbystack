@@ -1,6 +1,6 @@
 # Answer the questions the receptionist couldn't
 
-Since fork PR #105, LobbyStack saves the questions the receptionist couldn't answer. The business's team sees the open ones on the Knowledge page, and an owner or admin answers each once, which saves the answer as a text entry the receptionist uses from then on, or dismisses it. The feature was ported from the original project's October 2026 release (its PR #345), with migration `0131` in the fork's numbering. Fork PR #106 changed what gets saved, because the original's test, a knowledge lookup that found nothing, almost never passes ([see why](#know-why-an-empty-lookup-isnt-the-test)). Checked against the code of fork PR #106.
+Since fork PR #105, LobbyStack saves the questions the receptionist couldn't answer. The business's team sees the open ones on the **Questions** page, right below **Knowledge** in the sidebar, and an owner or admin answers each once, which saves the answer as a text entry the receptionist uses from then on, or dismisses it. The feature was ported from the original project's October 2026 release (its PR #345), with migration `0131` in the fork's numbering. Fork PR #106 changed what gets saved, because the original's test, a knowledge lookup that found nothing, almost never passes ([see why](#know-why-an-empty-lookup-isnt-the-test)). Fork PR #107 moved the list from the bottom of the Knowledge page to its own page, `/agent/questions`, and the Knowledge page is back to how it was before. Checked against the code of fork PR #107.
 
 ## Know what gets saved
 
@@ -18,11 +18,11 @@ The original project saved the receptionist's query when its `searchKnowledge` l
 
 ## Answer or dismiss a question
 
-1. Go to **Agent > Knowledge** and scroll to **Unanswered Questions**, below the table. Open questions are listed most asked first, up to 50, with how many times people asked and when they last asked; the badge counts every open one. While any are open, Home also shows a card under **Action required** that links there and counts as one action. Only owners and admins see that card.
-2. Click **Answer**, write what the receptionist should say (up to 5,000 characters), and click **Save Answer**. LobbyStack adds an active text entry titled with the question, at the default priority, and it appears in the Knowledge table. The receptionist's snapshot refreshes like after any new entry, so the next call or chat has it.
+1. Go to **Agent > Questions** (`/agent/questions`), right below **Knowledge** in the sidebar. Its **Unanswered Questions** list shows the open questions most asked first, up to 50, with how many times people asked and when they last asked; the badge counts every open one. While any are open, Home also shows a card under **Action required** that opens this page and counts as one action. Only owners and admins see that card.
+2. Click **Answer**, write what the receptionist should say (up to 5,000 characters), and click **Save Answer**. LobbyStack adds an active text entry titled with the question, at the default priority, and the question leaves the list. The entry appears in the table on the Knowledge page, where it can be edited, paused or deleted like any other. The receptionist's snapshot refreshes like after any new entry, so the next call or chat has it.
 3. Or click **Dismiss** to take a question off the list.
 
-Owners and admins answer and dismiss. Schedulers and viewers see the list on the Knowledge page without the buttons. If someone else answered or dismissed a question first, the page says so and shows the list as it is now.
+Owners and admins answer and dismiss. Schedulers and viewers see the list on the Questions page without the buttons. If someone else answered or dismissed a question first, the page says so and shows the list as it is now.
 
 ## Know what happens when it's asked again
 
@@ -44,7 +44,8 @@ A question repeats what a caller or visitor said, so it expires like a follow-up
 - **From calls:** the `unansweredQuestions` field of `callSummarySchema`, cleaned by `cleanUnansweredQuestions` (`packages/agent-core/src/callSummary.ts`); `loadCallSummaryInput` (`packages/domain/src/server/conversations.ts`) marks a prospect demo with `needsUnansweredQuestions: false` and gives the channel; the worker saves them in `saveCallUnansweredQuestions`. The model reads the transcript's first 8,000 and last 4,000 characters, like the summary, so a long call can miss a question asked in its middle.
 - **From chats:** `noteUnansweredQuestion` in `packages/agent-core/src/tools.ts`, offered only to website chats, and the matching line in `buildAgentInstructions` (`packages/agent-core/src/instructions.ts`). A chat's turn allows one more model step than a call's, 5, so a lookup, a second lookup and the save still leave room for the reply.
 - **Routes:** `GET /api/knowledge/questions` and `PATCH /api/knowledge/questions/{questionId}` ([route catalog](../reference/routes.md#knowledge)). The v1 API, the MCP server and the command line have no unanswered questions yet.
-- **Dashboard:** `apps/admin/src/components/unanswered-questions-section.tsx` on the Knowledge page, and the card in `apps/admin/src/components/live-overview-surface.tsx`, in English, French, Spanish and Serbian.
+- **Dashboard:** the page `apps/admin/app/(dashboard)/agent/questions/page.tsx` renders `LiveQuestionsSurface` (`apps/admin/src/components/live-questions-surface.tsx`), which shows the list from `apps/admin/src/components/unanswered-questions-section.tsx` for the active business. The sidebar item is in `apps/admin/src/components/dashboard-shell.tsx`, the page title in `agent-shell.tsx` (`sections.questions` in the `agent` namespace), and Home's card in `apps/admin/src/components/live-overview-surface.tsx`, all in English, French, Spanish and Serbian. The Knowledge page (`live-knowledge-surface.tsx`) neither shows nor loads the questions.
+- **Tests:** the page and its route (`apps/admin/app/(dashboard)/agent/questions/page.test.tsx`), the list (`unanswered-questions-section.test.tsx`), the sidebar (`dashboard-shell.test.tsx`), Home's card (`live-overview-surface.test.tsx`), and the Knowledge page without the list (`live-knowledge-surface.test.tsx`). A browser journey, `apps/admin/e2e/unanswered-questions.e2e.ts`: Home's card opens the Questions page, the Knowledge page shows and loads no questions, the sidebar lists Questions below Knowledge, an owner answers one question, which shows up on the Knowledge page, and dismisses the other.
 
 ## Know the limit on text entries
 

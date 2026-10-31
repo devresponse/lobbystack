@@ -36,7 +36,7 @@ describe("original shared navigation", () => {
     setup();
     // The sidebar header carries the workspace switcher alone; no brand mark.
     expect(screen.queryByRole("img", { name: "LobbyStack" })).toBeNull();
-    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/messages", "/contacts", "/agent", "/agent/knowledge", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/widget", "/settings/usage"]);
+    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/messages", "/contacts", "/agent", "/agent/knowledge", "/agent/questions", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/widget", "/settings/usage"]);
     expect(document.getElementById("dashboard-main-content")?.tabIndex).toBe(-1);
   });
   it("links the website widget and messages from every page", () => {
@@ -53,6 +53,18 @@ describe("original shared navigation", () => {
     expect(screen.getByRole("link", { name: "nav:items.settings" }).hasAttribute("data-active")).toBe(true);
     expect(screen.getByRole("link", { name: "settings:sections.widget" }).hasAttribute("data-active")).toBe(false);
   });
+  it("lists Questions right below Knowledge and marks only the open one active", () => {
+    const view = setup();
+    const receptionist = screen.getAllByRole("link").map(link => link.textContent);
+    expect(receptionist.indexOf("agent:sections.questions.title")).toBe(receptionist.indexOf("agent:sections.knowledge.title") + 1);
+    expect(screen.getByRole("link", { name: "agent:sections.questions.title" }).getAttribute("href")).toBe("/agent/questions");
+    view.navigate("/agent/questions");
+    expect(screen.getByRole("link", { name: "agent:sections.questions.title" }).hasAttribute("data-active")).toBe(true);
+    expect(screen.getByRole("link", { name: "agent:sections.knowledge.title" }).hasAttribute("data-active")).toBe(false);
+    view.navigate("/agent/knowledge");
+    expect(screen.getByRole("link", { name: "agent:sections.knowledge.title" }).hasAttribute("data-active")).toBe(true);
+    expect(screen.getByRole("link", { name: "agent:sections.questions.title" }).hasAttribute("data-active")).toBe(false);
+  });
   it("keeps integrations visible for viewers", () => {
     setup("viewer"); expect(screen.getByRole("link", { name: "settings:sections.integrations" })).toBeTruthy();
   });
@@ -64,7 +76,7 @@ describe("original shared navigation", () => {
   it("supports repeated mobile navigation across every original group", async () => {
     window.innerWidth = 390;
     const view = setup();
-    for (const [label, href] of [["nav:items.calls", "/calls"], ["agent:sections.knowledge.title", "/agent/knowledge"], ["settings:sections.integrations", "/integrations"]]) {
+    for (const [label, href] of [["nav:items.calls", "/calls"], ["agent:sections.knowledge.title", "/agent/knowledge"], ["agent:sections.questions.title", "/agent/questions"], ["settings:sections.integrations", "/integrations"]]) {
       await userEvent.click(screen.getByRole("button", { name: "accessibility.toggleSidebar" }));
       const dialog = await screen.findByRole("dialog");
       await userEvent.click(within(dialog).getByRole("button", { name: label! }));

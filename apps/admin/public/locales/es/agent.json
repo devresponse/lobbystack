@@ -93,6 +93,10 @@
         }
       }
     },
+    "questions": {
+      "title": "Preguntas",
+      "description": "Preguntas que su recepcionista no supo responder. Cada respuesta se convierte en conocimiento que usará a partir de entonces."
+    },
     "services": {
       "title": "Servicios",
       "description": "Detalles de los servicios que su recepcionista puede usar para explicar su oferta y ayudar a reservar la cita adecuada.",

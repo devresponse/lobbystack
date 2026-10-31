@@ -93,6 +93,10 @@
         }
       }
     },
+    "questions": {
+      "title": "Questions",
+      "description": "Questions your receptionist couldn't answer. Each answer becomes knowledge it uses from then on."
+    },
     "services": {
       "title": "Services",
       "description": "Service details your receptionist can use to explain offerings and help book the right appointment.",

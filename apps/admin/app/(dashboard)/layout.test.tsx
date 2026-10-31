@@ -19,7 +19,7 @@ it("ships every section's translations, so client navigation never requests one"
   const document = await DashboardLayout({ children: null }) as ReactElement<{ namespaces: readonly string[] }>;
   const i18n = createI18nInstance({ locale: "en", resources: resourcesForRoute("en", document.props.namespaces) });
 
-  for (const path of ["/", "/calls/id", "/agent/knowledge", "/affiliate", "/settings/team", "/demos"]) {
+  for (const path of ["/", "/calls/id", "/agent/knowledge", "/agent/questions", "/affiliate", "/settings/team", "/demos"]) {
     expect(missingNamespaces(i18n, "en", routeNamespaces(path))).toEqual([]);
   }
 });

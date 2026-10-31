@@ -48,13 +48,13 @@
       "alreadyHandled": "Alguien ya respondió o descartó esta pregunta."
     },
     "emptyTitle": "No hay preguntas sin respuesta",
-    "emptyDescription": "Cuando su recepcionista no encuentre una respuesta en su conocimiento, verá la pregunta aquí.",
+    "emptyDescription": "Cuando su recepcionista no pueda responder una pregunta sobre su negocio, la verá aquí.",
     "loadFailed": "No pudimos cargar sus preguntas sin respuesta. Actualice la página para intentarlo de nuevo.",
     "home": {
       "count_one": "{{count}} pregunta que su recepcionista no supo responder",
       "count_many": "{{count}} preguntas que su recepcionista no supo responder",
       "count_other": "{{count}} preguntas que su recepcionista no supo responder",
-      "description": "Añada las respuestas en la página Conocimiento."
+      "description": "Añada las respuestas en la página Preguntas."
     }
   }
 }

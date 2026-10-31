@@ -172,3 +172,12 @@ describe("original knowledge row interactions", () => {
     expect(() => telemetryRef.current!.expectEvent("web.knowledge.upload_completed", { businessId: "business" })).toThrow();
   });
 });
+describe("the knowledge page without unanswered questions", () => {
+  it("leaves the questions to their own page and never asks for them", async () => {
+    const fetchMock = setup();
+    expect(screen.getByText("Clinic hours")).toBeTruthy();
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByText("unansweredQuestions.title")).toBeNull();
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/knowledge/questions"))).toEqual([]);
+  });
+});

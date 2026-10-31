@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 
 import { businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
 import { requireBusinessMembership } from "../authz";
@@ -36,11 +37,17 @@ export type CallSummaryInput = {
   needsSummary: boolean;
   /** True when the call's contact has no name yet. */
   needsCallerName: boolean;
+  /** False for a prospect demo, whose callers aren't the business's: what they asked doesn't go on its unanswered questions. */
+  needsUnansweredQuestions: boolean;
+  /** Where the call came in, for the unanswered questions it leaves. */
+  channel: "voice" | "web_voice";
 };
 
 /**
  * Read what the worker needs to write a call summary. Returns undefined when
  * the call is already finalized or there is nothing a summary would change.
+ * Every call but a prospect demo gets one, for the questions it leaves
+ * unanswered, even when a booking or message already describes it.
  */
 export async function loadCallSummaryInput(
   context: DomainContext,
@@ -55,6 +62,10 @@ export async function loadCallSummaryInput(
       conversationLocale: conversations.locale,
       currentIntent: conversations.currentIntent,
       businessLocale: businesses.defaultLocale,
+      transport: calls.transport,
+      widgetId: calls.widgetId,
+      sessionPurpose: calls.sessionPurpose,
+      prospectDemoId: calls.prospectDemoId,
     }).from(calls)
       .innerJoin(businesses, eq(businesses.id, calls.businessId))
       .leftJoin(conversations, and(eq(conversations.id, calls.conversationId), eq(conversations.businessId, calls.businessId)))
@@ -66,7 +77,8 @@ export async function loadCallSummaryInput(
     if (session?.summaryGeneratedAt) return undefined;
     const needsSummary = row.currentIntent !== "message_taking" && !FACTUAL_OUTCOME_KINDS.has(resolveCallOutcome({ persisted: session?.summary }).kind);
     const needsCallerName = Boolean(row.contactId) && !row.contactName?.trim();
-    if (!needsSummary && !needsCallerName) return undefined;
+    const needsUnansweredQuestions = !(row.widgetId === PROSPECT_DEMO_WIDGET_ID || row.sessionPurpose === "prospect_demo" || row.prospectDemoId);
+    if (!needsSummary && !needsCallerName && !needsUnansweredQuestions) return undefined;
     const transcript = await tx.select({ speaker: transcripts.speaker, text: transcripts.text }).from(transcripts).where(and(eq(transcripts.businessId, input.businessId), eq(transcripts.callId, input.callId), eq(transcripts.final, true))).orderBy(asc(transcripts.sequence));
     return {
       conversationId: row.conversationId,
@@ -75,6 +87,8 @@ export async function loadCallSummaryInput(
       transcript,
       needsSummary,
       needsCallerName,
+      needsUnansweredQuestions,
+      channel: row.transport === "web_voice" ? "web_voice" : "voice",
     };
   });
 }

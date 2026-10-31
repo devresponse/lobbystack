@@ -35,7 +35,7 @@ vi.setSystemTime(new Date("2026-10-01T12:00:00Z"));
 
 describe("createReceptionistTools", () => {
   it("books directly by default", () => {
-    expect(toolNames()).toEqual(["bookAppointment", "findAvailability", "getBusinessHours", "getBusinessServices", "requestAppointmentCancellation", "searchKnowledge", "takeMessage"]);
+    expect(toolNames()).toEqual(["bookAppointment", "findAvailability", "getBusinessHours", "getBusinessServices", "noteUnansweredQuestion", "requestAppointmentCancellation", "searchKnowledge", "takeMessage"]);
   });
 
   it("takes requests instead of booking in request mode", () => {
@@ -360,51 +360,34 @@ describe("searchKnowledge", () => {
 });
 
 describe("unanswered questions", () => {
-  const evidence = (outcome: "found" | "empty" | "unavailable") => ({
-    matches: outcome === "found" ? [{ chunkId: "c", documentId: "d", title: "Parking", content: "Parking is free.", sourceUrl: null, sourceRevision: 1, sequence: 0 }] : [],
-    mode: "hybrid" as const,
-    outcome,
-    durationMs: 1,
-  });
-  const searchOn = async (conversation: Omit<AgentToolContext, "domain" | "snapshot">, found: ReturnType<typeof evidence> | Error, query = "Do you validate parking?") => {
+  type Note = (input: { question: string }, options: object) => Promise<unknown>;
+  const note = async (conversation: Omit<AgentToolContext, "domain" | "snapshot">, question = "Do you validate parking?") => {
     vi.mocked(recordUnansweredQuestion).mockClear();
-    if (found instanceof Error) vi.mocked(searchKnowledgeEvidence).mockRejectedValueOnce(found);
-    else vi.mocked(searchKnowledgeEvidence).mockResolvedValueOnce(found);
-    const tools = createReceptionistTools({ domain: { db: {} as never }, snapshot: { ...demoSnapshot, knowledgeSnippets: [] }, ...conversation });
-    const execute = tools.searchKnowledge!.execute! as (input: object, options: object) => Promise<{ outcome: string }>;
-    const result = await execute({ query }, { toolCallId: "1", messages: [] });
+    const tools = createReceptionistTools({ domain: { db: {} as never }, snapshot: demoSnapshot, ...conversation });
+    const result = await (tools.noteUnansweredQuestion!.execute! as Note)({ question }, { toolCallId: "1", messages: [] });
     // The save runs after the reply; let it start.
     await new Promise((resolve) => setTimeout(resolve, 0));
     return result;
   };
 
-  it("saves a question the knowledge base has no answer for, with the call or chat it came from", async () => {
-    await expect(searchOn({ channel: "voice", callId: "call_1", conversationId: "conversation_1", callerPhone: "+14165550100", callControl }, evidence("empty"))).resolves.toMatchObject({ outcome: "empty" });
-    expect(recordUnansweredQuestion).toHaveBeenCalledWith(expect.anything(), { businessId: demoSnapshot.businessId, question: "Do you validate parking?", channel: "voice", callId: "call_1", conversationId: "conversation_1" });
-
-    await searchOn({ channel: "web_chat", conversationId: "chat_1" }, evidence("empty"));
+  it("saves a website chat question the receptionist couldn't answer, with the chat it came from", async () => {
+    await expect(note({ channel: "web_chat", conversationId: "chat_1" })).resolves.toEqual({ noted: true });
     expect(recordUnansweredQuestion).toHaveBeenCalledWith(expect.anything(), { businessId: demoSnapshot.businessId, question: "Do you validate parking?", channel: "web_chat", conversationId: "chat_1" });
   });
 
-  it("saves nothing when the knowledge base answers, the search fails, or the call is a prospect demo", async () => {
-    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    await expect(searchOn({ channel: "web_chat" }, evidence("found"))).resolves.toMatchObject({ outcome: "found" });
-    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
-    await expect(searchOn({ channel: "web_chat" }, evidence("unavailable"))).resolves.toMatchObject({ outcome: "unavailable" });
-    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
-    await expect(searchOn({ channel: "web_chat" }, new Error("search down"))).resolves.toMatchObject({ outcome: "unavailable" });
-    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
-    await expect(searchOn({ channel: "web_voice", intakeOnly: true, callControl }, evidence("empty"))).resolves.toMatchObject({ outcome: "empty" });
-    expect(recordUnansweredQuestion).not.toHaveBeenCalled();
-    warn.mockRestore();
+  it("offers the tool only in website chats: calls get their questions from the call summary", () => {
+    expect(toolNames({ channel: "web_chat", conversationId: "chat_1" })).toContain("noteUnansweredQuestion");
+    expect(toolNames({ channel: "voice", callerPhone: "+14165550100", callControl })).not.toContain("noteUnansweredQuestion");
+    expect(toolNames({ channel: "web_voice", callControl })).not.toContain("noteUnansweredQuestion");
+    expect(toolNames({ channel: "web_chat", intakeOnly: true })).not.toContain("noteUnansweredQuestion");
   });
 
-  it("doesn't save the lookup getBusinessServices makes for itself", async () => {
+  it("saves nothing on its own when a search comes back empty", async () => {
     vi.mocked(recordUnansweredQuestion).mockClear();
-    vi.mocked(searchKnowledgeEvidence).mockResolvedValueOnce(evidence("empty"));
-    const tools = createReceptionistTools({ domain: { db: {} as never }, channel: "voice", snapshot: { ...demoSnapshot, services: [], knowledgeSnippets: [] } });
-    const execute = tools.getBusinessServices!.execute! as (input: object, options: object) => Promise<unknown>;
-    await execute({}, { toolCallId: "1", messages: [] });
+    vi.mocked(searchKnowledgeEvidence).mockResolvedValueOnce({ matches: [], mode: "hybrid", outcome: "empty", durationMs: 1 });
+    const tools = createReceptionistTools({ domain: { db: {} as never }, channel: "web_chat", conversationId: "chat_1", snapshot: { ...demoSnapshot, knowledgeSnippets: [] } });
+    const execute = tools.searchKnowledge!.execute! as (input: object, options: object) => Promise<{ outcome: string }>;
+    await expect(execute({ query: "Do you validate parking?" }, { toolCallId: "1", messages: [] })).resolves.toMatchObject({ outcome: "empty" });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(recordUnansweredQuestion).not.toHaveBeenCalled();
   });
@@ -413,7 +396,7 @@ describe("unanswered questions", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let finishSave: (() => void) | undefined;
     vi.mocked(recordUnansweredQuestion).mockImplementationOnce(() => new Promise((_, reject) => { finishSave = () => reject(new Error("database down")); }));
-    await expect(searchOn({ channel: "web_chat" }, evidence("empty"))).resolves.toMatchObject({ outcome: "empty" });
+    await expect(note({ channel: "web_chat", conversationId: "chat_1" })).resolves.toEqual({ noted: true });
     finishSave?.();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)))).toEqual([{ level: "warn", message: "knowledge.unanswered_question_failed", businessId: demoSnapshot.businessId, error: "database down" }]);

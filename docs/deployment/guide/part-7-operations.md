@@ -565,6 +565,8 @@ Every line about a call carries its IDs: `callId`, `sessionId` (the GPT-Live ses
 | `live.closed` | worker | The end of the call, with `durationMs` |
 | `live.detached`, `live.recovered`, `live.orphan_finished` | worker | Another worker took the call over, or picked it up after a crash ([7.16](#716-worker-crash-and-stuck-calls)) |
 | `live.recording_unavailable` | worker | OpenAI's recording couldn't be copied |
+| `call.summary_failed` | worker | The text AI couldn't write the call's one-line summary after it ended: `error` is `generation_timeout` or `generation_failed`. The call keeps a summary taken from its transcript, and saves none of the questions the receptionist couldn't answer (fork PR #106) |
+| `knowledge.unanswered_question_failed` | worker | A question the receptionist couldn't answer wasn't saved for the team ([unanswered questions](../../features/unanswered-questions.md)) |
 | `job.failed` | worker | A job failed, such as a text after the call. `willRetry` false means it gave up ([7.16](#716-worker-crash-and-stuck-calls)) |
 | `ops.billing.sweep` | worker | Billing work that no job finished, queued again, with how many of each kind ([7.16](#716-worker-crash-and-stuck-calls)) |
 | `ops.billing.webhook_refused` | admin | A delivery from Polar was refused. `"reason":"bad_signature"` means `POLAR_WEBHOOK_SECRET` isn't the webhook's secret ([7.18](#718-rotate-secrets-and-keys)) |
@@ -572,7 +574,7 @@ Every line about a call carries its IDs: `callId`, `sessionId` (the GPT-Live ses
 
 Browser calls also log `live.browser_start`, and `live.browser_refused` when one is turned away, with the limit that ran out (`apps/admin/app/api/voice/live/session/route.ts:59, 174`).
 
-The website chat logs `widget.chat_reply` for each answer, with its time to the first word and the tools it used, `widget.chat_refused` with the `code` when a message is turned away, and `widget.team_request` when a visitor asks for a person. A failed answer logs an `[admin] exception:` line with the Error ID the chat shows, and its `category` says why ([8.7](part-8-troubleshooting.md#87-the-website-chat); `apps/admin/app/api/widget/chat/route.ts`, fork PR #79). None of these lines has the chat's words.
+The website chat logs `widget.chat_reply` for each answer, with its time to the first word and the tools it used (`noteUnansweredQuestion` among them when it saved a question it couldn't answer, since fork PR #106), `widget.chat_refused` with the `code` when a message is turned away, and `widget.team_request` when a visitor asks for a person. A failed answer logs an `[admin] exception:` line with the Error ID the chat shows, and its `category` says why ([8.7](part-8-troubleshooting.md#87-the-website-chat); `apps/admin/app/api/widget/chat/route.ts`, fork PR #79). None of these lines has the chat's words.
 
 **Lines that mean a setting is missing**
 

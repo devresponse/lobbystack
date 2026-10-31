@@ -50,6 +50,17 @@ describe("createReceptionistAgent", () => {
     expect(JSON.stringify(plain.prompt)).not.toContain("requestTeamMember");
   });
 
+  it("gives only a website chat the tool and the rule to save a question it can't answer", async () => {
+    const chat = await firstCall("web_chat", { conversationId: "conv_1" });
+    expect(chat.tools?.map((tool) => tool.name)).toContain("noteUnansweredQuestion");
+    expect(JSON.stringify(chat.prompt)).toContain("save the question with noteUnansweredQuestion");
+    for (const channel of ["voice", "web_voice"] as const) {
+      const call = await firstCall(channel);
+      expect(call.tools?.map((tool) => tool.name)).not.toContain("noteUnansweredQuestion");
+      expect(JSON.stringify(call.prompt)).not.toContain("noteUnansweredQuestion");
+    }
+  });
+
   it("hands a request the model provider refused to onError, which the SDK would otherwise print", async () => {
     const refusal = new APICallError({ message: "Project does not have access to model gpt-6-luna.", url: "https://api.openai.com/v1/responses", requestBodyValues: {}, statusCode: 403, isRetryable: false });
     const model = new MockLanguageModelV4({ doStream: async () => { throw refusal; } });

@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageCircleQuestionMark } from "lucide-react";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -20,9 +20,6 @@ import { requestJson } from "@/lib/request-json";
 export type UnansweredQuestion = { id: string; question: string; timesAsked: number; firstAskedAt: string; lastAskedAt: string; lastChannel: string };
 export type UnansweredQuestions = { questions: UnansweredQuestion[]; openCount: number };
 
-/** The element the Home page links to. */
-export const UNANSWERED_QUESTIONS_ANCHOR = "unanswered-questions";
-
 // The domain's MAX_UNANSWERED_ANSWER_LENGTH.
 const MAX_ANSWER_LENGTH = 5_000;
 
@@ -34,12 +31,8 @@ export function fetchUnansweredQuestions(businessId: string): Promise<Unanswered
   return requestJson<UnansweredQuestions>(`/api/knowledge/questions?businessId=${encodeURIComponent(businessId)}`);
 }
 
-/**
- * Open questions the receptionist found no knowledge for, most asked first. Owners and admins answer or dismiss them.
- * Home links here by anchor, but the section renders after the page loads, so it scrolls itself into view once the
- * content above it (`layoutSettled`) and its own list have loaded.
- */
-export function UnansweredQuestionsSection({ businessId, canManage, layoutSettled = true }: { businessId: string; canManage: boolean; layoutSettled?: boolean }) {
+/** Open questions the receptionist couldn't answer, most asked first. Owners and admins answer or dismiss them. */
+export function UnansweredQuestionsSection({ businessId, canManage }: { businessId: string; canManage: boolean }) {
   const { i18n, t } = useTranslation("knowledge");
   const queryClient = useQueryClient();
   const [answering, setAnswering] = useState<string | null>(null);
@@ -79,20 +72,11 @@ export function UnansweredQuestionsSection({ businessId, canManage, layoutSettle
   const locale = intlLocale(i18n.resolvedLanguage ?? i18n.language);
   const formatDate = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).format(new Date(value));
   const open = questions.data?.questions ?? [];
-  const sectionRef = useRef<HTMLElement>(null);
-  const scrolled = useRef(false);
-  const settled = layoutSettled && !questions.isLoading;
-  useEffect(() => {
-    if (!settled || scrolled.current) return;
-    // Only the first settled render scrolls, so the page stays put as the table above changes.
-    scrolled.current = true;
-    if (window.location.hash === `#${UNANSWERED_QUESTIONS_ANCHOR}`) sectionRef.current?.scrollIntoView({ block: "start" });
-  }, [settled]);
 
-  return <section aria-labelledby={`${UNANSWERED_QUESTIONS_ANCHOR}-title`} className="flex scroll-mt-20 flex-col gap-3 md:scroll-mt-6" id={UNANSWERED_QUESTIONS_ANCHOR} ref={sectionRef}>
+  return <section aria-labelledby="unanswered-questions-title" className="flex flex-col gap-3">
     <div className="flex items-start justify-between gap-4 px-1">
       <div className="flex min-w-0 flex-col gap-1">
-        <h2 className="type-section-title" id={`${UNANSWERED_QUESTIONS_ANCHOR}-title`}>{t("unansweredQuestions.title")}</h2>
+        <h2 className="type-section-title" id="unanswered-questions-title">{t("unansweredQuestions.title")}</h2>
       </div>
       {questions.isLoading ? <Skeleton className="h-6 w-12 rounded-full" /> : <Badge variant="outline">{(questions.data?.openCount ?? 0).toLocaleString(locale)}</Badge>}
     </div>

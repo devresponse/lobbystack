@@ -93,6 +93,10 @@
         }
       }
     },
+    "questions": {
+      "title": "Pitanja",
+      "description": "Pitanja na koja recepcioner nije znao odgovor. Svaki odgovor postaje znanje koje recepcioner nadalje koristi."
+    },
     "services": {
       "title": "Usluge",
       "description": "Detalji o uslugama koje recepcioner koristi da objasni ponudu i pomogne da se zakaže pravi termin.",

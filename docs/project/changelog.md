@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-10-31
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#106](https://github.com/devresponse/lobbystack/pull/106) | Save the questions the receptionist said it couldn't answer |  | `94a3058` | [docs](../features/unanswered-questions.md#know-what-gets-saved) |
+
 ### 2026-10-30
 
 | PR | What changed | Migrations | Merge | More |

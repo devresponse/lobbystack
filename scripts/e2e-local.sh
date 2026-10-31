@@ -46,6 +46,7 @@ TESTS=(
   e2e/public-profile.e2e.ts
   e2e/qr-code-settings.e2e.ts
   e2e/supported-journeys.e2e.ts
+  e2e/unanswered-questions.e2e.ts
   e2e/widget-settings.e2e.ts
 )
 

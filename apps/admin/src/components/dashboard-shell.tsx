@@ -13,6 +13,7 @@ import {
   ChartColumnIncreasing,
   ClipboardCheck,
   House,
+  MessageCircleQuestionMark,
   MessageSquareMore,
   Phone,
   Settings,
@@ -135,6 +136,7 @@ function ReplacementSidebar({ user }: Pick<DashboardShellProps, "user">) {
   const receptionist: NavigationItem[] = [
     { label: t("agent:sections.basicSettings.title"), href: "/agent", icon: ClipboardCheck },
     { label: t("agent:sections.knowledge.title"), href: "/agent/knowledge", icon: BookText },
+    { label: t("agent:sections.questions.title"), href: "/agent/questions", icon: MessageCircleQuestionMark },
     { label: t("agent:sections.services.title"), href: "/agent/services", icon: Blocks },
     { label: t("agent:sections.rules.title"), href: "/agent/rules", icon: Workflow },
   ];

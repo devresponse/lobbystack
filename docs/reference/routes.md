@@ -5,7 +5,7 @@ Every page and HTTP route in the LobbyStack code, written against **https://demo
 | | |
 |---|---|
 | Base URL | `https://demo.alloplace.com` |
-| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off |
+| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off. Home, the Knowledge page and the two questions routes were updated on 2026-10-31 for fork PR #107, which adds `/agent/questions`, the Questions page |
 | How it was made | Read from the code, including every entry file and the files it calls. No route was tried against the live site. |
 | What runs at the base URL | `apps/admin`: the dashboard, sign-in pages, public business pages, the website widget, every HTTP API and the MCP server |
 | Also listed | The worker's internal routes (section 14) and the marketing site's pages (section 15). Neither is served at demo.alloplace.com. |
@@ -36,7 +36,7 @@ This catalog was written in the project's notes and moved into the repository on
 
 | Area | Route files | Method and path pairs | Section |
 |---|---|---|---|
-| Dashboard pages | 32 pages |  | 3 |
+| Dashboard pages | 33 pages |  | 3 |
 | Onboarding pages | 10 pages |  | 4 |
 | Sign-in and account pages | 13 pages, each in 4 languages |  | 5 |
 | Public business page, widget chat window and loader | 2 pages, 1 route | 1 | 6 |
@@ -51,9 +51,9 @@ This catalog was written in the project's notes and moved into the repository on
 | Health and operations | 3 | 3 | 13 |
 | Worker (internal, not at the base URL) | 1 server | 4 | 14 |
 
-In all, `apps/admin` has 57 page files and 179 route files, which answer 268 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
+In all, `apps/admin` has 58 page files and 179 route files, which answer 268 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
 
-Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 179 route files, 57 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
+Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 179 route files, 58 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
 
 ## 2. How to read this catalog
 
@@ -108,6 +108,7 @@ Each needs a signed-in account whose business has finished onboarding. A signed-
 | `https://demo.alloplace.com/agent/basic-settings` | The same screen as AI settings | The "no opening hours" alert links to `#opening-hours` here | Member reads; Admin+ saves | `agent/ai-settings/overview.mdx` | `apps/admin/app/(dashboard)/agent/basic-settings/page.tsx` |
 | `https://demo.alloplace.com/agent/integrations` | Old address; redirects to `/agent` | Nowhere | Signed in | None yet | `apps/admin/app/(dashboard)/agent/integrations/page.tsx` |
 | `https://demo.alloplace.com/agent/knowledge` | Knowledge: website imports, documents, snippets | Sidebar > Agent > Knowledge | Member reads; Admin+ changes | `agent/knowledge.mdx` | `apps/admin/app/(dashboard)/agent/knowledge/page.tsx` |
+| `https://demo.alloplace.com/agent/questions` | Questions: what the receptionist couldn't answer, to answer or dismiss | Sidebar > Agent > Questions, right below Knowledge, or the card on Home | Member reads; Admin+ answers and dismisses | `agent/knowledge.mdx` | `apps/admin/app/(dashboard)/agent/questions/page.tsx` |
 | `https://demo.alloplace.com/agent/services` | Services: what callers can book, and which staff do it | Sidebar > Agent > Services | Member reads; Admin+ changes | `agent/services.mdx` | `apps/admin/app/(dashboard)/agent/services/page.tsx` |
 | `https://demo.alloplace.com/agent/rules` | Rules: standing instructions for the receptionist | Sidebar > Agent > Rules | Member reads; Admin+ changes | `agent/rules.mdx` | `apps/admin/app/(dashboard)/agent/rules/page.tsx` |
 | `https://demo.alloplace.com/analytics` | Analytics: calls, messages, appointments, response time, channels and outcomes over a chosen period | Sidebar > Manage > Analytics | Member | `dashboard/analytics.mdx` | `apps/admin/app/(dashboard)/analytics/page.tsx` |
@@ -144,9 +145,9 @@ Related files: `apps/admin/src/components/dashboard-shell.tsx`, `apps/admin/src/
 
 **`apps/admin/app/(dashboard)/agent/layout.tsx`**
 
-Wraps every receptionist settings page (`/agent`, knowledge, services, rules) in one shared header. It has no tabs: the dashboard sidebar's agent group is the navigation between these pages.
+Wraps every receptionist settings page (`/agent`, knowledge, questions, services, rules) in one shared header. It has no tabs: the dashboard sidebar's agent group is the navigation between these pages.
 
-- The pages under `/agent`: Renders `AgentShell` (`apps/admin/src/components/agent-shell.tsx`), a client component. It picks the section from the path (`/knowledge`, `/services`, `/rules`, otherwise basic settings) and shows a `PageHeader` with that section's translated title and description. It wraps the page in `NestedPageSurfaceProvider`, which hides each page's own `PageSurface` header so the shell's header is the only one. It checks nothing and loads no data.
+- The pages under `/agent`: Renders `AgentShell` (`apps/admin/src/components/agent-shell.tsx`), a client component. It picks the section from the path (`/knowledge`, `/questions`, `/services`, `/rules`, otherwise basic settings) and shows a `PageHeader` with that section's translated title and description. It wraps the page in `NestedPageSurfaceProvider`, which hides each page's own `PageSurface` header so the shell's header is the only one. It checks nothing and loads no data.
 
 Related files: `apps/admin/src/components/agent-shell.tsx`, `apps/admin/src/components/page-surface.tsx`.
 
@@ -162,7 +163,7 @@ Related files: `apps/admin/src/components/settings-shell.tsx`, `apps/admin/src/c
 
 Home page of the dashboard. It gives operators the current picture for the active business: headline numbers, follow-ups that need action, upcoming appointments, monthly calls and recent calls.
 
-- `GET /`: Renders `LiveOverviewSurface` (`apps/admin/src/components/live-overview-surface.tsx`). It loads `GET /api/dashboard` (KPIs with deltas, monthly calls, recent calls without archived ones, follow-ups, upcoming appointments) and refetches it on realtime call, message, appointment and conversation events (`subscribeRealtimeQuery`). A voice-message follow-up links to `/calls/[callId]`. `CancelAppointmentButton`, shown to scheduler and up, cancels an appointment or approves a caller's cancellation request with `POST /api/appointments/[appointmentId]/cancel`. `DashboardActivationCard` loads `GET /api/activation` and, for a cloud business without a dedicated number, offers a test call, the upgrade dialog or a link to `/settings/phone-number`. For owners and admins it also loads `GET /api/knowledge/questions`; while questions are open, a card under **Action required** links to `/agent/knowledge#unanswered-questions` and counts as one more action (fork PR #105).
+- `GET /`: Renders `LiveOverviewSurface` (`apps/admin/src/components/live-overview-surface.tsx`). It loads `GET /api/dashboard` (KPIs with deltas, monthly calls, recent calls without archived ones, follow-ups, upcoming appointments) and refetches it on realtime call, message, appointment and conversation events (`subscribeRealtimeQuery`). A voice-message follow-up links to `/calls/[callId]`. `CancelAppointmentButton`, shown to scheduler and up, cancels an appointment or approves a caller's cancellation request with `POST /api/appointments/[appointmentId]/cancel`. `DashboardActivationCard` loads `GET /api/activation` and, for a cloud business without a dedicated number, offers a test call, the upgrade dialog or a link to `/settings/phone-number`. For owners and admins it also loads `GET /api/knowledge/questions`; while questions are open, a card under **Action required** links to `/agent/questions` and counts as one more action (fork PR #105; it linked to the Knowledge page until fork PR #107).
 
 Related files: `apps/admin/src/components/live-overview-surface.tsx`, `apps/admin/src/components/dashboard-activation-card.tsx`, `apps/admin/src/components/cancel-appointment-button.tsx`, `apps/admin/app/api/dashboard/route.ts`.
 
@@ -242,9 +243,17 @@ Related files: `apps/admin/app/(dashboard)/agent/page.tsx`, `apps/admin/src/comp
 
 The receptionist's knowledge base: uploaded documents, imported website pages and typed text entries, listed together. business_owner and business_admin add, pause and delete sources here, and cancel a running website import.
 
-- `GET /agent/knowledge`: Renders `LiveKnowledgeSurface` (`apps/admin/src/components/live-knowledge-surface.tsx`). It loads `GET /api/knowledge` (polled every 1.5 s while a document is pending or processing), `GET /api/knowledge/snippets` and, for the **Unanswered Questions** section below the table, `GET /api/knowledge/questions` (fork PR #105); opening a document row loads its text with `GET /api/knowledge/[documentId]`. business_owner and business_admin (client check; the domain functions also require business_admin) can upload a file (`uploadKnowledgeDocument`: `POST /api/uploads`, a PUT to the returned storage URL, `PUT /api/uploads`), import a website (`POST /api/knowledge`, `sourceType: "website"`), add text (`POST /api/knowledge/snippets`), edit, pause or delete it (`PATCH`, `DELETE /api/knowledge/snippets/[snippetId]`), pause or delete a document (`PATCH`, `DELETE /api/knowledge/[documentId]`), and cancel a running import (`action: "cancel"`). `?setup=upload`, `website` or `text` opens that form. Owners and admins answer or dismiss a question (`PATCH /api/knowledge/questions/[questionId]`); `#unanswered-questions`, Home's link, scrolls the section into view once the table has loaded.
+- `GET /agent/knowledge`: Renders `LiveKnowledgeSurface` (`apps/admin/src/components/live-knowledge-surface.tsx`). It loads `GET /api/knowledge` (polled every 1.5 s while a document is pending or processing) and `GET /api/knowledge/snippets`; opening a document row loads its text with `GET /api/knowledge/[documentId]`. business_owner and business_admin (client check; the domain functions also require business_admin) can upload a file (`uploadKnowledgeDocument`: `POST /api/uploads`, a PUT to the returned storage URL, `PUT /api/uploads`), import a website (`POST /api/knowledge`, `sourceType: "website"`), add text (`POST /api/knowledge/snippets`), edit, pause or delete it (`PATCH`, `DELETE /api/knowledge/snippets/[snippetId]`), pause or delete a document (`PATCH`, `DELETE /api/knowledge/[documentId]`), and cancel a running import (`action: "cancel"`). `?setup=upload`, `website` or `text` opens that form. Since fork PR #107 the questions the receptionist couldn't answer have their own page, `/agent/questions`, and this page no longer loads them.
 
 Related files: `apps/admin/src/components/live-knowledge-surface.tsx`, `apps/admin/src/lib/storage-upload.ts`, `apps/admin/app/api/knowledge/[documentId]/route.ts`, `packages/domain/src/server/knowledge.ts`.
+
+**`apps/admin/app/(dashboard)/agent/questions/page.tsx`**
+
+The questions the receptionist couldn't answer, on their own page since fork PR #107 (before, a section at the bottom of the Knowledge page). business_owner and business_admin answer or dismiss them here.
+
+- `GET /agent/questions`: Renders `LiveQuestionsSurface` (`apps/admin/src/components/live-questions-surface.tsx`), which shows `UnansweredQuestionsSection` (`apps/admin/src/components/unanswered-questions-section.tsx`) for the active business. It loads `GET /api/knowledge/questions`: the open questions, most asked first, up to 50, and how many are open. business_owner and business_admin (client check; the domain functions also require business_admin) answer a question, which adds a text entry titled with it, or dismiss it (`PATCH /api/knowledge/questions/[questionId]`); after an answer the list and the Knowledge page's text entries reload. A question someone else resolved first shows a notice and reloads the list. Schedulers and viewers see the list without the buttons. Without a business, the page shows the receptionist pages' empty message.
+
+Related files: `apps/admin/src/components/unanswered-questions-section.tsx`, `apps/admin/src/components/agent-shell.tsx` (the page title), `apps/admin/src/components/dashboard-shell.tsx` (the sidebar item), `apps/admin/app/api/knowledge/questions/route.ts`, `packages/domain/src/server/unansweredQuestions.ts`.
 
 **`apps/admin/app/(dashboard)/agent/services/page.tsx`**
 
@@ -1330,15 +1339,15 @@ Related files: `packages/domain/src/server/knowledge.ts`, `apps/admin/src/compon
 
 **`apps/admin/app/api/knowledge/questions/route.ts`**
 
-Lists the business's open unanswered questions for the Knowledge screen's **Unanswered Questions** section and Home's card (fork PR #105, [unanswered questions](../features/unanswered-questions.md)).
+Lists the business's open unanswered questions for the Questions page (`/agent/questions`, fork PR #107) and Home's card (fork PR #105, [unanswered questions](../features/unanswered-questions.md)).
 
 - `GET /api/knowledge/questions`: Any member: `requireOperatorBusiness`, then `requireBusinessMembership` inside `listOpenUnansweredQuestions` (`packages/domain/src/server/unansweredQuestions.ts`). Changes nothing. Answers 200 `{ questions, openCount }`: up to 50 open `unanswered_questions` rows, most asked first, then most recently asked, each with `id`, `question`, `timesAsked`, `firstAskedAt`, `lastAskedAt`, `lastChannel`, `lastCallId` and `lastConversationId`, and the count of every open one. Home asks only for owners and admins.
 
-Related files: `packages/domain/src/server/unansweredQuestions.ts`, `apps/admin/src/components/unanswered-questions-section.tsx`, `apps/admin/src/components/live-overview-surface.tsx`.
+Related files: `packages/domain/src/server/unansweredQuestions.ts`, `apps/admin/src/components/unanswered-questions-section.tsx`, `apps/admin/src/components/live-questions-surface.tsx`, `apps/admin/src/components/live-overview-surface.tsx`.
 
 **`apps/admin/app/api/knowledge/questions/[questionId]/route.ts`**
 
-Answers or dismisses one open question from the Knowledge screen (fork PR #105).
+Answers or dismisses one open question from the Questions page (fork PR #105; the page since fork PR #107).
 
 - `PATCH /api/knowledge/questions/{questionId}`: Requires business_admin or higher, checked by `requireBusinessAdmin` inside each domain call (`packages/domain/src/server/unansweredQuestions.ts`); `requireOperatorBusiness` picks the business. `action: "answer"` needs a non-empty `answer` (400 otherwise, and 400 `answer_too_long` past 5,000 characters); `answerUnansweredQuestion` locks the row, adds a text entry titled with the question through `createKnowledgeSnippetInTransaction`, which queues the snapshot refresh like any new entry, and marks the question answered. Answers 200 `{ snippetId }`. `action: "dismiss"` marks it dismissed and answers 200 `{ ok: true }`. Any other `action` is 400. A question the business doesn't have, or an id that isn't a UUID, is 404 `not_found`; one already answered or dismissed is 409 `question_resolved`.
 

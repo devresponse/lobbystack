@@ -449,6 +449,12 @@
       "comparison": "frozen-main"
     },
     {
+      "path": "/agent/questions",
+      "fixtureState": "operator",
+      "state": "default",
+      "comparison": "port-baseline"
+    },
+    {
       "path": "/agent/services",
       "fixtureState": "operator",
       "state": "default",

@@ -17,7 +17,7 @@ import { UnansweredQuestionsSection, unansweredQuestionsQueryKey, type Unanswere
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
 const clients: QueryClient[] = [];
-afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); window.history.replaceState(null, "", "/"); });
+afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 const listed: UnansweredQuestions = {
   openCount: 2,
@@ -27,8 +27,8 @@ const listed: UnansweredQuestions = {
   ],
 };
 
-type Setup = { strings?: typeof en; data?: UnansweredQuestions; canManage?: boolean; locale?: "en" | "fr" | "es" | "sr"; patch?: () => Response; layoutSettled?: boolean; cached?: boolean };
-async function setup({ strings = en, data = listed, canManage = true, locale = "en", patch = () => Response.json({ ok: true }), layoutSettled, cached = true }: Setup = {}) {
+type Setup = { strings?: typeof en; data?: UnansweredQuestions; canManage?: boolean; locale?: "en" | "fr" | "es" | "sr"; patch?: () => Response; cached?: boolean };
+async function setup({ strings = en, data = listed, canManage = true, locale = "en", patch = () => Response.json({ ok: true }), cached = true }: Setup = {}) {
   const i18n = createInstance();
   await i18n.init({ lng: locale, defaultNS: "knowledge", interpolation: { escapeValue: false }, resources: { en: { knowledge: strings, common: enCommon }, fr: { knowledge: fr }, es: { knowledge: es }, sr: { knowledge: sr } } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
@@ -36,13 +36,12 @@ async function setup({ strings = en, data = listed, canManage = true, locale = "
   if (cached) client.setQueryData(unansweredQuestionsQueryKey("business"), data);
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => init?.method ? patch() : Response.json(data));
   vi.stubGlobal("fetch", fetchMock);
-  const view = (settled?: boolean) => <I18nextProvider i18n={i18n}><QueryClientProvider client={client}><UnansweredQuestionsSection businessId="business" canManage={canManage} {...(settled === undefined ? {} : { layoutSettled: settled })} /></QueryClientProvider></I18nextProvider>;
-  const { rerender } = render(view(layoutSettled));
-  return { fetchMock, i18n, client, settle: () => rerender(view(true)), rerender: (settled: boolean) => rerender(view(settled)) };
+  render(<I18nextProvider i18n={i18n}><QueryClientProvider client={client}><UnansweredQuestionsSection businessId="business" canManage={canManage} /></QueryClientProvider></I18nextProvider>);
+  return { fetchMock, i18n, client };
 }
 const listRequests = (fetchMock: ReturnType<typeof vi.fn>) => fetchMock.mock.calls.filter(([, init]) => !(init as RequestInit | undefined)?.method);
 
-describe("unanswered questions on the knowledge page", () => {
+describe("the unanswered questions list", () => {
   it("lists open questions in the order the server ranks them, with how often and when they were last asked", async () => {
     await setup();
     expect(screen.getAllByText(/\?$/u).map((element) => element.textContent)).toEqual(["Do you validate parking?", "Can I bring my dog?"]);
@@ -127,35 +126,10 @@ describe("unanswered questions on the knowledge page", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith(enCommon.errors.unexpected));
   });
 
-  it("scrolls into view once, after the content above it loads, when the page opens on its anchor", async () => {
-    window.history.replaceState(null, "", "/agent/knowledge#unanswered-questions");
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    const { settle, rerender } = await setup({ layoutSettled: false });
-    expect(scrollIntoView).not.toHaveBeenCalled();
-    settle();
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-    expect(scrollIntoView.mock.contexts[0]).toBe(document.getElementById("unanswered-questions"));
-    rerender(false);
-    rerender(true);
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-  });
-
-  it("waits for its own list before scrolling", async () => {
-    window.history.replaceState(null, "", "/agent/knowledge#unanswered-questions");
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    await setup({ cached: false });
-    expect(scrollIntoView).not.toHaveBeenCalled();
-    await screen.findByText("Do you validate parking?");
-    expect(scrollIntoView).toHaveBeenCalledTimes(1);
-  });
-
-  it("leaves the scroll alone without its anchor", async () => {
-    const scrollIntoView = vi.fn();
-    Element.prototype.scrollIntoView = scrollIntoView;
-    await setup();
-    expect(scrollIntoView).not.toHaveBeenCalled();
+  it("loads its business's list when nothing is cached", async () => {
+    const { fetchMock } = await setup({ cached: false });
+    expect(await screen.findByText("Do you validate parking?")).toBeTruthy();
+    expect(listRequests(fetchMock).map(([url]) => url)).toEqual(["/api/knowledge/questions?businessId=business"]);
   });
 
   it("shows teammates who can't edit knowledge the questions without actions", async () => {

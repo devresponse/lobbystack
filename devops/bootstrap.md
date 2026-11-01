@@ -157,7 +157,7 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 
 When a step fails, the script stops, names the step, and lists **What to try** for that failure: for example, which token was refused and what kind it must be, a network or proxy problem, a provider's status page, or a workaround for that step. Finished steps stay recorded, so fix the problem and run the same command again.
 
-Each run is also written to `.env.bootstrap-<name>.log`: everything the script printed, with the time, plus each API call (service, method, path, answer and time taken). Headers and bodies are never written, and known secrets and anything shaped like a provider key show as `‹hidden›`, so the log can be shared when asking for help. Read it, or run again with `--verbose` to see the calls as they happen.
+Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstrap-<name>.log` (`status` only reads, so it writes nothing): everything the script printed, with the time, plus each API call (service, method, path, answer and time taken). Headers and bodies are never written, and known secrets and anything shaped like a provider key show as `‹hidden›`, so the log can be shared when asking for help. Read it, or run again with `--verbose` to see the calls as they happen.
 
 | You see | Do this |
 | --- | --- |

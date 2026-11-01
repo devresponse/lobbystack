@@ -55,7 +55,7 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `REPO`, `BRANCH` | `realinfobot/lobbystack`, `main` | What Railway builds |
 | `DEPLOYMENT_MODE` | `cloud` | Or `self_hosted_standard`. Decision 1 of the guide: hard to change once businesses exist |
 | `OPERATOR_EMAIL` | `you@example.com` | Owns the platform key, and gets the DMARC reports |
-| `RAILWAY_WORKSPACE_ID` | | Empty: your personal workspace |
+| `RAILWAY_WORKSPACE_ID` | the workspace's ID | Needed to make the project: Railway refuses a new project without a workspace. Find it in Railway under the workspace's **Settings**, **General** tab (Workspace ID, with a copy button), or run `doctor`, which lists the workspaces your token reaches. Can stay empty only if the project already exists |
 | `BUCKET_REGION` | `iad` | `sjc`, `iad`, `ams` or `sin`. It never changes |
 | `CUSTOM_HOST` | `test.realinfobot.com` | Optional. Empty: Railway's free address with `BRAND_PRESET` |
 | `EMAIL_DOMAIN`, `EMAIL_FROM` | `notifications.realinfobot.com`, `no-reply@notifications.realinfobot.com` | The subdomain kept for email, and the sender on it |
@@ -161,6 +161,7 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 
 | You see | Do this |
 | --- | --- |
+| `You must specify a workspaceId to create a project`, or `RAILWAY_WORKSPACE_ID is empty` | Put the workspace's ID in `RAILWAY_WORKSPACE_ID` (the error lists the ones your token reaches, and so does `doctor`), then run `up` again. It carries on at `railway.project` |
 | `didn't accept RAILWAY_API_TOKEN` (or another token) | Run `doctor`. Copy the token again in full. Railway needs an account or workspace token, not a project token; OpenAI an admin key; Resend a Full access key; Twilio the main account's Auth Token |
 | `isn't allowed to do this` | The token works but lacks a permission: Cloudflare needs **DNS Edit** on the zone and **Turnstile Edit** on the account; Twilio must be upgraded from trial |
 | `can't see a zone named ...` | Check that `CLOUDFLARE_ZONE` is the domain name, such as `realinfobot.com`, and not the Zone ID. If it is, edit the token in Cloudflare (My Profile, API Tokens) so its Zone Resources include that zone |

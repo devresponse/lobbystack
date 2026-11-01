@@ -84,7 +84,10 @@ BRANCH=main
 DEPLOYMENT_MODE=self_hosted_standard
 # The operator's email: the platform key's owner, and DMARC reports.
 OPERATOR_EMAIL=
-# Optional: a Railway workspace ID. Empty: your personal workspace.
+# The ID of the Railway workspace the project goes in. Railway refuses to make a project without
+# one, so fill it in unless the project already exists. Find it in Railway under the workspace's
+# Settings, General tab (Workspace ID, with a copy button), or run doctor, which lists the
+# workspaces your token can reach. A workspace token reaches only its own workspace.
 RAILWAY_WORKSPACE_ID=
 # The bucket's region, which never changes: sjc, iad, ams or sin.
 BUCKET_REGION=iad
@@ -937,6 +940,7 @@ async function dnsRecords(run, records) {
 const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
   project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
+  workspaces: "query workspaces { me { workspaces { id name } } }",
   projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name } } } }",
   domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
   readVariables: "query variables($projectId: String!, $environmentId: String!, $serviceId: String!) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true) }",
@@ -966,6 +970,19 @@ async function projectView(run, id = v(run, "RAILWAY_PROJECT_ID")) {
     volumes: project.volumes.edges.flatMap(({ node }) => node.volumeInstances.edges.map(({ node: instance }) => instance)),
     buckets: project.buckets.edges.map(({ node }) => node.name),
   };
+}
+
+/** The workspaces the Railway token can reach, as a sentence for an error or doctor. */
+async function workspaceList(auth) {
+  try {
+    const data = auth
+      ? (await http("Railway", URLS.railway, { method: "POST", headers: { Authorization: `Bearer ${auth}` }, body: { query: Q.workspaces } }))?.data
+      : await railway(Q.workspaces);
+    const list = data?.me?.workspaces ?? [];
+    if (list.length === 1) return `Put RAILWAY_WORKSPACE_ID=${list[0].id} (${list[0].name}) in the settings file.`;
+    if (list.length) return `Put one of these in the settings file as RAILWAY_WORKSPACE_ID: ${list.map((item) => `${item.id} (${item.name})`).join(", ")}.`;
+  } catch {}
+  return "Copy it from the workspace's Settings, General tab in Railway (Workspace ID).";
 }
 
 /** This run's Railway project if it exists, by its saved ID or by name; never creates it. */
@@ -1012,6 +1029,7 @@ async function railwaySteps(run) {
     if (!v(run, "RAILWAY_PROJECT_ID")) {
       const existing = await findProject(run);
       if (existing) console.log(`  found the project ${s.NAME}; using it`);
+      if (!existing && !s.RAILWAY_WORKSPACE_ID) throw new Error(`RAILWAY_WORKSPACE_ID is empty, and Railway needs it to make a project. ${await workspaceList()}`);
       const id = existing ?? (await railway(Q.projectCreate, { input: { name: s.NAME, defaultEnvironmentName: s.ENVIRONMENT, ...(s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {}) } })).projectCreate.id;
       run.state.values.RAILWAY_PROJECT_ID = id;
       save(run);
@@ -1441,7 +1459,7 @@ function hints(error) {
   } else if (error.status >= 500 || (!error.status && /problem processing request|internal server error|timed? ?out/i.test(message))) {
     tips.push(`${error.service ?? "The service"} had a problem on its side. Run the same command again in a few minutes${provider ? `, and check ${provider.status}` : ""}.`);
   }
-  if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: workspace settings), and use a token that can reach it.");
+  if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: the workspace's Settings, General tab, Workspace ID; doctor lists them), and use a token that can reach it.");
   if (/no valid value given/.test(message)) tips.push("The script needed a value and got none. Put it in the secrets file (see init), or run in a terminal where you can type it.");
   if (currentStep === "resend.key") tips.push("If Resend won't make a key limited to one domain, make a Sending access key for the domain at https://resend.com/api-keys, put it as SMTP_PASSWORD in the secrets file, and run again.");
   if (currentStep === "railway.domain") tips.push("Railway may not give an address before the service's first deploy. Run up again once the admin has deployed once (guide Appendix D).");
@@ -1513,6 +1531,10 @@ async function doctor(run) {
     if (json?.errors?.length) throw Object.assign(new Error(json.errors.map((item) => item.message).join("; ")), { service: "Railway", graphql: json.errors });
     return s.RAILWAY_WORKSPACE_ID ? `workspace ${json.data.workspace.name}` : "your account";
   });
+  if (!s.RAILWAY_WORKSPACE_ID && !run.state.done["railway.project"]) {
+    const value = quietGiven("RAILWAY_API_TOKEN");
+    fix(`RAILWAY_WORKSPACE_ID is empty, and Railway needs it to make a project. ${value ? await workspaceList(value) : "Copy it from the workspace's Settings, General tab in Railway (Workspace ID)."}`);
+  }
   const openaiGiven = config?.flat.OPENAI_API_KEY || config?.flat.OPENAI_PROJECT_ID;
   if (s.STEP_OPENAI && !openaiGiven && !run.state.done["openai.key"]) {
     await check("OpenAI", "OPENAI_ADMIN_KEY", async (value) => {

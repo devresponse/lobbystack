@@ -6,7 +6,8 @@ export const BRAND_INDEX: BrandIndex = {
   "default": "lobbystack",
   "domains": {
     "alloplace.ai": "alloplace",
-    "alloplace.com": "alloplace"
+    "alloplace.com": "alloplace",
+    "realinfobot.com": "realinfobot"
   }
 };
 
@@ -65,17 +66,147 @@ export const BRANDS: Record<string, BrandDefinition> = {
       "makeUrl": null
     },
     "environments": []
+  },
+  "realinfobot": {
+    "id": "realinfobot",
+    "appName": "RealInfoBot",
+    "logoUrl": "/brand/realinfobot/logo.svg?v=5614ff37c8c5",
+    "emailLogo": {
+      "url": "/brand/realinfobot/logo-email.png?v=d0d4ad554d3b",
+      "width": 96,
+      "height": 96
+    },
+    "ogImage": {
+      "url": "/brand/realinfobot/og.png?v=e28d64e06fb2",
+      "width": 1200,
+      "height": 630
+    },
+    "accentColor": "#f07423",
+    "links": {
+      "siteUrl": "https://realinfobot.com",
+      "termsUrl": "https://realinfobot.com/legal/terms",
+      "privacyUrl": "https://realinfobot.com/legal/privacy",
+      "docsUrl": "https://realinfobot.com",
+      "contactEmail": "support@realinfobot.com",
+      "zapierUrl": null,
+      "makeUrl": null
+    },
+    "environments": [
+      {
+        "pattern": "dev*",
+        "appNameSuffix": " (dev)",
+        "indexing": false
+      },
+      {
+        "pattern": "test*",
+        "appNameSuffix": " (test)",
+        "indexing": false
+      }
+    ]
   }
 };
 
 /** The SHA-256 of each brand's normalized billing.json, which a catalog apply compares with the file it is sent. */
 export const BILLING_PROFILE_HASHES: Record<string, string> = {
-  "alloplace": "d12ba70a16c72e59d5894b6071ef657803b9ec77f2dad2aa567363105ff6e72b"
+  "alloplace": "d12ba70a16c72e59d5894b6071ef657803b9ec77f2dad2aa567363105ff6e72b",
+  "realinfobot": "d12ba70a16c72e59d5894b6071ef657803b9ec77f2dad2aa567363105ff6e72b"
 };
 
 /** The four standard plans of each brand's billing.json, which a deployment shows and enforces until its first catalog apply. */
 export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
   "alloplace": [
+    {
+      "code": "free_cloud",
+      "sold": false,
+      "custom": false,
+      "overage": false,
+      "voice_sec": 1800,
+      "sms_seg": 10,
+      "calls_out": 2,
+      "chat_units": 5,
+      "kb_bytes": 1048576,
+      "numbers": 0,
+      "voice_rate": null,
+      "sms_rate": null,
+      "call_rate": null,
+      "sort": 10,
+      "prices": []
+    },
+    {
+      "code": "starter",
+      "sold": true,
+      "custom": false,
+      "overage": true,
+      "voice_sec": 9000,
+      "sms_seg": 50,
+      "calls_out": 20,
+      "chat_units": 50,
+      "kb_bytes": 5242880,
+      "numbers": 1,
+      "voice_rate": 20,
+      "sms_rate": 2,
+      "call_rate": 2,
+      "sort": 20,
+      "prices": [
+        {
+          "period": "annual",
+          "currency": "cad",
+          "cents": 37000
+        },
+        {
+          "period": "monthly",
+          "currency": "cad",
+          "cents": 3700
+        }
+      ]
+    },
+    {
+      "code": "pro",
+      "sold": true,
+      "custom": false,
+      "overage": true,
+      "voice_sec": 30000,
+      "sms_seg": 200,
+      "calls_out": 100,
+      "chat_units": 200,
+      "kb_bytes": 20971520,
+      "numbers": 1,
+      "voice_rate": 18,
+      "sms_rate": 2,
+      "call_rate": 2,
+      "sort": 30,
+      "prices": [
+        {
+          "period": "annual",
+          "currency": "cad",
+          "cents": 87000
+        },
+        {
+          "period": "monthly",
+          "currency": "cad",
+          "cents": 8700
+        }
+      ]
+    },
+    {
+      "code": "enterprise",
+      "sold": false,
+      "custom": true,
+      "overage": true,
+      "voice_sec": null,
+      "sms_seg": null,
+      "calls_out": null,
+      "chat_units": null,
+      "kb_bytes": null,
+      "numbers": null,
+      "voice_rate": null,
+      "sms_rate": null,
+      "call_rate": null,
+      "sort": 40,
+      "prices": []
+    }
+  ],
+  "realinfobot": [
     {
       "code": "free_cloud",
       "sold": false,

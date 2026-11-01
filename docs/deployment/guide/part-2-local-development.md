@@ -1,6 +1,6 @@
 # Part 2. Local development and testing
 
-**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac.
+**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac. [2.6](#26-sign-in-for-the-first-time-and-create-a-test-business)'s brand line was updated on 2026-11-01 for fork PR #112, from the code only.
 
 This part puts a complete LobbyStack on your own computer. It's the safest place to learn how LobbyStack works and to try changes, because nothing you do here reaches real customers. There are two ways to run it:
 
@@ -141,7 +141,7 @@ Two things to know about Way B:
 2. Sign up at `http://localhost:13000/en/signup`. The password needs at least 8 characters, a number and a special character. No captcha appears on your computer.
 3. The next page asks for a 6-digit code sent by email. Without an email setup it never arrives. Go to `http://localhost:13000/en/login` instead, and sign in with the same email and password. This works because your settings don't require a verified email.
 4. Onboarding walks you through these steps:
-   1. Your business's name. The app is already AlloPlace, the only brand in the code besides LobbyStack, so nothing asks you to name it. A copy older than fork PR #87, or one with no brand of its own, first shows **Make this app your own** ([6.2](part-6-first-run.md#62-the-brand-step)).
+   1. Your business's name. The app is already AlloPlace, which `BRAND_PRESET=alloplace` in `.env` picks, so nothing asks you to name it. With `BRAND_PRESET` empty, the app shows LobbyStack and first asks for a name and logo in **Make this app your own** ([6.2](part-6-first-run.md#62-the-brand-step)), because the code has two brands besides LobbyStack, AlloPlace and RealInfoBot (fork PR #112), and nothing says which one `localhost` means.
    2. Your website, or **I don't have a website**. Importing a website needs a Firecrawl key.
    3. Knowledge: **Skip for now**.
    4. The greeting callers hear.

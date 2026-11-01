@@ -11,7 +11,8 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
   "default": "lobbystack",
   "domains": {
     "alloplace.com": "alloplace",
-    "alloplace.ai": "alloplace"
+    "alloplace.ai": "alloplace",
+    "realinfobot.com": "realinfobot"
   }
 }
 ```
@@ -44,16 +45,16 @@ A brand folder can also hold a `billing.json`: the plans the brand sells, their 
 
 The admin and the worker resolve the brand once when they start (`packages/shared/src/brands/resolve.ts`):
 
-1. The brand whose domain the host of `APP_BASE_URL` sits under. `dev01.alloplace.com`, `demo.alloplace.com` and `alloplace.com` all get AlloPlace. Domains match whole labels, so `notalloplace.com` doesn't.
+1. The brand whose domain the host of `APP_BASE_URL` sits under. `dev01.alloplace.com`, `demo.alloplace.com` and `alloplace.com` all get AlloPlace, and any address under `realinfobot.com` gets RealInfoBot. Domains match whole labels, so `notalloplace.com` doesn't.
 2. Where no brand claims the domain, `BRAND_PRESET`, which names a folder, such as `alloplace` or `lobbystack`. Use it on `localhost` and on platform addresses such as `*.up.railway.app` to pick another brand than step 3 would, or one among several. On a claimed domain it has no effect, and both services log `brand.preset_ignored` at start.
-3. Where neither picks one, the only brand under `brands/` besides the default, if there's exactly one. This repository has one, AlloPlace, so `localhost` and Railway's addresses show AlloPlace with no `BRAND_PRESET`, and `BRAND_PRESET=lobbystack` shows LobbyStack there instead. With two or more brands besides the default, nothing says which one an address means, so this step picks none.
+3. Where neither picks one, the only brand under `brands/` besides the default, if there's exactly one. With two or more, nothing says which one an address means, so this step picks none. This repository has two since fork PR #112, AlloPlace and RealInfoBot, so `localhost` and Railway's addresses show LobbyStack unless `BRAND_PRESET` names a brand. `.env.example` sets `BRAND_PRESET=alloplace`, so local development still shows AlloPlace.
 4. Otherwise the default brand, LobbyStack: in a copy of the code with no brand of its own, or with several and none picked. Only then does the choice the first owner saved in onboarding, one row in `public.deployment_branding`, set the name and logo.
 
 Earlier releases let `BRAND_APP_NAME`, `BRAND_LOGO_URL`, `BRAND_ACCENT_COLOR`, `NEXT_PUBLIC_LANDING_SITE_URL`, `NEXT_PUBLIC_TERMS_URL`, `NEXT_PUBLIC_PRIVACY_URL`, `NEXT_PUBLIC_DOCS_SITE_URL` and `NEXT_PUBLIC_CONTACT_EMAIL` override the brand file. They no longer do anything, so put their values in a brand folder.
 
 When the matched host's first label matches an `environments` pattern, its settings apply: `appNameSuffix` is added to the name everywhere, emails and texts included, and `"indexing": false` keeps search engines away from every page.
 
-At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`, or `[brand] alloplace (only brand), shown as AlloPlace` on an address no brand claims. In production it also logs `brand.unmatched` when the default brand stands in because no brand claims the address, and `brand.base_url_missing` when it stands in because `APP_BASE_URL` is missing or isn't a URL. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked: `apex`, `preset`, `only` or `default`.
+At start, each service logs the brand it picked, such as `[brand] alloplace (apex alloplace.com), shown as AlloPlace`, or `[brand] alloplace (preset), shown as AlloPlace` on an address no brand claims. In production it also logs `brand.unmatched` when the default brand stands in because no brand claims the address, and `brand.base_url_missing` when it stands in because `APP_BASE_URL` is missing or isn't a URL. Set `BRAND_REQUIRED=true` to make the admin and worker refuse to start instead. The admin's `/api/health/ready` reports the brand's id and how it was picked: `apex`, `preset`, `only` or `default`.
 
 ### Add a brand
 
@@ -64,7 +65,7 @@ At start, each service logs the brand it picked, such as `[brand] alloplace (ape
 
 ### The onboarding step
 
-On a deployment that shows the default brand ([step 4](#how-a-deployment-picks-its-brand)), the first owner sees a **Make this app your own** step before naming their business. It never appears where a brand file applies, the only brand besides the default included, and `POST /api/branding/initial` answers 409 there. With AlloPlace as this repository's only brand besides LobbyStack, that's every deployment: the step comes back only in a copy with no brand of its own, or with several and none picked. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice. A row saved before a brand file applied stays in the table but no longer shows.
+On a deployment that shows the default brand ([step 4](#how-a-deployment-picks-its-brand)), the first owner sees a **Make this app your own** step before naming their business. It never appears where a brand file applies, the only brand besides the default included, and `POST /api/branding/initial` answers 409 there. With AlloPlace and RealInfoBot both in this repository, it appears only on an address no brand claims, such as `localhost` or Railway's, while `BRAND_PRESET` is empty, and in a copy with no brand of its own. The owner can type a name, upload a logo, or skip. Skipping saves an empty row, which keeps LobbyStack and ends the choice. A row saved before a brand file applied stays in the table but no longer shows.
 
 The step is shown only when both of these are true. `app.can_save_initial_branding()` checks them in the database, and `app.save_initial_branding()` checks them again when the choice is saved:
 
@@ -124,7 +125,7 @@ The admin also links to pages outside itself: the website, the terms of service 
 | Zapier integration | `links.zapier` | None. The original project's integration connects to its own hosted dashboard, so a brand gets no Zapier link but its own. |
 | Make app | `links.make` | None. A brand gets a Make card only for its own app. |
 
-**Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all six, with alloplace.com's home page standing in for docs and its Zapier integration's invite link (fork PR #94).
+**Give every deployment a brand file with its own links.** Where the `lobbystack` brand applies, by `BRAND_PRESET=lobbystack` or as the default, these links go to the original project's website, docs and inboxes, which this fork doesn't control (`brands/lobbystack/brand.json` and the defaults in `packages/shared/src/brandLinks.ts`). AlloPlace's brand file sets all six, with alloplace.com's home page standing in for docs and its Zapier integration's invite link (fork PR #94). RealInfoBot's sets the website, terms, privacy policy, docs and contact address, with realinfobot.com's home page standing in for docs (fork PR #112). It has no Zapier integration or Make app yet, so its **Integrations** page shows neither card. realinfobot.com sends a path without a country, such as `/legal/terms`, on to the visitor's `/ca` or `/us` page, so its links name no country.
 
 Where each one appears:
 
@@ -139,13 +140,13 @@ Where each one appears:
 
 `next.config.ts` writes the address and preset the brand comes from into the admin's build, both the browser's code and the server's, as `NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`. The server and the browser always agree, and a change takes a rebuild. When the admin starts with an `APP_BASE_URL` or `BRAND_PRESET` that would pick another brand than its build did, it logs `brand.build_mismatch`: rebuild it.
 
-alloplace.com has no docs yet, so AlloPlace's docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
+alloplace.com and realinfobot.com have no docs yet, so each brand's docs links open its home page, and the MCP metadata's `/ai/mcp` page doesn't exist there.
 
 `packages/shared/src/brandLinks.ts` holds the checks and LobbyStack's defaults. `apps/admin/src/lib/marketing-site-url.ts` builds the website, terms, and privacy links.
 
 ## Color the public pages
 
-Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, gets black text. Without it, the pages use the website widget's default teal, `#0f766e`.
+Businesses' public profile pages put one color behind the chat, or behind the call card when a business has no chat, and on today's row of the opening hours. The brand file's `accentColor` sets it. Text on it is black or white, whichever contrasts more, so AlloPlace's yellow, `#FFD100`, and RealInfoBot's orange, `#F07423`, both get black text. Without it, the pages use the website widget's default teal, `#0f766e`.
 
 ## How it works
 
@@ -197,6 +198,15 @@ These places still say LobbyStack or link to the original project's sites. Varia
 | Zapier | The integration's logo in Zapier's developer dashboard, and its name, default address and help link when it's pushed some other way than `npm run push` | `npm run push -- --brand <id> --url <dashboard>` (fork PR #94) takes the name from the brand file and points the default address and help link at the dashboard; the brand registers the integration under that name on its own Zapier account and uploads the logo there (`integrations/zapier/README.md`). |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |
+
+### Still AlloPlace's
+
+Two things look as AlloPlace designed them whichever brand applies, so a RealInfoBot deployment shows them too:
+
+| Area | Where | Proposed setting |
+| --- | --- | --- |
+| Website widget's call button | "Say Allo!", a play on AlloPlace's name, and in the other languages "Dites Allo !", "¡Diga Allo!" and "Recite Allo!" (`chat.voiceStart` in `apps/admin/public/locales/*/widget.json`) | Words without a brand's name, or a label from the brand file |
+| QR codes and printed signs | The yellow plate behind the name in the middle of each QR code (`QR_PLATE_COLOR`, `#FFD100`, in `apps/admin/src/lib/qr-code.ts`), and the three printed sign templates in AlloPlace's Cadre style, in the same yellow (`apps/admin/src/components/qr-code/qr-code-sign.tsx`, previewed in `live-qr-code-settings-surface.tsx`) | The brand's `accentColor`, as [public profile pages](#color-the-public-pages) use it |
 
 ### Writing translations that use the name
 

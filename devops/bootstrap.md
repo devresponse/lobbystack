@@ -4,6 +4,8 @@
 
 **Status:** tested on 1 November 2026 against stand-ins for every API it calls, with the requests checked against each provider's documentation. It hasn't run against the real services yet. Run it on a test environment first, and read [What isn't confirmed](#what-isnt-confirmed).
 
+**Which guide:** the section numbers here and in the script's messages, such as "guide 3.6" or "Appendix A.1", are those of the single-deployment Railway guide that ships with a white-label fork's deployment kit. That guide isn't in this repository. In this repository's [deployment guide](../docs/deployment/guide/README.md), the same ground is [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (the test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables).
+
 ## What it does, and what stays with you
 
 | Step | The script | You |

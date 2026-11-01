@@ -1,10 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn(), appBaseUrl: "http://localhost", unbranded: true }));
+const fixture = vi.hoisted(() => ({ save: vi.fn(), forget: vi.fn(), load: vi.fn(), appBaseUrl: "http://localhost", preset: null as string | null, unbranded: true, oneBrand: false }));
 vi.mock("@lobbystack/shared", async (importOriginal) => {
   const shared = await importOriginal<typeof import("@lobbystack/shared")>();
-  // An unbranded copy of the code has no brand besides LobbyStack, so the first owner may choose.
-  return { ...shared, currentBrand: () => fixture.unbranded ? { ...shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: "lobbystack" }), source: "default" } : shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl }) };
+  return {
+    ...shared,
+    currentBrand: () => {
+      // An unbranded copy of the code has no brand besides LobbyStack, so the first owner may choose.
+      if (fixture.unbranded) return { ...shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: "lobbystack" }), source: "default" };
+      // A copy with one brand besides LobbyStack shows it on every address.
+      if (fixture.oneBrand) return { ...shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: "alloplace" }), source: "only" };
+      return shared.resolveBrand({ appBaseUrl: fixture.appBaseUrl, preset: fixture.preset });
+    },
+  };
 });
 vi.mock("@lobbystack/domain", () => ({ saveInitialBranding: fixture.save }));
 vi.mock("@/lib/api-helpers", () => ({
@@ -27,7 +35,7 @@ beforeEach(() => {
   fixture.save.mockResolvedValue(undefined);
   fixture.load.mockResolvedValue({ appName: "Acme Desk", logoUrl: "/api/branding/logo?v=abc" });
 });
-afterEach(() => { vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; fixture.unbranded = true; });
+afterEach(() => { vi.clearAllMocks(); fixture.appBaseUrl = "http://localhost"; fixture.preset = null; fixture.unbranded = true; fixture.oneBrand = false; });
 
 describe("initial branding route", () => {
   it("saves the name and the decoded logo, then answers with what pages now show", async () => {
@@ -49,10 +57,26 @@ describe("initial branding route", () => {
 
   it("refuses on an address no brand claims when the code has one brand besides LobbyStack", async () => {
     fixture.unbranded = false;
+    fixture.oneBrand = true;
     const response = await post(JSON.stringify({ appName: "Acme Desk" }));
     expect(response.status).toBe(409);
     expect(await response.json()).toMatchObject({ code: "branding_set_by_brand_file" });
     expect(fixture.save).not.toHaveBeenCalled();
+  });
+
+  it("refuses on an address no brand claims when BRAND_PRESET names a brand", async () => {
+    fixture.unbranded = false;
+    fixture.preset = "realinfobot";
+    const response = await post(JSON.stringify({ appName: "Acme Desk" }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "branding_set_by_brand_file" });
+    expect(fixture.save).not.toHaveBeenCalled();
+  });
+
+  it("lets the first owner choose on an address no brand claims when the code has several brands besides LobbyStack and none is picked", async () => {
+    fixture.unbranded = false;
+    expect((await post(JSON.stringify({ appName: "Acme Desk" }))).status).toBe(200);
+    expect(fixture.save).toHaveBeenCalledWith({ db: {} }, { userId: "owner", appName: "Acme Desk", logo: null });
   });
 
   it("saves neither field when the owner skips", async () => {

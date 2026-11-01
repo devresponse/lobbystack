@@ -33,8 +33,13 @@ describe("brandingMetadata", () => {
     expect(brandingMetadata(branding).robots).toEqual({ index: false, follow: false });
   });
 
-  it("gives an address no brand claims the only brand's preview", () => {
-    expect(brandingMetadata(branding).openGraph).toMatchObject({ images: [{ url: expect.stringMatching(/^http:\/\/localhost\/brand\/alloplace\/og\.png\?v=/) }] });
+  it("gives an address no brand claims the preview of the brand BRAND_PRESET names", () => {
+    fixture.preset = "realinfobot";
+    expect(brandingMetadata({ appName: "RealInfoBot", logoUrl: null }).openGraph).toMatchObject({ siteName: "RealInfoBot", images: [{ url: expect.stringMatching(/^http:\/\/localhost\/brand\/realinfobot\/og\.png\?v=/), alt: "RealInfoBot" }] });
+  });
+
+  it("adds no preview on an address no brand claims without BRAND_PRESET, since LobbyStack stands in", () => {
+    expect(brandingMetadata({ appName: "LobbyStack", logoUrl: null })).not.toHaveProperty("openGraph");
   });
 
   it("adds no preview for a brand without a share image", () => {

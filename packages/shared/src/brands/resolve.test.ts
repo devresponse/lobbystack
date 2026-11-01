@@ -119,8 +119,11 @@ describe("resolveBrand", () => {
 
   it("resolves the committed brands", () => {
     expect(resolveBrand({ appBaseUrl: "https://demo.alloplace.com" })).toMatchObject({ id: "alloplace", appName: "AlloPlace", accentColor: "#ffd100", links: { siteUrl: "https://alloplace.com", contactEmail: "support@alloplace.com" } });
-    // AlloPlace is the only brand besides LobbyStack, so it shows on localhost too.
-    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "alloplace", source: "only", appName: "AlloPlace" });
+    expect(resolveBrand({ appBaseUrl: "https://app.realinfobot.com" })).toMatchObject({ id: "realinfobot", source: "apex", appName: "RealInfoBot", accentColor: "#f07423", links: { siteUrl: "https://realinfobot.com", contactEmail: "support@realinfobot.com" } });
+    expect(resolveBrand({ appBaseUrl: "https://dev01.realinfobot.com" })).toMatchObject({ appName: "RealInfoBot (dev)", indexing: false });
+    // AlloPlace and RealInfoBot are both brands besides LobbyStack, so localhost needs BRAND_PRESET to show either.
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000" })).toMatchObject({ id: "lobbystack", source: "default", appName: "LobbyStack" });
+    expect(resolveBrand({ appBaseUrl: "http://localhost:3000", preset: "alloplace" })).toMatchObject({ id: "alloplace", source: "preset", appName: "AlloPlace" });
     expect(resolveBrand({ appBaseUrl: "http://localhost:3000", preset: "lobbystack" })).toMatchObject({ id: "lobbystack", appName: "LobbyStack", logoUrl: null, emailLogo: null, ogImage: null });
   });
 });
@@ -130,13 +133,14 @@ describe("onlyBrand", () => {
     expect(onlyBrand(oneBrand)).toBe("alloplace");
     expect(onlyBrand(data)).toBeNull();
     expect(onlyBrand({ index: { default: "lobbystack", domains: {} }, brands: { lobbystack: data.brands.lobbystack! } })).toBeNull();
-    expect(onlyBrand()).toBe("alloplace");
+    expect(onlyBrand()).toBeNull();
   });
 });
 
 describe("brandBillingPlans", () => {
   it("gives the four standard plans of a brand's billing.json, and nothing for a brand without one", () => {
     expect(brandBillingPlans("alloplace")!.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
+    expect(brandBillingPlans("realinfobot")!.map((plan) => plan.code)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
     expect(brandBillingPlans("lobbystack")).toBeNull();
     expect(brandBillingPlans("nobody")).toBeNull();
     expect(brandBillingPlans("toString", {})).toBeNull();

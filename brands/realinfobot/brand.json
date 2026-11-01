@@ -1,0 +1,19 @@
+{
+  "$schema": "../brand.schema.json",
+  "appName": "RealInfoBot",
+  "logo": "logo.svg",
+  "emailLogo": "logo-email.png",
+  "ogImage": "og.png",
+  "accentColor": "#F07423",
+  "links": {
+    "site": "https://realinfobot.com",
+    "terms": "https://realinfobot.com/legal/terms",
+    "privacy": "https://realinfobot.com/legal/privacy",
+    "docs": "https://realinfobot.com"
+  },
+  "contactEmail": "support@realinfobot.com",
+  "environments": {
+    "dev*": { "appNameSuffix": " (dev)", "indexing": false },
+    "test*": { "appNameSuffix": " (test)", "indexing": false }
+  }
+}

@@ -5,7 +5,7 @@ import { currentBrand } from "@lobbystack/shared";
 test("login and signup pages expose accessible auth forms", async ({ page }) => {
   await page.goto("/en/login");
   await expect(page.getByRole("heading", { name: "Welcome back" })).toBeVisible();
-  // The brand the build picked from the same APP_BASE_URL and BRAND_PRESET: without them, AlloPlace, the only brand besides LobbyStack.
+  // The brand the build picked from the same APP_BASE_URL and BRAND_PRESET: without them, LobbyStack, since AlloPlace and RealInfoBot are both in the code.
   await expect(page.getByLabel(currentBrand().appName)).toBeVisible();
   await expect(page.getByLabel("Email")).toBeVisible();
   await expect(page.getByLabel("Password")).toBeVisible();

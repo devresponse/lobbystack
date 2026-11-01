@@ -22,12 +22,21 @@ describe("deploymentAppName", () => {
     const { db, limit } = databaseSaving("Saved Name");
     expect(await deploymentAppName(db, resolveBrand({ appBaseUrl: "https://dev01.alloplace.com" }))).toBe("AlloPlace (dev)");
     expect(await deploymentAppName(db, resolveBrand({ appBaseUrl: "https://demo.alloplace.com" }))).toBe("AlloPlace");
+    expect(await deploymentAppName(db, resolveBrand({ appBaseUrl: "https://app.realinfobot.com" }))).toBe("RealInfoBot");
     expect(limit).not.toHaveBeenCalled();
   });
 
   it("uses the only brand besides LobbyStack without reading the database", async () => {
     const { db, limit } = databaseSaving("Saved Name");
-    expect(await deploymentAppName(db, resolveBrand({ appBaseUrl: "http://localhost:13000" }))).toBe("AlloPlace");
+    // This code has two brands besides LobbyStack, so a copy with AlloPlace alone stands in.
+    const only: ResolvedBrand = { ...resolveBrand({ appBaseUrl: "http://localhost:13000", preset: "alloplace" }), source: "only" };
+    expect(await deploymentAppName(db, only)).toBe("AlloPlace");
+    expect(limit).not.toHaveBeenCalled();
+  });
+
+  it("uses the brand BRAND_PRESET picks without reading the database", async () => {
+    const { db, limit } = databaseSaving("Saved Name");
+    expect(await deploymentAppName(db, resolveBrand({ appBaseUrl: "http://localhost:13000", preset: "realinfobot" }))).toBe("RealInfoBot");
     expect(limit).not.toHaveBeenCalled();
   });
 

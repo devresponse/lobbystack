@@ -3,6 +3,7 @@
   "default": "lobbystack",
   "domains": {
     "alloplace.com": "alloplace",
-    "alloplace.ai": "alloplace"
+    "alloplace.ai": "alloplace",
+    "realinfobot.com": "realinfobot"
   }
 }

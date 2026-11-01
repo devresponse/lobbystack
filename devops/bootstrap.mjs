@@ -694,14 +694,45 @@ async function up(run) {
   }
 }
 
+// The workflows a deployment needs. CodeQL and the landing link check are optional on a fork.
+const NEEDED_WORKFLOWS = ["ci.yml", "runtime-images.yml", "replacement-platform.yml"];
+
+/** The first line of what a command printed when it failed. */
+function firstLine(result) {
+  return (result.stderr || result.stdout || result.error?.message || `exit ${result.status}`).trim().split("\n")[0];
+}
+
 async function githubSteps(run) {
   const s = run.settings;
   if (!s.STEP_GITHUB) return console.log("  skipped (STEP_GITHUB=no)");
-  await step(run, "github.actions", `Turn on the checks of ${s.REPO}`, async () => {
-    const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"]);
-    if (result.error || result.status !== 0) {
-      await byHand([`GitHub CLI couldn't do it (${(result.stderr || result.error?.message || "").trim().split("\n")[0]}).`, `Open https://github.com/${s.REPO}/actions and enable the workflows.`]);
+  await step(run, "github.actions", `Check that the checks of ${s.REPO} are on`, async () => {
+    // Reading the workflows needs only read access; turning them on needs admin rights, so that is
+    // tried only for the ones that are really off.
+    const listed = runTool("gh", ["api", `repos/${s.REPO}/actions/workflows?per_page=100`]);
+    if (listed.error) return byHand([`GitHub CLI isn't installed. Open https://github.com/${s.REPO}/actions and check that CI is on:`, "if GitHub shows a button to enable the workflows, click it."]);
+    let workflows = null;
+    try {
+      if (listed.status === 0) workflows = JSON.parse(listed.stdout).workflows ?? null;
+    } catch {}
+    const needed = (workflows ?? []).filter((workflow) => NEEDED_WORKFLOWS.includes(path.posix.basename(workflow.path ?? "")));
+    const off = needed.filter((workflow) => workflow.state !== "active");
+    if (needed.length && !off.length) {
+      const others = workflows.filter((workflow) => workflow.state !== "active").map((workflow) => workflow.name);
+      return console.log(`  = already on: ${needed.map((workflow) => workflow.name).join(", ")}${others.length ? ` (also off, and not needed: ${others.join(", ")})` : ""}`);
     }
+    const problems = [];
+    // A fork starts with Actions off for the whole repository, which shows as no workflows or as disabled_fork.
+    if (!needed.length || off.some((workflow) => workflow.state === "disabled_fork")) {
+      const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"]);
+      if (result.error || result.status !== 0) problems.push(firstLine(result));
+    }
+    for (const workflow of off.filter((item) => item.state !== "disabled_fork")) {
+      const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/workflows/${workflow.id}/enable`]);
+      if (result.error || result.status !== 0) problems.push(`${workflow.name}: ${firstLine(result)}`);
+    }
+    if (!problems.length) return console.log(`  turned on: ${off.length ? off.map((workflow) => workflow.name).join(", ") : "Actions"}`);
+    const why = listed.status !== 0 ? `GitHub CLI couldn't read the workflows of ${s.REPO} (${firstLine(listed)})` : `The checks are off, and turning them on needs admin rights on ${s.REPO} (${problems[0]})`;
+    await byHand([`${why}.`, `Open https://github.com/${s.REPO}/actions as the repository's owner and enable the workflows,`, "or sign gh in as the owner (gh auth login) and redo github.actions."]);
   });
   await step(run, "github.brand", `Check that ${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`, async () => {
     const result = runTool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);

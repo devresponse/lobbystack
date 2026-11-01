@@ -183,7 +183,12 @@ function usage(problem) {
 function init(name) {
   if (!name || !/^[a-z0-9][a-z0-9-]*$/.test(name)) usage("Give a short name in lower case, such as realinfobot-test.");
   const file = `.env.bootstrap-${name}`;
-  if (fs.existsSync(file)) throw new Error(`${file} already exists`);
+  if (fs.existsSync(file)) {
+    // A settings file made before the secrets file existed: add only the secrets file.
+    if (fs.existsSync(`${file}.secrets`)) throw new Error(`${file} and ${file}.secrets already exist`);
+    fs.writeFileSync(`${file}.secrets`, SECRETS_TEMPLATE, { mode: 0o600 });
+    return console.log(`${file} already exists, so only ${file}.secrets was written. Put the keys you have in it.`);
+  }
   fs.writeFileSync(file, SETTINGS_TEMPLATE.replace("__NAME__", name), { mode: 0o600 });
   if (!fs.existsSync(`${file}.secrets`)) fs.writeFileSync(`${file}.secrets`, SECRETS_TEMPLATE, { mode: 0o600 });
   console.log(`Wrote ${file} and ${file}.secrets. Fill in the first; put the keys you have in the second`);

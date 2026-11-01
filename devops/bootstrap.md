@@ -69,6 +69,8 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 
 `.env.bootstrap-<name>.secrets` holds keys, one `KEY=value` per line. Fill in only what you have: an empty line means the script asks you, or creates that thing itself.
 
+If your settings file was made before the script had a secrets file, run `node devops/bootstrap.mjs init <name>` again: it adds only the secrets file and leaves the settings alone.
+
 - **Tokens** the script uses to create things: `RAILWAY_API_TOKEN`, `OPENAI_ADMIN_KEY`, `TWILIO_MAIN_ACCOUNT_SID`, `TWILIO_MAIN_AUTH_TOKEN`, `RESEND_ADMIN_KEY` and `CLOUDFLARE_API_TOKEN` (the table above). An environment variable of the same name wins over the file.
 - **Things you already have.** The script uses each one instead of creating a new one, and then doesn't need that service's token for it:
 
@@ -85,7 +87,7 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 
   The provider keys in this table come only from the file, never from the environment, so an `OPENAI_API_KEY` that happens to be set in your shell is never put on Railway by mistake.
 
-**A variable file works too.** `--secrets <file>` reads another file instead, such as `.env.realinfobot`, the variable file for `node devops/railway-vars.mjs`. Its `[service]` lines are understood: `POLAR_ACCESS_TOKEN` under the admin's line is the admin's Polar token, under the worker's the worker's, and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is the widget's site key. Values that are empty, `?`, a `<placeholder>` or a `${{reference}}` count as not given.
+**A variable file works too.** `--secrets <file>` reads another file instead, such as `.env.realinfobot`, the variable file for `node devops/railway-vars.mjs`. Its `[service]` lines are understood: `POLAR_ACCESS_TOKEN` under the admin's line is the admin's Polar token, under the worker's the worker's, and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is the widget's site key. Values that are empty, `?`, a `<placeholder>` or a `${{reference}}` count as not given. If the `[service]` lines are commented out, a key with a different value per service, such as `POLAR_ACCESS_TOKEN`, can't be told apart: the script warns, uses neither, and asks, unless `POLAR_ADMIN_TOKEN` and `POLAR_WORKER_TOKEN` are in the environment.
 
 ```sh
 node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test --secrets .env.realinfobot

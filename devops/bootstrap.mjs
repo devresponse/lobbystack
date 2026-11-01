@@ -56,6 +56,18 @@ const URLS = {
 // The BOOTSTRAP_*_URL variables, BOOTSTRAP_APP_URL and BOOTSTRAP_RAILWAY_CLI exist for tests against stand-ins.
 const RAILWAY_CLI = process.env.BOOTSTRAP_RAILWAY_CLI ?? "railway";
 
+/**
+ * Runs a command-line tool and returns spawnSync's result. On Windows, pnpm and the Railway CLI are
+ * .cmd files that only start through the shell, and the shell splits arguments on spaces, so each
+ * argument is quoted and the whole line goes to the shell as one string (an argument list with
+ * shell: true would also print Node's DEP0190 warning).
+ */
+function runTool(command, args, options = {}) {
+  if (process.platform !== "win32") return spawnSync(command, args, { encoding: "utf8", ...options });
+  const quote = (arg) => (/^[\w@+=:,./\\-]+$/.test(String(arg)) ? String(arg) : `"${String(arg).replace(/"/g, '""')}"`);
+  return spawnSync([command, ...args].map(quote).join(" "), { encoding: "utf8", ...options, shell: true });
+}
+
 const SETTINGS_TEMPLATE = `# Settings for node devops/bootstrap.mjs (see devops/bootstrap.md).
 # Lines starting with # are ignored. Never put a comment after a value.
 
@@ -228,8 +240,11 @@ async function main() {
   if (command === "init") return init(target);
   if (!["up", "connect", "status", "doctor", "redo"].includes(command) || !target) usage("Give a command and the settings file.");
   const run = loadRun(target);
+  if (command === "status") {
+    logPath = null; // status only reads, so it doesn't add to the log either
+    return status(run);
+  }
   writeLog(`==== ${command} ${path.basename(target)}${dryRun ? " --dry-run" : ""}${assumeYes ? " --yes" : ""}${config ? ` (keys: ${config.file})` : ""} | node ${process.version} on ${process.platform} | bootstrap.mjs ${scriptVersion()}`);
-  if (command === "status") return status(run);
   if (command === "doctor") return doctor(run);
   if (command === "redo") return redo(run, positional.slice(2));
   if (command === "up") return up(run);
@@ -239,7 +254,7 @@ async function main() {
 /** The script's own commit, for the log, when it runs from a Git checkout. */
 function scriptVersion() {
   const dir = path.dirname(fileURLToPath(import.meta.url));
-  const result = spawnSync("git", ["log", "-1", "--format=%h %cs", "--", "bootstrap.mjs"], { cwd: dir, encoding: "utf8", shell: process.platform === "win32" });
+  const result = runTool("git", ["log", "-1", "--format=%h %cs", "--", "bootstrap.mjs"], { cwd: dir });
   return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : "(not in Git)";
 }
 
@@ -358,7 +373,7 @@ function loadConfig(file) {
   if (problems.length) throw new Error(`the secrets file ${file} needs fixing:\n  ${problems.join("\n  ")}`);
   for (const key of conflicts) delete flat[key];
   for (const key of conflicts) console.warn(`Warning: ${file} sets ${key} to different values outside a [service] line, so neither is used.`);
-  const ignored = spawnSync("git", ["check-ignore", "-q", file], { encoding: "utf8", shell: process.platform === "win32" });
+  const ignored = runTool("git", ["check-ignore", "-q", file]);
   if (ignored.status === 1) console.warn(`Warning: Git doesn't ignore ${file}. It holds secrets: never commit it.`);
   return { file, flat, services, used: new Set() };
 }
@@ -677,13 +692,13 @@ async function githubSteps(run) {
   const s = run.settings;
   if (!s.STEP_GITHUB) return console.log("  skipped (STEP_GITHUB=no)");
   await step(run, "github.actions", `Turn on the checks of ${s.REPO}`, async () => {
-    const result = spawnSync("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"], { encoding: "utf8", shell: process.platform === "win32" });
+    const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"]);
     if (result.error || result.status !== 0) {
       await byHand([`GitHub CLI couldn't do it (${(result.stderr || result.error?.message || "").trim().split("\n")[0]}).`, `Open https://github.com/${s.REPO}/actions and enable the workflows.`]);
     }
   });
   await step(run, "github.brand", `Check that ${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`, async () => {
-    const result = spawnSync("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"], { encoding: "utf8", shell: process.platform === "win32" });
+    const result = runTool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);
     if (result.error) return byHand([`GitHub CLI isn't installed. Check that https://github.com/${s.REPO}/tree/${s.BRANCH}/brands/${s.BRAND} exists`, "(click Sync fork first if it's missing): BRAND_REQUIRED stops the admin and the worker without it."]);
     if (result.status !== 0) throw new Error(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json. Click Sync fork on GitHub, or add the brand (guide section 4), then run again`);
   });
@@ -997,8 +1012,8 @@ async function railwaySteps(run) {
   }
   await step(run, "railway.bucket", `The bucket "Bucket" in ${s.BUCKET_REGION}`, async () => {
     if ((await projectView(run)).buckets.includes("Bucket")) return console.log("  = already there");
-    const link = spawnSync(RAILWAY_CLI, ["link", "--project", v(run, "RAILWAY_PROJECT_ID"), "--environment", s.ENVIRONMENT], { encoding: "utf8", env: cliEnv(), shell: process.platform === "win32" });
-    const made = !link.error && link.status === 0 && spawnSync(RAILWAY_CLI, ["bucket", "create", "Bucket", "--region", s.BUCKET_REGION, "--json"], { encoding: "utf8", env: cliEnv(), shell: process.platform === "win32" });
+    const link = runTool(RAILWAY_CLI, ["link", "--project", v(run, "RAILWAY_PROJECT_ID"), "--environment", s.ENVIRONMENT], { env: cliEnv() });
+    const made = !link.error && link.status === 0 && runTool(RAILWAY_CLI, ["bucket", "create", "Bucket", "--region", s.BUCKET_REGION, "--json"], { env: cliEnv() });
     if (!made || made.status !== 0) {
       const reason = (link.error?.message ?? (made && made.stderr) ?? link.stderr ?? "").trim().split("\n")[0];
       await byHand([`The Railway CLI couldn't make the bucket${reason ? ` (${reason})` : ""}.`, `In the project's canvas: create a Bucket in region ${s.BUCKET_REGION}, named exactly Bucket (guide section 7, step 3).`]);
@@ -1280,8 +1295,8 @@ async function connect(run) {
       console.log(`  = the admin already has an operator key for ${s.OPERATOR_EMAIL} (${mine.prefix}). To make a new one, remove that entry from PLATFORM_API_KEYS on the admin and redo connect.platformKey.`);
       return { PLATFORM_API_KEYS: current };
     }
-    const result = spawnSync("pnpm", ["--silent", "platform-key:create", "--name", "Operator key", "--partner", "operator", "--owner-email", s.OPERATOR_EMAIL, "--access", "all"], {
-      encoding: "utf8", shell: process.platform === "win32", env: { ...process.env, PLATFORM_API_KEYS: current },
+    const result = runTool("pnpm", ["--silent", "platform-key:create", "--name", "Operator key", "--partner", "operator", "--owner-email", s.OPERATOR_EMAIL, "--access", "all"], {
+      env: { ...process.env, PLATFORM_API_KEYS: current },
     });
     if (result.error || result.status !== 0) throw new Error(`pnpm platform-key:create failed: ${(result.stderr || result.error?.message || "").trim().split("\n").at(-1)}`);
     const last = result.stdout.trim().split(/\r?\n/).at(-1);
@@ -1319,7 +1334,8 @@ function status(run) {
   const s = run.settings;
   console.log(`${s.NAME}: ${run.stateFile}`);
   console.log(`  secrets file: ${config ? config.file : "none (keys come from the environment or are asked for)"}`);
-  console.log(`  log: ${logPath}`);
+  const log = `${run.file}.log`;
+  console.log(`  log: ${fs.existsSync(log) ? log : `${log} (not written yet)`}`);
   const done = Object.entries(run.state.done);
   if (!done.length) console.log("  nothing done yet: run up");
   for (const [id, at] of done) console.log(`  done  ${at}  ${id}`);
@@ -1409,7 +1425,7 @@ async function doctor(run) {
     fixes += 1;
     console.log(`  FIX    ${text}`);
   };
-  const tool = (name, args) => spawnSync(name, args, { encoding: "utf8", shell: process.platform === "win32" });
+  const tool = (name, args) => runTool(name, args);
   console.log(`Checking ${run.file}. Nothing is changed.\n`);
 
   console.log("This computer");

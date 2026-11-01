@@ -25,7 +25,7 @@
 2. **Your computer:** Node.js 18 or later, and `pnpm install` done in the repository folder. Two tools are optional, and the script asks you to do their step by hand without them:
    - the Railway CLI (`npm install --global @railway/cli`), used only to make the bucket;
    - the GitHub CLI (`gh`, signed in), used to turn on the fork's checks.
-3. **Tokens.** The script asks for each one with typing hidden, or reads it from the environment variable of the same name. It never saves a token.
+3. **Tokens.** The script reads each one from the environment variable of the same name, then from the secrets file ([below](#2-put-your-keys-in-the-secrets-file)), and otherwise asks for it with typing hidden. It never saves a token in its state file.
 
    | Variable | What it is | Where to make it |
    | --- | --- | --- |
@@ -35,7 +35,7 @@
    | `RESEND_ADMIN_KEY` | A **Full access** key, used only to make the domain and the sending key. Delete it afterwards | resend.com/api-keys |
    | `CLOUDFLARE_API_TOKEN` | A token with **Zone > DNS > Edit** on the zone, and **Account > Turnstile > Edit** | dash.cloudflare.com/profile/api-tokens |
 
-   In PowerShell, set one for the session with `$env:RAILWAY_API_TOKEN = Read-Host -MaskInput`, or leave them unset and paste each one when the script asks.
+   In PowerShell, set one for the session with `$env:RAILWAY_API_TOKEN = Read-Host -MaskInput`, put them in the secrets file, or paste each one when the script asks.
 
 ## 1. Write the settings file
 
@@ -45,7 +45,7 @@ In the repository folder:
 node devops/bootstrap.mjs init realinfobot-test
 ```
 
-This writes `.env.bootstrap-realinfobot-test`. Git ignores it, like every `.env.*` file. Fill it in:
+This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-test.secrets`. Git ignores both, like every `.env.*` file. Fill in the first:
 
 | Setting | Example | Notes |
 | --- | --- | --- |
@@ -63,9 +63,37 @@ This writes `.env.bootstrap-realinfobot-test`. Git ignores it, like every `.env.
 | `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The zone that holds both domains. Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number you already have in the subaccount, or empty |
 | `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | Cloud mode only |
-| `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then asks you for its values instead, for example an OpenAI project you already made |
+| `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then takes its values from the secrets file, or asks you for them |
 
-## 2. Check the plan
+## 2. Put your keys in the secrets file
+
+`.env.bootstrap-<name>.secrets` holds keys, one `KEY=value` per line. Fill in only what you have: an empty line means the script asks you, or creates that thing itself.
+
+- **Tokens** the script uses to create things: `RAILWAY_API_TOKEN`, `OPENAI_ADMIN_KEY`, `TWILIO_MAIN_ACCOUNT_SID`, `TWILIO_MAIN_AUTH_TOKEN`, `RESEND_ADMIN_KEY` and `CLOUDFLARE_API_TOKEN` (the table above). An environment variable of the same name wins over the file.
+- **Things you already have.** The script uses each one instead of creating a new one, and then doesn't need that service's token for it:
+
+  | Keys | Instead of |
+  | --- | --- |
+  | `OPENAI_PROJECT_ID` and `OPENAI_API_KEY` | Creating the OpenAI project and its key. Give both: the key must belong to that project, whose ID also goes into the trunk's SIP address. With only one given, the script asks for the other |
+  | `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` | Creating the Twilio subaccount. The trunk is then made in that account |
+  | `TWILIO_SIP_TRUNK_SID` | Creating the trunk. It must be in the account above. The script still checks it has exactly one origination URI, to the OpenAI project |
+  | `SMTP_PASSWORD` | Creating Resend's sending key. The domain and its DNS records are still set up, unless `STEP_RESEND=no` |
+  | `TURNSTILE_SITE_KEY` and `TURNSTILE_SECRET_KEY` | Creating the Turnstile widget |
+  | `POLAR_ADMIN_TOKEN` and `POLAR_WORKER_TOKEN` | Stopping to ask for them (cloud mode) |
+  | `OPENAI_WEBHOOK_SECRET` | Stopping at the webhook step in `connect`, once the webhook exists |
+  | Any of the 13 platform secrets, such as `ENCRYPTION_KEY` | Making a new one |
+
+  The provider keys in this table come only from the file, never from the environment, so an `OPENAI_API_KEY` that happens to be set in your shell is never put on Railway by mistake.
+
+**A variable file works too.** `--secrets <file>` reads another file instead, such as `.env.realinfobot`, the variable file for `node devops/railway-vars.mjs`. Its `[service]` lines are understood: `POLAR_ACCESS_TOKEN` under the admin's line is the admin's Polar token, under the worker's the worker's, and `NEXT_PUBLIC_TURNSTILE_SITE_KEY` is the widget's site key. Values that are empty, `?`, a `<placeholder>` or a `${{reference}}` count as not given.
+
+```sh
+node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test --secrets .env.realinfobot
+```
+
+As it runs, the script names each key it took from the file, never its value. It warns you if Git doesn't ignore the file.
+
+## 3. Check the plan
 
 ```sh
 node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test --dry-run
@@ -73,7 +101,7 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test --dry-run
 
 It lists every step in order and calls nothing. It also refuses a settings file with a mistake in it, and says which line.
 
-## 3. Set it up
+## 4. Set it up
 
 ```sh
 node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
@@ -86,13 +114,13 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 
 `--yes` skips the questions and the waits, so use it only to finish a run whose waits are already behind you.
 
-## 4. Connect the providers
+## 5. Connect the providers
 
 ```sh
 node devops/bootstrap.mjs connect .env.bootstrap-realinfobot-test
 ```
 
-It checks that the admin is ready and shows the right brand. It then tells you how to create OpenAI's incoming-call webhook and asks for its `whsec_` secret. Next it runs `pnpm platform-key:create`, which leaves the key in `.platform-keys/`: move the key to the password manager, then delete that file. Finally it sets both values on the admin, which redeploys it. It ends by printing the last steps, which need you:
+It checks that the admin is ready and shows the right brand. It then tells you how to create OpenAI's incoming-call webhook and asks for its `whsec_` secret, unless `OPENAI_WEBHOOK_SECRET` is in the secrets file. Next it runs `pnpm platform-key:create`, which leaves the key in `.platform-keys/`: move the key to the password manager, then delete that file. Finally it sets both values on the admin, which redeploys it. It ends by printing the last steps, which need you:
 
 1. Sign up at `https://<address>/en/signup` with `OPERATOR_EMAIL`, using the 6-digit code from the email.
 2. `pnpm lobbystack login --url https://<address> --key-stdin --profile <name>`, then paste the platform key.
@@ -110,10 +138,11 @@ It checks that the admin is ready and shows the right brand. It then tells you h
 | File | Holds |
 | --- | --- |
 | `.env.bootstrap-<name>` | Your settings. Nothing secret |
+| `.env.bootstrap-<name>.secrets` | Your keys, as you typed them in. `init` writes it, and the script only reads it |
 | `.env.bootstrap-<name>.state.json` | Every step's result: the 13 generated secrets, the provider keys it made or was given, and the IDs |
 | `.env.bootstrap-<name>.vars` | Every service's variables in guide Appendix A's format, so `node devops/railway-vars.mjs` can set them again |
 
-Git ignores all three. The last two hold secrets: copy them into the password manager entry for the environment, keep a second copy of `ENCRYPTION_KEY` and `OTP_HASH_SECRET` (guide decision 10), and never commit or send these files. The script never prints a secret. Production gets its own settings file and new secrets; never copy test's.
+Git ignores all four. The last three hold secrets. Once the environment works, delete the tokens from the secrets file, or the whole file once its keys are in the password manager. For the state and variable files: copy them into the password manager entry for the environment, keep a second copy of `ENCRYPTION_KEY` and `OTP_HASH_SECRET` (guide decision 10), and never commit or send these files. The script never prints a secret. Production gets its own settings file and new secrets; never copy test's.
 
 ## What isn't confirmed
 

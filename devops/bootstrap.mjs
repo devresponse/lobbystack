@@ -4,11 +4,12 @@
 // hand in sections 3 to 12, except the few steps that only a person can do, for which it stops
 // and says what to do.
 //
-//   node devops/bootstrap.mjs init <name>              writes .env.bootstrap-<name> to fill in
+//   node devops/bootstrap.mjs init <name>              writes .env.bootstrap-<name> and its .secrets file
 //   node devops/bootstrap.mjs up <settings file>       sets everything up, then deploys
 //   node devops/bootstrap.mjs connect <settings file>  the steps once the address works
 //   node devops/bootstrap.mjs status <settings file>   what's done and what's left
-// Options: --dry-run (show the steps, call nothing), --yes (don't stop at questions or pauses)
+// Options: --dry-run (show the steps, call nothing), --yes (don't stop at questions or pauses),
+//          --secrets <file> (read keys from that file instead of <settings file>.secrets)
 //
 // Each step is recorded in .env.bootstrap-<name>.state.json, beside the settings file, as
 // soon as it succeeds, so a run that stops is finished by running the same command again.
@@ -18,7 +19,11 @@
 //
 // It needs Node.js 18 or later and nothing installed. The Railway CLI is used for one step
 // only, the bucket; without it, the script asks you to make the bucket in the dashboard.
-// Tokens come from the environment or a hidden prompt, and are never saved:
+// Keys and tokens come from the environment, then from the secrets file, then a hidden prompt.
+// The secrets file is <settings file>.secrets (init writes one to fill in), or the file given
+// with --secrets, which may also be a railway-vars.mjs variable file such as .env.realinfobot.
+// A key given there for something the script would create, such as OPENAI_API_KEY or
+// TWILIO_ACCOUNT_SID, is used instead of creating a new one. The tokens it needs:
 //   RAILWAY_API_TOKEN       a Railway account or workspace token (railway.com/account/tokens)
 //   OPENAI_ADMIN_KEY        an OpenAI admin key (platform.openai.com/settings/organization/admin-keys)
 //   TWILIO_MAIN_ACCOUNT_SID, TWILIO_MAIN_AUTH_TOKEN   the main Twilio account, which owns the subaccounts
@@ -84,12 +89,50 @@ TWILIO_TOLLFREE=
 POLAR_ORGANIZATION_ID=
 POLAR=sandbox
 
-# Turn steps off with no (each then asks you for its values instead).
+# Turn steps off with no (each then takes its values from the secrets file, or asks you).
 STEP_GITHUB=yes
 STEP_OPENAI=yes
 STEP_TWILIO=yes
 STEP_RESEND=yes
 STEP_TURNSTILE=yes
+`;
+
+const SECRETS_TEMPLATE = `# Keys for node devops/bootstrap.mjs (see devops/bootstrap.md). It holds secrets:
+# Git ignores it (.env.*), never commit or send it, and delete what you no longer need.
+# Leave a line empty to be asked, or to let the script create that thing. Lines starting
+# with # are ignored. For the tokens in the first group, the Polar tokens and the webhook
+# secret, an environment variable of the same name wins over this file.
+
+# Tokens the script uses to create things (it never puts them on Railway).
+RAILWAY_API_TOKEN=
+OPENAI_ADMIN_KEY=
+TWILIO_MAIN_ACCOUNT_SID=
+TWILIO_MAIN_AUTH_TOKEN=
+RESEND_ADMIN_KEY=
+CLOUDFLARE_API_TOKEN=
+
+# Things you already have. Each one given here is used instead of creating a new one,
+# and the token above for that service is then not needed for it.
+# OpenAI: the project and its key, both or neither.
+OPENAI_PROJECT_ID=
+OPENAI_API_KEY=
+# Twilio: the (sub)account's SID and Auth Token, and optionally its SIP trunk to OpenAI.
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_SIP_TRUNK_SID=
+# Resend's sending key (re_...).
+SMTP_PASSWORD=
+# Cloudflare Turnstile's widget for the admin's address.
+TURNSTILE_SITE_KEY=
+TURNSTILE_SECRET_KEY=
+# Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 5.5).
+POLAR_ADMIN_TOKEN=
+POLAR_WORKER_TOKEN=
+# For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
+OPENAI_WEBHOOK_SECRET=
+
+# Optional: the 13 platform secrets, to reuse ones already made (64 hex characters each).
+# Left out, the script makes new ones. POSTGRES_PASSWORD, REDIS_PASSWORD, ENCRYPTION_KEY, ...
 `;
 
 const SECRETS = ["POSTGRES_PASSWORD", "LOBBYSTACK_AUTH_PASSWORD", "LOBBYSTACK_APP_PASSWORD", "LOBBYSTACK_WORKER_PASSWORD",
@@ -103,10 +146,20 @@ const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes
 
 class Stop extends Error {}
 
-const argv = process.argv.slice(2);
-const flags = new Set(argv.filter((arg) => arg.startsWith("--")));
-const [command, target] = argv.filter((arg) => !arg.startsWith("--"));
-for (const flag of flags) if (!["--dry-run", "--yes"].includes(flag)) usage(`Unknown option ${flag}.`);
+const flags = new Set();
+const positional = [];
+let secretsOption = null;
+for (let args = process.argv.slice(2), i = 0; i < args.length; i += 1) {
+  const arg = args[i];
+  if (arg === "--secrets" || arg.startsWith("--secrets=")) {
+    secretsOption = arg === "--secrets" ? args[(i += 1)] : arg.slice("--secrets=".length);
+    if (!secretsOption) usage("--secrets needs a file.");
+  } else if (arg.startsWith("--")) {
+    if (!["--dry-run", "--yes"].includes(arg)) usage(`Unknown option ${arg}.`);
+    flags.add(arg);
+  } else positional.push(arg);
+}
+const [command, target] = positional;
 const dryRun = flags.has("--dry-run");
 const assumeYes = flags.has("--yes");
 
@@ -123,7 +176,7 @@ async function main() {
 }
 
 function usage(problem) {
-  console.error(`${problem}\n\nUsage:\n  node devops/bootstrap.mjs init <name>\n  node devops/bootstrap.mjs up|connect|status <settings file> [--dry-run] [--yes]`);
+  console.error(`${problem}\n\nUsage:\n  node devops/bootstrap.mjs init <name>\n  node devops/bootstrap.mjs up|connect|status <settings file> [--dry-run] [--yes] [--secrets <file>]`);
   process.exit(2);
 }
 
@@ -132,7 +185,9 @@ function init(name) {
   const file = `.env.bootstrap-${name}`;
   if (fs.existsSync(file)) throw new Error(`${file} already exists`);
   fs.writeFileSync(file, SETTINGS_TEMPLATE.replace("__NAME__", name), { mode: 0o600 });
-  console.log(`Wrote ${file}. Fill it in, then run:\n  node devops/bootstrap.mjs up ${file} --dry-run`);
+  if (!fs.existsSync(`${file}.secrets`)) fs.writeFileSync(`${file}.secrets`, SECRETS_TEMPLATE, { mode: 0o600 });
+  console.log(`Wrote ${file} and ${file}.secrets. Fill in the first; put the keys you have in the second`);
+  console.log(`(or leave it empty to be asked). Then run:\n  node devops/bootstrap.mjs up ${file} --dry-run`);
 }
 
 // ---------------------------------------------------------------- settings and state
@@ -169,7 +224,87 @@ function loadRun(file) {
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
   const stateFile = path.join(path.dirname(file), `${path.basename(file)}.state.json`);
   const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} };
+  const secretsFile = secretsOption ?? (fs.existsSync(`${file}.secrets`) ? `${file}.secrets` : null);
+  config = secretsFile ? loadConfig(secretsFile) : null;
   return { file, settings: s, stateFile, state };
+}
+
+// ---------------------------------------------------------------- the secrets file
+
+let config = null;
+
+/**
+ * Reads KEY=value lines. Also reads devops/railway-vars.mjs files: their [service] lines are
+ * kept, so a key set differently per service (POLAR_ACCESS_TOKEN) is found by service. Empty
+ * values, ?, <placeholders> and ${{references}} count as not given.
+ */
+function loadConfig(file) {
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch (error) {
+    throw new Error(`couldn't read the secrets file ${file} (${error.code ?? error.message})`);
+  }
+  const flat = {};
+  const conflicts = new Set();
+  const services = {};
+  const problems = [];
+  let current = [];
+  text.replace(/^\uFEFF/, "").split(/\r?\n/).forEach((raw, index) => {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) return;
+    const section = line.match(/^\[(.+)\]$/);
+    if (section) {
+      current = section[1].split(",").map((name) => name.trim().toLowerCase()).filter(Boolean);
+      return;
+    }
+    const body = line.replace(/^export\s+/, "");
+    const equals = body.indexOf("=");
+    const key = equals > 0 ? body.slice(0, equals).trim() : "";
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return problems.push(`line ${index + 1} isn't KEY=value`);
+    let value = body.slice(equals + 1).trim();
+    if (/^(["']).*\1$/.test(value) && value.length >= 2) value = value.slice(1, -1);
+    if (!value || value === "?" || /^<[^>]*>$/.test(value) || value.includes("${{")) return;
+    for (const name of current) (services[name] ??= {})[key] = value;
+    if (key in flat && flat[key] !== value) conflicts.add(key);
+    else flat[key] = value;
+  });
+  if (problems.length) throw new Error(`the secrets file ${file} needs fixing:\n  ${problems.join("\n  ")}`);
+  for (const key of conflicts) delete flat[key];
+  for (const key of conflicts) console.warn(`Warning: ${file} sets ${key} to different values outside a [service] line, so neither is used.`);
+  const ignored = spawnSync("git", ["check-ignore", "-q", file], { encoding: "utf8", shell: process.platform === "win32" });
+  if (ignored.status === 1) console.warn(`Warning: Git doesn't ignore ${file}. It holds secrets: never commit it.`);
+  return { file, flat, services, used: new Set() };
+}
+
+/** Where else a value may be in a variable file: [service, key], service "" for any. */
+const CONFIG_ALIASES = {
+  TURNSTILE_SITE_KEY: [["", "NEXT_PUBLIC_TURNSTILE_SITE_KEY"]],
+  POLAR_ADMIN_TOKEN: [["admin", "POLAR_ACCESS_TOKEN"]],
+  POLAR_WORKER_TOKEN: [["worker", "POLAR_ACCESS_TOKEN"]],
+};
+
+/** A value from the secrets file only, or undefined. */
+function fromFile(name) {
+  if (!config) return undefined;
+  let found = config.flat[name];
+  for (const [service, key] of CONFIG_ALIASES[name] ?? []) {
+    if (found) break;
+    if (!service) found = config.flat[key];
+    else {
+      found = Object.entries(config.services).find(([names, values]) => (names === service || names.endsWith(`-${service}`)) && values[key])?.[1][key];
+    }
+  }
+  if (found && !config.used.has(name)) {
+    config.used.add(name);
+    console.log(`  ${name}: from ${config.file}`);
+  }
+  return found;
+}
+
+/** A value from the environment, then the secrets file, or undefined. */
+function given(name) {
+  return process.env[name]?.trim() || fromFile(name);
 }
 
 function save(run) {
@@ -206,9 +341,15 @@ function createPrompter() {
   const waiting = [];
   let closed = false;
   let current = null;
+  let pending = null;
   rl.on("line", (line) => waiting.push(line));
   rl.on("close", () => {
     closed = true;
+    // Input ended mid-question (a pipe or Ctrl+D): answer it empty, so the run stops with a reason.
+    if (pending) {
+      process.stdout.write("\n");
+      pending("");
+    }
   });
   if (terminal) {
     rl._writeToOutput = (text) => {
@@ -228,9 +369,11 @@ function createPrompter() {
       }
       return new Promise((resolve) => {
         current = { question, muted: false };
+        pending = resolve;
         rl.question(question, (answer) => {
           const { muted } = current;
           current = null;
+          pending = null;
           if (muted) process.stdout.write("\n");
           resolve(answer.trim());
         });
@@ -248,19 +391,39 @@ function ask(question, { hidden = false } = {}) {
   return prompter.ask(question, hidden);
 }
 
-async function secret(name, question) {
-  const fromEnv = process.env[name]?.trim();
-  if (fromEnv) return fromEnv;
+/**
+ * A secret from the environment (tokens only, envToo) or the secrets file, else asked for with
+ * typing hidden. Keys that stand in for something the script creates, such as OPENAI_API_KEY,
+ * come only from the file, so a key that happens to be set in the shell is never picked up.
+ */
+async function secret(name, question, check = () => true, { envToo = true } = {}) {
+  const found = envToo ? given(name) : fromFile(name);
+  if (found) {
+    if (!check(found)) throw new Error(`${name} in ${envToo && process.env[name]?.trim() ? "the environment" : config.file} doesn't look right (${question})`);
+    return found;
+  }
   const answer = await ask(`${question} (typing is hidden): `, { hidden: true });
-  if (!answer) throw new Error(`no value given for ${name}`);
+  if (!answer || !check(answer)) throw new Error(`no valid value given for ${name}`);
   return answer;
 }
 
-async function value(question, check = () => true) {
+/** A value that isn't secret: from the secrets file, else asked for. */
+async function value(name, question, check = () => true) {
+  const found = fromFile(name);
+  if (found) {
+    if (!check(found)) throw new Error(`${name} in ${config.file} doesn't look right (${question})`);
+    return found;
+  }
   const answer = await ask(`${question}: `);
   if (!answer || !check(answer)) throw new Error(`that isn't a valid answer to "${question}"`);
   return answer;
 }
+
+const looksLike = {
+  project: (answer) => /^proj_\w+$/.test(answer),
+  account: (answer) => /^AC\w{32}$/.test(answer),
+  trunk: (answer) => /^TK\w{32}$/.test(answer),
+};
 
 async function confirm(question) {
   if (assumeYes) return true;
@@ -358,7 +521,8 @@ async function cloudflare(pathname, options = {}) {
 
 async function up(run) {
   const s = run.settings;
-  console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME}: ${s.ENVIRONMENT}, ${s.DEPLOYMENT_MODE}, brand ${s.BRAND}, from ${s.REPO}@${s.BRANCH}\n`);
+  console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME}: ${s.ENVIRONMENT}, ${s.DEPLOYMENT_MODE}, brand ${s.BRAND}, from ${s.REPO}@${s.BRANCH}`);
+  console.log(`${config ? `Keys from ${config.file}, the environment, or asked for.` : "No secrets file: keys come from the environment or are asked for."}\n`);
   const providers = ["Railway", s.STEP_OPENAI && "OpenAI", s.STEP_TWILIO && "Twilio", s.STEP_RESEND && "Resend", (s.CLOUDFLARE_ZONE || (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID)) && "Cloudflare"].filter(Boolean);
   if (!dryRun) await confirm(`This sets up ${s.NAME} at ${providers.slice(0, -1).join(", ")}${providers.length > 1 ? " and " : ""}${providers.at(-1)}, which bill your accounts.`);
 
@@ -373,7 +537,7 @@ async function up(run) {
   if (s.DEPLOYMENT_MODE === "cloud") {
     console.log("\nPolar");
     await step(run, "polar.tokens", "Polar's two platform tokens (Polar makes tokens only in its dashboard)", async () => {
-      await byHand([
+      if (!given("POLAR_ADMIN_TOKEN") || !given("POLAR_WORKER_TOKEN")) await byHand([
         `In Polar's ${s.POLAR} organization, Settings > Developers > New Token, make two tokens (guide 5.5):`,
         `"${s.NAME} admin" with customer_sessions:write only, and "${s.NAME} worker" with checkouts:write,`,
         "events:write, organizations:read, meters:read, products:read, discounts:read, subscriptions:write, customers:write.",
@@ -421,12 +585,16 @@ async function openaiSteps(run) {
   const s = run.settings;
   if (!s.STEP_OPENAI) {
     await step(run, "openai.manual", "OpenAI project and key, typed in (STEP_OPENAI=no)", async () => ({
-      OPENAI_PROJECT_ID: await value("The OpenAI project's ID (proj_...)", (answer) => answer.startsWith("proj_")),
-      OPENAI_API_KEY: await secret("OPENAI_API_KEY", "The project's API key (sk-...)"),
+      OPENAI_PROJECT_ID: await value("OPENAI_PROJECT_ID", "The OpenAI project's ID (proj_...)", looksLike.project),
+      OPENAI_API_KEY: await secret("OPENAI_API_KEY", "The project's API key (sk-...)", undefined, { envToo: false }),
     }));
     return;
   }
   await step(run, "openai.project", `OpenAI project "${s.NAME}"`, async () => {
+    // A key or project given in the secrets file is used as it is: the key belongs to that project.
+    if (fromFile("OPENAI_PROJECT_ID") || fromFile("OPENAI_API_KEY")) {
+      return { OPENAI_PROJECT_ID: await value("OPENAI_PROJECT_ID", "The ID of the OpenAI project your OPENAI_API_KEY belongs to (proj_...)", looksLike.project) };
+    }
     const list = await openai("/organization/projects?limit=100");
     const found = list?.data?.find((project) => project.name === s.NAME && project.status !== "archived");
     if (found) return { OPENAI_PROJECT_ID: found.id };
@@ -434,6 +602,7 @@ async function openaiSteps(run) {
     return { OPENAI_PROJECT_ID: project.id };
   });
   await step(run, "openai.key", "Its API key, owned by a service account", async () => {
+    if (fromFile("OPENAI_API_KEY") || fromFile("OPENAI_PROJECT_ID")) return { OPENAI_API_KEY: await secret("OPENAI_API_KEY", "The project's API key (sk-...)", undefined, { envToo: false }) };
     const account = await openai(`/organization/projects/${v(run, "OPENAI_PROJECT_ID")}/service_accounts`, { method: "POST", body: { name: `${s.NAME} platform` } });
     if (!account?.api_key?.value) throw new Error("OpenAI made the service account but sent no key");
     return { OPENAI_API_KEY: account.api_key.value };
@@ -449,13 +618,20 @@ async function twilioSteps(run) {
   const s = run.settings;
   if (!s.STEP_TWILIO) {
     await step(run, "twilio.manual", "Twilio subaccount and trunk, typed in (STEP_TWILIO=no)", async () => ({
-      TWILIO_ACCOUNT_SID: await value("The subaccount's Account SID (AC...)", (answer) => /^AC\w{32}$/.test(answer)),
-      TWILIO_AUTH_TOKEN: await secret("TWILIO_AUTH_TOKEN", "The subaccount's Auth Token"),
-      TWILIO_SIP_TRUNK_SID: await value("The trunk's SID (TK...)", (answer) => /^TK\w{32}$/.test(answer)),
+      TWILIO_ACCOUNT_SID: await value("TWILIO_ACCOUNT_SID", "The subaccount's Account SID (AC...)", looksLike.account),
+      TWILIO_AUTH_TOKEN: await secret("TWILIO_AUTH_TOKEN", "The subaccount's Auth Token", undefined, { envToo: false }),
+      TWILIO_SIP_TRUNK_SID: await value("TWILIO_SIP_TRUNK_SID", "The trunk's SID (TK...)", looksLike.trunk),
     }));
     return;
   }
   await step(run, "twilio.subaccount", `Twilio subaccount "${s.NAME}"`, async () => {
+    // An account given in the secrets file is used instead of a new subaccount; a trunk given there must be in it.
+    if (fromFile("TWILIO_ACCOUNT_SID") || fromFile("TWILIO_AUTH_TOKEN") || fromFile("TWILIO_SIP_TRUNK_SID")) {
+      return {
+        TWILIO_ACCOUNT_SID: await value("TWILIO_ACCOUNT_SID", "The Twilio account's SID (AC...)", looksLike.account),
+        TWILIO_AUTH_TOKEN: await secret("TWILIO_AUTH_TOKEN", "That account's Auth Token", undefined, { envToo: false }),
+      };
+    }
     const list = await twilioMain(`/Accounts.json?FriendlyName=${encodeURIComponent(s.NAME)}&PageSize=20`);
     const found = list?.accounts?.find((account) => account.friendly_name === s.NAME && account.status !== "closed");
     const account = found ?? (await twilioMain("/Accounts.json", { method: "POST", form: { FriendlyName: s.NAME } }));
@@ -463,6 +639,7 @@ async function twilioSteps(run) {
     return { TWILIO_ACCOUNT_SID: account.sid, TWILIO_AUTH_TOKEN: account.auth_token };
   });
   await step(run, "twilio.trunk", "The SIP trunk to OpenAI: Secure Trunking, transfers, caller ID of the transferee", async () => {
+    if (fromFile("TWILIO_SIP_TRUNK_SID")) return { TWILIO_SIP_TRUNK_SID: await value("TWILIO_SIP_TRUNK_SID", "The trunk's SID (TK...)", looksLike.trunk) };
     const list = await twilioSub(run, URLS.trunking, "/Trunks?PageSize=100");
     const name = `${s.NAME} to OpenAI`;
     const found = list?.trunks?.find((trunk) => trunk.friendly_name === name);
@@ -493,7 +670,7 @@ async function twilioSteps(run) {
 async function resendSteps(run) {
   const s = run.settings;
   if (!s.STEP_RESEND) {
-    await step(run, "resend.manual", "Resend's sending key, typed in (STEP_RESEND=no)", async () => ({ SMTP_PASSWORD: await secret("SMTP_PASSWORD", "The Resend API key (re_...)") }));
+    await step(run, "resend.manual", "Resend's sending key, typed in (STEP_RESEND=no)", async () => ({ SMTP_PASSWORD: await secret("SMTP_PASSWORD", "The Resend API key (re_...)", undefined, { envToo: false }) }));
     return;
   }
   await step(run, "resend.domain", `Resend domain ${s.EMAIL_DOMAIN}`, async () => {
@@ -520,6 +697,7 @@ async function resendSteps(run) {
     console.log("  Resend checks in the background; the domain's page shows Verified once DNS has spread.");
   });
   await step(run, "resend.key", "A sending key for that domain only", async () => {
+    if (fromFile("SMTP_PASSWORD")) return { SMTP_PASSWORD: await secret("SMTP_PASSWORD", "The Resend API key (re_...)", undefined, { envToo: false }) };
     const key = await resend("/api-keys", { method: "POST", body: { name: s.NAME, permission: "sending_access", domain_id: v(run, "RESEND_DOMAIN_ID") } });
     return { SMTP_PASSWORD: key.token };
   });
@@ -685,11 +863,12 @@ async function addressSteps(run) {
     });
   }
   await step(run, "turnstile", "The Turnstile widget for the address", async () => {
-    if (!s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
-      await byHand([`In Cloudflare, Turnstile > Add widget for ${v(run, "APP_HOST")}, Managed, Pre-clearance No (guide 5.3).`]);
+    const both = fromFile("TURNSTILE_SITE_KEY") && fromFile("TURNSTILE_SECRET_KEY");
+    if (both || !s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
+      if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${v(run, "APP_HOST")}, Managed, Pre-clearance No (guide 5.3).`]);
       return {
-        TURNSTILE_SITE_KEY: await value("The widget's Site Key"),
-        TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key"),
+        TURNSTILE_SITE_KEY: await value("TURNSTILE_SITE_KEY", "The widget's Site Key"),
+        TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
       };
     }
     const domains = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])];
@@ -793,7 +972,7 @@ function perService(sections) {
 
 async function variableSteps(run) {
   await step(run, "secrets", "The 13 passwords and secrets (64 hex characters each)", () =>
-    Object.fromEntries(SECRETS.map((key) => [key, run.state.values[key] ?? randomBytes(32).toString("hex")])));
+    Object.fromEntries(SECRETS.map((key) => [key, run.state.values[key] ?? fromFile(key) ?? randomBytes(32).toString("hex")])));
   await step(run, "variables", "Every service's variables (guide Appendix A), without deploying yet", async () => {
     const sections = variableSections(run);
     const missing = sections.flatMap(([section, variables]) => Object.entries(variables).filter(([, value]) => !value).map(([key]) => `${key} (${section})`));
@@ -843,7 +1022,7 @@ async function connect(run) {
   const s = run.settings;
   if (!run.state.done["deploy.admin"]) throw new Error("run up first, and finish it");
   const host = v(run, "APP_HOST");
-  console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME} at https://${host}\n`);
+  console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME} at https://${host}${config ? `, keys from ${config.file}` : ""}\n`);
   await step(run, "connect.health", `https://${host}/api/health/ready answers "ok":true with the ${s.BRAND} brand`, async () => {
     const health = await http("The admin", `${process.env.BOOTSTRAP_APP_URL ?? `https://${host}`}/api/health/ready`).catch((error) => ({ failed: error.message }));
     if (health?.failed || health?.ok !== true) throw new Error(`the admin isn't ready yet (${health?.failed ?? JSON.stringify(health)}). Check its deployment, then run again`);
@@ -851,12 +1030,12 @@ async function connect(run) {
     if (brand && brand !== s.BRAND) throw new Error(`the admin shows the ${brand} brand, not ${s.BRAND}`);
   });
   await step(run, "connect.webhook", "OpenAI's incoming-call webhook (OpenAI's API can't make this one yet)", async () => {
-    await byHand([
+    if (!given("OPENAI_WEBHOOK_SECRET")) await byHand([
       `In the OpenAI project "${s.NAME}": Settings > Webhooks > Create (guide 3.5, steps 8 to 10).`,
       `URL: https://${host}/api/webhooks/openai/live   (no slash at the end)`,
       "Event types: only live.transport.incoming. Copy the whsec_ signing secret it shows once.",
     ]);
-    return { OPENAI_WEBHOOK_SECRET: await secret("OPENAI_WEBHOOK_SECRET", "The webhook's signing secret (whsec_...)") };
+    return { OPENAI_WEBHOOK_SECRET: await secret("OPENAI_WEBHOOK_SECRET", "The webhook's signing secret (whsec_...)", (answer) => answer.startsWith("whsec_")) };
   });
   await step(run, "connect.platformKey", "The operator's platform key (pnpm platform-key:create)", async () => {
     const result = spawnSync("pnpm", ["--silent", "platform-key:create", "--name", "Operator key", "--partner", "operator", "--owner-email", s.OPERATOR_EMAIL, "--access", "all"], {

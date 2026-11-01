@@ -8,8 +8,16 @@
 //   node devops/bootstrap.mjs up <settings file>       sets everything up, then deploys
 //   node devops/bootstrap.mjs connect <settings file>  the steps once the address works
 //   node devops/bootstrap.mjs status <settings file>   what's done and what's left
+//   node devops/bootstrap.mjs doctor <settings file>   checks settings, tools and tokens; changes nothing
+//   node devops/bootstrap.mjs redo <settings file> <step>   runs a finished step again next time
 // Options: --dry-run (show the steps, call nothing), --yes (don't stop at questions or pauses),
-//          --secrets <file> (read keys from that file instead of <settings file>.secrets)
+//          --verbose (show each API call), --secrets <file> (read keys from that file instead
+//          of <settings file>.secrets)
+//
+// Every step can run again safely: it finds what an earlier run made, by name, and reuses or
+// updates it. Keys a provider shows only once (OpenAI's, Resend's) are read back from Railway
+// when they got there; otherwise the script asks before replacing them. Each run appends to
+// <settings file>.log, with secrets replaced by ‹hidden›.
 //
 // Each step is recorded in .env.bootstrap-<name>.state.json, beside the settings file, as
 // soon as it succeeds, so a run that stops is finished by running the same command again.
@@ -35,6 +43,7 @@ import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
+import { fileURLToPath } from "node:url";
 
 const URLS = {
   railway: process.env.BOOTSTRAP_RAILWAY_URL ?? "https://backboard.railway.com/graphql/v2",
@@ -144,6 +153,54 @@ const REDIS_START = "sh -c 'exec redis-server --bind :: 0.0.0.0 --appendonly yes
 
 // ---------------------------------------------------------------- command line
 
+// ---------------------------------------------------------------- log file and hidden secrets
+
+// Every line the script prints also goes to <settings file>.log, with the time, plus each API
+// call it makes (service, method, path, answer, time taken; never headers or bodies). Known
+// secrets, and anything shaped like a provider key, are replaced by ‹hidden› in both.
+let logPath = null;
+let verbose = false;
+const hiddenValues = new Set();
+const KEY_SHAPES = /\b(?:sk-[A-Za-z0-9_-]{16,}|whsec_[A-Za-z0-9+/=_-]{16,}|re_[A-Za-z0-9_]{16,}|lsp_[A-Za-z0-9_]{16,}|polar_[a-z]{2,4}_[A-Za-z0-9_]{16,})/g;
+const SECRET_KEYS = new Set(["OPENAI_API_KEY", "TWILIO_AUTH_TOKEN", "SMTP_PASSWORD", "TURNSTILE_SECRET_KEY", "POLAR_ADMIN_TOKEN",
+  "POLAR_WORKER_TOKEN", "OPENAI_WEBHOOK_SECRET", "RAILWAY_API_TOKEN", "OPENAI_ADMIN_KEY", "TWILIO_MAIN_AUTH_TOKEN", "RESEND_ADMIN_KEY",
+  "CLOUDFLARE_API_TOKEN", "POLAR_ACCESS_TOKEN", "S3_SECRET_ACCESS_KEY"]);
+
+function hide(value) {
+  if (typeof value === "string" && value.length >= 8) hiddenValues.add(value);
+  return value;
+}
+
+function redact(text) {
+  let out = String(text);
+  for (const value of hiddenValues) if (out.includes(value)) out = out.split(value).join("‹hidden›");
+  return out.replace(KEY_SHAPES, "‹hidden›");
+}
+
+function writeLog(line) {
+  if (!logPath) return;
+  try {
+    fs.appendFileSync(logPath, `${new Date().toISOString()} ${redact(line)}\n`, { mode: 0o600 });
+  } catch {
+    // A log that can't be written never stops the run.
+  }
+}
+
+/** An API call or other detail: in the log always, on screen with --verbose. */
+function trace(line) {
+  writeLog(`  . ${line}`);
+  if (verbose) consoleOriginal.log(`  . ${redact(line)}`);
+}
+
+const consoleOriginal = { log: console.log.bind(console), warn: console.warn.bind(console), error: console.error.bind(console) };
+for (const level of ["log", "warn", "error"]) {
+  console[level] = (...args) => {
+    const text = redact(args.join(" "));
+    consoleOriginal[level](text);
+    for (const line of text.split("\n")) writeLog(level === "log" ? line : `${level.toUpperCase()} ${line}`);
+  };
+}
+
 class Stop extends Error {}
 
 const flags = new Set();
@@ -155,28 +212,49 @@ for (let args = process.argv.slice(2), i = 0; i < args.length; i += 1) {
     secretsOption = arg === "--secrets" ? args[(i += 1)] : arg.slice("--secrets=".length);
     if (!secretsOption) usage("--secrets needs a file.");
   } else if (arg.startsWith("--")) {
-    if (!["--dry-run", "--yes"].includes(arg)) usage(`Unknown option ${arg}.`);
+    if (!["--dry-run", "--yes", "--verbose"].includes(arg)) usage(`Unknown option ${arg}.`);
     flags.add(arg);
   } else positional.push(arg);
 }
 const [command, target] = positional;
 const dryRun = flags.has("--dry-run");
 const assumeYes = flags.has("--yes");
+verbose = flags.has("--verbose");
 
 let prompter = null;
 
 async function main() {
   if (typeof fetch !== "function") throw new Error("this script needs Node 18 or later");
   if (command === "init") return init(target);
-  if (!["up", "connect", "status"].includes(command) || !target) usage("Give a command and the settings file.");
+  if (!["up", "connect", "status", "doctor", "redo"].includes(command) || !target) usage("Give a command and the settings file.");
   const run = loadRun(target);
+  writeLog(`==== ${command} ${path.basename(target)}${dryRun ? " --dry-run" : ""}${assumeYes ? " --yes" : ""}${config ? ` (keys: ${config.file})` : ""} | node ${process.version} on ${process.platform} | bootstrap.mjs ${scriptVersion()}`);
   if (command === "status") return status(run);
+  if (command === "doctor") return doctor(run);
+  if (command === "redo") return redo(run, positional.slice(2));
   if (command === "up") return up(run);
   return connect(run);
 }
 
+/** The script's own commit, for the log, when it runs from a Git checkout. */
+function scriptVersion() {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const result = spawnSync("git", ["log", "-1", "--format=%h %cs", "--", "bootstrap.mjs"], { cwd: dir, encoding: "utf8", shell: process.platform === "win32" });
+  return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : "(not in Git)";
+}
+
 function usage(problem) {
-  console.error(`${problem}\n\nUsage:\n  node devops/bootstrap.mjs init <name>\n  node devops/bootstrap.mjs up|connect|status <settings file> [--dry-run] [--yes] [--secrets <file>]`);
+  console.error(`${problem}
+
+Usage:
+  node devops/bootstrap.mjs init <name>                  write the settings and secrets files
+  node devops/bootstrap.mjs doctor <settings file>       check settings, tools and tokens; changes nothing
+  node devops/bootstrap.mjs up <settings file>           set everything up, then deploy
+  node devops/bootstrap.mjs connect <settings file>      the last steps, once the address works
+  node devops/bootstrap.mjs status <settings file>       what's done
+  node devops/bootstrap.mjs redo <settings file> <step>  run a finished step again next time (status lists them)
+Options: --dry-run, --yes, --verbose (show each API call), --secrets <file>
+See devops/bootstrap.md.`);
   process.exit(2);
 }
 
@@ -229,6 +307,8 @@ function loadRun(file) {
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
   const stateFile = path.join(path.dirname(file), `${path.basename(file)}.state.json`);
   const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} };
+  logPath = `${file}.log`;
+  for (const [key, value] of Object.entries(state.values)) if (SECRET_KEYS.has(key) || SECRETS.includes(key)) hide(value);
   const secretsFile = secretsOption ?? (fs.existsSync(`${file}.secrets`) ? `${file}.secrets` : null);
   config = secretsFile ? loadConfig(secretsFile) : null;
   return { file, settings: s, stateFile, state };
@@ -270,6 +350,7 @@ function loadConfig(file) {
     let value = body.slice(equals + 1).trim();
     if (/^(["']).*\1$/.test(value) && value.length >= 2) value = value.slice(1, -1);
     if (!value || value === "?" || /^<[^>]*>$/.test(value) || value.includes("${{")) return;
+    if (!/(_ID|_SID|SITE_KEY|_URL|_HOST|EMAIL|_FROM|DOMAIN|MODE|REGION|PRESET|_PORT|_PATH|NODE_ENV|_USER|_DB|_NAME)$/.test(key)) hide(value);
     for (const name of current) (services[name] ??= {})[key] = value;
     if (key in flat && flat[key] !== value) conflicts.add(key);
     else flat[key] = value;
@@ -290,7 +371,7 @@ const CONFIG_ALIASES = {
 };
 
 /** A value from the secrets file only, or undefined. */
-function fromFile(name) {
+function fromFile(name, { quiet = false } = {}) {
   if (!config) return undefined;
   let found = config.flat[name];
   for (const [service, key] of CONFIG_ALIASES[name] ?? []) {
@@ -300,7 +381,7 @@ function fromFile(name) {
       found = Object.entries(config.services).find(([names, values]) => (names === service || names.endsWith(`-${service}`)) && values[key])?.[1][key];
     }
   }
-  if (found && !config.used.has(name)) {
+  if (found && !quiet && !config.used.has(name)) {
     config.used.add(name);
     console.log(`  ${name}: from ${config.file}`);
   }
@@ -329,12 +410,21 @@ async function step(run, id, title, work) {
     return;
   }
   console.log(`${dryRun ? "~" : "+"} ${title}`);
+  writeLog(`  step ${id}`);
   if (dryRun) return;
+  const started = Date.now();
+  currentStep = id;
   const values = (await work()) ?? {};
+  currentStep = null;
+  for (const [key, value] of Object.entries(values)) if (SECRET_KEYS.has(key) || SECRETS.includes(key)) hide(value);
   Object.assign(run.state.values, values);
   run.state.done[id] = new Date().toISOString();
   save(run);
+  const seconds = Math.round((Date.now() - started) / 1000);
+  writeLog(`  done ${id} in ${seconds} s`);
 }
+
+let currentStep = null;
 
 const v = (run, key) => run.state.values[key];
 
@@ -391,9 +481,12 @@ function createPrompter() {
   };
 }
 
-function ask(question, { hidden = false } = {}) {
+async function ask(question, { hidden = false } = {}) {
   prompter ??= createPrompter();
-  return prompter.ask(question, hidden);
+  writeLog(`ASK ${question.trim()}`);
+  const answer = await prompter.ask(question, hidden);
+  writeLog(`  answer: ${hidden ? "(hidden)" : answer || "(empty)"}`);
+  return answer;
 }
 
 /**
@@ -402,12 +495,12 @@ function ask(question, { hidden = false } = {}) {
  * come only from the file, so a key that happens to be set in the shell is never picked up.
  */
 async function secret(name, question, check = () => true, { envToo = true } = {}) {
-  const found = envToo ? given(name) : fromFile(name);
+  const found = hide(envToo ? given(name) : fromFile(name));
   if (found) {
     if (!check(found)) throw new Error(`${name} in ${envToo && process.env[name]?.trim() ? "the environment" : config.file} doesn't look right (${question})`);
     return found;
   }
-  const answer = await ask(`${question} (typing is hidden): `, { hidden: true });
+  const answer = hide(await ask(`${question} (typing is hidden): `, { hidden: true }));
   if (!answer || !check(answer)) throw new Error(`no valid value given for ${name}`);
   return answer;
 }
@@ -454,12 +547,20 @@ async function http(service, url, { method = "GET", headers = {}, body, form } =
     init.body = JSON.stringify(body);
     init.headers["Content-Type"] = "application/json";
   }
+  const label = `${service} ${method} ${new URL(url).pathname}${service === "Railway" && body?.query ? ` ${body.query.match(/^(?:query|mutation) (\w+)/)?.[1] ?? ""}` : ""}`;
+  const started = Date.now();
   let response;
   try {
     response = await fetch(url, init);
   } catch (error) {
-    throw new Error(`${service} couldn't be reached (${error.cause?.code ?? error.message})`);
+    const reason = error.cause?.code ?? error.cause?.errors?.[0]?.code ?? error.cause?.message ?? error.message;
+    trace(`${label} -> no answer (${reason})`);
+    const failure = new Error(`${service} couldn't be reached (${reason})`);
+    failure.service = service;
+    failure.network = reason;
+    throw failure;
   }
+  trace(`${label} -> ${response.status} in ${Date.now() - started} ms`);
   const text = await response.text();
   let json = null;
   try {
@@ -471,6 +572,7 @@ async function http(service, url, { method = "GET", headers = {}, body, form } =
     const message = json?.error?.message ?? json?.message ?? json?.errors?.[0]?.message ?? `HTTP ${response.status}`;
     const error = new Error(`${service} refused ${method} ${new URL(url).pathname}: ${message}`);
     error.status = response.status;
+    error.service = service;
     throw error;
   }
   return json;
@@ -478,7 +580,7 @@ async function http(service, url, { method = "GET", headers = {}, body, form } =
 
 const tokens = {};
 async function token(name, question) {
-  tokens[name] ??= await secret(name, question);
+  tokens[name] ??= hide(await secret(name, question));
   return tokens[name];
 }
 
@@ -486,8 +588,9 @@ async function railway(query, variables = {}) {
   const auth = await token("RAILWAY_API_TOKEN", "Railway account or workspace token");
   const json = await http("Railway", URLS.railway, { method: "POST", headers: { Authorization: `Bearer ${auth}` }, body: { query, variables } });
   if (json?.errors?.length) {
-    const error = new Error(`Railway refused it: ${json.errors.map((item) => item.message).join("; ")}`);
+    const error = new Error(`Railway refused ${query.match(/^(?:query|mutation) (\w+)/)?.[1] ?? "it"}: ${json.errors.map((item) => item.message).join("; ")}`);
     error.graphql = json.errors;
+    error.service = "Railway";
     throw error;
   }
   return json.data;
@@ -518,7 +621,7 @@ async function resend(pathname, options = {}) {
 async function cloudflare(pathname, options = {}) {
   const key = await token("CLOUDFLARE_API_TOKEN", "Cloudflare API token");
   const json = await http("Cloudflare", `${URLS.cloudflare}${pathname}`, { ...options, headers: { Authorization: `Bearer ${key}` } });
-  if (json && json.success === false) throw new Error(`Cloudflare refused ${pathname}: ${json.errors?.map((item) => item.message).join("; ")}`);
+  if (json && json.success === false) throw Object.assign(new Error(`Cloudflare refused ${pathname}: ${json.errors?.map((item) => item.message).join("; ")}`), { service: "Cloudflare" });
   return json.result;
 }
 
@@ -602,13 +705,26 @@ async function openaiSteps(run) {
     }
     const list = await openai("/organization/projects?limit=100");
     const found = list?.data?.find((project) => project.name === s.NAME && project.status !== "archived");
-    if (found) return { OPENAI_PROJECT_ID: found.id };
+    if (found) {
+      console.log(`  = ${found.id}`);
+      return { OPENAI_PROJECT_ID: found.id };
+    }
     const project = await openai("/organization/projects", { method: "POST", body: { name: s.NAME } });
     return { OPENAI_PROJECT_ID: project.id };
   });
   await step(run, "openai.key", "Its API key, owned by a service account", async () => {
     if (fromFile("OPENAI_API_KEY") || fromFile("OPENAI_PROJECT_ID")) return { OPENAI_API_KEY: await secret("OPENAI_API_KEY", "The project's API key (sk-...)", undefined, { envToo: false }) };
-    const account = await openai(`/organization/projects/${v(run, "OPENAI_PROJECT_ID")}/service_accounts`, { method: "POST", body: { name: `${s.NAME} platform` } });
+    const base = `/organization/projects/${v(run, "OPENAI_PROJECT_ID")}/service_accounts`;
+    const name = `${s.NAME} platform`;
+    const old = (await openai(`${base}?limit=100`))?.data?.find((account) => account.name === name);
+    if (old) {
+      // OpenAI shows a key only once. An earlier run made it: take it from Railway if it got there.
+      const onRailway = await railwayVariable(run, "admin", "OPENAI_API_KEY");
+      if (onRailway) return { OPENAI_API_KEY: onRailway };
+      await confirm(`The service account "${name}" exists, but its key isn't saved anywhere this script can read. Replace it with a new one? Its old key stops working.`);
+      await openai(`${base}/${old.id}`, { method: "DELETE" });
+    }
+    const account = await openai(base, { method: "POST", body: { name } });
     if (!account?.api_key?.value) throw new Error("OpenAI made the service account but sent no key");
     return { OPENAI_API_KEY: account.api_key.value };
   });
@@ -639,6 +755,7 @@ async function twilioSteps(run) {
     }
     const list = await twilioMain(`/Accounts.json?FriendlyName=${encodeURIComponent(s.NAME)}&PageSize=20`);
     const found = list?.accounts?.find((account) => account.friendly_name === s.NAME && account.status !== "closed");
+    if (found) console.log(`  = ${found.sid}`);
     const account = found ?? (await twilioMain("/Accounts.json", { method: "POST", form: { FriendlyName: s.NAME } }));
     if (!account?.auth_token) throw new Error(`Twilio didn't send the Auth Token of subaccount ${account?.sid}`);
     return { TWILIO_ACCOUNT_SID: account.sid, TWILIO_AUTH_TOKEN: account.auth_token };
@@ -648,23 +765,22 @@ async function twilioSteps(run) {
     const list = await twilioSub(run, URLS.trunking, "/Trunks?PageSize=100");
     const name = `${s.NAME} to OpenAI`;
     const found = list?.trunks?.find((trunk) => trunk.friendly_name === name);
-    const trunk = found ?? (await twilioSub(run, URLS.trunking, "/Trunks", {
-      method: "POST",
-      form: { FriendlyName: name, Secure: "true", TransferMode: "enable-all", TransferCallerId: "from-transferee", CnamLookupEnabled: "false" },
-    }));
-    return { TWILIO_SIP_TRUNK_SID: trunk.sid };
+    const form = { FriendlyName: name, Secure: "true", TransferMode: "enable-all", TransferCallerId: "from-transferee", CnamLookupEnabled: "false" };
+    // Found: its settings are set again, so a trunk changed by hand is put back as the guide wants it.
+    if (found) console.log(`  = ${found.sid}, settings checked`);
+    const trunk = await twilioSub(run, URLS.trunking, found ? `/Trunks/${found.sid}` : "/Trunks", { method: "POST", form });
+    return { TWILIO_SIP_TRUNK_SID: trunk?.sid ?? found.sid };
   });
   await step(run, "twilio.origination", "Its origination URI to the OpenAI project", async () => {
     const trunk = v(run, "TWILIO_SIP_TRUNK_SID");
     const sipUrl = `sip:${v(run, "OPENAI_PROJECT_ID")}@sip.api.openai.com;transport=tls`;
     const list = await twilioSub(run, URLS.trunking, `/Trunks/${trunk}/OriginationUrls`);
     const urls = list?.origination_urls ?? [];
-    if (urls.some((url) => url.sip_url === sipUrl)) return;
-    if (urls.length) throw new Error(`trunk ${trunk} already has another origination URI; keep exactly one (guide 3.6, step 9)`);
-    await twilioSub(run, URLS.trunking, `/Trunks/${trunk}/OriginationUrls`, {
-      method: "POST",
-      form: { FriendlyName: "OpenAI GPT-Live", SipUrl: sipUrl, Priority: "10", Weight: "10", Enabled: "true" },
-    });
+    const form = { FriendlyName: "OpenAI GPT-Live", SipUrl: sipUrl, Priority: "10", Weight: "10", Enabled: "true" };
+    if (urls.some((url) => url.sip_url === sipUrl && url.enabled !== false)) return console.log("  = already there");
+    if (urls.length > 1) throw new Error(`trunk ${trunk} has ${urls.length} origination URIs. Keep exactly one, to ${sipUrl}, in Twilio's console (guide 3.6, step 9), then run again`);
+    if (urls.length === 1) console.log(`  ~ the trunk's origination URI pointed to ${urls[0].sip_url}; now to the OpenAI project`);
+    await twilioSub(run, URLS.trunking, urls.length === 1 ? `/Trunks/${trunk}/OriginationUrls/${urls[0].sid}` : `/Trunks/${trunk}/OriginationUrls`, { method: "POST", form });
   });
   await step(run, "twilio.console", "Twilio's console-only steps", () => byHand([
     "1. Voice > Settings > Geo permissions: allow each country whose phones take transfers (guide 3.6, step 12).",
@@ -681,6 +797,7 @@ async function resendSteps(run) {
   await step(run, "resend.domain", `Resend domain ${s.EMAIL_DOMAIN}`, async () => {
     const list = await resend("/domains");
     const found = list?.data?.find((domain) => domain.name === s.EMAIL_DOMAIN);
+    if (found) console.log(`  = ${found.id}${found.status ? ` (${found.status})` : ""}`);
     const domain = found ? await resend(`/domains/${found.id}`) : await resend("/domains", { method: "POST", body: { name: s.EMAIL_DOMAIN, region: s.RESEND_REGION } });
     return { RESEND_DOMAIN_ID: domain.id, RESEND_RECORDS: domain.records ?? [] };
   });
@@ -703,6 +820,14 @@ async function resendSteps(run) {
   });
   await step(run, "resend.key", "A sending key for that domain only", async () => {
     if (fromFile("SMTP_PASSWORD")) return { SMTP_PASSWORD: await secret("SMTP_PASSWORD", "The Resend API key (re_...)", undefined, { envToo: false }) };
+    const old = (await resend("/api-keys"))?.data?.find((key) => key.name === s.NAME);
+    if (old) {
+      // Resend shows a key only once. An earlier run made it: take it from Railway if it got there.
+      const onRailway = await railwayVariable(run, "worker", "SMTP_PASSWORD");
+      if (onRailway) return { SMTP_PASSWORD: onRailway };
+      await confirm(`Resend has a key named "${s.NAME}", but it isn't saved anywhere this script can read. Replace it with a new one? The old key stops working.`);
+      await resend(`/api-keys/${old.id}`, { method: "DELETE" });
+    }
     const key = await resend("/api-keys", { method: "POST", body: { name: s.NAME, permission: "sending_access", domain_id: v(run, "RESEND_DOMAIN_ID") } });
     return { SMTP_PASSWORD: key.token };
   });
@@ -734,13 +859,22 @@ async function dnsRecords(run, records) {
   }
   const zone = await zoneId(run);
   for (const record of records) {
-    const existing = await cloudflare(`/zones/${zone}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`);
-    if (existing?.some((item) => item.content === record.content || (record.onlyIfNone && item.content.startsWith("v=DMARC1")))) {
+    const existing = (await cloudflare(`/zones/${zone}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`)) ?? [];
+    const same = (item) => item.content.replace(/^"|"$/g, "") === record.content && (record.priority === undefined || item.priority === record.priority);
+    if (existing.some((item) => same(item) || (record.onlyIfNone && item.content.includes("v=DMARC1")))) {
       console.log(`  = ${record.type} ${record.name}`);
       continue;
     }
-    if (record.type === "CNAME" && existing?.length) throw new Error(`${record.name} already has a CNAME pointing elsewhere; change it by hand`);
     const { onlyIfNone, ...body } = record;
+    // A name holds one CNAME, one DKIM key, one SPF record and one Railway check: an old one is updated, not doubled.
+    const kind = (content) => (content.includes("v=spf1") ? "spf" : content.includes("railway-verify=") ? "railway" : record.name.includes("._domainkey.") ? "dkim" : null);
+    const replace = record.type === "CNAME" ? existing[0] : record.type === "TXT" && kind(record.content) ? existing.find((item) => kind(item.content) === kind(record.content)) : null;
+    if (replace) {
+      if (record.type === "CNAME") await confirm(`${record.name} points to ${replace.content} now. Point it to ${record.content} instead? Visitors to that address then reach this deployment.`);
+      await cloudflare(`/zones/${zone}/dns_records/${replace.id}`, { method: "PATCH", body: { ...body, ttl: 1, proxied: false } });
+      console.log(`  ~ ${record.type} ${record.name} (updated)`);
+      continue;
+    }
     await cloudflare(`/zones/${zone}/dns_records`, { method: "POST", body: { ...body, ttl: 1, proxied: false } });
     console.log(`  + ${record.type} ${record.name}`);
   }
@@ -750,12 +884,15 @@ async function dnsRecords(run, records) {
 
 const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
-  project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } } }",
+  project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
+  projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name } } } }",
+  domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
+  readVariables: "query variables($projectId: String!, $environmentId: String!, $serviceId: String!) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true) }",
   serviceCreate: "mutation serviceCreate($input: ServiceCreateInput!) { serviceCreate(input: $input) { id name } }",
   volumeCreate: "mutation volumeCreate($input: VolumeCreateInput!) { volumeCreate(input: $input) { id name } }",
   instanceUpdate: "mutation serviceInstanceUpdate($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }",
   domainCreate: "mutation serviceDomainCreate($input: ServiceDomainCreateInput!) { serviceDomainCreate(input: $input) { id domain } }",
-  customDomainCreate: "mutation customDomainCreate($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain status { verificationToken dnsRecords { hostlabel requiredValue status } } } }",
+  customDomainCreate: "mutation customDomainCreate($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } }",
   variables: "mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }",
   connect: "mutation serviceConnect($id: String!, $input: ServiceConnectInput!) { serviceConnect(id: $id, input: $input) { id } }",
 };
@@ -768,12 +905,52 @@ const SERVICES = [
   { name: "worker" },
 ];
 
-async function projectView(run) {
-  const { project } = await railway(Q.project, { id: v(run, "RAILWAY_PROJECT_ID") });
+async function projectView(run, id = v(run, "RAILWAY_PROJECT_ID")) {
+  const { project } = await railway(Q.project, { id });
   return {
+    id,
     services: Object.fromEntries(project.services.edges.map(({ node }) => [node.name, node.id])),
     environments: Object.fromEntries(project.environments.edges.map(({ node }) => [node.name, node.id])),
+    volumes: project.volumes.edges.flatMap(({ node }) => node.volumeInstances.edges.map(({ node: instance }) => instance)),
+    buckets: project.buckets.edges.map(({ node }) => node.name),
   };
+}
+
+/** This run's Railway project if it exists, by its saved ID or by name; never creates it. */
+async function findProject(run) {
+  if (v(run, "RAILWAY_PROJECT_ID")) return v(run, "RAILWAY_PROJECT_ID");
+  const s = run.settings;
+  const { projects } = await railway(Q.projects, s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {});
+  const matches = projects.edges.map(({ node }) => node).filter((project) => project.name === s.NAME);
+  if (matches.length > 1) throw new Error(`Railway has ${matches.length} projects named ${s.NAME}. Delete or rename the extra ones, then run again`);
+  return matches[0]?.id ?? null;
+}
+
+const variableCache = {};
+/**
+ * A variable's current value on one of this run's Railway services, or undefined. Used to pick
+ * up a value made in an earlier run whose state file was lost, so it isn't made again.
+ */
+async function railwayVariable(run, service, key) {
+  try {
+    if (!(service in variableCache)) {
+      variableCache[service] = {};
+      const projectId = await findProject(run);
+      if (projectId) {
+        const view = await projectView(run, projectId);
+        const environmentId = v(run, "RAILWAY_ENVIRONMENT_ID") ?? view.environments[run.settings.ENVIRONMENT];
+        const serviceId = view.services[service];
+        if (environmentId && serviceId) variableCache[service] = (await railway(Q.readVariables, { projectId, environmentId, serviceId })).variables ?? {};
+      }
+    }
+  } catch (error) {
+    trace(`couldn't read ${service}'s variables on Railway: ${error.message}`);
+    return undefined;
+  }
+  const value = variableCache[service][key];
+  if (typeof value !== "string" || !value || value.includes("${{")) return undefined;
+  console.log(`  ${key}: found on Railway's ${service} service`);
+  return hide(value);
 }
 
 async function railwaySteps(run) {
@@ -781,9 +958,10 @@ async function railwaySteps(run) {
   await step(run, "railway.project", `Railway project "${s.NAME}" with the environment ${s.ENVIRONMENT}`, async () => {
     // Kept at once, so a run that stops after this call never makes a second project.
     if (!v(run, "RAILWAY_PROJECT_ID")) {
-      const input = { name: s.NAME, defaultEnvironmentName: s.ENVIRONMENT, ...(s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {}) };
-      const { projectCreate } = await railway(Q.projectCreate, { input });
-      run.state.values.RAILWAY_PROJECT_ID = projectCreate.id;
+      const existing = await findProject(run);
+      if (existing) console.log(`  found the project ${s.NAME}; using it`);
+      const id = existing ?? (await railway(Q.projectCreate, { input: { name: s.NAME, defaultEnvironmentName: s.ENVIRONMENT, ...(s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {}) } })).projectCreate.id;
+      run.state.values.RAILWAY_PROJECT_ID = id;
       save(run);
     }
     const view = await projectView(run);
@@ -797,6 +975,7 @@ async function railwaySteps(run) {
     for (const service of SERVICES) {
       if (view.services[service.name]) {
         ids[service.name] = view.services[service.name];
+        console.log(`  = ${service.name}`);
         continue;
       }
       const input = { projectId: v(run, "RAILWAY_PROJECT_ID"), name: service.name, ...(service.image ? { source: { image: service.image } } : {}) };
@@ -807,10 +986,17 @@ async function railwaySteps(run) {
   const id = (name) => v(run, "RAILWAY_SERVICE_IDS")?.[name];
   for (const [service, mountPath] of [["Postgres", "/var/lib/postgresql/data"], ["Redis", "/data"]]) {
     await step(run, `railway.volume.${service}`, `A volume on ${service} at ${mountPath}`, async () => {
+      const view = await projectView(run);
+      const existing = view.volumes.find((volume) => volume.serviceId === id(service) && volume.environmentId === v(run, "RAILWAY_ENVIRONMENT_ID"));
+      if (existing) {
+        if (existing.mountPath !== mountPath) throw new Error(`${service} already has a volume, mounted at ${existing.mountPath}. Change its mount path to ${mountPath} in Railway, then run again`);
+        return console.log(`  = already there`);
+      }
       await railway(Q.volumeCreate, { input: { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: id(service), mountPath } });
     });
   }
   await step(run, "railway.bucket", `The bucket "Bucket" in ${s.BUCKET_REGION}`, async () => {
+    if ((await projectView(run)).buckets.includes("Bucket")) return console.log("  = already there");
     const link = spawnSync(RAILWAY_CLI, ["link", "--project", v(run, "RAILWAY_PROJECT_ID"), "--environment", s.ENVIRONMENT], { encoding: "utf8", env: cliEnv(), shell: process.platform === "win32" });
     const made = !link.error && link.status === 0 && spawnSync(RAILWAY_CLI, ["bucket", "create", "Bucket", "--region", s.BUCKET_REGION, "--json"], { encoding: "utf8", env: cliEnv(), shell: process.platform === "win32" });
     if (!made || made.status !== 0) {
@@ -850,21 +1036,27 @@ function cliEnv() {
 async function addressSteps(run) {
   const s = run.settings;
   const admin = () => v(run, "RAILWAY_SERVICE_IDS")?.admin;
+  const domains = async () => (await railway(Q.domains, { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: admin() })).domains;
   await step(run, "railway.domain", "The admin's Railway address, port 3000", async () => {
-    const { serviceDomainCreate } = await railway(Q.domainCreate, { input: { serviceId: admin(), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), targetPort: 3000 } });
-    return { RAILWAY_HOST: serviceDomainCreate.domain, APP_HOST: s.CUSTOM_HOST || serviceDomainCreate.domain };
+    const existing = (await domains()).serviceDomains[0];
+    if (existing) console.log(`  = ${existing.domain}${existing.targetPort && existing.targetPort !== 3000 ? ` (port ${existing.targetPort}: set it to 3000 in admin > Settings > Networking)` : ""}`);
+    const domain = existing?.domain ?? (await railway(Q.domainCreate, { input: { serviceId: admin(), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), targetPort: 3000 } })).serviceDomainCreate.domain;
+    return { RAILWAY_HOST: domain, APP_HOST: s.CUSTOM_HOST || domain };
   });
   if (s.CUSTOM_HOST) {
     await step(run, "railway.custom", `The custom domain ${s.CUSTOM_HOST}`, async () => {
-      const { customDomainCreate } = await railway(Q.customDomainCreate, { input: { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: admin(), domain: s.CUSTOM_HOST, targetPort: 3000 } });
-      const target = customDomainCreate.status?.dnsRecords?.find((record) => record.requiredValue)?.requiredValue;
-      const verification = customDomainCreate.status?.verificationToken;
-      if (target && s.CLOUDFLARE_ZONE) await dnsRecords(run, [{ type: "CNAME", name: s.CUSTOM_HOST, content: target }]);
-      await byHand([
-        target && s.CLOUDFLARE_ZONE ? `The CNAME ${s.CUSTOM_HOST} -> ${target} is made.` : `Create a CNAME ${s.CUSTOM_HOST} -> ${target ?? "the target Railway shows"}, DNS only.`,
-        `Create the TXT record Railway shows under admin > Settings > Networking for ${s.CUSTOM_HOST}${verification ? ` (its value includes ${verification})` : ""}.`,
-        "Wait for the green check mark next to the domain (guide section 11).",
-      ]);
+      const existing = (await domains()).customDomains.find((domain) => domain.domain === s.CUSTOM_HOST);
+      if (existing) console.log(`  = ${s.CUSTOM_HOST} is on the admin already`);
+      const domain = existing ?? (await railway(Q.customDomainCreate, { input: { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: admin(), domain: s.CUSTOM_HOST, targetPort: 3000 } })).customDomainCreate;
+      const records = (domain.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue).map((record) => ({ type: record.recordType.replace("DNS_RECORD_TYPE_", ""), name: record.fqdn, content: record.requiredValue }));
+      const { verified, verificationDnsHost, verificationToken } = domain.status ?? {};
+      if (!verified && verificationDnsHost && verificationToken) records.push({ type: "TXT", name: verificationDnsHost, content: `railway-verify=${verificationToken.replace(/^(railway-verify=)+/, "")}` });
+      if (!records.length) {
+        await byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones shown under admin > Settings > Networking, DNS only (guide section 11).`]);
+      } else {
+        await dnsRecords(run, records);
+        if (s.CLOUDFLARE_ZONE) console.log("  Railway checks the records and issues the certificate; the domain shows a green check mark once DNS has spread (guide section 11).");
+      }
     });
   }
   await step(run, "turnstile", "The Turnstile widget for the address", async () => {
@@ -876,8 +1068,17 @@ async function addressSteps(run) {
         TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
       };
     }
-    const domains = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])];
-    const widget = await cloudflare(`/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/challenges/widgets`, { method: "POST", body: { name: s.NAME, domains, mode: "managed" } });
+    const hosts = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])];
+    const base = `/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/challenges/widgets`;
+    const found = (await cloudflare(`${base}?per_page=100`))?.find((widget) => widget.name === s.NAME);
+    if (found) {
+      const widget = await cloudflare(`${base}/${found.sitekey}`);
+      const missing = hosts.filter((host) => !widget.domains?.includes(host));
+      if (missing.length) await cloudflare(`${base}/${found.sitekey}`, { method: "PUT", body: { name: s.NAME, domains: [...new Set([...(widget.domains ?? []), ...hosts])], mode: widget.mode ?? "managed" } });
+      console.log(`  = the widget ${s.NAME}${missing.length ? `, now also for ${missing.join(", ")}` : ""}`);
+      return { TURNSTILE_SITE_KEY: widget.sitekey, TURNSTILE_SECRET_KEY: widget.secret };
+    }
+    const widget = await cloudflare(base, { method: "POST", body: { name: s.NAME, domains: hosts, mode: "managed" } });
     return { TURNSTILE_SITE_KEY: widget.sitekey, TURNSTILE_SECRET_KEY: widget.secret };
   });
 }
@@ -888,13 +1089,24 @@ async function tollfreeSteps(run) {
     const smsUrl = `https://${v(run, "APP_HOST")}/api/webhooks/twilio/sms`;
     const base = `${URLS.twilio}/Accounts/${v(run, "TWILIO_ACCOUNT_SID")}`;
     let number = s.TWILIO_TOLLFREE;
+    const friendly = `${s.NAME} shared texts`;
+    if (number === "buy") {
+      // A number an earlier run bought is found by its name, so a rerun never buys a second one.
+      const owned = await twilioSub(run, base, `/IncomingPhoneNumbers.json?FriendlyName=${encodeURIComponent(friendly)}&PageSize=20`);
+      const mine = owned?.incoming_phone_numbers?.find((item) => item.friendly_name === friendly);
+      if (mine) {
+        number = mine.phone_number;
+        console.log(`  = ${number}, bought earlier`);
+        await twilioSub(run, base, `/IncomingPhoneNumbers/${mine.sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST" } });
+      }
+    }
     if (number === "buy") {
       const available = await twilioSub(run, base, "/AvailablePhoneNumbers/US/TollFree.json?SmsEnabled=true&PageSize=1");
       number = available?.available_phone_numbers?.[0]?.phone_number;
       if (!number) throw new Error("Twilio offered no toll-free number");
       await confirm(`Buy ${number} in subaccount ${s.NAME}? Twilio bills it every month.`);
-      await twilioSub(run, base, "/IncomingPhoneNumbers.json", { method: "POST", form: { PhoneNumber: number, SmsUrl: smsUrl, SmsMethod: "POST", FriendlyName: `${s.NAME} shared texts` } });
-    } else {
+      await twilioSub(run, base, "/IncomingPhoneNumbers.json", { method: "POST", form: { PhoneNumber: number, SmsUrl: smsUrl, SmsMethod: "POST", FriendlyName: friendly } });
+    } else if (s.TWILIO_TOLLFREE !== "buy") {
       const owned = await twilioSub(run, base, `/IncomingPhoneNumbers.json?PhoneNumber=${encodeURIComponent(number)}`);
       const sid = owned?.incoming_phone_numbers?.[0]?.sid;
       if (!sid) throw new Error(`${number} isn't in subaccount ${s.NAME}`);
@@ -976,8 +1188,13 @@ function perService(sections) {
 }
 
 async function variableSteps(run) {
-  await step(run, "secrets", "The 13 passwords and secrets (64 hex characters each)", () =>
-    Object.fromEntries(SECRETS.map((key) => [key, run.state.values[key] ?? fromFile(key) ?? randomBytes(32).toString("hex")])));
+  // Kept, given, or already on Railway (a lost state file must never change the database's passwords), else new.
+  const holder = (key) => (key.startsWith("POSTGRES_") || key.startsWith("LOBBYSTACK_") ? "Postgres" : key === "REDIS_PASSWORD" ? "Redis" : "admin");
+  await step(run, "secrets", "The 13 passwords and secrets (64 hex characters each)", async () => {
+    const values = {};
+    for (const key of SECRETS) values[key] = run.state.values[key] ?? fromFile(key) ?? (await railwayVariable(run, holder(key), key)) ?? randomBytes(32).toString("hex");
+    return values;
+  });
   await step(run, "variables", "Every service's variables (guide Appendix A), without deploying yet", async () => {
     const sections = variableSections(run);
     const missing = sections.flatMap(([section, variables]) => Object.entries(variables).filter(([, value]) => !value).map(([key]) => `${key} (${section})`));
@@ -1035,6 +1252,13 @@ async function connect(run) {
     if (brand && brand !== s.BRAND) throw new Error(`the admin shows the ${brand} brand, not ${s.BRAND}`);
   });
   await step(run, "connect.webhook", "OpenAI's incoming-call webhook (OpenAI's API can't make this one yet)", async () => {
+    if (!given("OPENAI_WEBHOOK_SECRET")) {
+      const onRailway = await railwayVariable(run, "admin", "OPENAI_WEBHOOK_SECRET");
+      if (onRailway) {
+        console.log("  To use a new webhook's secret instead, put it as OPENAI_WEBHOOK_SECRET in the secrets file and redo connect.webhook.");
+        return { OPENAI_WEBHOOK_SECRET: onRailway };
+      }
+    }
     if (!given("OPENAI_WEBHOOK_SECRET")) await byHand([
       `In the OpenAI project "${s.NAME}": Settings > Webhooks > Create (guide 3.5, steps 8 to 10).`,
       `URL: https://${host}/api/webhooks/openai/live   (no slash at the end)`,
@@ -1043,8 +1267,21 @@ async function connect(run) {
     return { OPENAI_WEBHOOK_SECRET: await secret("OPENAI_WEBHOOK_SECRET", "The webhook's signing secret (whsec_...)", (answer) => answer.startsWith("whsec_")) };
   });
   await step(run, "connect.platformKey", "The operator's platform key (pnpm platform-key:create)", async () => {
+    // The admin's current keys are kept: a new key is added to them, never put in their place.
+    const current = (await railwayVariable(run, "admin", "PLATFORM_API_KEYS")) ?? "";
+    let entries = [];
+    try {
+      entries = current ? JSON.parse(current) : [];
+    } catch {
+      throw new Error("the admin's PLATFORM_API_KEYS isn't valid JSON. Fix it in Railway first, then run again");
+    }
+    const mine = Array.isArray(entries) && entries.find((entry) => entry?.partner === "operator" && entry?.owner_email === s.OPERATOR_EMAIL);
+    if (mine) {
+      console.log(`  = the admin already has an operator key for ${s.OPERATOR_EMAIL} (${mine.prefix}). To make a new one, remove that entry from PLATFORM_API_KEYS on the admin and redo connect.platformKey.`);
+      return { PLATFORM_API_KEYS: current };
+    }
     const result = spawnSync("pnpm", ["--silent", "platform-key:create", "--name", "Operator key", "--partner", "operator", "--owner-email", s.OPERATOR_EMAIL, "--access", "all"], {
-      encoding: "utf8", shell: process.platform === "win32", env: { ...process.env, PLATFORM_API_KEYS: "" },
+      encoding: "utf8", shell: process.platform === "win32", env: { ...process.env, PLATFORM_API_KEYS: current },
     });
     if (result.error || result.status !== 0) throw new Error(`pnpm platform-key:create failed: ${(result.stderr || result.error?.message || "").trim().split("\n").at(-1)}`);
     const last = result.stdout.trim().split(/\r?\n/).at(-1);
@@ -1080,20 +1317,239 @@ Done by the script. What's left needs you (guide 12.3 to 14):
 
 function status(run) {
   const s = run.settings;
-  console.log(`${s.NAME} (${run.stateFile})`);
+  console.log(`${s.NAME}: ${run.stateFile}`);
+  console.log(`  secrets file: ${config ? config.file : "none (keys come from the environment or are asked for)"}`);
+  console.log(`  log: ${logPath}`);
   const done = Object.entries(run.state.done);
   if (!done.length) console.log("  nothing done yet: run up");
   for (const [id, at] of done) console.log(`  done  ${at}  ${id}`);
   const host = run.state.values.APP_HOST;
   if (host) console.log(`  address: https://${host}`);
   console.log(`  values kept (never printed): ${Object.keys(run.state.values).length}`);
+  if (done.length) console.log(`\nTo run a step again: node devops/bootstrap.mjs redo ${run.file} <step>, then the same command as before.`);
+}
+
+// ---------------------------------------------------------------- redo
+
+/** Takes the done mark off steps, so the next up or connect runs them again. Their values stay, and each step finds what it made before. */
+function redo(run, wanted) {
+  const done = Object.keys(run.state.done);
+  if (!wanted.length) throw new Stop(`name the step to run again, such as twilio.trunk, or a group such as twilio.* Finished steps:\n  ${done.join("\n  ") || "(none)"}`);
+  const matches = done.filter((id) => wanted.some((want) => id === want || (want.endsWith("*") && id.startsWith(want.slice(0, -1)))));
+  if (!matches.length) throw new Stop(`no finished step matches ${wanted.join(" ")}. Finished steps:\n  ${done.join("\n  ") || "(none)"}`);
+  for (const id of matches) {
+    delete run.state.done[id];
+    console.log(`  ${id}: runs again next time`);
+  }
+  save(run);
+  console.log(`\nNow run the command that made ${matches.length === 1 ? "it" : "them"} again (up, or connect for connect.* steps). What exists is found and reused or updated, not made twice.`);
+}
+
+// ---------------------------------------------------------------- troubleshooting
+
+const PROVIDERS = {
+  Railway: { token: "RAILWAY_API_TOKEN", make: "https://railway.com/account/tokens", status: "https://status.railway.com",
+    needs: "an account token, or a workspace token for RAILWAY_WORKSPACE_ID (a project token can't create projects)" },
+  OpenAI: { token: "OPENAI_ADMIN_KEY", make: "https://platform.openai.com/settings/organization/admin-keys", status: "https://status.openai.com",
+    needs: "an admin key, which only an organization owner can make (a project's API key can't create projects)" },
+  Twilio: { token: "TWILIO_MAIN_ACCOUNT_SID and TWILIO_MAIN_AUTH_TOKEN (or, for the trunk and numbers, TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN)",
+    make: "https://console.twilio.com (Account Info)", status: "https://status.twilio.com",
+    needs: "the main account's Account SID and Auth Token, on an account upgraded from trial (API keys can't create subaccounts)" },
+  Resend: { token: "RESEND_ADMIN_KEY", make: "https://resend.com/api-keys", status: "https://resend-status.com",
+    needs: "a Full access key (a Sending access key can't create domains or keys)" },
+  Cloudflare: { token: "CLOUDFLARE_API_TOKEN", make: "https://dash.cloudflare.com/profile/api-tokens", status: "https://www.cloudflarestatus.com",
+    needs: "Zone > DNS > Edit on the zone, and Account > Turnstile > Edit on the account" },
+};
+
+/** Suggestions for an error, from what failed and how. */
+function hints(error) {
+  const tips = [];
+  const provider = PROVIDERS[error.service];
+  const doctorLine = target ? `Check every token and tool without changing anything: node devops/bootstrap.mjs doctor ${target}` : null;
+  const message = error.message ?? "";
+  if (error.network) {
+    tips.push(`Check that this computer reaches ${error.service}: the internet connection, a VPN, or a firewall. If your network needs a proxy, set HTTPS_PROXY and NODE_USE_ENV_PROXY=1, which recent Node.js versions read.`);
+    if (provider) tips.push(`See whether ${error.service} has an outage: ${provider.status}`);
+  } else if (error.status === 401 || (!error.status && /not authorized|unauthori[sz]ed|invalid api key|authenticate/i.test(message))) {
+    if (provider) {
+      tips.push(`${error.service} didn't accept ${provider.token}. Copy it again in full (no spaces or quotes), and check it isn't expired, deleted, or for another account.`);
+      tips.push(`It must be ${provider.needs}. Make one at ${provider.make}`);
+    }
+    if (doctorLine) tips.push(doctorLine);
+  } else if (error.status === 403 || (!error.status && /forbidden|permission|insufficient/i.test(message))) {
+    if (provider) tips.push(`${provider.token} works but isn't allowed to do this. It must be ${provider.needs}.`);
+    if (error.service === "Twilio" && /trial/i.test(message)) tips.push("Upgrade the Twilio account from trial (guide 3.1): trial accounts can't make subaccounts or buy numbers.");
+  } else if (error.status === 404) {
+    tips.push(`${error.service} doesn't have something this step needs; it may have been deleted by hand. Run node devops/bootstrap.mjs status ${target ?? "<settings file>"}, then redo the step that made it, and run again.`);
+  } else if (error.status === 409 || error.status === 422 || error.status === 400) {
+    tips.push(`${error.service} refused the request as it stands: read its message above. Something with the same name may already exist with other settings, or a value in the settings file may be off.`);
+  } else if (error.status === 429) {
+    tips.push(`${error.service} is limiting requests. Wait a few minutes, then run the same command again.`);
+  } else if (error.status >= 500 || (!error.status && /problem processing request|internal server error|timed? ?out/i.test(message))) {
+    tips.push(`${error.service ?? "The service"} had a problem on its side. Run the same command again in a few minutes${provider ? `, and check ${provider.status}` : ""}.`);
+  }
+  if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: workspace settings), and use a token that can reach it.");
+  if (/no valid value given/.test(message)) tips.push("The script needed a value and got none. Put it in the secrets file (see init), or run in a terminal where you can type it.");
+  if (currentStep === "resend.key") tips.push("If Resend won't make a key limited to one domain, make a Sending access key for the domain at https://resend.com/api-keys, put it as SMTP_PASSWORD in the secrets file, and run again.");
+  if (currentStep === "railway.domain") tips.push("Railway may not give an address before the service's first deploy. Run up again once the admin has deployed once (guide Appendix D).");
+  if (currentStep?.startsWith("railway.volume")) tips.push("If the volume was made by hand already, check it's on the right service and mount path; the script then finds it.");
+  if (currentStep === "connect.platformKey") tips.push("Run pnpm install in the repository folder first: the platform key is made by pnpm platform-key:create.");
+  return tips;
+}
+
+// ---------------------------------------------------------------- doctor
+
+/** Checks the settings, the tools and every token it can find, with read-only calls. Asks nothing and changes nothing. */
+async function doctor(run) {
+  const s = run.settings;
+  let fixes = 0;
+  const ok = (text) => console.log(`  ok     ${text}`);
+  const note = (text) => console.log(`  note   ${text}`);
+  const fix = (text) => {
+    fixes += 1;
+    console.log(`  FIX    ${text}`);
+  };
+  const tool = (name, args) => spawnSync(name, args, { encoding: "utf8", shell: process.platform === "win32" });
+  console.log(`Checking ${run.file}. Nothing is changed.\n`);
+
+  console.log("This computer");
+  const major = Number(process.versions.node.split(".")[0]);
+  (major >= 18 ? ok : fix)(`Node.js ${process.version}${major >= 18 ? "" : ": needs 18 or later"}`);
+  for (const file of [run.file, run.stateFile, config?.file, logPath].filter(Boolean)) {
+    const ignored = tool("git", ["check-ignore", "-q", file]);
+    if (ignored.status === 1) fix(`Git doesn't ignore ${file}: name it .env.<something>, or add it to .gitignore, so it's never committed`);
+  }
+  const pnpm = tool("pnpm", ["--version"]);
+  (pnpm.status === 0 ? ok : fix)(pnpm.status === 0 ? `pnpm ${pnpm.stdout.trim()} (connect uses it for the platform key)` : "pnpm isn't installed: connect needs it (npm install --global pnpm, then pnpm install here)");
+  const cli = tool(RAILWAY_CLI, ["--version"]);
+  (cli.status === 0 ? ok : note)(cli.status === 0 ? `Railway CLI ${cli.stdout.trim()} (makes the bucket)` : "no Railway CLI: you'll make the bucket by hand (npm install --global @railway/cli to avoid that)");
+  if (s.STEP_GITHUB) {
+    const gh = tool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);
+    if (gh.error) note(`no GitHub CLI: you'll check ${s.REPO} by hand`);
+    else if (gh.status === 0) ok(`${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`);
+    else fix(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json, or gh isn't signed in (gh auth login). Click Sync fork if the brand is missing`);
+  }
+
+  console.log("\nSettings and keys");
+  ok(`${s.NAME}: ${s.ENVIRONMENT}, ${s.DEPLOYMENT_MODE}, brand ${s.BRAND}, from ${s.REPO}@${s.BRANCH}`);
+  const off = ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"].filter((name) => !s[`STEP_${name}`]);
+  if (off.length) note(`turned off: ${off.map((name) => `STEP_${name}`).join(", ")} (their values come from the secrets file, or are asked for)`);
+  if (config) ok(`secrets file ${config.file}: ${Object.keys(config.flat).length} values (names only: ${Object.keys(config.flat).sort().join(", ") || "none"})`);
+  else note("no secrets file: up will ask for each key (init writes one)");
+  const done = Object.keys(run.state.done).length;
+  note(done ? `${done} steps already done (status lists them)` : "nothing done yet");
+
+  console.log("\nTokens (read-only calls)");
+  const quietGiven = (name) => process.env[name]?.trim() || config?.flat[name];
+  const bearer = (value) => ({ Authorization: `Bearer ${value}` });
+  const check = async (label, name, call) => {
+    const value = quietGiven(name);
+    if (!value) return note(`${label}: ${name} isn't set, so up will ask for it`);
+    hide(value);
+    try {
+      const detail = await call(value);
+      ok(`${label}: ${name} works${detail ? ` (${detail})` : ""}`);
+    } catch (error) {
+      fix(`${label}: ${name} was refused: ${error.message}`);
+      for (const tip of hints(error)) console.log(`         ${tip}`);
+    }
+  };
+  await check("Railway", "RAILWAY_API_TOKEN", async (value) => {
+    const query = s.RAILWAY_WORKSPACE_ID ? "query workspace($id: String!) { workspace(workspaceId: $id) { name } }" : "query me { me { email } }";
+    const json = await http("Railway", URLS.railway, { method: "POST", headers: bearer(value), body: { query, variables: s.RAILWAY_WORKSPACE_ID ? { id: s.RAILWAY_WORKSPACE_ID } : {} } });
+    if (json?.errors?.length) throw Object.assign(new Error(json.errors.map((item) => item.message).join("; ")), { service: "Railway", graphql: json.errors });
+    return s.RAILWAY_WORKSPACE_ID ? `workspace ${json.data.workspace.name}` : "your account";
+  });
+  const openaiGiven = config?.flat.OPENAI_API_KEY || config?.flat.OPENAI_PROJECT_ID;
+  if (s.STEP_OPENAI && !openaiGiven && !run.state.done["openai.key"]) {
+    await check("OpenAI", "OPENAI_ADMIN_KEY", async (value) => {
+      const list = await http("OpenAI", `${URLS.openai}/organization/projects?limit=100`, { headers: bearer(value) });
+      return list?.data?.some((project) => project.name === s.NAME && project.status !== "archived") ? `project ${s.NAME} exists and will be reused` : `project ${s.NAME} will be made`;
+    });
+  } else note("OpenAI: no admin key needed (the project and key are given, or done)");
+  const twilioGiven = config?.flat.TWILIO_ACCOUNT_SID || config?.flat.TWILIO_AUTH_TOKEN;
+  if (s.STEP_TWILIO && !twilioGiven && !run.state.done["twilio.subaccount"]) {
+    const sid = quietGiven("TWILIO_MAIN_ACCOUNT_SID");
+    await check("Twilio", "TWILIO_MAIN_AUTH_TOKEN", async (value) => {
+      if (!sid) throw Object.assign(new Error("TWILIO_MAIN_ACCOUNT_SID isn't set"), { service: "Twilio" });
+      const account = await http("Twilio", `${URLS.twilio}/Accounts/${sid}.json`, { headers: { Authorization: basic(sid, value) } });
+      if (account?.type === "Trial") throw Object.assign(new Error("the account is still a trial, which can't make subaccounts or buy numbers"), { service: "Twilio", status: 403 });
+      return `${account?.friendly_name ?? sid}, ${account?.type ?? "type unknown"}`;
+    });
+  } else note("Twilio: no main account token needed (the account is given, or done)");
+  const subSid = config?.flat.TWILIO_ACCOUNT_SID ?? v(run, "TWILIO_ACCOUNT_SID");
+  const subToken = config?.flat.TWILIO_AUTH_TOKEN ?? v(run, "TWILIO_AUTH_TOKEN");
+  if (subSid && subToken) {
+    try {
+      const account = await http("Twilio", `${URLS.twilio}/Accounts/${subSid}.json`, { headers: { Authorization: basic(subSid, hide(subToken)) } });
+      ok(`Twilio: account ${account?.friendly_name ?? subSid} answers with TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN`);
+    } catch (error) {
+      fix(`Twilio: TWILIO_ACCOUNT_SID with TWILIO_AUTH_TOKEN was refused: ${error.message}`);
+    }
+  }
+  if (s.STEP_RESEND && !run.state.done["resend.key"]) {
+    await check("Resend", "RESEND_ADMIN_KEY", async (value) => {
+      const list = await http("Resend", `${URLS.resend}/domains`, { headers: bearer(value) });
+      const found = list?.data?.find((domain) => domain.name === s.EMAIL_DOMAIN);
+      return found ? `${s.EMAIL_DOMAIN} exists (${found.status ?? "status unknown"}) and will be reused` : `${s.EMAIL_DOMAIN} will be added`;
+    });
+  }
+  if (s.CLOUDFLARE_ZONE || (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID)) {
+    await check("Cloudflare", "CLOUDFLARE_API_TOKEN", async (value) => {
+      const results = [];
+      if (s.CLOUDFLARE_ZONE) {
+        const zones = await http("Cloudflare", `${URLS.cloudflare}/zones?name=${encodeURIComponent(s.CLOUDFLARE_ZONE)}`, { headers: bearer(value) });
+        if (!zones?.result?.length) throw Object.assign(new Error(`the token can't see the zone ${s.CLOUDFLARE_ZONE}`), { service: "Cloudflare", status: 403 });
+        results.push(`sees ${s.CLOUDFLARE_ZONE}`);
+      }
+      if (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID) {
+        await http("Cloudflare", `${URLS.cloudflare}/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/challenges/widgets?per_page=1`, { headers: bearer(value) });
+        results.push("can read Turnstile widgets");
+      }
+      return results.join(", ");
+    });
+  }
+  if (s.DEPLOYMENT_MODE === "cloud") {
+    for (const name of ["POLAR_ADMIN_TOKEN", "POLAR_WORKER_TOKEN"]) {
+      const set = process.env[name]?.trim() || fromFile(name, { quiet: true });
+      (set ? ok : note)(`Polar: ${name} ${set ? "is set" : "isn't set, so up will ask for it"}`);
+    }
+  }
+  const host = v(run, "APP_HOST");
+  if (host) {
+    console.log("\nThe deployment");
+    try {
+      const health = await http("The admin", `${process.env.BOOTSTRAP_APP_URL ?? `https://${host}`}/api/health/ready`);
+      (health?.ok === true ? ok : fix)(`https://${host}/api/health/ready says ${JSON.stringify(health)}`);
+    } catch (error) {
+      note(`https://${host}/api/health/ready doesn't answer yet (${error.message}); normal until the admin's first deploy finishes`);
+    }
+  }
+  console.log(fixes ? `\n${fixes} thing${fixes === 1 ? "" : "s"} to fix first (FIX above).` : `\nNothing to fix. Next: node devops/bootstrap.mjs ${run.state.done["deploy.admin"] ? "connect" : "up"} ${run.file}${run.state.done["deploy.admin"] ? "" : " --dry-run"}`);
+  process.exitCode = fixes ? 1 : 0;
 }
 
 // Last, so every declaration above is in place before the first step runs.
+process.on("SIGINT", () => {
+  console.error(`\nStopped by Ctrl+C${currentStep ? ` during ${currentStep}` : ""}. Finished steps are recorded: run the same command again to go on.`);
+  prompter?.close();
+  process.exit(130);
+});
+
 main()
   .catch((error) => {
-    console.error(`\nStopped: ${error.message}`);
-    console.error("Steps already done are recorded. Fix the problem and run the same command again.");
+    console.error(`\nStopped${currentStep ? ` at ${currentStep}` : ""}: ${error.message}`);
+    if (error instanceof Stop) {
+      process.exitCode = 1;
+      return;
+    }
+    const tips = hints(error);
+    if (tips.length) console.error(`\nWhat to try:\n${tips.map((tip) => `  - ${tip}`).join("\n")}`);
+    if (logPath && command !== "init") {
+      console.error(`\nFinished steps are recorded: fix the problem, then run the same command again.`);
+      console.error(`Details, with every API call: ${logPath}${verbose ? "" : " (or run again with --verbose)"}`);
+    }
+    writeLog(`ERROR ${error.stack ?? error.message}`);
     process.exitCode = 1;
   })
   .finally(() => prompter?.close());

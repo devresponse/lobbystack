@@ -7,7 +7,7 @@ How to work on the code: set up a checkout, run the checks a pull request needs,
 - Use Node 26, as CI does, and pnpm 12.15.0 (`packageManager` in `package.json`).
 - `pnpm env:generate` writes `.env` with new random secrets. Keep your own keys and overrides in `.env.local`, which wins over `.env` and which Git and Docker both ignore.
 - Build `@lobbystack/telemetry` before the first `pnpm dev`, and again after changing it: the admin loads it from its build output. In a fresh checkout, `pnpm build` once also builds the packages some tests import.
-- `next dev` rewrites `apps/admin/next-env.d.ts`. Restore it before committing.
+- Git ignores `apps/admin/next-env.d.ts`. Next writes it whenever `next dev`, `next build` or `next typegen` runs, and the admin's `typecheck` script runs `next typegen` before `tsc`, so a fresh checkout and CI get it too.
 - To run the whole stack in Docker, debug in VS Code, or take real calls on your desktop through a tunnel, follow [run and debug on your desktop](../voice/local-debugging.md).
 
 ## Run the checks before a pull request

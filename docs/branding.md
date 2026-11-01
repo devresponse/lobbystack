@@ -35,6 +35,8 @@ A brand is a folder under `brands/` with a `brand.json` and its logo. `brands/in
 
 After changing anything under `brands/`, run `pnpm brands:build`. It checks every brand, then writes `packages/shared/src/brands/generated.ts`, copies each image to `apps/admin/public/brand/<id>/`, and refreshes the schemas. `scripts/brands.test.ts` fails when any of them falls behind `brands/`, and the build refuses a brand with a problem, listing every one.
 
+The build reads only the images `brand.json` names, so a folder can also keep images used elsewhere. AlloPlace's holds `logo-zapier.png`, the 256×256 logo uploaded by hand in Zapier's developer dashboard ([`integrations/zapier/README.md`](../integrations/zapier/README.md)).
+
 The repository is public, so everything in a brand folder is public too.
 
 ### Billing
@@ -195,7 +197,7 @@ These places still say LobbyStack or link to the original project's sites. Varia
 | Website widget | The `window.LobbyStack` global, the `lobby-widget-*` classes, and the default color `#0f766e` (`packages/embed`, built into `apps/admin/public/embed/embed.js`) | Keep `window.LobbyStack`, because customers' sites may call it; the dashboard's embed code never shows it. Use the brand's `accentColor`, which [public profile pages](#color-the-public-pages) already read, for the default color. |
 | Twilio | Numbers get the friendly name `LobbyStack <business id>` (`apps/worker/src/handlers.ts`) | The app name. Only the Twilio console shows it. |
 | CLI | The `lobbystack` command, its `LOBBYSTACK_*` variables and config path, and links to the original project's docs in its help (`packages/cli`) | None: one command works with every deployment, so its help text says "the dashboard" instead of a name. |
-| Zapier | The integration's logo in Zapier's developer dashboard, and its name, default address and help link when it's pushed some other way than `npm run push` | `npm run push -- --brand <id> --url <dashboard>` (fork PR #94) takes the name from the brand file and points the default address and help link at the dashboard; the brand registers the integration under that name on its own Zapier account and uploads the logo there (`integrations/zapier/README.md`). |
+| Zapier | The integration's logo in Zapier's developer dashboard, and its name, default address and help link when it's pushed some other way than `npm run push` | `npm run push -- --brand <id> --url <dashboard>` (fork PR #94) takes the name from the brand file and points the default address and help link at the dashboard; the brand registers the integration under that name on its own Zapier account and uploads the logo there, the 256×256 `logo-zapier.png` in its brand folder (`integrations/zapier/README.md`). |
 | Marketing site and docs | `apps/landing` (about 5,600 mentions) and `mintlify` (about 1,200), including logos, favicons, Open Graph images, structured data, and the legal entity "Lobbystack Inc." | Separate sites, so they're rebranded as content rather than with a variable. |
 | Observability | `lobbystack-admin` and `lobbystack-worker` service names, and `lobbystack.*` metric names | Operators see these, end users don't. `OTEL_SERVICE_NAME` already overrides the service name. |
 

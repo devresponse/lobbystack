@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-11-01
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#112](https://github.com/devresponse/lobbystack/pull/112) | Add the RealInfoBot brand for realinfobot.com, so an address no brand claims needs `BRAND_PRESET` |  |  | [docs](../branding.md) |
+
 ### 2026-10-31
 
 | PR | What changed | Migrations | Merge | More |

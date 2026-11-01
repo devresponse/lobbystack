@@ -1,6 +1,6 @@
 # Brands
 
-Each folder here is one brand: its `brand.json` and the images it names. `index.json` maps apex domains to folders, and a deployment shows the brand that claims the domain of its `APP_BASE_URL`. `BRAND_PRESET` names a folder where no brand claims the domain, such as on `localhost`. Where neither names one, a deployment shows the only folder besides `lobbystack`, which is `alloplace` today, so adding a second brand means giving each deployment on such an address a `BRAND_PRESET`.
+Each folder here is one brand: its `brand.json` and the images it names. `index.json` maps apex domains to folders, and a deployment shows the brand that claims the domain of its `APP_BASE_URL`. `BRAND_PRESET` names a folder where no brand claims the domain, such as on `localhost`. Where neither names one, a deployment shows the only folder besides `lobbystack`, if there's exactly one. There are two today, `alloplace` and `realinfobot`, so each deployment on such an address needs a `BRAND_PRESET`, or it shows LobbyStack.
 
 After any change here, run `pnpm brands:build` and commit what it writes. The repository is public, so everything in these folders is public too.
 

@@ -60,7 +60,7 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `CUSTOM_HOST` | `test.realinfobot.com` | Optional. Empty: Railway's free address with `BRAND_PRESET` |
 | `EMAIL_DOMAIN`, `EMAIL_FROM` | `notifications.realinfobot.com`, `no-reply@notifications.realinfobot.com` | The subdomain kept for email, and the sender on it |
 | `RESEND_REGION` | `us-east-1` | It can't change later |
-| `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The zone that holds both domains. Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
+| `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The domain name of the zone that holds both domains, not the Zone ID Cloudflare shows beside it; and the Account ID from the zone's Overview page (right-hand column, under API). Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number you already have in the subaccount, or empty |
 | `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | Cloud mode only |
 | `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then takes its values from the secrets file, or asks you for them |
@@ -163,6 +163,7 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 | --- | --- |
 | `didn't accept RAILWAY_API_TOKEN` (or another token) | Run `doctor`. Copy the token again in full. Railway needs an account or workspace token, not a project token; OpenAI an admin key; Resend a Full access key; Twilio the main account's Auth Token |
 | `isn't allowed to do this` | The token works but lacks a permission: Cloudflare needs **DNS Edit** on the zone and **Turnstile Edit** on the account; Twilio must be upgraded from trial |
+| `can't see a zone named ...` | Check that `CLOUDFLARE_ZONE` is the domain name, such as `realinfobot.com`, and not the Zone ID. If it is, edit the token in Cloudflare (My Profile, API Tokens) so its Zone Resources include that zone |
 | `couldn't be reached` | Check the internet connection, VPN or firewall. Behind a proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` |
 | `Railway has 2 projects named ...` | Delete or rename the extra project in Railway, then run again |
 | `already has a volume, mounted at ...` | Change that volume's mount path in Railway to the one named, then run again |

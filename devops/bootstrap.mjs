@@ -97,8 +97,11 @@ EMAIL_FROM=
 # us-east-1, eu-west-1, sa-east-1 or ap-northeast-1. It can't change later.
 RESEND_REGION=us-east-1
 
-# Cloudflare: the zone that holds EMAIL_DOMAIN and CUSTOM_HOST (such as example.com), and the
-# account ID from the zone's Overview page. Empty zone: the script prints the DNS records instead.
+# Cloudflare. CLOUDFLARE_ZONE is the domain name of the zone that holds EMAIL_DOMAIN and
+# CUSTOM_HOST, such as example.com: the name, not the 32-character Zone ID that Cloudflare shows
+# beside it. CLOUDFLARE_ACCOUNT_ID is the Account ID from the zone's Overview page (right-hand
+# column, under API). Empty zone: the script prints the DNS records for you to add instead.
+# Empty account ID: you make the Turnstile widget by hand.
 CLOUDFLARE_ZONE=
 CLOUDFLARE_ACCOUNT_ID=
 
@@ -316,6 +319,9 @@ function loadRun(file) {
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push("CUSTOM_HOST is a host name only, such as test.example.com");
+  if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
+  else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
+  if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
   if (s.DEPLOYMENT_MODE === "cloud" && !s.POLAR_ORGANIZATION_ID) problems.push("POLAR_ORGANIZATION_ID is empty, and DEPLOYMENT_MODE is cloud");
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
@@ -861,7 +867,7 @@ function fullName(name, emailDomain, zone) {
 async function zoneId(run) {
   if (v(run, "CLOUDFLARE_ZONE_ID")) return v(run, "CLOUDFLARE_ZONE_ID");
   const zones = await cloudflare(`/zones?name=${encodeURIComponent(run.settings.CLOUDFLARE_ZONE)}`);
-  if (!zones?.length) throw new Error(`the Cloudflare token can't see the zone ${run.settings.CLOUDFLARE_ZONE}`);
+  if (!zones?.length) throw new Error(`the Cloudflare token can't see a zone named ${run.settings.CLOUDFLARE_ZONE}: check the name, and that the token's Zone Resources include it`);
   run.state.values.CLOUDFLARE_ZONE_ID = zones[0].id;
   save(run);
   return zones[0].id;
@@ -1515,7 +1521,7 @@ async function doctor(run) {
       const results = [];
       if (s.CLOUDFLARE_ZONE) {
         const zones = await http("Cloudflare", `${URLS.cloudflare}/zones?name=${encodeURIComponent(s.CLOUDFLARE_ZONE)}`, { headers: bearer(value) });
-        if (!zones?.result?.length) throw Object.assign(new Error(`the token can't see the zone ${s.CLOUDFLARE_ZONE}`), { service: "Cloudflare", status: 403 });
+        if (!zones?.result?.length) throw Object.assign(new Error(`the token can't see a zone named ${s.CLOUDFLARE_ZONE}: check the name, and that the token's Zone Resources include it`), { service: "Cloudflare", status: 403 });
         results.push(`sees ${s.CLOUDFLARE_ZONE}`);
       }
       if (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID) {

@@ -191,7 +191,7 @@ node devops/bootstrap.mjs redo .env.bootstrap-realinfobot-test "railway.*" turns
 node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 ```
 
-Redoing `railway.project` also forgets the old project's IDs and address, and runs the steps after the deploy (`post.*`) again. A project you deleted stays listed in Railway for a few days, but the script never reuses one that's being deleted. `railway.*` includes the custom domain step; add `twilio.tollfree` to the list if you use the toll-free number's texting address.
+Two runs never share the progress file: a run that finds the file changed since it read it stops without saving, so close any old terminal still waiting at a prompt. A run also stops if the file names a deleted Railway project. Redoing `railway.project` also forgets the old project's IDs and address, and runs the steps after the deploy (`post.*`) again. A project you deleted stays listed in Railway for a few days, but the script never reuses one that's being deleted. `railway.*` includes the custom domain step; add `twilio.tollfree` to the list if you use the toll-free number's texting address.
 
 To give an environment another `APP_BASE_URL`, change it in the settings file, then:
 
@@ -231,6 +231,8 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 | Stopped at `railway.domain` | Railway may not give an address before the admin's first deploy: run `up` again after it has deployed once |
 | Stopped at `connect.health` | The admin isn't ready yet. `connect` tries APP_BASE_URL's address and the admin's current Railway address (read from Railway, not the state file) and lists what each answered. Check the admin's deployment logs in Railway, then run `connect` again |
 | `Application not found` from an `up.railway.app` address | That address belongs to no running service, usually a project you deleted. `connect` now reads the admin's address from Railway; if the project itself is gone, redo the Railway steps (see [Running it again is safe](#running-it-again-is-safe)) and run `up` |
+| `another run changed ... state.json after this one read it` | Two runs used the same progress file, for example an old terminal left waiting at a BY HAND prompt. The run that noticed stopped without saving. Close every other terminal running `bootstrap.mjs`, then run the command again. Don't press Enter in an old run's prompt |
+| `the state file names a Railway project that's deleted` | The progress file points at a project you deleted. Run `redo <settings> "railway.*"`, then `up`: it finds the live project with the same name, or makes one, and redeploys nothing that's done |
 | `up ran before APP_BASE_URL ... was set` | Run the `redo` it prints (`railway.domain railway.custom turnstile "post.*"`), then `up`, which adds the domain, its CNAME, the Turnstile hostnames and the admin's variables, then `connect` |
 | `Service admin does not have a source that can be used to generate a template` | The script predates the steps that link the code services to the repository: pull the latest script and run `template` again. It carries on from the steps already done |
 | `Railway's GitHub access can't reach <repo>` | Railway links a service only to a repository its GitHub app reaches for someone in your workspace. Add the repository to Railway's GitHub app (GitHub: Settings, Applications, Railway, Configure), or set `TEMPLATE_REPO` to one it reaches, such as your own fork, then run `template` again |

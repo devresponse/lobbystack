@@ -354,12 +354,13 @@ function loadRun(file) {
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
   const stateFile = path.join(path.dirname(file), `${path.basename(file)}.state.json`);
-  const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} };
+  const stateText = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf8") : null;
+  const state = stateText ? JSON.parse(stateText) : { done: {}, values: {} };
   logPath = `${file}.log`;
   for (const [key, value] of Object.entries(state.values)) if (SECRET_KEYS.has(key) || SECRETS.includes(key)) hide(value);
   const secretsFile = secretsOption ?? (fs.existsSync(`${file}.secrets`) ? `${file}.secrets` : null);
   config = secretsFile ? loadConfig(secretsFile) : null;
-  return { file, settings: s, stateFile, state };
+  return { file, settings: s, stateFile, state, stateText };
 }
 
 // ---------------------------------------------------------------- the secrets file
@@ -443,7 +444,15 @@ function given(name) {
 
 function save(run) {
   if (dryRun) return;
-  fs.writeFileSync(run.stateFile, `${JSON.stringify(run.state, null, 2)}\n`, { mode: 0o600 });
+  // Another run may have written the file since this one read it, such as an old run left waiting at a BY HAND
+  // prompt for hours (seen 2 November 2026: it saved a deleted project's IDs over the live one's). Never overwrite.
+  const onDisk = fs.existsSync(run.stateFile) ? fs.readFileSync(run.stateFile, "utf8") : null;
+  if ("stateText" in run && onDisk !== run.stateText) {
+    throw new Error(`another run changed ${run.stateFile} after this one read it, so this run stops without saving. Close any other terminal running bootstrap.mjs, then run the command again`);
+  }
+  const text = `${JSON.stringify(run.state, null, 2)}\n`;
+  fs.writeFileSync(run.stateFile, text, { mode: 0o600 });
+  run.stateText = text;
   try {
     fs.chmodSync(run.stateFile, 0o600);
   } catch {
@@ -986,7 +995,7 @@ async function dnsRecords(run, records) {
 
 const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
-  project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
+  project: "query project($id: String!) { project(id: $id) { id name deletedAt services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
   workspaces: "query workspaces { me { workspaces { id name } } }",
   projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name deletedAt } } } }",
   domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
@@ -1063,7 +1072,20 @@ async function projectView(run, id = v(run, "RAILWAY_PROJECT_ID")) {
     environments: Object.fromEntries(project.environments.edges.map(({ node }) => [node.name, node.id])),
     volumes: project.volumes.edges.flatMap(({ node }) => node.volumeInstances.edges.map(({ node: instance }) => instance)),
     buckets: project.buckets.edges.map(({ node }) => node.name),
+    deletedAt: project.deletedAt ?? null,
   };
+}
+
+/**
+ * Stops when the state file names a Railway project that's deleted: its services still answer the API for a few
+ * days, so a run would otherwise connect or configure a project nobody uses (seen 2 November 2026, when an old run
+ * saved its state over a newer one).
+ */
+async function assertLiveProject(run) {
+  if (dryRun || run.template || !v(run, "RAILWAY_PROJECT_ID")) return;
+  const view = await projectView(run).catch(() => null);
+  if (view && !view.deletedAt) return;
+  throw new Error(`the state file names a Railway project that's ${view ? "deleted" : "gone"} (${v(run, "RAILWAY_PROJECT_ID")}). Run: node devops/bootstrap.mjs redo ${run.file} "railway.*", then up; it finds the live project named ${run.settings.NAME}, or makes one`);
 }
 
 /** The workspaces the Railway token can reach, as a sentence for an error or doctor. */
@@ -1152,6 +1174,7 @@ async function waitForTemplateApplied(run, config) {
 
 async function railwaySteps(run) {
   const s = run.settings;
+  await assertLiveProject(run);
   await step(run, "railway.project", `Railway project "${s.NAME}" with the environment ${s.ENVIRONMENT}`, async () => {
     // Kept at once, so a run that stops after this call never makes a second project.
     if (!v(run, "RAILWAY_PROJECT_ID")) {
@@ -1306,6 +1329,7 @@ async function makeTemplate(run) {
     file: run.file, stateFile, template: true,
     settings: { ...s, NAME: name, CUSTOM_HOST: "", APP_BASE_URL: "", ENVIRONMENT: "test" },
     state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} },
+    stateText: fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf8") : null,
   };
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}Template: a Railway project "${name}" with the layout only, then a private template of it.`);
   console.log(`Progress: ${stateFile}\n`);
@@ -1760,6 +1784,7 @@ async function connect(run) {
   if (s.CUSTOM_HOST && !run.state.done["post.dns"]) {
     throw new Error(`up ran before APP_BASE_URL (${s.CUSTOM_HOST}) was set, so the admin isn't on that address yet. Run: node devops/bootstrap.mjs redo ${run.file} railway.domain railway.custom turnstile "post.*", then up, then connect again`);
   }
+  await assertLiveProject(run);
   const host = appHost(run);
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME} at https://${host}${config ? `, keys from ${config.file}` : ""}\n`);
   await step(run, "connect.health", `https://${host}/api/health/ready answers "ok":true with the ${s.BRAND} brand`, async () => {

@@ -1079,10 +1079,28 @@ async function railwaySteps(run) {
           if (variable && variable.value === undefined && variable.defaultValue) variable.value = variable.defaultValue;
         }
       }
-      const { templateDeployV2 } = await railway(Q.templateDeploy, { input: {
-        templateId: template.id, serializedConfig: config, projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"),
-      } });
-      await waitForWorkflow(templateDeployV2?.workflowId, `the template ${s.RAILWAY_TEMPLATE}`);
+      const deploy = async (serializedConfig) => (await railway(Q.templateDeploy, { input: {
+        templateId: template.id, serializedConfig, projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"),
+      } })).templateDeployV2;
+      // The template names the repository it was made from. Its code services are deployed without it, so they
+      // wait for the connect steps at the end (migrate first, after the secrets), as they do without a template.
+      const repoServices = (cfg) => Object.values(cfg.services ?? {}).filter((service) => service?.source?.repo);
+      const withoutSource = structuredClone(config);
+      for (const service of repoServices(withoutSource)) delete service.source;
+      let deployed;
+      try {
+        deployed = await deploy(withoutSource);
+      } catch (error) {
+        if (!repoServices(config).length || !/source/i.test(error.message)) throw error;
+        console.log(`  Railway wants the code services' source in the deploy (${String(error.message).split("\n")[0]}), so they get ${s.REPO}@${s.BRANCH}.`);
+        console.log("  They start building now and fail until the secrets are set: that's expected, and the connect steps deploy them again.");
+        for (const service of repoServices(config)) {
+          service.source.repo = s.REPO;
+          if ("branch" in service.source) service.source.branch = s.BRANCH;
+        }
+        deployed = await deploy(config);
+      }
+      await waitForWorkflow(deployed?.workflowId, `the template ${s.RAILWAY_TEMPLATE}`);
       const made = await projectView(run);
       console.log(`  made ${SERVICES.filter((service) => made.services[service.name]).map((service) => service.name).join(", ") || "no services with the expected names"}; the next steps add anything it left out`);
     });
@@ -1173,6 +1191,20 @@ async function makeTemplate(run) {
   if (!dryRun) await confirm(`This makes the Railway project ${name} in your workspace. Postgres and Redis there start without passwords and stop after a few retries; nothing else deploys.`);
   console.log("\nRailway");
   await railwaySteps(trun);
+  // Railway makes a template only of services that have a source (an image or a repository).
+  await step(trun, "template.sources", `${s.REPO} as the source of migrate, admin and worker, which Railway needs to make a template`, async () => {
+    const ids = v(trun, "RAILWAY_SERVICE_IDS");
+    for (const service of ["migrate", "admin", "worker"]) {
+      try {
+        await railway(Q.instanceUpdate, { serviceId: ids[service], environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID"), input: { source: { repo: s.REPO } } });
+        console.log(`  ${service}: ${s.REPO}`);
+      } catch (error) {
+        console.log(`  ${service}: Railway refused the source as a setting (${String(error.message).split("\n")[0]}), so it's connected to ${s.REPO}@${s.BRANCH} instead.`);
+        console.log("    That starts a build here, which fails without the secrets: that's expected in this project.");
+        await railway(Q.connect, { id: ids[service], input: { repo: s.REPO, branch: s.BRANCH } });
+      }
+    }
+  });
   await step(trun, "template.variables", "The variables that are the same in every deployment (references, ports, file paths)", async () => {
     const ids = v(trun, "RAILWAY_SERVICE_IDS");
     const services = perService(variableSections(trun));

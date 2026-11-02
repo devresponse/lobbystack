@@ -478,9 +478,9 @@ The test environment is also where `pnpm voice:call` places its scripted test ca
   3. Or wipe the Postgres volume and the Redis volume: each volume's **Settings** > **Wipe Volume**, which also deletes their backups. Then deploy migrate, then the admin and the worker.
   4. Either way the bucket keeps its files; delete them from its **Files** view if you want it empty.
 
-## 4.11 Later: set it all up with one command
+## 4.11 Set it all up with the bootstrap script
 
-Not built. The 2026-10-14 research recommended a Railway definition and a set-up script kept in the fork, which would do [4.2](#42-create-the-account-and-the-project) to [4.6](#46-add-the-admin-and-the-worker) from about six values and one sign-up per instance. Until it exists, follow this part by hand. Don't run `railway config apply` from the fork: its definition targets the original LobbyStack's project (`.railway/railway.ts:5-7`).
+`devops/bootstrap.mjs` does [4.2](#42-create-the-account-and-the-project) to [4.7](#47-use-your-own-domain-optional), part of [4.8](#48-connect-the-providers-to-this-environment) and most of [Part 3](part-3-outside-services.md) from one settings file and the providers' admin tokens. It creates the OpenAI project and key, the Twilio subaccount and trunk, the Resend domain, the DNS records and the Turnstile widget, then the Railway project with its services, settings, secrets and variables, and deploys them in order. It stops, with exact instructions, at the few steps only a person can do, such as OpenAI's incoming-call webhook, and every step can run again. [devops/bootstrap.md](../../../devops/bootstrap.md) covers its settings, each step, and what it leaves to you. Don't run `railway config apply` from the fork: its definition targets the original LobbyStack's project (`.railway/railway.ts:5-7`).
 
 **Not yet confirmed:**
 

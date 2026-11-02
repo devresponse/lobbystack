@@ -92,7 +92,7 @@ Every way builds the admin, the worker and migrate from the code itself. No read
 | Docker Compose, Way B | Your computer | One command | Checking a change the way a server runs it | [2.5](part-2-local-development.md#25-way-b-run-everything-in-docker), untested |
 | Railway, set up from the fork in its dashboard | Railway | Many clicks, and five blocks of settings to paste | The test environment, and production: this guide's main path | [Part 4](part-4-test-environment.md) and [5.2](part-5-production.md#52-production-on-railway), not yet run |
 | Docker Compose on one rented server | A Linux server | One settings file, two files of your own and one command, and then you look after the server | Production at the lowest monthly cost | [5.3](part-5-production.md#53-alternative-production-on-your-own-server-with-docker-compose), not yet run |
-| Railway, from a definition and a script kept in the fork | Railway | About six values for each instance | Setting up many instances | Not built ([4.11](part-4-test-environment.md#411-later-set-it-all-up-with-one-command)) |
+| Railway, from the bootstrap script kept in the fork | Railway | One settings file, the providers' admin tokens, and a few steps by hand | Setting up many instances | [4.11](part-4-test-environment.md#411-set-it-all-up-with-the-bootstrap-script), run against the real services since 2026-11-02 |
 | The LobbyStack template hosted on Railway | Railway | The fewest clicks | Not used | Ruled out; its definition also points at the original repository, which is no longer available (`.railway/template.ts:14`) |
 | Other platforms, such as Render, Fly.io or Kubernetes | Elsewhere | A setup of your own | Not covered | Nothing for them in the code |
 

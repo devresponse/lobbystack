@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#124](https://github.com/devresponse/lobbystack/pull/124) | Make the bootstrap script's `connect` use `APP_BASE_URL` whenever the settings name one, and the admin's current Railway address, read from Railway |  | `a771db6` | [docs](../../devops/bootstrap.md#6-connect-the-incoming-call-webhook-and-make-the-platform-key) |
 | [#123](https://github.com/devresponse/lobbystack/pull/123) | Give a Railway template's Postgres and Redis their passwords from the start, and remove a database deployment that isn't running before deploying again, so two Postgres deployments never share the volume |  | `373c5fc` | [docs](../../devops/bootstrap.md#what-isnt-confirmed) |
 | [#122](https://github.com/devresponse/lobbystack/pull/122) | Wait for Railway to finish applying a template, deploy Postgres and Redis through the API, and wait for migrate to pass |  | `60de5d1` | [docs](../../devops/bootstrap.md#4-set-it-up) |
 | [#121](https://github.com/devresponse/lobbystack/pull/121) | Deploy a Railway template again with the code services' source when Railway accepts the deploy and then fails it |  | `2b9e60f` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
@@ -252,3 +253,4 @@ These commits reached `main` without a pull request:
 | 2026-10-27 | `d6fb078` | List `26c582d` in this table. |
 | 2026-10-27 | `0beb75b` | Add two of the maintainer's PowerShell scripts to `devops/`: `delete-kb.ps1` deletes one business's whole knowledge base through the `lobbystack` command, and `reload-kb-from-pdfs.ps1` does the same, then uploads every PDF in a folder to be read again. |
 | 2026-11-02 | `b26ac4a` | Give the bootstrap script an `APP_BASE_URL` setting, the dashboard's own address (`CUSTOM_HOST` still works), and a phase after the deploy that makes sure its CNAME is in Cloudflare, that the admin's and the worker's addresses and `AUTH_TRUSTED_ORIGINS` match the settings, and that the Turnstile widget lists both addresses ([set it up](../../devops/bootstrap.md#4-set-it-up)). The commit after it tidies the certificate message, records the first run with it, and lists it here. |
+| 2026-11-02 | `099fd24` | Tidy the bootstrap script's certificate message, and record its first run with `APP_BASE_URL` in its docs ([what isn't confirmed](../../devops/bootstrap.md#what-isnt-confirmed)). |

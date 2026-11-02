@@ -1,6 +1,6 @@
 # Automate a Railway deployment
 
-On 2026-10-14 a study asked how to deploy LobbyStack to Railway from the fork, from nothing, with the fewest inputs and clicks, and without Railway's hosted template, which the maintainer ruled out. It recommended a bootstrap script built on Railway's infrastructure-as-code SDK, the Railway CLI and the providers' own APIs. **None of it has been built.** Until it is, the [deployment guide](../deployment/guide/README.md) is the way to deploy by hand, and its parts 3 to 5 already include the settings this study found missing. Tool versions and prices are as of 2026-10-14.
+On 2026-10-14 a study asked how to deploy LobbyStack to Railway from the fork, from nothing, with the fewest inputs and clicks, and without Railway's hosted template, which the maintainer ruled out. It recommended a bootstrap script built on Railway's infrastructure-as-code SDK, the Railway CLI and the providers' own APIs. **None of it had been built then.** Since fork PR #113 (2026-11-01), `devops/bootstrap.mjs` does most of what it describes with the providers' APIs, Railway's GraphQL API and, for the bucket only, the Railway CLI, without the infrastructure-as-code SDK ([devops/bootstrap.md](../../devops/bootstrap.md)). The [deployment guide](../deployment/guide/README.md) remains the way to deploy by hand, and its parts 3 to 5 already include the settings this study found missing. Tool versions and prices are as of 2026-10-14.
 
 ## Know the recommendation
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // bootstrap.mjs: sets up one LobbyStack environment on Railway, with its outside services,
-// from one small settings file. It does in one run what the Railway deployment guide does by
-// hand in sections 3 to 12, except the few steps that only a person can do, for which it stops
-// and says what to do.
+// from one small settings file. It does in one run what parts 3 and 4 of the deployment guide
+// (docs/deployment/guide) do by hand, except the few steps that only a person can do, for which
+// it stops and says what to do. "guide 3.2" and the like in its messages are that guide's sections.
 //
 //   node devops/bootstrap.mjs init <name>              writes .env.bootstrap-<name> and its .secrets file
 //   node devops/bootstrap.mjs up <settings file>       sets everything up, then deploys
@@ -41,8 +41,9 @@
 //   CLOUDFLARE_API_TOKEN    Zone DNS edit on the zone, and Turnstile Sites write on the account
 
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
@@ -70,6 +71,12 @@ function runTool(command, args, options = {}) {
   return spawnSync([command, ...args].map(quote).join(" "), { encoding: "utf8", ...options, shell: true });
 }
 
+/** Whether a runTool result means the tool isn't installed. On Windows the shell always starts, and says so instead. */
+function missingTool(result) {
+  if (result.error) return true;
+  return process.platform === "win32" && result.status !== 0 && /is not recognized as an internal or external command|cannot find the path specified/i.test(`${result.stderr ?? ""}${result.stdout ?? ""}`);
+}
+
 const SETTINGS_TEMPLATE = `# Settings for node devops/bootstrap.mjs (see devops/bootstrap.md).
 # Lines starting with # are ignored. Never put a comment after a value.
 
@@ -79,8 +86,9 @@ NAME=__NAME__
 BRAND=
 # test or production. production adds REQUIRE_EMAIL_VERIFICATION=true and no BRAND_PRESET.
 ENVIRONMENT=test
-# The repository and branch Railway builds from.
-REPO=realinfobot/lobbystack
+# The fork (owner/name) and branch Railway builds from. Railway's GitHub app must reach the
+# repository, or pushes won't redeploy (Railway can build a public repository it can't reach).
+REPO=
 BRANCH=main
 # self_hosted_standard (every business unlimited) or cloud (businesses buy plans through Polar).
 DEPLOYMENT_MODE=self_hosted_standard
@@ -166,7 +174,7 @@ SMTP_PASSWORD=
 # Cloudflare Turnstile's widget for the admin's address.
 TURNSTILE_SITE_KEY=
 TURNSTILE_SECRET_KEY=
-# Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 5.5).
+# Polar, only with DEPLOYMENT_MODE=cloud: the admin's and the worker's tokens (guide 3.7, Polar, step 3).
 POLAR_ADMIN_TOKEN=
 POLAR_WORKER_TOKEN=
 # For connect: the incoming-call webhook's signing secret (whsec_...), once it exists.
@@ -259,11 +267,10 @@ async function main() {
   if (typeof fetch !== "function") throw new Error("this script needs Node 18 or later");
   if (command === "init") return init(target);
   if (!["up", "connect", "status", "doctor", "redo", "template"].includes(command) || !target) usage("Give a command and the settings file.");
-  const run = loadRun(target);
-  if (command === "status") {
-    logPath = null; // status only reads, so it doesn't add to the log either
-    return status(run);
-  }
+  // status only reads, so it doesn't add to the log either.
+  const run = loadRun(target, { log: command !== "status" });
+  if (command === "status") return status(run);
+  if (!dryRun && ["up", "connect", "redo", "template"].includes(command)) lockState(run);
   writeLog(`==== ${command} ${path.basename(target)}${dryRun ? " --dry-run" : ""}${assumeYes ? " --yes" : ""}${config ? ` (keys: ${config.file})` : ""} | node ${process.version} on ${process.platform} | bootstrap.mjs ${scriptVersion()}`);
   if (command === "doctor") return doctor(run);
   if (command === "redo") return redo(run, positional.slice(2));
@@ -312,7 +319,28 @@ function init(name) {
 
 // ---------------------------------------------------------------- settings and state
 
-function loadRun(file) {
+// Every setting the script reads: the template's keys, and CUSTOM_HOST, APP_BASE_URL's older name.
+const KNOWN_SETTINGS = new Set([...SETTINGS_TEMPLATE.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1]).concat("CUSTOM_HOST"));
+
+/** The brand brands/index.json gives a host, by the host or a parent domain; null for none, undefined if the index can't be read. */
+function brandForHost(host) {
+  let index;
+  try {
+    index = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "brands", "index.json"), "utf8"));
+  } catch {
+    return undefined;
+  }
+  const labels = String(host).toLowerCase().split(".");
+  for (let i = 0; i < labels.length - 1; i += 1) {
+    const domain = labels.slice(i).join(".");
+    if (Object.hasOwn(index.domains ?? {}, domain)) return index.domains[domain];
+  }
+  return null;
+}
+
+const hashText = (text) => createHash("sha256").update(text).digest("hex");
+
+function loadRun(file, { log = true } = {}) {
   let text;
   try {
     text = fs.readFileSync(file, "utf8");
@@ -321,20 +349,31 @@ function loadRun(file) {
   }
   const settings = {};
   const problems = [];
+  const repeated = new Set();
   text.replace(/^﻿/, "").split(/\r?\n/).forEach((raw, index) => {
     const line = raw.trim();
     if (!line || line.startsWith("#")) return;
     const equals = line.indexOf("=");
     if (equals < 1) return problems.push(`line ${index + 1} isn't KEY=value`);
-    settings[line.slice(0, equals).trim()] = line.slice(equals + 1).trim();
+    let value = line.slice(equals + 1).trim();
+    if (/^(["']).*\1$/.test(value) && value.length >= 2) value = value.slice(1, -1);
+    const key = line.slice(0, equals).trim();
+    if (key in settings && settings[key] !== value) repeated.add(key);
+    settings[key] = value;
   });
   const s = { ENVIRONMENT: "test", BRANCH: "main", DEPLOYMENT_MODE: "self_hosted_standard", BUCKET_REGION: "iad", RESEND_REGION: "us-east-1", POLAR: "sandbox", ...settings };
-  for (const step of ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"]) s[`STEP_${step}`] = (s[`STEP_${step}`] ?? "yes").toLowerCase() !== "no";
+  for (const step of ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"]) {
+    const word = String(s[`STEP_${step}`] || "yes").toLowerCase();
+    if (!["yes", "no", "true", "false", "on", "off", "1", "0"].includes(word)) problems.push(`STEP_${step} is yes or no`);
+    s[`STEP_${step}`] = !["no", "false", "off", "0"].includes(word);
+  }
   for (const key of ["NAME", "BRAND", "REPO", "OPERATOR_EMAIL", "EMAIL_FROM"]) if (!s[key]) problems.push(`${key} is empty`);
+  if (s.NAME && !/^[a-z0-9][a-z0-9-]*$/.test(s.NAME)) problems.push("NAME is lower case letters, digits and dashes, such as acme-test");
   if (s.STEP_RESEND && !s.EMAIL_DOMAIN) problems.push("EMAIL_DOMAIN is empty (or set STEP_RESEND=no)");
   if (!["self_hosted_standard", "cloud"].includes(s.DEPLOYMENT_MODE)) problems.push("DEPLOYMENT_MODE is self_hosted_standard or cloud");
   if (!["test", "production"].includes(s.ENVIRONMENT)) problems.push("ENVIRONMENT is test or production");
   if (!["sjc", "iad", "ams", "sin"].includes(s.BUCKET_REGION)) problems.push("BUCKET_REGION is sjc, iad, ams or sin");
+  if (!["us-east-1", "eu-west-1", "sa-east-1", "ap-northeast-1"].includes(s.RESEND_REGION)) problems.push("RESEND_REGION is us-east-1, eu-west-1, sa-east-1 or ap-northeast-1");
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.TEMPLATE_REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.TEMPLATE_REPO)) problems.push("TEMPLATE_REPO is owner/name");
@@ -346,6 +385,15 @@ function loadRun(file) {
   const zone = String(s.CLOUDFLARE_ZONE ?? "").toLowerCase();
   if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push(`${hostSetting} is the dashboard's address, such as demo.example.com or https://demo.example.com, with no path`);
   else if (s.CUSTOM_HOST && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(zone) && s.CUSTOM_HOST !== zone && !s.CUSTOM_HOST.endsWith(`.${zone}`)) problems.push(`${hostSetting} must be in CLOUDFLARE_ZONE (${s.CLOUDFLARE_ZONE}), where the script writes its CNAME; or empty CLOUDFLARE_ZONE to add the records by hand`);
+  const emailDomain = String(s.EMAIL_DOMAIN ?? "").toLowerCase();
+  if (s.STEP_RESEND && emailDomain && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(zone) && emailDomain !== zone && !emailDomain.endsWith(`.${zone}`)) problems.push(`EMAIL_DOMAIN must be in CLOUDFLARE_ZONE (${s.CLOUDFLARE_ZONE}), where the script writes its records; or empty CLOUDFLARE_ZONE to add them by hand`);
+  // The admin and the worker take their brand from APP_BASE_URL's domain when brands/index.json gives it one, and
+  // from BRAND_PRESET only on other addresses. Production sets no BRAND_PRESET, so its address must be on the brand's
+  // domain, or both refuse to start (BRAND_REQUIRED) under the default brand.
+  const hostBrand = s.CUSTOM_HOST && s.BRAND ? brandForHost(s.CUSTOM_HOST) : undefined;
+  if (s.ENVIRONMENT === "production" && !s.CUSTOM_HOST) problems.push("production needs APP_BASE_URL: an address on a domain the brand owns, since production sets no BRAND_PRESET");
+  else if (hostBrand && hostBrand !== s.BRAND) problems.push(`APP_BASE_URL (${s.CUSTOM_HOST}) is on a domain brands/index.json gives the brand ${hostBrand}, which wins over BRAND_PRESET, not ${s.BRAND}`);
+  else if (s.ENVIRONMENT === "production" && hostBrand === null) problems.push(`APP_BASE_URL (${s.CUSTOM_HOST}) is on no domain brands/index.json gives a brand, so production would start under the default brand and stop. Add its domain for ${s.BRAND} there (and push it), or use an address on one of ${s.BRAND}'s domains`);
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
   if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
@@ -353,13 +401,18 @@ function loadRun(file) {
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
   if (problems.length) throw new Error(`${file} needs fixing:\n  ${problems.join("\n  ")}`);
+  const unknown = Object.keys(settings).filter((key) => !KNOWN_SETTINGS.has(key));
+  if (unknown.length) console.warn(`Warning: ${file} has settings the script doesn't read: ${unknown.join(", ")}. Check their spelling.`);
+  if (repeated.size) console.warn(`Warning: ${file} sets ${[...repeated].join(", ")} more than once, to different values; the last line is used.`);
   const stateFile = path.join(path.dirname(file), `${path.basename(file)}.state.json`);
-  const state = fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} };
-  logPath = `${file}.log`;
+  // The file's hash as read, so save() can tell when another run has written it since (see save()).
+  const stateText = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf8") : null;
+  const state = stateText ? JSON.parse(stateText) : { done: {}, values: {} };
+  if (log) logPath = `${file}.log`;
   for (const [key, value] of Object.entries(state.values)) if (SECRET_KEYS.has(key) || SECRETS.includes(key)) hide(value);
   const secretsFile = secretsOption ?? (fs.existsSync(`${file}.secrets`) ? `${file}.secrets` : null);
   config = secretsFile ? loadConfig(secretsFile) : null;
-  return { file, settings: s, stateFile, state };
+  return { file, settings: s, stateFile, state, stateHash: stateText === null ? null : hashText(stateText) };
 }
 
 // ---------------------------------------------------------------- the secrets file
@@ -380,6 +433,7 @@ function loadConfig(file) {
   }
   const flat = {};
   const conflicts = new Set();
+  const outside = new Set();
   const services = {};
   const problems = [];
   let current = [];
@@ -400,12 +454,14 @@ function loadConfig(file) {
     if (!value || value === "?" || /^<[^>]*>$/.test(value) || value.includes("${{")) return;
     if (!/(_ID|_SID|SITE_KEY|_URL|_HOST|EMAIL|_FROM|DOMAIN|MODE|REGION|PRESET|_PORT|_PATH|NODE_ENV|_USER|_DB|_NAME)$/.test(key)) hide(value);
     for (const name of current) (services[name] ??= {})[key] = value;
+    if (!current.length) outside.add(key);
     if (key in flat && flat[key] !== value) conflicts.add(key);
     else flat[key] = value;
   });
   if (problems.length) throw new Error(`the secrets file ${file} needs fixing:\n  ${problems.join("\n  ")}`);
   for (const key of conflicts) delete flat[key];
-  for (const key of conflicts) console.warn(`Warning: ${file} sets ${key} to different values outside a [service] line, so neither is used.`);
+  // A key set differently under each [service] line is found by service (POLAR_ACCESS_TOKEN); only values outside them clash.
+  for (const key of conflicts) if (outside.has(key)) console.warn(`Warning: ${file} sets ${key} to different values outside a [service] line, so neither is used.`);
   const ignored = runTool("git", ["check-ignore", "-q", file]);
   if (ignored.status === 1) console.warn(`Warning: Git doesn't ignore ${file}. It holds secrets: never commit it.`);
   return { file, flat, services, used: new Set() };
@@ -443,11 +499,68 @@ function given(name) {
 
 function save(run) {
   if (dryRun) return;
-  fs.writeFileSync(run.stateFile, `${JSON.stringify(run.state, null, 2)}\n`, { mode: 0o600 });
+  // Another run may have saved since this one read the file: an old run left at a prompt for hours once wrote its
+  // stale progress over a newer project's. Never write over another run's progress.
+  const onDisk = fs.existsSync(run.stateFile) ? hashText(fs.readFileSync(run.stateFile, "utf8")) : null;
+  if (onDisk !== (run.stateHash ?? null)) {
+    throw new Stop(`another run changed ${run.stateFile} after this one read it, so this run saved nothing. Close any other window running bootstrap.mjs, then run the command again`);
+  }
+  const text = `${JSON.stringify(run.state, null, 2)}\n`;
+  const temp = `${run.stateFile}.${process.pid}.tmp`;
+  fs.writeFileSync(temp, text, { mode: 0o600 });
+  try {
+    fs.renameSync(temp, run.stateFile);
+  } catch {
+    // Windows refuses the rename while another program has the file open: write it in place instead.
+    fs.writeFileSync(run.stateFile, text, { mode: 0o600 });
+    fs.rmSync(temp, { force: true });
+  }
+  run.stateHash = hashText(text);
   try {
     fs.chmodSync(run.stateFile, 0o600);
   } catch {
     // Windows has no such modes.
+  }
+}
+
+/** Keeps a second run off the same state file while this one runs. A lock left by a run that's gone is taken over. */
+function lockState(run) {
+  const lock = `${run.stateFile}.lock`;
+  const mine = JSON.stringify({ pid: process.pid, command, started: new Date().toISOString() });
+  for (let tries = 0; tries < 2; tries += 1) {
+    try {
+      fs.writeFileSync(lock, mine, { flag: "wx", mode: 0o600 });
+      process.on("exit", () => {
+        try {
+          if (fs.readFileSync(lock, "utf8") === mine) fs.rmSync(lock);
+        } catch {
+          // Already gone.
+        }
+      });
+      return;
+    } catch (error) {
+      if (error.code !== "EEXIST") throw error;
+      let other = {};
+      try {
+        other = JSON.parse(fs.readFileSync(lock, "utf8"));
+      } catch {
+        // Unreadable: treated as left by a run that's gone.
+      }
+      if (other.pid && isRunning(other.pid)) {
+        throw new Stop(`another bootstrap.mjs run (${other.command ?? "a command"}, process ${other.pid}, since ${other.started ?? "?"}) is using ${run.stateFile}. Let it finish, or close its window, then run this again. If no such run is left, delete ${lock}`);
+      }
+      fs.rmSync(lock, { force: true });
+    }
+  }
+  throw new Stop(`couldn't lock ${run.stateFile}. If no other run is using it, delete ${lock}`);
+}
+
+function isRunning(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
   }
 }
 
@@ -462,14 +575,34 @@ async function step(run, id, title, work) {
   if (dryRun) return;
   const started = Date.now();
   currentStep = id;
+  byHandSkipped = false;
   const values = (await work()) ?? {};
   currentStep = null;
   for (const [key, value] of Object.entries(values)) if (SECRET_KEYS.has(key) || SECRETS.includes(key)) hide(value);
   Object.assign(run.state.values, values);
+  run.state.byHand ??= {};
+  if (byHandSkipped) {
+    // --yes didn't wait at its BY HAND part, so nobody confirmed it: it stays open, is listed at the end and by
+    // status, and runs again next time (a skipped "GPT-Live SIP and the spending limit" once went unnoticed).
+    run.state.byHand[id] = title;
+    save(run);
+    writeLog(`  left ${id} open: its BY HAND part wasn't confirmed`);
+    return;
+  }
+  delete run.state.byHand[id];
   run.state.done[id] = new Date().toISOString();
   save(run);
   const seconds = Math.round((Date.now() - started) / 1000);
   writeLog(`  done ${id} in ${seconds} s`);
+}
+
+let byHandSkipped = false;
+
+/** The steps whose BY HAND part is still waiting for someone, as a block to print, or "". */
+function openByHand(run, command) {
+  const open = Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id]);
+  if (!open.length) return "";
+  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${command} again without --yes and press Enter at each.`;
 }
 
 let currentStep = null;
@@ -492,12 +625,15 @@ function createPrompter() {
   let current = null;
   let pending = null;
   rl.on("line", (line) => waiting.push(line));
+  // Ctrl+C at a question stops the run, as it does elsewhere. Without a listener, readline closes the input instead,
+  // and the open question would look answered.
+  rl.on("SIGINT", () => process.emit("SIGINT"));
   rl.on("close", () => {
     closed = true;
-    // Input ended mid-question (a pipe or Ctrl+D): answer it empty, so the run stops with a reason.
+    // Input ended mid-question (a pipe, or Ctrl+D): the question gets no answer (null), and the caller stops.
     if (pending) {
       process.stdout.write("\n");
-      pending("");
+      pending(null);
     }
   });
   if (terminal) {
@@ -508,13 +644,16 @@ function createPrompter() {
   }
   return {
     ask(question, hidden) {
+      // In a terminal, a line typed before its question (a second Enter, an early paste) never answers it. Piped
+      // answers, as tests feed them, are taken in order.
+      if (terminal) waiting.length = 0;
       if (waiting.length) {
         process.stdout.write(`${question}\n`);
         return Promise.resolve(waiting.shift().trim());
       }
       if (closed) {
         process.stdout.write(`${question}\n`);
-        return Promise.resolve("");
+        return Promise.resolve(null);
       }
       return new Promise((resolve) => {
         current = { question, muted: false };
@@ -554,6 +693,7 @@ async function secret(name, question, check = () => true, { envToo = true } = {}
     if (!check(found)) throw new Error(`${name} in ${envToo && process.env[name]?.trim() ? "the environment" : config.file} doesn't look right (${question})`);
     return found;
   }
+  if (!process.stdin.isTTY) console.log("  (This terminal can't hide typing, such as Git Bash's: put the value in the secrets file instead, or run in PowerShell.)");
   const answer = hide(await ask(`${question} (typing is hidden): `, { hidden: true }));
   if (!answer || !check(answer)) throw new Error(`no valid value given for ${name}`);
   return answer;
@@ -579,15 +719,20 @@ const looksLike = {
 
 async function confirm(question) {
   if (assumeYes) return true;
-  const answer = (await ask(`${question} Type yes to go on: `)).toLowerCase();
+  const answer = String((await ask(`${question} Type yes to go on: `)) ?? "").toLowerCase();
   if (answer !== "yes") throw new Stop("you didn't type yes");
   return true;
 }
 
-/** A step only a person can do: says what to do, then waits for Enter. */
+/** A step only a person can do: says what to do, then waits for Enter. With --yes it doesn't wait, and step() keeps the step open. */
 async function byHand(lines) {
   console.log(`\n  BY HAND:\n${lines.map((line) => `    ${line}`).join("\n")}`);
-  if (!assumeYes) await ask("  Press Enter when it's done: ");
+  if (assumeYes) {
+    byHandSkipped = true;
+    return console.log("  (--yes doesn't wait here, so this step stays open: do it, then run again without --yes.)");
+  }
+  const answer = await ask("  Press Enter when it's done: ");
+  if (answer === null) throw new Stop("input ended at a BY HAND step, so it isn't recorded as done. Do it, then run the same command again");
 }
 
 // ---------------------------------------------------------------- HTTP
@@ -700,7 +845,7 @@ async function up(run) {
     console.log("\nPolar");
     await step(run, "polar.tokens", "Polar's two platform tokens (Polar makes tokens only in its dashboard)", async () => {
       if (!given("POLAR_ADMIN_TOKEN") || !given("POLAR_WORKER_TOKEN")) await byHand([
-        `In Polar's ${s.POLAR} organization, Settings > Developers > New Token, make two tokens (guide 5.5):`,
+        `In Polar's ${s.POLAR} organization, Settings > Developers > New Token, make two tokens (guide 3.7, "Selling plans (Polar)", step 3):`,
         `"${s.NAME} admin" with customer_sessions:write only, and "${s.NAME} worker" with checkouts:write,`,
         "events:write, organizations:read, meters:read, products:read, discounts:read, subscriptions:write, customers:write.",
       ]);
@@ -728,7 +873,7 @@ async function up(run) {
     const railwayHost = v(run, "RAILWAY_HOST");
     const host = appHost(run);
     const first = railwayHost && railwayHost !== host ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
-    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}`);
+    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}${openByHand(run, "up")}`);
   }
 }
 
@@ -747,7 +892,7 @@ async function githubSteps(run) {
     // Reading the workflows needs only read access; turning them on needs admin rights, so that is
     // tried only for the ones that are really off.
     const listed = runTool("gh", ["api", `repos/${s.REPO}/actions/workflows?per_page=100`]);
-    if (listed.error) return byHand([`GitHub CLI isn't installed. Open https://github.com/${s.REPO}/actions and check that CI is on:`, "if GitHub shows a button to enable the workflows, click it."]);
+    if (missingTool(listed)) return byHand([`GitHub CLI isn't installed. Open https://github.com/${s.REPO}/actions and check that CI is on:`, "if GitHub shows a button to enable the workflows, click it."]);
     let workflows = null;
     try {
       if (listed.status === 0) workflows = JSON.parse(listed.stdout).workflows ?? null;
@@ -774,8 +919,9 @@ async function githubSteps(run) {
   });
   await step(run, "github.brand", `Check that ${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`, async () => {
     const result = runTool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);
-    if (result.error) return byHand([`GitHub CLI isn't installed. Check that https://github.com/${s.REPO}/tree/${s.BRANCH}/brands/${s.BRAND} exists`, "(click Sync fork first if it's missing): BRAND_REQUIRED stops the admin and the worker without it."]);
-    if (result.status !== 0) throw new Error(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json. Click Sync fork on GitHub, or add the brand (guide section 4), then run again`);
+    if (missingTool(result)) return byHand([`GitHub CLI isn't installed. Check that https://github.com/${s.REPO}/tree/${s.BRANCH}/brands/${s.BRAND} exists`, "(click Sync fork first if it's missing): BRAND_REQUIRED stops the admin and the worker without it."]);
+    if (result.status !== 0 && /auth login|not logged in|authentication|HTTP 401/i.test(`${result.stderr ?? ""}`)) throw new Error(`gh isn't signed in, so it couldn't check ${s.REPO}@${s.BRANCH}: run gh auth login, then run again`);
+    if (result.status !== 0) throw new Error(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json. Click Sync fork on GitHub, or add the brand (guide 3.6), then run again`);
   });
 }
 
@@ -820,8 +966,8 @@ async function openaiSteps(run) {
   });
   await step(run, "openai.limits", "GPT-Live SIP and the spending limit", () => byHand([
     `In the OpenAI project "${s.NAME}" (${v(run, "OPENAI_PROJECT_ID") ?? "its ID"}):`,
-    "1. Make sure the project can take GPT-Live SIP calls (guide 3.5, step 7).",
-    "2. Limits > Spend: a monthly spend limit, Enforce a hard limit on, and alerts below it (guide 3.5, step 6).",
+    "1. Make sure the project can take GPT-Live SIP calls (guide 3.2, \"Phone calls (SIP)\"). OpenAI documents no switch for it, so the first test call is the check.",
+    "2. Limits > Spend: a monthly spend limit, Enforce a hard limit on, and alerts below it (guide 3.2, steps 12 and 13).",
   ]));
 }
 
@@ -867,14 +1013,15 @@ async function twilioSteps(run) {
     const list = await twilioSub(run, URLS.trunking, `/Trunks/${trunk}/OriginationUrls`);
     const urls = list?.origination_urls ?? [];
     const form = { FriendlyName: "OpenAI GPT-Live", SipUrl: sipUrl, Priority: "10", Weight: "10", Enabled: "true" };
+    // Checked first: with a second URI, such as one to an older project, Twilio sends some calls there.
+    if (urls.length > 1) throw new Error(`trunk ${trunk} has ${urls.length} origination URIs. Keep exactly one, to ${sipUrl}, in Twilio's console (guide 3.3, step 11), then run again`);
     if (urls.some((url) => url.sip_url === sipUrl && url.enabled !== false)) return console.log("  = already there");
-    if (urls.length > 1) throw new Error(`trunk ${trunk} has ${urls.length} origination URIs. Keep exactly one, to ${sipUrl}, in Twilio's console (guide 3.6, step 9), then run again`);
     if (urls.length === 1) console.log(`  ~ the trunk's origination URI pointed to ${urls[0].sip_url}; now to the OpenAI project`);
     await twilioSub(run, URLS.trunking, urls.length === 1 ? `/Trunks/${trunk}/OriginationUrls/${urls[0].sid}` : `/Trunks/${trunk}/OriginationUrls`, { method: "POST", form });
   });
   await step(run, "twilio.console", "Twilio's console-only steps", () => byHand([
-    "1. Voice > Settings > Geo permissions: allow each country whose phones take transfers (guide 3.6, step 12).",
-    "2. The business profile and US texting registration, if not done yet: Twilio reviews them for days (guide 3.6, steps 3 and 13).",
+    "1. Voice > Settings > Geo permissions: allow each country whose phones take transfers.",
+    "2. The business profile and US texting registration, if not done yet: Twilio reviews them for days (guide 3.3, steps 3 and 14).",
   ]));
 }
 
@@ -934,10 +1081,12 @@ function fullName(name, emailDomain, zone) {
 }
 
 async function zoneId(run) {
-  if (v(run, "CLOUDFLARE_ZONE_ID")) return v(run, "CLOUDFLARE_ZONE_ID");
-  const zones = await cloudflare(`/zones?name=${encodeURIComponent(run.settings.CLOUDFLARE_ZONE)}`);
+  const name = run.settings.CLOUDFLARE_ZONE.toLowerCase();
+  // Kept with the zone's name, so a changed CLOUDFLARE_ZONE is looked up again (state files from before kept only the ID).
+  if (v(run, "CLOUDFLARE_ZONE_ID") && (v(run, "CLOUDFLARE_ZONE_NAME") ?? name) === name) return v(run, "CLOUDFLARE_ZONE_ID");
+  const zones = await cloudflare(`/zones?name=${encodeURIComponent(name)}`);
   if (!zones?.length) throw new Error(`the Cloudflare token can't see a zone named ${run.settings.CLOUDFLARE_ZONE}: check the name, and that the token's Zone Resources include it`);
-  run.state.values.CLOUDFLARE_ZONE_ID = zones[0].id;
+  Object.assign(run.state.values, { CLOUDFLARE_ZONE_ID: zones[0].id, CLOUDFLARE_ZONE_NAME: name });
   save(run);
   return zones[0].id;
 }
@@ -948,7 +1097,12 @@ async function dnsRecords(run, records) {
     return byHand(["Create these records at the DNS provider, DNS only (not proxied), with the names as Resend's domain page shows them:", ...records.map((record) => `${record.type.padEnd(5)} ${record.name}  ${record.priority !== undefined ? `${record.priority} ` : ""}${record.content}`)]);
   }
   const zone = await zoneId(run);
+  const zoneName = run.settings.CLOUDFLARE_ZONE.toLowerCase();
   for (const record of records) {
+    // Cloudflare's lookups need the full name, though it accepts a short one when making a record: a short name
+    // would never be found again, and a second run would add it twice.
+    record.name = record.name.toLowerCase().replace(/\.$/, "");
+    if (record.name !== zoneName && !record.name.endsWith(`.${zoneName}`)) record.name = record.name === "@" ? zoneName : `${record.name}.${zoneName}`;
     // A CNAME target may come with a trailing dot, and host names are compared without case.
     const norm = (text) => (record.type === "CNAME" ? text.replace(/\.$/, "").toLowerCase() : text);
     if (record.type === "CNAME") record.content = norm(record.content);
@@ -986,7 +1140,7 @@ async function dnsRecords(run, records) {
 
 const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
-  project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
+  project: "query project($id: String!) { project(id: $id) { id name deletedAt services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
   workspaces: "query workspaces { me { workspaces { id name } } }",
   projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name deletedAt } } } }",
   domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
@@ -1002,6 +1156,7 @@ const Q = {
   template: "query template($code: String!) { template(code: $code) { id code name serializedConfig } }",
   templateDeploy: "mutation templateDeployV2($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { projectId workflowId } }",
   triggerCreate: "mutation deploymentTriggerCreate($input: DeploymentTriggerCreateInput!) { deploymentTriggerCreate(input: $input) { id } }",
+  triggers: "query deploymentTriggers($projectId: String!, $environmentId: String!, $serviceId: String!) { deploymentTriggers(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { edges { node { id repository branch } } } }",
   workflowStatus: "query workflowStatus($workflowId: String!) { workflowStatus(workflowId: $workflowId) { status error } }",
   instance: "query serviceInstance($serviceId: String!, $environmentId: String!) { serviceInstance(serviceId: $serviceId, environmentId: $environmentId) { id } }",
   deployService: "mutation serviceInstanceDeployV2($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
@@ -1056,7 +1211,17 @@ const SERVICES = [
 ];
 
 async function projectView(run, id = v(run, "RAILWAY_PROJECT_ID")) {
-  const { project } = await railway(Q.project, { id });
+  const again = `Run: node devops/bootstrap.mjs redo ${run.file} railway.project, then up, then connect`;
+  let project;
+  try {
+    ({ project } = await railway(Q.project, { id }));
+  } catch (error) {
+    if (error.graphql && /not found/i.test(error.message)) throw new Stop(`Railway has no project ${id}, which ${run.stateFile} names: it was deleted. ${again}`);
+    throw error;
+  }
+  if (!project) throw new Stop(`Railway has no project ${id}, which ${run.stateFile} names: it was deleted. ${again}`);
+  // Railway keeps answering for a deleted project for about two days: never work on one.
+  if (project.deletedAt) throw new Stop(`the Railway project ${project.name} that ${run.stateFile} names is being deleted (Railway removes it after ${String(project.deletedAt).slice(0, 10)}). ${again}`);
   return {
     id,
     services: Object.fromEntries(project.services.edges.map(({ node }) => [node.name, node.id])),
@@ -1096,20 +1261,18 @@ const variableCache = {};
  * up a value made in an earlier run whose state file was lost, so it isn't made again.
  */
 async function railwayVariable(run, service, key) {
-  try {
-    if (!(service in variableCache)) {
-      variableCache[service] = {};
-      const projectId = await findProject(run);
-      if (projectId) {
-        const view = await projectView(run, projectId);
-        const environmentId = v(run, "RAILWAY_ENVIRONMENT_ID") ?? view.environments[run.settings.ENVIRONMENT];
-        const serviceId = view.services[service];
-        if (environmentId && serviceId) variableCache[service] = (await railway(Q.readVariables, { projectId, environmentId, serviceId })).variables ?? {};
-      }
+  // "Not set" only after a read that worked: a failed read stops the run, since taking it for "not set" would make a
+  // new password or key, or drop the admin's other platform keys.
+  if (!(service in variableCache)) {
+    let read = {};
+    const projectId = await findProject(run);
+    if (projectId) {
+      const view = await projectView(run, projectId);
+      const environmentId = v(run, "RAILWAY_ENVIRONMENT_ID") ?? view.environments[run.settings.ENVIRONMENT];
+      const serviceId = view.services[service];
+      if (environmentId && serviceId) read = (await railway(Q.readVariables, { projectId, environmentId, serviceId })).variables ?? {};
     }
-  } catch (error) {
-    trace(`couldn't read ${service}'s variables on Railway: ${error.message}`);
-    return undefined;
+    variableCache[service] = read;
   }
   const value = variableCache[service][key];
   if (typeof value !== "string" || !value || value.includes("${{")) return undefined;
@@ -1152,6 +1315,8 @@ async function waitForTemplateApplied(run, config) {
 
 async function railwaySteps(run) {
   const s = run.settings;
+  // A project deleted since the last run must stop the run here, before the steps already done are skipped over it.
+  if (!dryRun && v(run, "RAILWAY_PROJECT_ID")) await projectView(run);
   await step(run, "railway.project", `Railway project "${s.NAME}" with the environment ${s.ENVIRONMENT}`, async () => {
     // Kept at once, so a run that stops after this call never makes a second project.
     if (!v(run, "RAILWAY_PROJECT_ID")) {
@@ -1208,7 +1373,7 @@ async function railwaySteps(run) {
       try {
         await deployAndWait(withoutSource);
       } catch (error) {
-        if (!repoServices(config).length || !/source/i.test(error.message)) throw error;
+        if (!repoServices(config).length || !/\bsource\b/i.test(error.message)) throw error;
         const partly = await projectView(run);
         if (SERVICES.some((service) => partly.services[service.name])) throw new Error(`${error.message}. Railway made some of the services anyway; check the project, then run again`);
         console.log(`  Railway wants the code services' source in the deploy (${String(error.message).split("\n")[0]}), so they get ${s.REPO}@${s.BRANCH}.`);
@@ -1253,11 +1418,19 @@ async function railwaySteps(run) {
   }
   await step(run, "railway.bucket", `The bucket "Bucket" in ${s.BUCKET_REGION}`, async () => {
     if ((await projectView(run)).buckets.includes("Bucket")) return console.log("  = already there");
-    const link = runTool(RAILWAY_CLI, ["link", "--project", v(run, "RAILWAY_PROJECT_ID"), "--environment", s.ENVIRONMENT], { env: cliEnv() });
-    const made = !link.error && link.status === 0 && runTool(RAILWAY_CLI, ["bucket", "create", "Bucket", "--region", s.BUCKET_REGION, "--json"], { env: cliEnv() });
-    if (!made || made.status !== 0) {
-      const reason = (link.error?.message ?? (made && made.stderr) ?? link.stderr ?? "").trim().split("\n")[0];
-      await byHand([`The Railway CLI couldn't make the bucket${reason ? ` (${reason})` : ""}.`, `In the project's canvas: create a Bucket in region ${s.BUCKET_REGION}, named exactly Bucket (guide section 7, step 3).`]);
+    // In a folder of its own: `railway link` remembers a project per folder, and in the repository folder it would aim
+    // later railway commands typed there at this project.
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "bootstrap-railway-"));
+    try {
+      const link = runTool(RAILWAY_CLI, ["link", "--project", v(run, "RAILWAY_PROJECT_ID"), "--environment", s.ENVIRONMENT], { env: cliEnv(), cwd });
+      const made = !missingTool(link) && link.status === 0 && runTool(RAILWAY_CLI, ["bucket", "create", "Bucket", "--region", s.BUCKET_REGION, "--json"], { env: cliEnv(), cwd });
+      if (!made || made.status !== 0) {
+        const reason = String(link.error?.message || (made && made.stderr) || link.stderr || "").trim().split("\n")[0];
+        const why = missingTool(link) ? "The Railway CLI isn't installed (npm install --global @railway/cli), so it couldn't make the bucket." : `The Railway CLI couldn't make the bucket${reason ? ` (${reason})` : ""}.`;
+        await byHand([why, `In the project's canvas: create a Bucket in region ${s.BUCKET_REGION}, named exactly Bucket (guide 4.4, step 11).`]);
+      }
+    } finally {
+      fs.rmSync(cwd, { recursive: true, force: true });
     }
   });
   const settings = [
@@ -1302,11 +1475,15 @@ async function makeTemplate(run) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("TEMPLATE_PROJECT is a short name in lower case, such as lobbystack-template");
   if (name === s.NAME) throw new Error("TEMPLATE_PROJECT must differ from NAME: the template is made from a project of its own");
   const stateFile = run.stateFile.replace(/\.state\.json$/, ".template.state.json");
+  // Read as loadRun reads the main state file: save() refuses to write over a file whose hash changed since.
+  const stateText = fs.existsSync(stateFile) ? fs.readFileSync(stateFile, "utf8") : null;
   const trun = {
     file: run.file, stateFile, template: true,
     settings: { ...s, NAME: name, CUSTOM_HOST: "", APP_BASE_URL: "", ENVIRONMENT: "test" },
-    state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} },
+    state: stateText ? JSON.parse(stateText) : { done: {}, values: {} },
+    stateHash: stateText === null ? null : hashText(stateText),
   };
+  if (!dryRun) lockState(trun);
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}Template: a Railway project "${name}" with the layout only, then a private template of it.`);
   console.log(`Progress: ${stateFile}\n`);
   if (!dryRun) await confirm(`This makes the Railway project ${name} in your workspace. Postgres and Redis there start without passwords and stop after a few retries; nothing else deploys.`);
@@ -1342,7 +1519,8 @@ async function makeTemplate(run) {
     const where = { projectId: v(trun, "RAILWAY_PROJECT_ID"), environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID") };
     const ids = v(trun, "RAILWAY_SERVICE_IDS");
     const generate = async () => (await railway(Q.templateGenerate, { input: where })).templateGenerate;
-    const noSource = (error) => /source/i.test(error.message);
+    // A whole word, so "resource" in another error doesn't count.
+    const noSource = (error) => /\bsource\b/i.test(error.message);
     // Railway wants each code service linked to a repository and branch, not only its source setting
     // (seen on the first real run). Link them without a build first; connect them only if that isn't enough.
     const links = [
@@ -1400,11 +1578,13 @@ async function makeTemplate(run) {
     console.log(`  ${holds(config, pattern) ? "has" : "NO "} ${label}`);
   }
   console.log(`\nPut this in your settings files, then up makes the layout from it:\n  RAILWAY_TEMPLATE=${code}`);
-  console.log("Anything the template left out, up still makes step by step. Only your workspace lists the template, but anyone with its code can read it: that's why it holds no keys or passwords.");
+  console.log(`Anything the template left out, up still makes step by step. Only your workspace lists the template, but anyone with its code can read it: that's why it holds no keys or passwords.${openByHand(trun, "template")}`);
 }
 
 function cliEnv() {
-  return { ...process.env, ...(tokens.RAILWAY_API_TOKEN ? { RAILWAY_API_TOKEN: tokens.RAILWAY_API_TOKEN } : {}) };
+  // A RAILWAY_TOKEN in the shell (a project token, such as railway-vars.mjs uses) would win over this run's token.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toUpperCase() !== "RAILWAY_TOKEN"));
+  return { ...env, ...(tokens.RAILWAY_API_TOKEN ? { RAILWAY_API_TOKEN: tokens.RAILWAY_API_TOKEN } : {}) };
 }
 
 /** The admin's custom domain (APP_BASE_URL's host) on Railway, made if missing, and the DNS records Railway wants for it. */
@@ -1415,7 +1595,11 @@ async function customDomain(run) {
   const domain = existing ?? (await railway(Q.customDomainCreate, { input: { ...where, domain: s.CUSTOM_HOST, targetPort: 3000 } })).customDomainCreate;
   const records = (domain.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue).map((record) => ({ type: record.recordType.replace("DNS_RECORD_TYPE_", ""), name: record.fqdn, content: record.requiredValue }));
   const { verified, verificationDnsHost, verificationToken } = domain.status ?? {};
-  if (!verified && verificationDnsHost && verificationToken) records.push({ type: "TXT", name: verificationDnsHost, content: `railway-verify=${verificationToken.replace(/^(railway-verify=)+/, "")}` });
+  // Railway names the check's record relative to the domain's apex, such as _railway-verify.demo for demo.example.com.
+  const check = String(verificationDnsHost ?? "").toLowerCase().replace(/\.$/, "");
+  const rest = check.replace(/^_railway-verify\.?/, "");
+  const checkName = check === s.CUSTOM_HOST || check.endsWith(`.${s.CUSTOM_HOST}`) ? check : check.startsWith("_railway-verify") && (!rest || s.CUSTOM_HOST.startsWith(`${rest}.`)) ? `_railway-verify.${s.CUSTOM_HOST}` : check;
+  if (!verified && checkName && verificationToken) records.push({ type: "TXT", name: checkName, content: `railway-verify=${verificationToken.replace(/^(railway-verify=)+/, "")}` });
   return { domain, records, existed: Boolean(existing) };
 }
 
@@ -1438,7 +1622,7 @@ async function addressSteps(run) {
         console.log(`  Railway sent no DNS records for ${s.CUSTOM_HOST} yet; the step after the deploy asks again`);
       } else {
         await dnsRecords(run, records);
-        if (s.CLOUDFLARE_ZONE) console.log("  Railway checks the records and issues the certificate; the domain shows a green check mark once DNS has spread (guide section 11).");
+        if (s.CLOUDFLARE_ZONE) console.log("  Railway checks the records and issues the certificate; the domain shows a green check mark once DNS has spread (guide 4.7, step 2).");
       }
     });
   }
@@ -1447,7 +1631,7 @@ async function addressSteps(run) {
     if (both || !s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
       // A widget given in the secrets file may not list this deployment's addresses (seen on realinfobot-test1):
       // post.turnstile adds them after the deploy, or says what to add by hand.
-      if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${appHost(run)}, Managed, Pre-clearance No (guide 5.3).`]);
+      if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${appHost(run)}, Managed, Pre-clearance No (guide 3.5).`]);
       return {
         TURNSTILE_SITE_KEY: await value("TURNSTILE_SITE_KEY", "The widget's Site Key"),
         TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
@@ -1497,14 +1681,14 @@ async function tollfreeSteps(run) {
       if (!sid) throw new Error(`${number} isn't in subaccount ${s.NAME}`);
       await twilioSub(run, base, `/IncomingPhoneNumbers/${sid}.json`, { method: "POST", form: { SmsUrl: smsUrl, SmsMethod: "POST" } });
     }
-    await byHand([`Send ${number} for toll-free verification in Twilio's console (guide 3.6, step 14). Texts to US and Canadian phones wait for it.`]);
+    await byHand([`Send ${number} for toll-free verification in Twilio's console (guide 3.3, step 19). Texts to US and Canadian phones wait for it.`]);
     return { TWILIO_ALERT_SMS_FROM: number };
   });
 }
 
 // ---------------------------------------------------------------- variables
 
-/** The variables of guide Appendix A.1 (test) or A.3 (production), with this run's values. */
+/** The variables of guide Appendix A, for a test or a production environment, with this run's values. */
 function variableSections(run) {
   const s = run.settings;
   const x = (key) => v(run, key);
@@ -1526,7 +1710,8 @@ function variableSections(run) {
     }],
     ["admin, worker", {
       NODE_ENV: "production", DEPLOYMENT_MODE: s.DEPLOYMENT_MODE, LIVE_PROTOTYPE_ENABLED: "true",
-      ...(production || s.CUSTOM_HOST ? {} : { BRAND_PRESET: s.BRAND }), BRAND_REQUIRED: "true",
+      // An address on the brand's own domain picks the brand by itself (BRAND_PRESET would only log that it's ignored).
+      ...(production || (s.CUSTOM_HOST && brandForHost(s.CUSTOM_HOST) === s.BRAND) ? {} : { BRAND_PRESET: s.BRAND }), BRAND_REQUIRED: "true",
       REDIS_URL: "redis://default:${{Redis.REDIS_PASSWORD}}@${{Redis.RAILWAY_PRIVATE_DOMAIN}}:6379",
       STORAGE_PROVIDER: "s3", S3_BUCKET: "${{Bucket.BUCKET}}", S3_ENDPOINT: "${{Bucket.ENDPOINT}}", S3_REGION: "${{Bucket.REGION}}",
       S3_ACCESS_KEY_ID: "${{Bucket.ACCESS_KEY_ID}}", S3_SECRET_ACCESS_KEY: "${{Bucket.SECRET_ACCESS_KEY}}", S3_FORCE_PATH_STYLE: "false",
@@ -1584,7 +1769,12 @@ async function secretsStep(run) {
   const holder = (key) => (key.startsWith("POSTGRES_") || key.startsWith("LOBBYSTACK_") ? "Postgres" : key === "REDIS_PASSWORD" ? "Redis" : "admin");
   await step(run, "secrets", "The 13 passwords and secrets (64 hex characters each)", async () => {
     const values = {};
-    for (const key of SECRETS) values[key] = run.state.values[key] ?? fromFile(key) ?? (await railwayVariable(run, holder(key), key)) ?? randomBytes(32).toString("hex");
+    for (const key of SECRETS) {
+      const fromSecretsFile = fromFile(key);
+      // They go into connection URLs and keys, so only URL-safe characters, and enough of them.
+      if (fromSecretsFile && !/^[A-Za-z0-9_-]{32,}$/.test(fromSecretsFile)) throw new Error(`${key} in ${config.file} must be at least 32 letters, digits, dashes or underscores, such as 64 hex characters`);
+      values[key] = run.state.values[key] ?? fromSecretsFile ?? (await railwayVariable(run, holder(key), key)) ?? randomBytes(32).toString("hex");
+    }
     return values;
   });
 }
@@ -1640,28 +1830,50 @@ async function deploySteps(run) {
         console.log(`  ${service}: running`);
       }
     } catch (error) {
-      if (error.deployFailed) throw error;
+      // Only a call Railway refused falls back to the dashboard; a failed deployment or an unreachable Railway stops.
+      if (!error.graphql) throw error;
       console.log(`  Railway didn't deploy them through its API (${String(error.message).split("\n")[0]}).`);
-      await byHand(["Deploy Postgres and Redis in the project's canvas (the Deploy banner, or each service's Deployments > Redeploy).", "Then check that Postgres's and Redis's logs say they're ready to accept connections (guide 8.3, step 5)."]);
+      await byHand(["Deploy Postgres and Redis in the project's canvas (the Deploy banner, or each service's Deployments > Redeploy).", "Then check that Postgres's and Redis's logs say they're ready to accept connections (guide 4.4, step 13)."]);
     }
   });
   await step(run, "deploy.migrate", `Connect migrate to ${s.REPO}@${s.BRANCH}, which deploys it`, async () => {
     const before = await latestDeployment(run, ids().migrate).catch(() => undefined);
     await railway(Q.connect, { id: ids().migrate, input: source });
+    await checkTrigger(run, "migrate");
     try {
       console.log("  migrate: building, then its pre-deploy runs the migrations (several minutes)");
       await waitForDeployment(run, "migrate", ids().migrate, { after: before?.id });
       console.log("  migrate: succeeded, so its pre-deploy passed (migrations, roles, RLS check)");
     } catch (error) {
-      if (error.deployFailed) throw new Error(`${error.message}. Guide 10.3 lists the usual causes; run up again once it's fixed`);
-      await byHand(["Wait for migrate's deployment to succeed: its log ends with RLS enabled and forced on <n> tables (guide 10.1).", "If it fails, guide 10.3 lists the usual causes; run this command again once it passes."]);
+      if (error.deployFailed) throw new Error(`${error.message}. Guide 4.5, step 6, and 8.2 list the usual causes; run up again once it's fixed`);
+      if (!error.graphql) throw error;
+      await byHand(["Wait for migrate's deployment to succeed: its log ends with RLS enabled and forced on <n> tables (guide 4.5, step 6).", "If it fails, guide 4.5, step 6, and 8.2 list the usual causes; run this command again once it passes."]);
     }
   });
   for (const service of ["admin", "worker"]) {
     await step(run, `deploy.${service}`, `Connect the ${service} to ${s.REPO}@${s.BRANCH}, which builds it`, async () => {
       await railway(Q.connect, { id: ids()[service], input: source });
+      await checkTrigger(run, service);
     });
   }
+}
+
+/**
+ * Warns when a service connected to the repository has no deployment trigger: Railway builds a public repository
+ * its GitHub app can't reach, but then never redeploys on a push. Only a warning, since the deploy itself works.
+ */
+async function checkTrigger(run, service) {
+  const s = run.settings;
+  let triggers;
+  try {
+    const where = { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS")[service] };
+    triggers = (await railway(Q.triggers, where)).deploymentTriggers?.edges?.map(({ node }) => node) ?? [];
+  } catch (error) {
+    return trace(`couldn't read ${service}'s deployment triggers: ${error.message}`);
+  }
+  const repo = (name) => String(name ?? "").replace(/^https?:\/\/github\.com\//i, "").replace(/\.git$/, "").toLowerCase();
+  if (triggers.some((trigger) => repo(trigger.repository) === repo(s.REPO) && trigger.branch === s.BRANCH)) return;
+  console.log(`  WARNING: ${service} has no trigger for ${s.REPO}@${s.BRANCH}, so pushes there won't redeploy it. Add ${s.REPO} to Railway's GitHub app (GitHub: Settings, Applications, Railway, Configure), then in ${service} > Settings > Source, disconnect and connect the repository again.`);
 }
 
 // ---------------------------------------------------------------- after the deploy
@@ -1683,11 +1895,17 @@ async function postDeploySteps(run) {
         found = await customDomain(run);
       }
       const { domain, records } = found;
+      // The address this was done for, so connect can tell when APP_BASE_URL changed afterwards.
+      const done = { POST_DNS_HOST: s.CUSTOM_HOST };
       if (records.length) await dnsRecords(run, records);
-      else if (!domain.status?.verified) return byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones under admin > Settings > Networking, DNS only (guide section 11): a CNAME to the target Railway shows.`]);
+      else if (!domain.status?.verified) {
+        await byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones under admin > Settings > Networking, DNS only (guide 4.7, step 2): a CNAME to the target Railway shows.`]);
+        return done;
+      }
       const { verified, certificateStatus } = domain.status ?? {};
       // Railway names the status like CERTIFICATE_STATUS_TYPE_VALID.
       console.log(`  Railway: ${verified ? "verified" : "not verified yet"}, certificate ${String(certificateStatus ?? "status unknown").replace(/^CERTIFICATE_STATUS_TYPE_/i, "").toLowerCase().replace(/_/g, " ")}${verified ? "" : ". Railway checks again by itself once DNS has spread, usually within minutes"}`);
+      return done;
     });
   }
   await step(run, "post.urls", "The admin's and the worker's APP_BASE_URL and AUTH_TRUSTED_ORIGINS match the settings", async () => {
@@ -1748,7 +1966,7 @@ async function currentRailwayHost(run) {
     }
     return now ?? recorded;
   } catch (error) {
-    console.log(`  Railway didn't list the admin's addresses (${String(error.message).split("\n")[0]}). If its project was deleted, run: node devops/bootstrap.mjs redo ${run.file} "railway.*" turnstile variables "deploy.*" "post.*" "connect.*", then up.`);
+    console.log(`  Railway didn't list the admin's addresses (${String(error.message).split("\n")[0]}), so the address the state file names is used.`);
     return recorded;
   }
 }
@@ -1756,16 +1974,32 @@ async function currentRailwayHost(run) {
 async function connect(run) {
   const s = run.settings;
   if (!run.state.done["deploy.admin"]) throw new Error("run up first, and finish it");
-  // APP_BASE_URL set after up ran: Railway, Cloudflare and the admin's variables don't know the address yet.
-  if (s.CUSTOM_HOST && !run.state.done["post.dns"]) {
-    throw new Error(`up ran before APP_BASE_URL (${s.CUSTOM_HOST}) was set, so the admin isn't on that address yet. Run: node devops/bootstrap.mjs redo ${run.file} railway.domain railway.custom turnstile "post.*", then up, then connect again`);
+  // APP_BASE_URL set or changed after up ran: Railway, Cloudflare and the admin's variables don't know the address yet.
+  // post.dns records the address it was done for; state files from before only have APP_HOST.
+  if (s.CUSTOM_HOST && (!run.state.done["post.dns"] || (v(run, "POST_DNS_HOST") ?? v(run, "APP_HOST")) !== s.CUSTOM_HOST)) {
+    throw new Error(`up ran before APP_BASE_URL was ${s.CUSTOM_HOST}, so the admin isn't on that address yet. Run: node devops/bootstrap.mjs redo ${run.file} railway.domain railway.custom turnstile variables "post.*", then up, then connect again`);
   }
+  // The project as Railway has it now, and the admin's Railway address: a state file can name an address from an
+  // earlier, deleted project, which answers "Application not found".
+  if (!dryRun) await projectView(run);
+  const railwayHost = dryRun ? v(run, "RAILWAY_HOST") : await currentRailwayHost(run);
   const host = appHost(run);
+  const webhookUrl = `https://${host}/api/webhooks/openai/live`;
+  const openaiProject = v(run, "OPENAI_PROJECT_ID") ? `${v(run, "OPENAI_PROJECT_ID")}${s.STEP_OPENAI ? ` ("${s.NAME}")` : ""}` : `"${s.NAME}"`;
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME} at https://${host}${config ? `, keys from ${config.file}` : ""}\n`);
+  if (!dryRun && run.state.done["connect.webhook"] && v(run, "WEBHOOK_URL") && v(run, "WEBHOOK_URL") !== webhookUrl) {
+    // The address changed since the webhook was made, such as for a new project without APP_BASE_URL. There's no API
+    // to change a webhook, so a person does it, and its signing secret stays the same.
+    byHandSkipped = false;
+    await byHand([`OpenAI's incoming-call webhook was made for ${v(run, "WEBHOOK_URL")}, but the admin is at https://${host} now.`,
+      `In the OpenAI project ${openaiProject}: Settings > Webhooks, open that webhook and change its URL to ${webhookUrl} (its secret stays).`]);
+    if (!byHandSkipped) {
+      run.state.values.WEBHOOK_URL = webhookUrl;
+      save(run);
+    }
+  }
   await step(run, "connect.health", `https://${host}/api/health/ready answers "ok":true with the ${s.BRAND} brand`, async () => {
-    // Both of the admin's addresses are tried: APP_BASE_URL's may still wait for DNS or its certificate. The Railway
-    // address is read from Railway, since a state file can still name one from an earlier, deleted project.
-    const railwayHost = await currentRailwayHost(run);
+    // Both of the admin's addresses are tried: APP_BASE_URL's may still wait for DNS or its certificate.
     const failures = [];
     for (const candidate of [...new Set([host, railwayHost].filter(Boolean))]) {
       const health = await http("The admin", `${process.env.BOOTSTRAP_APP_URL ?? `https://${candidate}`}/api/health/ready`).catch((error) => ({ failed: error.message }));
@@ -1781,19 +2015,27 @@ async function connect(run) {
     throw new Error(`the admin isn't ready yet (${failures.join("; ")}). Check its deployment, then run again`);
   });
   await step(run, "connect.webhook", "OpenAI's incoming-call webhook (OpenAI's API can't make this one yet)", async () => {
+    // WEBHOOK_URL: the address the webhook is for, so a later run can tell when the admin's address has changed.
     if (!given("OPENAI_WEBHOOK_SECRET")) {
       const onRailway = await railwayVariable(run, "admin", "OPENAI_WEBHOOK_SECRET");
       if (onRailway) {
         console.log("  To use a new webhook's secret instead, put it as OPENAI_WEBHOOK_SECRET in the secrets file and redo connect.webhook.");
-        return { OPENAI_WEBHOOK_SECRET: onRailway };
+        return { OPENAI_WEBHOOK_SECRET: onRailway, WEBHOOK_URL: webhookUrl };
       }
     }
-    if (!given("OPENAI_WEBHOOK_SECRET")) await byHand([
-      `In the OpenAI project "${s.NAME}": Settings > Webhooks > Create (guide 3.5, steps 8 to 10).`,
-      `URL: https://${host}/api/webhooks/openai/live   (no slash at the end)`,
-      "Event types: only live.transport.incoming. Copy the whsec_ signing secret it shows once.",
-    ]);
-    return { OPENAI_WEBHOOK_SECRET: await secret("OPENAI_WEBHOOK_SECRET", "The webhook's signing secret (whsec_...)", (answer) => answer.startsWith("whsec_")) };
+    // OpenAI sends a call only to the webhooks of the project the trunk names: one made in another project never hears
+    // of these calls (seen on realinfobot-test1, whose calls rang unanswered).
+    if (!given("OPENAI_WEBHOOK_SECRET")) {
+      await byHand([
+        `In the OpenAI project ${openaiProject}, the one the Twilio trunk sends calls to (pick it in the project menu at the`,
+        "top left of platform.openai.com first): Settings > Webhooks > Create (guide 3.2, steps 14 to 16).",
+        `URL: ${webhookUrl}   (no slash at the end)`,
+        "Event types: only live.transport.incoming. Copy the whsec_ signing secret it shows once.",
+      ]);
+      // --yes didn't wait for the webhook, so there's no secret to ask for yet: the step stays open.
+      if (byHandSkipped) return {};
+    }
+    return { OPENAI_WEBHOOK_SECRET: await secret("OPENAI_WEBHOOK_SECRET", "The webhook's signing secret (whsec_...)", (answer) => answer.startsWith("whsec_")), WEBHOOK_URL: webhookUrl };
   });
   await step(run, "connect.platformKey", "The operator's platform key (pnpm platform-key:create)", async () => {
     // The admin's current keys are kept: a new key is added to them, never put in their place.
@@ -1812,13 +2054,17 @@ async function connect(run) {
     const result = runTool("pnpm", ["--silent", "platform-key:create", "--name", "Operator key", "--partner", "operator", "--owner-email", s.OPERATOR_EMAIL, "--access", "all"], {
       env: { ...process.env, PLATFORM_API_KEYS: current },
     });
-    if (result.error || result.status !== 0) throw new Error(`pnpm platform-key:create failed: ${(result.stderr || result.error?.message || "").trim().split("\n").at(-1)}`);
+    if (missingTool(result)) throw new Error("pnpm isn't installed: npm install --global pnpm, then pnpm install in the repository folder, then run again");
+    if (result.status !== 0) throw new Error(`pnpm platform-key:create failed: ${(result.stderr || result.stdout || "").trim().split("\n").at(-1)}`);
     const last = result.stdout.trim().split(/\r?\n/).at(-1);
     if (!last?.startsWith("[")) throw new Error("pnpm platform-key:create didn't print the PLATFORM_API_KEYS value");
     const file = result.stdout.match(/Key written to (.+?\.json)/)?.[1];
     console.log(`  The key itself is in ${file ?? ".platform-keys/"}: move it to the password manager, then delete the file.`);
-    return { PLATFORM_API_KEYS: last };
+    // The file's path, not the key, so the last message can name it.
+    return { PLATFORM_API_KEYS: last, ...(file ? { PLATFORM_KEY_FILE: file } : {}) };
   });
+  // connect.variables puts both values on the admin together, so it waits for a webhook --yes didn't wait for.
+  if (!dryRun && !run.state.done["connect.webhook"]) return console.log(openByHand(run, "connect"));
   await step(run, "connect.variables", "OPENAI_WEBHOOK_SECRET and PLATFORM_API_KEYS on the admin, which redeploys it", async () => {
     await railway(Q.variables, {
       input: {
@@ -1829,17 +2075,30 @@ async function connect(run) {
   });
   if (dryRun) return;
   const profile = s.NAME.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  const keyFile = v(run, "PLATFORM_KEY_FILE") && fs.existsSync(v(run, "PLATFORM_KEY_FILE")) ? v(run, "PLATFORM_KEY_FILE") : null;
+  const login = `pnpm lobbystack login --url https://${host} --key-stdin --profile ${profile}`;
+  const cloud = s.DEPLOYMENT_MODE === "cloud";
+  const billing = (command) => `pnpm billing ${command} --brand ${s.BRAND} --polar ${s.POLAR} --profile ${profile}`;
   console.log(`
-Done by the script. What's left needs you (guide 12.3 to 14):
+Done by the script. What's left needs you (guide 4.8, 4.9 and 6.1):
   1. Once the admin's new deployment is Active, sign up at https://${host}/en/signup as ${s.OPERATOR_EMAIL},
      with the 6-digit code from the email.
-  2. pnpm lobbystack login --url https://${host} --key-stdin --profile ${profile}
-     (paste the platform key from the file above, Enter, then Ctrl+D; on Windows Ctrl+Z, Enter)${s.DEPLOYMENT_MODE === "cloud" ? `
-  3. Polar (guide 12.4), with a setup token made in Polar's ${s.POLAR} organization:
-     pnpm billing plan  --brand ${s.BRAND} --polar ${s.POLAR} --profile ${profile}
-     pnpm billing apply --brand ${s.BRAND} --polar ${s.POLAR} --profile ${profile} --railway-file .env.polar-${profile}
-     then change lobbystack-admin to admin in that file, node devops/railway-vars.mjs .env.polar-${profile}, and delete it.` : ""}
-  ${s.DEPLOYMENT_MODE === "cloud" ? 4 : 3}. pnpm smoke:production (guide section 13), then a test call.`);
+  2. Sign the command line in with the operator key${keyFile ? ` (in ${keyFile})` : ""}:
+     ${keyFile ? `PowerShell: (Get-Content "${keyFile}" -Raw | ConvertFrom-Json).key | ${login}` : login}
+     ${keyFile ? `Or run ${login}, paste` : "Paste"} the key, press Enter, then Ctrl+D (in PowerShell or cmd: Ctrl+Z, then Enter).${keyFile ? `
+     Then move the key to the password manager and delete the file.` : ""}${cloud ? `
+  3. Polar (guide 3.7, "Selling plans (Polar)", steps 6 to 8), with a setup token made in Polar's ${s.POLAR} organization:
+     ${billing("plan")}
+     ${billing("apply")} --railway-file .env.polar-${profile}
+     In .env.polar-${profile}, change lobbystack-admin to admin in the [...] lines, then run
+     node devops/railway-vars.mjs .env.polar-${profile}, which asks for a Railway project token (the project's
+     Settings > Tokens). Delete the file once the admin has redeployed, then check:
+     ${billing("verify")}     (should end "Result: in sync (exit 0)")` : ""}
+  ${cloud ? 4 : 3}. Set up the first business and buy its number (guide 6.3 and 6.4), then call it: the receptionist answers.
+     If it rings with no answer, check that the webhook is in the OpenAI project ${openaiProject}.
+  ${cloud ? 5 : 4}. Optional, in Git Bash: pnpm smoke:production (guide 4.9) with this deployment's values on the same line,
+     ADMIN_BASE_URL=https://${host} SMOKE_EXPECTED_NUMBERS=<the number> and the Twilio values from the .vars file;
+     without them it checks the original project's address and numbers.${openByHand(run, "connect")}`);
 }
 
 // ---------------------------------------------------------------- status
@@ -1853,6 +2112,8 @@ function status(run) {
   const done = Object.entries(run.state.done);
   if (!done.length) console.log("  nothing done yet: run up");
   for (const [id, at] of done) console.log(`  done  ${at}  ${id}`);
+  // Steps whose BY HAND part --yes didn't wait for: they run again, and wait, at the next run without --yes.
+  for (const [id, title] of Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id])) console.log(`  OPEN  by hand: ${id} (${title})`);
   const host = appHost(run);
   if (host) console.log(`  address: https://${host}`);
   console.log(`  values kept (never printed): ${Object.keys(run.state.values).length}`);
@@ -1874,15 +2135,20 @@ function redo(run, wanted) {
   // Redoing the project step means a new project, such as after deleting the old one in Railway:
   // forget the old project's IDs and address too, or the next steps would keep using them.
   if (matches.includes("railway.project")) {
-    for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST"]) delete run.state.values[key];
-    // The steps after the deploy (DNS, URLs, Turnstile) belong to the project, so they run again too.
-    for (const id of Object.keys(run.state.done).filter((item) => item.startsWith("post."))) {
+    for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST", "POST_DNS_HOST"]) delete run.state.values[key];
+    // Every step that made or set something in the old project runs again in the new one. The secrets stay (the new
+    // database gets the same passwords), and so do the webhook's secret and the operator key, which connect puts on
+    // the new admin. Without APP_BASE_URL the address changes, and with it the toll-free number's texting URL.
+    const projectBound = (id) => /^(railway\.|deploy\.|post\.)/.test(id) || ["turnstile", "variables", "connect.health", "connect.variables"].includes(id) || (id === "twilio.tollfree" && !run.settings.CUSTOM_HOST);
+    for (const id of Object.keys(run.state.done).filter(projectBound)) {
       delete run.state.done[id];
       console.log(`  ${id}: runs again next time`);
     }
     console.log("  forgot the Railway project's IDs and address, so up finds or makes the project again");
+    if (run.state.done["connect.webhook"] && !run.settings.CUSTOM_HOST) console.log("  The new project gets a new Railway address: connect then says to change OpenAI's webhook URL to it (the secret stays).");
   }
   save(run);
+  if (matches.includes("railway.project")) return console.log(`\nNow run up, then connect. The project is found by name, or made if there's none (a project being deleted doesn't count).`);
   console.log(`\nNow run the command that made ${matches.length === 1 ? "it" : "them"} again (up, or connect for connect.* steps). What exists is found and reused or updated, not made twice.`);
 }
 
@@ -1919,7 +2185,7 @@ function hints(error) {
     if (doctorLine) tips.push(doctorLine);
   } else if (error.status === 403 || (!error.status && /forbidden|permission|insufficient/i.test(message))) {
     if (provider) tips.push(`${provider.token} works but isn't allowed to do this. It must be ${provider.needs}.`);
-    if (error.service === "Twilio" && /trial/i.test(message)) tips.push("Upgrade the Twilio account from trial (guide 3.1): trial accounts can't make subaccounts or buy numbers.");
+    if (error.service === "Twilio" && /trial/i.test(message)) tips.push("Upgrade the Twilio account from trial (guide 3.3, step 2): trial accounts can't make subaccounts or buy numbers.");
   } else if (error.status === 404) {
     tips.push(`${error.service} doesn't have something this step needs; it may have been deleted by hand. Run node devops/bootstrap.mjs status ${target ?? "<settings file>"}, then redo the step that made it, and run again.`);
   } else if (error.status === 409 || error.status === 422 || error.status === 400) {
@@ -1932,7 +2198,7 @@ function hints(error) {
   if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: the workspace's Settings, General tab, Workspace ID; doctor lists them), and use a token that can reach it.");
   if (/no valid value given/.test(message)) tips.push("The script needed a value and got none. Put it in the secrets file (see init), or run in a terminal where you can type it.");
   if (currentStep === "resend.key") tips.push("If Resend won't make a key limited to one domain, make a Sending access key for the domain at https://resend.com/api-keys, put it as SMTP_PASSWORD in the secrets file, and run again.");
-  if (currentStep === "railway.domain") tips.push("Railway may not give an address before the service's first deploy. Run up again once the admin has deployed once (guide Appendix D).");
+  if (currentStep === "railway.domain") tips.push("Railway may not give an address before the service's first deploy. Run up again once the admin has deployed once (guide 4.6).");
   if (currentStep?.startsWith("railway.volume")) tips.push("If the volume was made by hand already, check it's on the right service and mount path; the script then finds it.");
   if (currentStep === "connect.platformKey") tips.push("Run pnpm install in the repository folder first: the platform key is made by pnpm platform-key:create.");
   return tips;
@@ -1956,19 +2222,27 @@ async function doctor(run) {
   console.log("This computer");
   const major = Number(process.versions.node.split(".")[0]);
   (major >= 18 ? ok : fix)(`Node.js ${process.version}${major >= 18 ? "" : ": needs 18 or later"}`);
+  const secretFiles = [run.file, run.stateFile, config?.file, logPath, `${run.file}.vars`].filter((file) => file && fs.existsSync(file));
   for (const file of [run.file, run.stateFile, config?.file, logPath].filter(Boolean)) {
     const ignored = tool("git", ["check-ignore", "-q", file]);
     if (ignored.status === 1) fix(`Git doesn't ignore ${file}: name it .env.<something>, or add it to .gitignore, so it's never committed`);
   }
+  if (process.platform === "win32") {
+    // Windows ignores the files' 0600 mode. A folder made at the top of a drive, such as C:\repos, lets every account on
+    // the computer read what's in it. icacls names the groups in the system's language, so this only knows English ones.
+    const readable = secretFiles.filter((file) => /\\Users:|Authenticated Users:|Everyone:/i.test(tool("icacls", [file]).stdout ?? ""));
+    if (readable.length) note(`other accounts on this computer can read ${readable.join(", ")}. To keep them to yours, in PowerShell: icacls <file> /inheritance:r /grant:r "\${env:USERNAME}:F"`);
+  }
   const pnpm = tool("pnpm", ["--version"]);
-  (pnpm.status === 0 ? ok : fix)(pnpm.status === 0 ? `pnpm ${pnpm.stdout.trim()} (connect uses it for the platform key)` : "pnpm isn't installed: connect needs it (npm install --global pnpm, then pnpm install here)");
+  (pnpm.status === 0 ? ok : fix)(pnpm.status === 0 ? `pnpm ${pnpm.stdout.trim()} (connect uses it for the platform key)` : missingTool(pnpm) ? "pnpm isn't installed: connect needs it (npm install --global pnpm, then pnpm install here)" : `pnpm didn't run: ${firstLine(pnpm)}`);
   const cli = tool(RAILWAY_CLI, ["--version"]);
   (cli.status === 0 ? ok : note)(cli.status === 0 ? `Railway CLI ${cli.stdout.trim()} (makes the bucket)` : "no Railway CLI: you'll make the bucket by hand (npm install --global @railway/cli to avoid that)");
   if (s.STEP_GITHUB) {
     const gh = tool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);
-    if (gh.error) note(`no GitHub CLI: you'll check ${s.REPO} by hand`);
+    if (missingTool(gh)) note(`no GitHub CLI: you'll check ${s.REPO} by hand`);
     else if (gh.status === 0) ok(`${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`);
-    else fix(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json, or gh isn't signed in (gh auth login). Click Sync fork if the brand is missing`);
+    else if (/auth login|not logged in|authentication|HTTP 401/i.test(`${gh.stderr ?? ""}`)) fix("gh isn't signed in: run gh auth login");
+    else fix(`${s.REPO}@${s.BRANCH} has no brands/${s.BRAND}/brand.json. Click Sync fork on GitHub if the brand is missing`);
   }
 
   console.log("\nSettings and keys");
@@ -1980,6 +2254,8 @@ async function doctor(run) {
   else note("no secrets file: up will ask for each key (init writes one)");
   const done = Object.keys(run.state.done).length;
   note(done ? `${done} steps already done (status lists them)` : "nothing done yet");
+  const open = Object.keys(run.state.byHand ?? {}).filter((id) => !run.state.done[id]);
+  if (open.length) note(`waiting for you by hand, since --yes didn't wait: ${open.join(", ")}. Run again without --yes and press Enter at each once it's done`);
 
   console.log("\nTokens (read-only calls)");
   const quietGiven = (name) => process.env[name]?.trim() || config?.flat[name];

@@ -156,7 +156,7 @@ Good to know:
 node devops/bootstrap.mjs connect .env.bootstrap-realinfobot-test
 ```
 
-It checks that the admin is ready and shows the right brand. It then tells you how to create OpenAI's incoming-call webhook and asks for its `whsec_` secret, unless `OPENAI_WEBHOOK_SECRET` is in the secrets file. Next it runs `pnpm platform-key:create`, which leaves the key in `.platform-keys/`: move the key to the password manager, then delete that file. Finally it sets both values on the admin, which redeploys it. It ends by printing the last steps, which need you:
+It checks that the admin is ready and shows the right brand, at APP_BASE_URL's address as the settings file has it now, or else at the admin's Railway address, which it reads from Railway. If APP_BASE_URL was set after `up` ran, it stops and prints the `redo` that puts the admin on that address first. It then tells you how to create OpenAI's incoming-call webhook and asks for its `whsec_` secret, unless `OPENAI_WEBHOOK_SECRET` is in the secrets file. Next it runs `pnpm platform-key:create`, which leaves the key in `.platform-keys/`: move the key to the password manager, then delete that file. Finally it sets both values on the admin, which redeploys it. It ends by printing the last steps, which need you:
 
 1. Sign up at `https://<address>/en/signup` with `OPERATOR_EMAIL`, using the 6-digit code from the email.
 2. `pnpm lobbystack login --url https://<address> --key-stdin --profile <name>`, then paste the platform key.
@@ -229,7 +229,9 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 | `has 2 origination URIs` | In Twilio, keep only the one to `sip:<project>@sip.api.openai.com;transport=tls`, then run again |
 | Stopped at `resend.key` | Make a Sending access key for the domain at resend.com/api-keys, put it as `SMTP_PASSWORD` in the secrets file, and run again |
 | Stopped at `railway.domain` | Railway may not give an address before the admin's first deploy: run `up` again after it has deployed once |
-| Stopped at `connect.health` | The admin isn't ready yet. Check its deployment logs in Railway, then run `connect` again |
+| Stopped at `connect.health` | The admin isn't ready yet. `connect` tries APP_BASE_URL's address and the admin's current Railway address (read from Railway, not the state file) and lists what each answered. Check the admin's deployment logs in Railway, then run `connect` again |
+| `Application not found` from an `up.railway.app` address | That address belongs to no running service, usually a project you deleted. `connect` now reads the admin's address from Railway; if the project itself is gone, redo the Railway steps (see [Running it again is safe](#running-it-again-is-safe)) and run `up` |
+| `up ran before APP_BASE_URL ... was set` | Run the `redo` it prints (`railway.domain railway.custom turnstile "post.*"`), then `up`, which adds the domain, its CNAME, the Turnstile hostnames and the admin's variables, then `connect` |
 | `Service admin does not have a source that can be used to generate a template` | The script predates the steps that link the code services to the repository: pull the latest script and run `template` again. It carries on from the steps already done |
 | `Railway's GitHub access can't reach <repo>` | Railway links a service only to a repository its GitHub app reaches for someone in your workspace. Add the repository to Railway's GitHub app (GitHub: Settings, Applications, Railway, Configure), or set `TEMPLATE_REPO` to one it reaches, such as your own fork, then run `template` again |
 | `no valid value given` | The script needed a value and got none: put it in the secrets file, or run in a terminal where you can type |

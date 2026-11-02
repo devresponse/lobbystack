@@ -1098,20 +1098,24 @@ async function railwaySteps(run) {
       const repoServices = (cfg) => Object.values(cfg.services ?? {}).filter((service) => service?.source?.repo);
       const withoutSource = structuredClone(config);
       for (const service of repoServices(withoutSource)) delete service.source;
-      let deployed;
+      // Railway may refuse the deploy call, or accept it and fail the deploy afterwards (seen on the first
+      // real up from a template: "migrate does not have a source"). Either way, deploy again with the source.
+      const deployAndWait = async (serializedConfig) => waitForWorkflow((await deploy(serializedConfig))?.workflowId, `the template ${s.RAILWAY_TEMPLATE}`);
       try {
-        deployed = await deploy(withoutSource);
+        await deployAndWait(withoutSource);
       } catch (error) {
         if (!repoServices(config).length || !/source/i.test(error.message)) throw error;
+        const partly = await projectView(run);
+        if (SERVICES.some((service) => partly.services[service.name])) throw new Error(`${error.message}. Railway made some of the services anyway; check the project, then run again`);
         console.log(`  Railway wants the code services' source in the deploy (${String(error.message).split("\n")[0]}), so they get ${s.REPO}@${s.BRANCH}.`);
         console.log("  They start building now and fail until the secrets are set: that's expected, and the connect steps deploy them again.");
         for (const service of repoServices(config)) {
-          service.source.repo = s.REPO;
+          // Keep the template's own form: a full GitHub address, or owner/name.
+          service.source.repo = /^https?:\/\//.test(service.source.repo) ? `https://github.com/${s.REPO}` : s.REPO;
           if ("branch" in service.source) service.source.branch = s.BRANCH;
         }
-        deployed = await deploy(config);
+        await deployAndWait(config);
       }
-      await waitForWorkflow(deployed?.workflowId, `the template ${s.RAILWAY_TEMPLATE}`);
       const made = await projectView(run);
       console.log(`  made ${SERVICES.filter((service) => made.services[service.name]).map((service) => service.name).join(", ") || "no services with the expected names"}; the next steps add anything it left out`);
     });

@@ -28,13 +28,13 @@ describe("business creation onboarding", () => {
     await waitFor(() => expect(refresh).toBeTypeOf("function"));
     expect(router.push).not.toHaveBeenCalled();
     refresh!(Response.json({ businesses: [{ businessId: "business", name: "Acme", active: true }] }));
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/knowledge"));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/website"));
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
     expect(pendingAnalytics.record).toHaveBeenCalledWith("business");
     expect(telemetryRef.current!.events).toEqual([]);
   });
 
-  it("moves an existing workspace to the knowledge step before continuing", async () => {
+  it("moves an existing workspace to the website step before continuing", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
     client.setQueryData(["businesses"], { businesses: [{ businessId: "demo", name: "Climco", active: true }] });
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -48,11 +48,11 @@ describe("business creation onboarding", () => {
     await userEvent.clear(input);
     await userEvent.type(input, "Climco HVAC");
     await userEvent.click(screen.getByRole("button", { name: "businessName.continue" }));
-    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/knowledge"));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith("/onboarding/website"));
     const writes = fetchMock.mock.calls.filter(([, init]) => init?.method).map(([url, init]) => [url, init!.method, init!.body]);
     expect(writes).toEqual([
       ["/api/businesses?businessId=demo", "PATCH", JSON.stringify({ name: "Climco HVAC" })],
-      ["/api/onboarding/stage?businessId=demo", "POST", JSON.stringify({ to: "knowledge" })],
+      ["/api/onboarding/stage?businessId=demo", "POST", JSON.stringify({ to: "website" })],
     ]);
     expect(telemetryRef.current!.events).toEqual([expect.objectContaining({ name: "web.onboarding.business_name_submitted" })]);
   });

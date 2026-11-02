@@ -62,7 +62,7 @@ test("an owner cancels their only business from its Team page and a link, and st
       return businessId;
     };
     const mainId = await createBusiness(mainName);
-    await expect(page).toHaveURL(/\/onboarding\/knowledge$/);
+    await expect(page).toHaveURL(/\/onboarding\/website$/);
     // The rest of onboarding has its own journeys; the dashboard opens once it's complete.
     await database.db.update(businesses).set({ onboardingStage: "complete" }).where(eq(businesses.id, mainId));
 
@@ -125,7 +125,7 @@ test("an owner cancels their only business from its Team page and a link, and st
     await expect(page).toHaveURL(/\/onboarding\/business$/);
     const freshId = await createBusiness(`Fresh ${suffix}`);
     expect(freshId).not.toBe(mainId);
-    await expect(page).toHaveURL(/\/onboarding\/knowledge$/);
+    await expect(page).toHaveURL(/\/onboarding\/website$/);
 
     // The link has been used.
     await page.goto(`${link.pathname}${link.search}`);

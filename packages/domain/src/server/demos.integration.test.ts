@@ -93,7 +93,7 @@ describe.skipIf(!testUrl)("prospect demo operator membership against dedicated P
       expect(await membership(tx, ownBusinessId, operatorUserId)).toMatchObject({ status: "active" });
       expect(await activeBusinessId(tx, operatorUserId)).toBeNull();
       expect(await switcherBusinessIds(tx, operatorUserId)).toEqual([ownBusinessId]);
-      expect(await asApp(tx, () => getActiveOnboardingState(asDb(tx), operatorUserId))).toEqual({ businessId: ownBusinessId, stage: "knowledge" });
+      expect(await asApp(tx, () => getActiveOnboardingState(asDb(tx), operatorUserId))).toEqual({ businessId: ownBusinessId, stage: "website" });
 
       const listed = await asApp(tx, () => listProspectDemos({ db: asDb(tx) }, operatorUserId));
       expect(listed.map((row) => [row.demoId, row.status])).toEqual([[demo.demoId, "revoked"]]);

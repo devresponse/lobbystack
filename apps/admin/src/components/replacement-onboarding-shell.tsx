@@ -27,15 +27,13 @@ type OnboardingShellProps = {
 export const onboardingRoutes = {
   "/onboarding/brand": { key: "brand", step: 2, width: "md" },
   "/onboarding/business": { key: "businessName", step: 2, width: "md" },
-  "/onboarding/knowledge": { key: "knowledge", step: 3, width: "lg" },
-  "/onboarding/greeting": { key: "greeting", step: 4, width: "md" },
-  "/onboarding/plan": { key: "plan", step: 5, width: "wide" },
-  "/onboarding/number": { key: "number", step: 6, width: "lg" },
-  "/onboarding/attribution": { key: "attribution", step: 7, width: "xl" },
+  "/onboarding/website": { key: "website", step: 3, width: "md" },
+  "/onboarding/knowledge": { key: "knowledge", step: 4, width: "lg" },
+  "/onboarding/greeting": { key: "greeting", step: 5, width: "md" },
+  "/onboarding/plan": { key: "plan", step: 6, width: "wide" },
+  "/onboarding/number": { key: "number", step: 7, width: "lg" },
+  "/onboarding/attribution": { key: "attribution", step: 8, width: "xl" },
 } as const;
-
-/** How many dots the progress bar shows: sign-up, then each step above. */
-export const onboardingStepCount = 7;
 
 const progressRoutes: Record<number, string> = Object.fromEntries(Object.entries(onboardingRoutes).map(([path, route]) => [route.step, path]));
 

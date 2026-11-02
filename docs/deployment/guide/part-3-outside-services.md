@@ -424,7 +424,7 @@ Without a key, a business's public profile page shows a simple drawn map that op
 
 ### Website import (Firecrawl)
 
-Lets the Knowledge page and the API import a business's website. Onboarding doesn't ask for one since fork PR #126.
+Lets the Knowledge page and the API import a business's website. Onboarding's website step only saves the address since fork PR #127, and reads nothing.
 
 1. Sign up at `firecrawl.dev/app/api-keys`.
 2. Copy the key from the **API keys** page. It starts with `fc-`.

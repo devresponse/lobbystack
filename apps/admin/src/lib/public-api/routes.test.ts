@@ -1015,7 +1015,7 @@ describe("phone numbers", () => {
 });
 
 describe("onboarding", () => {
-  const onboarding = { stage: "knowledge", complete: false, checklist: [{ id: "greeting", status: "missing", required: true }], missing: ["greeting"] };
+  const onboarding = { stage: "website", complete: false, checklist: [{ id: "greeting", status: "missing", required: true }], missing: ["greeting"] };
   const complete = (body: unknown, init: RequestInit = {}) => v1.completeOnboarding(call("/onboarding/complete", { method: "POST", body: JSON.stringify(body), ...init }));
 
   it("reads progress and skips setup steps", async () => {
@@ -1621,7 +1621,7 @@ describe("platform keys on v1 routes", () => {
   });
 
   describe("POST /businesses", () => {
-    const business = { id: "3f2a9c1e-5b7d-8e8a-9c21-7d4e5f6a8b90", name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: null, business_type: "service_company", onboarding_stage: "knowledge", booking_mode: "request", hours: [], created_at: "2026-10-11T21:00:00.000Z", updated_at: "2026-10-11T21:00:00.000Z" };
+    const business = { id: "3f2a9c1e-5b7d-8e8a-9c21-7d4e5f6a8b90", name: "Acme Plumbing", timezone: "America/Toronto", locale: "en", website_url: null, business_type: "service_company", onboarding_stage: "website", booking_mode: "request", hours: [], created_at: "2026-10-11T21:00:00.000Z", updated_at: "2026-10-11T21:00:00.000Z" };
     const post = (body: unknown, headers: Record<string, string> = { "Idempotency-Key": "onboard-acme" }) => v1.createBusiness(platformCall("/businesses", { method: "POST", headers, body: JSON.stringify(body) }));
 
     it("creates the business as the key's owner, keyed by the Idempotency-Key", async () => {

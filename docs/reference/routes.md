@@ -5,7 +5,7 @@ Every page and HTTP route in the LobbyStack code, written against **https://demo
 | | |
 |---|---|
 | Base URL | `https://demo.alloplace.com` |
-| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off. Home, the Knowledge page and the two questions routes were updated on 2026-10-31 for fork PR #107, which adds `/agent/questions`, the Questions page, and Home, Messages, `GET /api/dashboard` and `GET` and `PATCH /api/messages` the same day for fork PR #108, which archives conversations. The brand step and its route were updated on 2026-11-01 for fork PR #112, which adds RealInfoBot as a second brand besides LobbyStack |
+| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off. Home, the Knowledge page and the two questions routes were updated on 2026-10-31 for fork PR #107, which adds `/agent/questions`, the Questions page, and Home, Messages, `GET /api/dashboard` and `GET` and `PATCH /api/messages` the same day for fork PR #108, which archives conversations. The brand step and its route were updated on 2026-11-01 for fork PR #112, which adds RealInfoBot as a second brand besides LobbyStack. The website, documents and greeting steps and `POST /api/knowledge` were updated on 2026-11-02 for fork PR #127, which adds `POST /api/onboarding/website` so the website step saves the address and reads nothing; the counts in section 1 now include it and fork PR #105's two questions routes |
 | How it was made | Read from the code, including every entry file and the files it calls. No route was tried against the live site. |
 | What runs at the base URL | `apps/admin`: the dashboard, sign-in pages, public business pages, the website widget, every HTTP API and the MCP server |
 | Also listed | The worker's internal routes (section 14) and the marketing site's pages (section 15). Neither is served at demo.alloplace.com. |
@@ -42,7 +42,7 @@ This catalog was written in the project's notes and moved into the repository on
 | Public business page, widget chat window and loader | 2 pages, 1 route | 1 | 6 |
 | Website widget API | 6 | 7 | 6 |
 | Browser calls | 2 | 4 | 7 |
-| Dashboard API | 82 | 132 | 8 |
+| Dashboard API | 85 | 135 | 8 |
 | Public API (v1) | 71 (one catches unknown paths) | 99: 98 operations and the OpenAPI document | 9 |
 | MCP server | 1 | 3 (18 tools) | 10 |
 | OAuth discovery and redirects | 6 | 10 | 10 |
@@ -51,9 +51,9 @@ This catalog was written in the project's notes and moved into the repository on
 | Health and operations | 3 | 3 | 13 |
 | Worker (internal, not at the base URL) | 1 server | 4 | 14 |
 
-In all, `apps/admin` has 58 page files and 179 route files, which answer 268 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
+In all, `apps/admin` has 58 page files and 182 route files, which answer 271 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
 
-Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 179 route files, 58 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
+Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 182 route files, 58 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
 
 ## 2. How to read this catalog
 
@@ -431,6 +431,7 @@ A new account lands here, and the dashboard keeps sending it back until its busi
 |---|---|---|---|---|---|
 | `https://demo.alloplace.com/onboarding/brand` | "Make this app your own": the app's name and logo | Before the first business, only where no brand file applies. demo.alloplace.com has one (AlloPlace). Since fork PR #112 the code has two brands besides LobbyStack, AlloPlace and RealInfoBot, so it shows only on an address no brand claims, such as `localhost` or Railway's, while `BRAND_PRESET` is empty. | The deployment's first owner | None yet | `apps/admin/app/(onboarding)/onboarding/brand/page.tsx` |
 | `https://demo.alloplace.com/onboarding/business` | "First, what is the name of your business?" | `create_business`. `?create=true` starts another business (workspace menu > Create Business). | Signed in | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/business/page.tsx` |
+| `https://demo.alloplace.com/onboarding/website` | "Now let's train {{appName}} on your website" | `website` | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/website/page.tsx` |
 | `https://demo.alloplace.com/onboarding/knowledge` | "Add training documents" | `knowledge` | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/knowledge/page.tsx` |
 | `https://demo.alloplace.com/onboarding/greeting` | "How should we greet your callers?" | `greeting` | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/greeting/page.tsx` |
 | `https://demo.alloplace.com/onboarding/plan` | "Choose your plan" | `plan` | Signed in; saving needs Admin+ | `billing/plans.mdx` | `apps/admin/app/(onboarding)/onboarding/plan/page.tsx` |
@@ -438,7 +439,6 @@ A new account lands here, and the dashboard keeps sending it back until its busi
 | `https://demo.alloplace.com/onboarding/attribution` | "How did you hear about {{appName}}?" Answering it finishes onboarding. | `attribution`, then `complete` (the dashboard) | Signed in; saving needs Admin+ | `getting-started/account-setup.mdx` | `apps/admin/app/(onboarding)/onboarding/attribution/page.tsx` |
 | `https://demo.alloplace.com/onboarding/verify-phone` | Old address; sends you to your current step | None (phone verification left onboarding) | Signed in | None yet | `apps/admin/app/(onboarding)/onboarding/verify-phone/page.tsx` |
 | `https://demo.alloplace.com/onboarding/verify-phone/code` | Old address; sends you to your current step | None | Signed in | None yet | `apps/admin/app/(onboarding)/onboarding/verify-phone/code/page.tsx` |
-| `https://demo.alloplace.com/onboarding/website` | Old address; sends you to your current step | None (the website step left onboarding in fork PR #126; a business still stored on `website` counts as `knowledge`) | Signed in | None yet | `apps/admin/app/(onboarding)/onboarding/website/page.tsx` |
 
 ### Entry files
 
@@ -456,7 +456,7 @@ Related files: `apps/admin/src/app/root-document.tsx`, `apps/admin/src/lib/auth.
 
 Wraps every onboarding step in the shared onboarding frame (step title, sign-out button and progress dots), so all steps share one look and the same navigation.
 
-- Every onboarding page (the step shell): Renders the client component `OnboardingRouteShell` (`apps/admin/src/components/onboarding-route-shell.tsx`) around the page. It picks the step from the path, shows its title and description from the `onboarding` translations, and offers Sign out (`useSignOut`: `POST /api/auth/sign-out`, then the localized `/login`). It loads workspaces with `GET /api/businesses` and draws seven progress dots (step 1 is sign-up) that link to steps up to the active business's stored stage; on `/onboarding/number` it also reads `GET /api/phone-numbers?businessId=` to pick the title. It makes no server-side check: each page enforces the step order.
+- Every onboarding page (the step shell): Renders the client component `OnboardingRouteShell` (`apps/admin/src/components/onboarding-route-shell.tsx`) around the page. It picks the step from the path, shows its title and description from the `onboarding` translations, and offers Sign out (`useSignOut`: `POST /api/auth/sign-out`, then the localized `/login`). It loads workspaces with `GET /api/businesses` and draws eight progress dots (step 1 is sign-up) that link to steps up to the active business's stored stage; on `/onboarding/number` it also reads `GET /api/phone-numbers?businessId=` to pick the title. It makes no server-side check: each page enforces the step order.
 
 Related files: `apps/admin/src/components/onboarding-route-shell.tsx`, `apps/admin/src/components/replacement-onboarding-shell.tsx`, `apps/admin/src/hooks/use-sign-out.ts`, `apps/admin/src/hooks/use-active-business.ts`.
 
@@ -472,21 +472,29 @@ Related files: `apps/admin/src/components/onboarding-brand-surface.tsx`, `apps/a
 
 Step 2: the owner names their business. It creates the first workspace for a new signup, renames the workspace of a claimed prospect demo, and with `?create=true` creates another workspace.
 
-- `GET /onboarding/business`: `requireOnboardingStage` admits every signed-in user, since this is the earliest step (signed out: `/login`). A user with no business whom `asksInitialBranding` selects is redirected to `/onboarding/brand`. `OnboardingBusinessSurface` loads `GET /api/businesses`. With a business and no `?create=true`, it prefills the active business's name, then calls `PATCH /api/businesses?businessId=` with the name and `POST /api/onboarding/stage?businessId=` with `{ to: "knowledge" }` (ignored when the business is already further along). Otherwise it calls `POST /api/businesses` with the name, the browser's time zone, `businessType: "service_company"` and the stored referral code; the new business starts on `knowledge` as the active business. Either way it then goes to `/onboarding/knowledge`.
+- `GET /onboarding/business`: `requireOnboardingStage` admits every signed-in user, since this is the earliest step (signed out: `/login`). A user with no business whom `asksInitialBranding` selects is redirected to `/onboarding/brand`. `OnboardingBusinessSurface` loads `GET /api/businesses`. With a business and no `?create=true`, it prefills the active business's name, then calls `PATCH /api/businesses?businessId=` with the name and `POST /api/onboarding/stage?businessId=` with `{ to: "website" }` (ignored when the business is already further along). Otherwise it calls `POST /api/businesses` with the name, the browser's time zone, `businessType: "service_company"` and the stored referral code; the new business starts on `website` as the active business. Either way it then goes to `/onboarding/website`.
 
 Related files: `apps/admin/src/components/onboarding-business-surface.tsx`, `apps/admin/src/lib/onboarding-route.ts`, `apps/admin/app/api/businesses/route.ts`, `packages/domain/src/server/tenancy.ts`.
 
+**`apps/admin/app/(onboarding)/onboarding/website/page.tsx`**
+
+Step 3: the owner gives the business's website, or skips. Since fork PR #127 the step only saves the address: onboarding reads no website and queues no crawl ([onboarding](../features/onboarding.md#know-what-the-website-step-saves)).
+
+- `GET /onboarding/website`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `website` back to their step, so a claimed prospect demo still on `create_business` returns to `/onboarding/business`. `OnboardingWebsiteSurface` prefills the saved `websiteUrl` from `GET /api/businesses`. Continue calls `POST /api/onboarding/website?businessId=` with `{ websiteUrl }`, which saves it as the business website and moves a business still on `website` to `knowledge`, with no knowledge source, website import or `knowledge.crawlWebsite` message. Skip calls `POST /api/onboarding/stage?businessId=` with `{ to: "knowledge" }`. Both go to `/onboarding/knowledge`.
+
+Related files: `apps/admin/src/components/onboarding-website-surface.tsx`, `apps/admin/src/lib/onboarding-route.ts`, `apps/admin/app/api/onboarding/website/route.ts`, `packages/domain/src/server/onboarding.ts`.
+
 **`apps/admin/app/(onboarding)/onboarding/knowledge/page.tsx`**
 
-Step 3: the owner gives the AI receptionist something to learn from by uploading documents or pasting text. Onboarding has asked for no website since fork PR #126: the Knowledge page imports one.
+Step 4: the owner gives the AI receptionist something to learn from by uploading documents or pasting text.
 
-- `GET /onboarding/knowledge`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `knowledge` back to their step. `OnboardingKnowledgeSurface` lists uploads from `GET /api/knowledge?businessId=`, polling every 2 seconds while a website import runs, such as one started before fork PR #126, and shows its progress. Each file up to 10 MB goes through `uploadKnowledgeDocument` (`apps/admin/src/lib/storage-upload.ts`): `POST /api/uploads`, a PUT to the returned storage URL, then `PUT /api/uploads` to finalize it. Continue saves pasted text with `POST /api/knowledge/snippets?businessId=`, then calls `POST /api/onboarding/stage?businessId=` with `{ to: "greeting" }`; Skip makes only the stage call. Both go to `/onboarding/greeting`.
+- `GET /onboarding/knowledge`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `knowledge` back to their step. `OnboardingKnowledgeSurface` lists uploads from `GET /api/knowledge?businessId=`, polling every 2 seconds while a website import runs; onboarding starts none since fork PR #127, so only one added another way, such as through the API, shows here. Each file up to 10 MB goes through `uploadKnowledgeDocument` (`apps/admin/src/lib/storage-upload.ts`): `POST /api/uploads`, a PUT to the returned storage URL, then `PUT /api/uploads` to finalize it. Continue saves pasted text with `POST /api/knowledge/snippets?businessId=`, then calls `POST /api/onboarding/stage?businessId=` with `{ to: "greeting" }`; Skip makes only the stage call. Both go to `/onboarding/greeting`.
 
 Related files: `apps/admin/src/components/onboarding-knowledge-surface.tsx`, `apps/admin/src/lib/storage-upload.ts`, `apps/admin/src/lib/onboarding-route.ts`, `apps/admin/app/api/uploads/route.ts`.
 
 **`apps/admin/app/(onboarding)/onboarding/greeting/page.tsx`**
 
-Step 4: the owner writes the AI receptionist's greeting. While a website import runs, the page shows its progress.
+Step 5: the owner writes the AI receptionist's greeting. The page also shows the progress of a website import, when one runs; onboarding starts none since fork PR #127.
 
 - `GET /onboarding/greeting`: `requireOnboardingStage` sends a signed-out visitor to `/login` and a business whose stage comes before `greeting` back to its step; later stages may revisit. `OnboardingGreetingSurface` prefills the greeting from `GET /api/agent` and polls `GET /api/knowledge?businessId=` every 2 seconds while a website import runs. Continue calls `PATCH /api/agent` with the greeting and a `locale`: the interface language when calls can open in it (`en`, `fr` or `es`, since fork PR #82), else `en` (this also sets the business's `defaultLocale`), then `POST /api/onboarding/stage?businessId=` with `{ to: "plan" }`, and goes to `/onboarding/plan`.
 
@@ -494,7 +502,7 @@ Related files: `apps/admin/src/components/onboarding-greeting-surface.tsx`, `app
 
 **`apps/admin/app/(onboarding)/onboarding/plan/page.tsx`**
 
-Step 5: the owner picks a plan. Free skips the number step, Starter and Pro go through a Polar checkout, Enterprise opens an email to sales, and a business already on a paid plan just continues.
+Step 6: the owner picks a plan. Free skips the number step, Starter and Pro go through a Polar checkout, Enterprise opens an email to sales, and a business already on a paid plan just continues.
 
 - `GET /onboarding/plan`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `plan` back to their step. `OnboardingPlanSurface` reads `GET /api/billing?businessId=`. Free posts `{ to: "attribution" }` to `POST /api/onboarding/stage` and goes to `/onboarding/attribution`. The plan cards and the comparison come from `plans` in the billing answer, the billing catalog's once a `billing.json` is applied, and before that the brand's `billing.json` as the build carries it (fork PR #88), in the file's currency either way. On the Annual tab a paid card shows the year's price over twelve months, rounded to whole units of the currency (`monthlyAmountCents`), and the tab's badge says the months a year leaves free, or else the percent it saves (`annualBadge` in `apps/admin/src/lib/billing-plans.ts`; fork PR #89); the upgrade dialog does the same. A promo link's code waits from sign-up in `PromoCodeEntry`, which checks it with `POST /api/billing/promo`. Starter or Pro calls `POST /api/billing/checkout` (the worker's `billing.createCheckout` job makes the Polar checkout), polls `GET /api/billing/checkout?requestId=` every 1.5 seconds and opens the returned `checkoutUrl`; when Polar already has the payer's email for another business, `BillingEmailForm` asks for a billing email and starts again with it (fork PR #72). Polar returns to `?checkout=success&requestId=`; once that request is `synced`, the page posts `{ to: "phone_number" }` and replaces to `/onboarding/number`. A business already on a paid plan sees one Continue button doing the same. Enterprise opens a `mailto:` to the brand's sales address (`contactEmailFor(brandLinks(), "sales")`).
 
@@ -502,7 +510,7 @@ Related files: `apps/admin/src/components/onboarding-plan-surface.tsx`, `apps/ad
 
 **`apps/admin/app/(onboarding)/onboarding/number/page.tsx`**
 
-Step 6: the owner picks and claims the business's phone number, or skips it for later. A business whose plan includes no number, such as Free, is held at the plan step instead.
+Step 7: the owner picks and claims the business's phone number, or skips it for later. A business whose plan includes no number, such as Free, is held at the plan step instead.
 
 - `GET /onboarding/number`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `phone_number` back to their step; for a business whose plan in force includes no number (Free, a lapsed subscription, or a promo plan without one) the number stages count as `plan`. `OnboardingNumberSurface` reads `GET /api/phone-numbers?businessId=`, every second during a claim. A business that already has a number goes on to `/onboarding/attribution`. Otherwise `PhoneNumberChooser` loads `GET /api/onboarding/phone-numbers/suggestion`, searches with `POST /api/onboarding/phone-numbers/search`, claims with `POST /api/onboarding/phone-numbers/claim` and polls `GET /api/onboarding/phone-numbers/claim/[claimId]` for up to two minutes, then goes to `/onboarding/attribution` (`/settings/phone-number` once onboarding is complete). Skip calls `POST /api/onboarding/phone-numbers/skip`, which moves the stage to `attribution`, and goes there.
 
@@ -510,7 +518,7 @@ Related files: `apps/admin/src/components/onboarding-number-surface.tsx`, `apps/
 
 **`apps/admin/app/(onboarding)/onboarding/attribution/page.tsx`**
 
-Step 7, the last onboarding step: the owner says how they heard about the product. Submitting or skipping records the answer, credits a stored affiliate referral, and marks onboarding complete.
+Step 8, the last onboarding step: the owner says how they heard about the product. Submitting or skipping records the answer, credits a stored affiliate referral, and marks onboarding complete.
 
 - `GET /onboarding/attribution`: `requireOnboardingStage` (`apps/admin/src/lib/onboarding-route.ts`) sends a signed-out visitor to `/login` and a business whose stage (`getActiveOnboardingState` in `packages/domain/src/server/onboarding.ts`) comes before `attribution` back to its step; finished businesses may return. `OnboardingAttributionSurface` offers 15 sources. Finish, or Skip with a null source, posts the source and the referral code saved at sign-up to `POST /api/onboarding/attribution?businessId=`. There `submitOnboardingAttribution` credits the referral while the stage is `attribution`, saves the source, sets the stage to `complete` and queues a check-in email for a day later. The surface then clears the saved code and goes to `/`.
 
@@ -529,14 +537,6 @@ Related files: `apps/admin/src/lib/onboarding-route.ts`, `packages/domain/src/se
 Leftover address from the removed phone verification code step. Like `/onboarding/verify-phone`, it renders nothing and forwards the visitor to their current onboarding step.
 
 - `GET /onboarding/verify-phone/code`: Calls `requireOnboardingStage("/onboarding/verify-phone/code")` from `apps/admin/src/lib/onboarding-route.ts`. A signed-out visitor goes to `/login`. The path has no stage in the helper's route map, so every signed-in visitor is redirected to the step for their active business's stage (`resolveOnboardingRoute` in `packages/domain/src/server/onboarding.ts`), or to `/` once onboarding is complete. Businesses still stored on the old `verify_phone` or `verify_phone_code` stages count as `plan`. The page returns `null` and calls no API.
-
-Related files: `apps/admin/src/lib/onboarding-route.ts`, `packages/domain/src/server/onboarding.ts`.
-
-**`apps/admin/app/(onboarding)/onboarding/website/page.tsx`**
-
-Leftover address from the removed website step (fork PR #126), which asked for the business's website and read a sample of it. It renders nothing and forwards the visitor to their current onboarding step, so old links keep working. The Knowledge page still imports websites.
-
-- `GET /onboarding/website`: Calls `requireOnboardingStage("/onboarding/website")` from `apps/admin/src/lib/onboarding-route.ts`. A signed-out visitor goes to `/login`. The path has no stage in the helper's route map, so every signed-in visitor is redirected to the step for their active business's stage (`resolveOnboardingRoute` in `packages/domain/src/server/onboarding.ts`), or to `/` once onboarding is complete. Businesses still stored on the old `website` stage count as `knowledge`, and the next step forward stores the new one. The page returns `null` and calls no API.
 
 Related files: `apps/admin/src/lib/onboarding-route.ts`, `packages/domain/src/server/onboarding.ts`.
 
@@ -1295,12 +1295,12 @@ Related files: `packages/domain/src/server/rules.ts`, `apps/admin/src/components
 
 **`apps/admin/app/api/knowledge/route.ts`**
 
-Lists knowledge sources for the Knowledge screen, onboarding and the setup guide, and adds a website as a source from the Knowledge screen.
+Lists knowledge sources for the Knowledge screen, onboarding and the setup guide, and adds a website as a source from the Knowledge screen. The onboarding website step used it too until fork PR #127, which made that step only save the address.
 
 - `GET /api/knowledge`: Any member: `withOperatorTransaction` with no `minimumRole`. Selects the business's `knowledge_documents` sorted by title, each with `websiteImport` (its `website_ingestion_jobs` row as JSON) and `textContent` (the first 500 characters of its first chunk). Changes nothing. Answers 200 `{ documents }`.
-- `POST /api/knowledge`: Requires business_admin or higher, checked by `requireBusinessAdmin` inside `createKnowledgeDocument` (`packages/domain/src/server/knowledge.ts`); the route runs `requireApiSession`. Needs `businessId`, `title` and `sourceType` in the body (400). For a website it normalizes `sourceUrl` (422 `website_url_invalid`), saves it as the business website and reads only a 10-page sample when the body has `onboarding: true` (nothing sends it since fork PR #126 removed the website step), reuses an existing source with that URL (re-queuing a failed or cancelled one), or inserts `knowledge_documents` and `website_ingestion_jobs` rows and queues `knowledge.crawlWebsite`. Answers 201 `{ documentId }`.
+- `POST /api/knowledge`: Requires business_admin or higher, checked by `requireBusinessAdmin` inside `createKnowledgeDocument` (`packages/domain/src/server/knowledge.ts`); the route runs `requireApiSession`. Needs `businessId`, `title` and `sourceType` in the body (400). For a website it normalizes `sourceUrl` (422 `website_url_invalid`), saves it as the business website and advances the onboarding stage when `onboarding` is true or the business is still on `website` (the dashboard's onboarding stopped calling this route in fork PR #127), reuses an existing source with that URL (re-queuing a failed or cancelled one), or inserts `knowledge_documents` and `website_ingestion_jobs` rows and queues `knowledge.crawlWebsite`. Answers 201 `{ documentId }`.
 
-Related files: `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/knowledgeUrl.ts`, `apps/admin/src/components/live-knowledge-surface.tsx`.
+Related files: `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/knowledgeUrl.ts`, `apps/admin/src/components/live-knowledge-surface.tsx`, `apps/admin/src/components/onboarding-website-surface.tsx`.
 
 **`apps/admin/app/api/knowledge/[documentId]/route.ts`**
 
@@ -1435,6 +1435,7 @@ Related files: `packages/domain/src/server/phoneNumbers.ts`, `apps/admin/src/com
 | Method | Address | What it does | Who | Entry file |
 |---|---|---|---|---|
 | POST | `https://demo.alloplace.com/api/onboarding/stage` | Move to a later onboarding step (`to`) | Admin+ | `apps/admin/app/api/onboarding/stage/route.ts` |
+| POST | `https://demo.alloplace.com/api/onboarding/website` | Save the business's website from the website step (`websiteUrl`), reading nothing | Admin+ | `apps/admin/app/api/onboarding/website/route.ts` |
 | GET | `https://demo.alloplace.com/api/onboarding/phone-numbers/suggestion` | Ten suggested numbers | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/suggestion/route.ts` |
 | POST | `https://demo.alloplace.com/api/onboarding/phone-numbers/search` | Search for numbers (`selection`, `limit`) | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/search/route.ts` |
 | POST | `https://demo.alloplace.com/api/onboarding/phone-numbers/claim` | Claim a number (`claimToken`; answers 202). Needs `businessId`. | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/claim/route.ts` |
@@ -1446,9 +1447,15 @@ Related files: `packages/domain/src/server/phoneNumbers.ts`, `apps/admin/src/com
 
 **`apps/admin/app/api/onboarding/stage/route.ts`**
 
-Moves a business forward through onboarding as each onboarding screen (business, knowledge, greeting, plan) finishes.
+Moves a business forward through onboarding as each onboarding screen (business, knowledge, greeting, plan, and the website step's skip) finishes.
 
-- `POST /api/onboarding/stage`: `requireOperatorBusiness` and `readJson`; `to` must be an onboarding stage other than `create_business` or `complete` (400). `advanceOnboardingStage` (`packages/domain/src/server/onboarding.ts`) checks business_admin, locks the business row and repairs a retired stage (`verify_phone` and `verify_phone_code` become `plan`, `website` becomes `knowledge`). A target at or before the current step changes nothing. Otherwise the move must be an allowed transition, and the conditional update answers 409 `onboarding_stage_conflict` if the stage changed meanwhile. Answers 200 `{ ok: true, stage }`.
+- `POST /api/onboarding/stage`: `requireOperatorBusiness` and `readJson`; `to` must be an onboarding stage other than `create_business` or `complete` (400). `advanceOnboardingStage` (`packages/domain/src/server/onboarding.ts`) checks business_admin, locks the business row and repairs a legacy verification stage. A target at or before the current step changes nothing. Otherwise the move must be an allowed transition, and the conditional update answers 409 `onboarding_stage_conflict` if the stage changed meanwhile. Answers 200 `{ ok: true, stage }`.
+
+**`apps/admin/app/api/onboarding/website/route.ts`**
+
+Saves the website the owner gives on the website step (fork PR #127). It never reads the site.
+
+- `POST /api/onboarding/website`: `requireOperatorBusiness` and `readJson`; `websiteUrl` must be a string of 1 to 2,000 characters (422 `website_url_invalid`). `saveOnboardingWebsite` (`packages/domain/src/server/onboarding.ts`) normalizes it with `normalizeWebsiteSourceUrl` (422 `website_url_invalid` for anything but a public HTTP or HTTPS address), checks business_admin, locks the business row, saves `website_url`, and moves a business on `website` to `knowledge`; a business further along keeps its stage. It inserts no `knowledge_documents` or `website_ingestion_jobs` row and queues no outbox message. Answers 200 `{ ok: true, websiteUrl, stage }`.
 
 Related files: `packages/domain/src/server/onboarding.ts`, `apps/admin/src/components/onboarding-plan-surface.tsx`.
 
@@ -2589,7 +2596,7 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 Lists knowledge sources (websites, the pages their crawls read, and uploaded files) and adds a website to crawl, for API integrations, the CLI (`lobbystack knowledge sources` and `add-website`) and `lobbystack onboard`.
 
 - `GET /api/v1/knowledge/sources`: Needs `knowledge:read`. `v1.listKnowledgeSources` reads `limit` and `cursor` (`pageQuery`), `type` (`website`, `page`, `file`) and `status` (`pending`, `processing`, `indexed`, `error`, `cancelled`); other values are 400. `listKnowledgeSourcesForApi` calls `listKnowledgeSourceResources` (`packages/domain/src/server/publicApi/resources.ts`), which reads `knowledge_documents` left-joined to `website_ingestion_jobs` (a website has a crawl job, a page has none), newest first. Answers 200 `{ data, next_cursor, has_more }`.
-- `POST /api/v1/knowledge/sources`: Needs `knowledge:write`. Body: `apiKnowledgeSourceCreateSchema` (`type` `website`, `url`). `createKnowledgeSourceForApi` normalizes the URL (400 if invalid). A page an earlier crawl read is 409. An existing website comes back as it is, re-queued at its page limit if its last crawl failed or was cancelled. Otherwise `createKnowledgeDocumentInTransaction` (`packages/domain/src/server/knowledge.ts`) inserts `knowledge_documents` and a 10-page `website_ingestion_jobs` row, and queues `knowledge.crawlWebsite`. It never changes the business's own website. Answers 202 `{ data }`. PUT, PATCH and DELETE answer 405.
+- `POST /api/v1/knowledge/sources`: Needs `knowledge:write`. Body: `apiKnowledgeSourceCreateSchema` (`type` `website`, `url`). `createKnowledgeSourceForApi` normalizes the URL (400 if invalid). A page an earlier crawl read is 409. An existing website comes back as it is, re-queued at its page limit if its last crawl failed or was cancelled. Otherwise `createKnowledgeDocumentInTransaction` (`packages/domain/src/server/knowledge.ts`) inserts `knowledge_documents` and a 10-page `website_ingestion_jobs` row, sets the business website during onboarding's website step, and queues `knowledge.crawlWebsite`. Answers 202 `{ data }`. PUT, PATCH and DELETE answer 405.
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/publicApi/operations.ts`, `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/publicApi/resources.ts`.
 

@@ -8,6 +8,7 @@ import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 import { deploymentAppName } from "./branding";
+import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { loadBillingContext } from "./usage";
 
 // French puts no "de" before the name and Serbian never declines it, because
@@ -21,6 +22,7 @@ const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, (appName: string) =>
 
 export type OnboardingStage =
   | "create_business"
+  | "website"
   | "knowledge"
   | "greeting"
   | "plan"
@@ -31,6 +33,7 @@ export type OnboardingStage =
 
 const stageRoutes: Record<OnboardingStage, string> = {
   create_business: "/onboarding/business",
+  website: "/onboarding/website",
   knowledge: "/onboarding/knowledge",
   greeting: "/onboarding/greeting",
   plan: "/onboarding/plan",
@@ -42,17 +45,19 @@ const stageRoutes: Record<OnboardingStage, string> = {
 
 const stageSteps: Record<OnboardingStage, number> = {
   create_business: 2,
-  knowledge: 3,
-  greeting: 4,
-  plan: 5,
-  phone_number: 6,
-  phone_number_claiming: 6,
-  attribution: 7,
-  complete: 8,
+  website: 3,
+  knowledge: 4,
+  greeting: 5,
+  plan: 6,
+  phone_number: 7,
+  phone_number_claiming: 7,
+  attribution: 8,
+  complete: 9,
 };
 
 const transitions: Record<OnboardingStage, readonly OnboardingStage[]> = {
-  create_business: ["knowledge"],
+  create_business: ["website"],
+  website: ["knowledge"],
   knowledge: ["greeting"],
   greeting: ["plan"],
   plan: ["phone_number", "attribution"],
@@ -62,16 +67,10 @@ const transitions: Record<OnboardingStage, readonly OnboardingStage[]> = {
   complete: [],
 };
 
-// Steps removed from onboarding, and the step each resumes on, so a workspace
-// parked on one before its removal moves on instead of looping on a step that
-// no longer exists. Personal phone verification went first. The website step
-// went next: onboarding no longer reads a website, and the Knowledge page
-// still does.
-const retiredStages: Readonly<Record<string, OnboardingStage>> = {
-  verify_phone: "plan",
-  verify_phone_code: "plan",
-  website: "knowledge",
-};
+// Personal phone verification was removed from onboarding. Workspaces parked on
+// a verification stage before the removal normalize forward to plan so they
+// resume instead of looping on a step that no longer exists.
+const legacyVerificationStages = new Set(["verify_phone", "verify_phone_code"]);
 
 export function isOnboardingStage(value: unknown): value is OnboardingStage {
   return typeof value === "string" && Object.hasOwn(stageRoutes, value);
@@ -79,7 +78,7 @@ export function isOnboardingStage(value: unknown): value is OnboardingStage {
 
 export function normalizeOnboardingStage(value: unknown): OnboardingStage {
   if (isOnboardingStage(value)) return value;
-  if (typeof value === "string" && Object.hasOwn(retiredStages, value)) return retiredStages[value]!;
+  if (typeof value === "string" && legacyVerificationStages.has(value)) return "plan";
   return "create_business";
 }
 
@@ -191,9 +190,8 @@ export async function advanceOnboardingStage(
     const current = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
     if (!current) throw new Error("Business onboarding state was not found.");
     const currentStage = normalizeOnboardingStage(current.onboardingStage);
-    // Repair a retired stage, such as a verification step or the website step,
-    // before reading or advancing it so the conditional stage write below still
-    // matches the persisted value.
+    // Repair a legacy verification stage before reading or advancing it so the
+    // conditional stage write below still matches the persisted value.
     if (currentStage !== current.onboardingStage) {
       await tx.update(businesses)
         .set({ onboardingStage: currentStage, updatedAt: new Date() })
@@ -202,6 +200,30 @@ export async function advanceOnboardingStage(
     // Revisiting an earlier form must never move durable onboarding progress backwards.
     if (canVisitOnboardingStage(currentStage, input.to)) return;
     await advanceOnboardingStageInTransaction(tx, { ...input, from: currentStage });
+  });
+}
+
+/**
+ * Saves the address the owner gives on onboarding's website step as the
+ * business's website, and moves a business on that step to knowledge. It reads
+ * nothing: no knowledge source, website import or crawl is queued, so
+ * onboarding never starts the crawler. The owner adds the site as knowledge
+ * later, from the Knowledge page. Revisiting the step only changes the address.
+ */
+export async function saveOnboardingWebsite(
+  context: DomainContext,
+  input: { userId: string; businessId: string; websiteUrl: string },
+): Promise<{ websiteUrl: string; stage: OnboardingStage }> {
+  const websiteUrl = normalizeWebsiteSourceUrl(input.websiteUrl);
+  return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, input);
+    const current = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
+    if (!current) throw new Error("Business onboarding state was not found.");
+    await tx.update(businesses).set({ websiteUrl, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
+    // A business already past the step keeps its progress.
+    if (current.onboardingStage !== "website") return { websiteUrl, stage: normalizeOnboardingStage(current.onboardingStage) };
+    await moveOnboardingStageInTransaction(tx, { businessId: input.businessId, from: "website", to: "knowledge" });
+    return { websiteUrl, stage: "knowledge" };
   });
 }
 

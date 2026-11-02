@@ -544,7 +544,7 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       // Each business gets its own owner, so one owner's sign-in counts for one business.
       const business = async (input: { onboarded: boolean; member?: "active" | "removed" }) => {
         const [businessId, userId] = [randomUUID(), randomUUID()];
-        await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Scheduler listing", timezone: "UTC", businessType: "test", onboardingStage: input.onboarded ? "complete" : "knowledge" });
+        await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Scheduler listing", timezone: "UTC", businessType: "test", onboardingStage: input.onboarded ? "complete" : "website" });
         await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
         await tx.insert(businessMemberships).values({ businessId, userId, role: "business_owner", status: input.member ?? "active" });
         return { businessId, userId };

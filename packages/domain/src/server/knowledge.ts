@@ -12,6 +12,7 @@ import type { DomainContext } from "./context";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { getMeter } from "@lobbystack/telemetry/node";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
+import { moveOnboardingStageInTransaction } from "./onboarding";
 import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
 import { loadBusinessPlanLimits } from "./usage";
@@ -77,11 +78,13 @@ export async function createKnowledgeDocument(
 
 /**
  * Adds a website or an uploaded file as a knowledge source and queues its
- * crawl or extraction. The caller checks who may do that. onboarding also
- * saves the URL as the business's website; onboarding or sample limit the
- * crawl to a sample of the site. Neither moves the onboarding stage: since the
- * website step left onboarding, no step needs a website. Submitting a website
- * that is already a source returns that source.
+ * crawl or extraction. The caller checks who may do that. onboarding (or a
+ * business still on its website step) also saves the URL as the business's
+ * website; onboarding or sample limit the crawl to a sample of the site.
+ * The dashboard's onboarding no longer sends onboarding: its website step only
+ * saves the address (saveOnboardingWebsite) and reads nothing. The API and the
+ * CLI still read a site here when asked to.
+ * Submitting a website that is already a source returns that source.
  */
 export async function createKnowledgeDocumentInTransaction(
   tx: DatabaseTransaction,
@@ -97,9 +100,14 @@ export async function createKnowledgeDocumentInTransaction(
   const sourceUrl = isWebsite ? normalizeWebsiteSourceUrl(input.sourceUrl!) : input.sourceUrl;
   const crawlLimit = input.onboarding || input.sample ? ONBOARDING_CRAWL_PAGE_LIMIT : FULL_CRAWL_PAGE_LIMIT;
   // Serialize website submissions so retries/revisited forms reuse the same import.
-  if (isWebsite) await tx.select({ id: businesses.id }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update");
-  if (isWebsite && input.onboarding) {
+  const business = isWebsite
+    ? (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0]
+    : undefined;
+  if (isWebsite && (input.onboarding || business?.onboardingStage === "website")) {
     await tx.update(businesses).set({ websiteUrl: sourceUrl!, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
+    if (business?.onboardingStage === "website") {
+      await moveOnboardingStageInTransaction(tx, { businessId: input.businessId, from: "website", to: "knowledge" });
+    }
   }
   if (isWebsite) {
     const existing = (await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.sourceUrl, sourceUrl!))).limit(1).for("update"))[0];
@@ -168,9 +176,9 @@ export async function retryKnowledgeDocumentInTransaction(tx: DatabaseTransactio
 }
 
 /**
- * Reads the rest of a site that was only sampled: by the API, or by onboarding
- * before its website step was removed. Re-crawling at the full limit replaces
- * the partial import rather than adding a second copy.
+ * Reads the rest of a site that was only sampled, as the API's first read of
+ * a site is. Re-crawling at the full limit replaces the partial import rather
+ * than adding a second copy.
  */
 export async function expandWebsiteCrawl(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {

@@ -21,7 +21,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Read the business's website in onboarding again, as an option](onboarding-website-option.md) | The website read during onboarding again, where and when the deployment chooses, after fork PR #126 took the step out | Not estimated; most of the code is kept | Waiting on 4 decisions | None; the maintainer's request of 2026-11-02 |
+| [Read the business's website during onboarding, as an option](onboarding-website-option.md) | The website read during onboarding again, where and when the deployment chooses, now that fork PR #127 makes the website step only save the address | Not estimated; most of the code is kept | Waiting on 4 decisions | None; the maintainer's request of 2026-11-02 |
 
 **Calls and conversations**
 

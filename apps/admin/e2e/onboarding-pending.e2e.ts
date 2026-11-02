@@ -82,7 +82,7 @@ test("the continue button stays pending until the next onboarding step is on scr
   // lasts exactly as long as the assertions below need it to.
   let release = (): void => undefined;
   const held = new Promise<void>((resolve) => { release = resolve; });
-  await page.route(url => url.pathname.endsWith("/onboarding/website"), async route => {
+  await page.route(url => url.pathname.endsWith("/onboarding/knowledge"), async route => {
     await held;
     await route.continue();
   });
@@ -105,5 +105,5 @@ test("the continue button stays pending until the next onboarding step is on scr
   await expect(page.getByRole("button", { name: "Saving..." })).toBeVisible();
 
   release();
-  await expect(page).toHaveURL(/\/onboarding\/website$/, { timeout: 30_000 });
+  await expect(page).toHaveURL(/\/onboarding\/knowledge$/, { timeout: 30_000 });
 });

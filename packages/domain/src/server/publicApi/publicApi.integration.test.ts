@@ -421,7 +421,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const [crawl] = await admin!.db.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.businessId, a.businessId), eq(outboxMessages.topic, "knowledge.crawlWebsite"), eq(outboxMessages.aggregateId, source.id)));
     expect(crawl?.payload).toMatchObject({ documentId: source.id, limit: ONBOARDING_CRAWL_PAGE_LIMIT });
     expect((await createKnowledgeSourceForApi(context, a.caller, { type: "website", url: "https://maple-api.example/" })).id).toBe(source.id);
-    // Business a is not on its website step, so its website stays as it was.
+    // Adding a website never makes it the business's own website.
     const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, a.businessId));
     expect(business?.websiteUrl).not.toBe("https://maple-api.example/");
   });
@@ -531,11 +531,13 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     });
   });
 
-  it("takes the first website as the business's website while onboarding", async () => {
-    await admin!.db.update(businesses).set({ onboardingStage: "website" }).where(eq(businesses.id, b.businessId));
+  it("leaves a business on the retired website step, and its own website, as they were when a website is added", async () => {
+    await admin!.db.update(businesses).set({ onboardingStage: "website", websiteUrl: null }).where(eq(businesses.id, b.businessId));
     await createKnowledgeSourceForApi({ db: worker!.db }, b.caller, { type: "website", url: "https://birch-api.example" });
     const [business] = await admin!.db.select({ websiteUrl: businesses.websiteUrl, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, b.businessId));
-    expect(business).toEqual({ websiteUrl: "https://birch-api.example/", stage: "knowledge" });
+    // Onboarding no longer has a website step, so the stored step isn't moved: it reads as knowledge.
+    expect(business).toEqual({ websiteUrl: null, stage: "website" });
+    expect((await getOnboardingForApi({ db: worker!.db }, b.caller)).stage).toBe("knowledge");
   });
 
   it("adds, changes and deletes services, and keeps slugs unique among live services", async () => {
@@ -841,6 +843,9 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     try {
       // A verification step onboarding no longer has resumes at the plan.
       expect(await stages()).toEqual(["plan", "plan"]);
+      // The website step, gone too, resumes at knowledge.
+      await store("website");
+      expect(await stages()).toEqual(["knowledge", "knowledge"]);
       // The free plan goes back from the number steps to its plan, and a paid one stays on them.
       await store("phone_number_claiming");
       await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan: "free_cloud" });
@@ -1101,7 +1106,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
   it("reports onboarding in any order and finishes it once, when the business is ready", async () => {
     const context = { db: worker!.db };
     const businessId = randomUUID();
-    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-onboarding-${businessId}`, name: "Onboarding test", timezone: "America/Toronto", businessType: "test", onboardingStage: "website" });
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-onboarding-${businessId}`, name: "Onboarding test", timezone: "America/Toronto", businessType: "test", onboardingStage: "knowledge" });
     await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
     const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
     const audited = async (eventType: string) => (await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))).length;
@@ -1110,7 +1115,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       const start = await getOnboardingForApi(context, caller);
       expect(apiOnboardingSchema.safeParse(start).success).toBe(true);
       expect(start).toEqual({
-        stage: "website",
+        stage: "knowledge",
         complete: false,
         checklist: [
           { id: "business_details", status: "done", required: true },

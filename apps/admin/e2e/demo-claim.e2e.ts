@@ -33,13 +33,13 @@ test("demo claim transfers ownership automatically and re-entry preserves onboar
       expect(memberships[0]?.role).toBe("business_owner");
       const business = (await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0];
       expect(business?.onboardingStage).toBe("create_business");
-      await tx.update(businesses).set({ onboardingStage: "website" }).where(eq(businesses.id, businessId));
+      await tx.update(businesses).set({ onboardingStage: "knowledge" }).where(eq(businesses.id, businessId));
     });
     const replay = await context.request.post(`${baseURL}/api/demo/claim`, { headers: { Origin: baseURL!, "Sec-Fetch-Site": "same-origin" }, data: { token } });
     expect(replay.status()).toBe(200);
     expect((await replay.json()).status).toBe("already_claimed");
     await withBusinessTransaction(database.db, { businessId, actorType: "worker" }, async tx => {
-      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]?.onboardingStage).toBe("website");
+      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]?.onboardingStage).toBe("knowledge");
     });
   } finally {
     await context.close();

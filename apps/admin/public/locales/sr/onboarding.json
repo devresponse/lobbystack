@@ -68,22 +68,6 @@
     "submitting": "Čuvanje...",
     "submitFailed": "Trenutno ne možemo da sačuvamo firmu. Pokušajte ponovo."
   },
-  "website": {
-    "title": "Sada ćemo obučiti {{appName}} pomoću Vašeg sajta",
-    "description": "",
-    "label": "Sajt",
-    "placeholder": "mojafirma.rs",
-    "sourceName": "Naziv izvora",
-    "sourceNameHint": "Opcioni naziv za uvezeni izvor.",
-    "sourceNamePlaceholder": "Sajt firme",
-    "continue": "Nastavi",
-    "submitting": "Pokretanje uvoza...",
-    "skip": "Nemam sajt",
-    "skipping": "Preskakanje...",
-    "submitFailed": "Trenutno ne možemo da pokrenemo uvoz sajta. Pokušajte ponovo.",
-    "invalidUrl": "Unesite adresu svog sajta, na primer mojafirma.rs.",
-    "skipFailed": "Trenutno ne možemo da preskočimo ovaj korak. Pokušajte ponovo."
-  },
   "knowledge": {
     "title": "Dodajte dokumente za obuku",
     "description": "Pomozite AI recepcioneru da razume Vašu firmu.",

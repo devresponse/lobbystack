@@ -82,7 +82,7 @@ export const apiMeSchema = z.object({
 }).describe("The API key making the request and the business it acts on.");
 
 const businessHoursSources = ["none", "generated", "operator"] as const;
-const onboardingStages = ["create_business", "website", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
+const onboardingStages = ["create_business", "knowledge", "greeting", "plan", "phone_number", "phone_number_claiming", "attribution", "complete"] as const;
 
 const callTranscriptRecipients = z.enum(callTranscriptRecipientChoices);
 const callTranscriptContent = z.enum(callTranscriptContentChoices);

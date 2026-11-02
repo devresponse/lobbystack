@@ -258,3 +258,4 @@ These commits reached `main` without a pull request:
 | 2026-11-02 | `970ba1b` | List `9622842` in this table. |
 | 2026-11-02 | `df0a0ed` | Record the first answered phone call: guide 3.2 and 4.9 say to check the webhook's project before asking OpenAI support, and the bootstrap's roadmap page and decision now cover only the four fork changes still proposed ([what isn't confirmed](../../devops/bootstrap.md#what-isnt-confirmed)). |
 | 2026-11-02 | `efca2f4` | Name a deployment's projects after `APP_BASE_URL`, with `NAME` as the fallback, and keep each name once used, so a changed setting renames nothing; find things by their recorded IDs and stop on a name that matches two; pass a redone value on to Railway; and on a running deployment set only the variables that differ ([what things are named](../../devops/bootstrap.md#what-things-are-named)). |
+| 2026-11-02 | `99ab598` | List `efca2f4` in this table. |

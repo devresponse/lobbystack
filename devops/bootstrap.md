@@ -64,6 +64,8 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number you already have in the subaccount, or empty |
 | `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | Cloud mode only |
 | `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then takes its values from the secrets file, or asks you for them |
+| `RAILWAY_TEMPLATE` | the code `template` printed | Optional. With it, `up` makes the services, volumes and settings from your private template in one call; empty, it makes them one by one. See [A private Railway template](#optional-a-private-railway-template) |
+| `TEMPLATE_PROJECT` | `lobbystack-template` | Optional, used only by `template`: the Railway project the template is made from. It must differ from `NAME` |
 
 ## 2. Put your keys in the secrets file
 
@@ -118,6 +120,27 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 4. It ends with the address. When `https://<address>/api/health/ready` shows `"ok":true`, go on.
 
 `--yes` skips the questions and the waits, so use it only to finish a run whose waits are already behind you. `--verbose` also shows each API call as it happens.
+
+## Optional: a private Railway template
+
+Instead of making the Railway services one by one, `up` can make them from a private template of your own in one call. You make the template once, from a clean project that holds only the layout:
+
+```sh
+node devops/bootstrap.mjs template .env.bootstrap-realinfobot-test
+```
+
+1. It makes a Railway project named `TEMPLATE_PROJECT` (default `lobbystack-template`) in `RAILWAY_WORKSPACE_ID`, with the same Railway steps as `up`: the five services, both volumes, the bucket, the settings and migrate's pre-deploy command. It never touches the project named in `NAME`.
+2. It sets only the variables that are the same in every deployment: references between services such as `${{Postgres.LOBBYSTACK_APP_PASSWORD}}`, ports and file paths. No key, password, address, brand, sender or Polar value goes in.
+3. It asks Railway to make a template of that project (`templateGenerate`), saves what Railway put in it to `.env.bootstrap-<name>.template.json`, and lists it: each service's source and variables, and whether it holds the volumes, the bucket, the pre-deploy command and start commands.
+4. It prints `RAILWAY_TEMPLATE=<code>`. Put that line in each settings file that should use the template.
+
+With `RAILWAY_TEMPLATE` set, `up` deploys the template into the new project right after making it (`templateDeployV2`), then carries on as before. Every later step finds what the template made by name and adds anything it left out, so a template that misses the bucket or the pre-deploy command still ends in a full setup. If the project already has any of the five services, the template isn't deployed again.
+
+Good to know:
+
+- The template project's Postgres and Redis start without passwords and stop after a few retries. That's expected: nothing in it is meant to run, and the repository services have no source, so they never build. Leave the project in place while you use the template, or delete it once the template exists.
+- Only your workspace lists the template, but anyone who has its code can read it. That's why it holds no secrets. Don't publish it.
+- When the layout changes (a new service, setting or shared variable), delete `.env.bootstrap-<name>.template.state.json` and run `template` again. It finds the template project and its services by name, brings them up to date, and makes a new template: put its code in `RAILWAY_TEMPLATE`.
 
 ## 5. Connect the providers
 
@@ -185,8 +208,9 @@ Ctrl+C stops at once; the finished steps stay recorded.
 | `.env.bootstrap-<name>.state.json` | Every step's result: the 13 generated secrets, the provider keys it made or was given, and the IDs |
 | `.env.bootstrap-<name>.vars` | Every service's variables in guide Appendix A's format, so `node devops/railway-vars.mjs` can set them again |
 | `.env.bootstrap-<name>.log` | What each run printed and each API call it made, with secrets hidden |
+| `.env.bootstrap-<name>.template.state.json`, `.template.json` | Only after `template`: its own progress, and what Railway put in the template. Nothing secret |
 
-Git ignores all five. The secrets, state and variable files hold secrets. Once the environment works, delete the tokens from the secrets file, or the whole file once its keys are in the password manager. For the state and variable files: copy them into the password manager entry for the environment, keep a second copy of `ENCRYPTION_KEY` and `OTP_HASH_SECRET` (guide decision 10), and never commit or send these files. The script never prints a secret. Production gets its own settings file and new secrets; never copy test's.
+Git ignores all of them. The secrets, state and variable files hold secrets. Once the environment works, delete the tokens from the secrets file, or the whole file once its keys are in the password manager. For the state and variable files: copy them into the password manager entry for the environment, keep a second copy of `ENCRYPTION_KEY` and `OTP_HASH_SECRET` (guide decision 10), and never commit or send these files. The script never prints a secret. Production gets its own settings file and new secrets; never copy test's.
 
 ## What isn't confirmed
 
@@ -196,4 +220,5 @@ Git ignores all five. The secrets, state and variable files hold secrets. Once t
   - The custom domain's records: the script makes the CNAME and the `railway-verify` TXT record from what Railway's API returns, the way the Railway CLI prints them.
 - Resend's documentation doesn't name the field that limits a key to one domain. The script sends `domain_id`; if Resend refuses it, the run stops at that step with the workaround.
 - The lookups that make reruns safe (OpenAI's service accounts, Resend's key list, Cloudflare's Turnstile widgets, Twilio's numbers by name) follow each provider's documentation and were tested only against stand-ins, including a full second run with the state file deleted, which made nothing new and kept every value.
+- The template: `templateGenerate`, `template(code)` and `templateDeployV2` follow the Railway CLI's schema and its own template deploy, and were tested only against a stand-in. The first `template` run shows which parts Railway copies (it lists them); whether it keeps the bucket, the pre-deploy command and start commands isn't known yet. Whatever it leaves out, `up` still makes.
 - `fullName` turns Resend's record names into host names in the zone. Check the records in Cloudflare after the first run.

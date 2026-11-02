@@ -10,6 +10,8 @@
 //   node devops/bootstrap.mjs status <settings file>   what's done and what's left
 //   node devops/bootstrap.mjs doctor <settings file>   checks settings, tools and tokens; changes nothing
 //   node devops/bootstrap.mjs redo <settings file> <step>   runs a finished step again next time
+//   node devops/bootstrap.mjs template <settings file> makes a private Railway template of the
+//                                                      layout, which up then deploys (RAILWAY_TEMPLATE)
 // Options: --dry-run (show the steps, call nothing), --yes (don't stop at questions or pauses),
 //          --verbose (show each API call), --secrets <file> (read keys from that file instead
 //          of <settings file>.secrets)
@@ -89,6 +91,12 @@ OPERATOR_EMAIL=
 # Settings, General tab (Workspace ID, with a copy button), or run doctor, which lists the
 # workspaces your token can reach. A workspace token reaches only its own workspace.
 RAILWAY_WORKSPACE_ID=
+# Optional: the code of a private Railway template made by the template command (it prints the code).
+# With it, up makes the services, volumes and settings from the template in one call, instead
+# of one by one. Empty: one by one. TEMPLATE_PROJECT names the project the template command
+# builds the template from (default lobbystack-template); it holds no keys or passwords.
+RAILWAY_TEMPLATE=
+TEMPLATE_PROJECT=
 # The bucket's region, which never changes: sjc, iad, ams or sin.
 BUCKET_REGION=iad
 # Optional: the dashboard's own address, such as test.example.com. Empty: Railway's free address.
@@ -244,7 +252,7 @@ let prompter = null;
 async function main() {
   if (typeof fetch !== "function") throw new Error("this script needs Node 18 or later");
   if (command === "init") return init(target);
-  if (!["up", "connect", "status", "doctor", "redo"].includes(command) || !target) usage("Give a command and the settings file.");
+  if (!["up", "connect", "status", "doctor", "redo", "template"].includes(command) || !target) usage("Give a command and the settings file.");
   const run = loadRun(target);
   if (command === "status") {
     logPath = null; // status only reads, so it doesn't add to the log either
@@ -254,6 +262,7 @@ async function main() {
   if (command === "doctor") return doctor(run);
   if (command === "redo") return redo(run, positional.slice(2));
   if (command === "up") return up(run);
+  if (command === "template") return makeTemplate(run);
   return connect(run);
 }
 
@@ -274,6 +283,7 @@ Usage:
   node devops/bootstrap.mjs connect <settings file>      the last steps, once the address works
   node devops/bootstrap.mjs status <settings file>       what's done
   node devops/bootstrap.mjs redo <settings file> <step>  run a finished step again next time (status lists them)
+  node devops/bootstrap.mjs template <settings file>     make a private Railway template of the layout, for RAILWAY_TEMPLATE
 Options: --dry-run, --yes, --verbose (show each API call), --secrets <file>
 See devops/bootstrap.md.`);
   process.exit(2);
@@ -951,7 +961,24 @@ const Q = {
   customDomainCreate: "mutation customDomainCreate($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } }",
   variables: "mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }",
   connect: "mutation serviceConnect($id: String!, $input: ServiceConnectInput!) { serviceConnect(id: $id, input: $input) { id } }",
+  templateGenerate: "mutation templateGenerate($input: TemplateGenerateInput!) { templateGenerate(input: $input) { id code name status } }",
+  template: "query template($code: String!) { template(code: $code) { id code name serializedConfig } }",
+  templateDeploy: "mutation templateDeployV2($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { projectId workflowId } }",
+  workflowStatus: "query workflowStatus($workflowId: String!) { workflowStatus(workflowId: $workflowId) { status error } }",
 };
+
+/** Waits for a Railway workflow, such as a template deploy, to finish. */
+async function waitForWorkflow(workflowId, what) {
+  if (!workflowId) return;
+  const pause = Number(process.env.BOOTSTRAP_POLL_MS ?? 3000);
+  for (let tries = 0; tries < 200; tries += 1) {
+    const { workflowStatus } = await railway(Q.workflowStatus, { workflowId });
+    if (workflowStatus?.status === "Complete") return;
+    if (workflowStatus?.status === "Error") throw new Error(`Railway couldn't finish ${what}: ${workflowStatus.error ?? "no reason given"}`);
+    await new Promise((resolve) => setTimeout(resolve, pause));
+  }
+  throw new Error(`Railway was still working on ${what} after ${Math.round((200 * pause) / 60000)} minutes. Check the project in Railway, then run again`);
+}
 
 const SERVICES = [
   { name: "Postgres", image: "pgvector/pgvector:pg16" },
@@ -1039,6 +1066,27 @@ async function railwaySteps(run) {
     if (!environmentId) throw new Error("Railway made the project without an environment");
     return { RAILWAY_ENVIRONMENT_ID: environmentId };
   });
+  if (s.RAILWAY_TEMPLATE && !run.template) {
+    await step(run, "railway.template", `The services, volumes and settings from the template ${s.RAILWAY_TEMPLATE}`, async () => {
+      const view = await projectView(run);
+      if (SERVICES.some((service) => view.services[service.name])) return console.log("  = the project has its services already, so the template isn't deployed again");
+      const { template } = await railway(Q.template, { code: s.RAILWAY_TEMPLATE });
+      if (!template) throw new Error(`Railway has no template with the code ${s.RAILWAY_TEMPLATE}. Run template again, or empty RAILWAY_TEMPLATE`);
+      // Passed through whole, as the Railway CLI does: only the values are filled in, from the template's defaults.
+      const config = template.serializedConfig ?? {};
+      for (const service of Object.values(config.services ?? {})) {
+        for (const variable of Object.values(service?.variables ?? {})) {
+          if (variable && variable.value === undefined && variable.defaultValue) variable.value = variable.defaultValue;
+        }
+      }
+      const { templateDeployV2 } = await railway(Q.templateDeploy, { input: {
+        templateId: template.id, serializedConfig: config, projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"),
+      } });
+      await waitForWorkflow(templateDeployV2?.workflowId, `the template ${s.RAILWAY_TEMPLATE}`);
+      const made = await projectView(run);
+      console.log(`  made ${SERVICES.filter((service) => made.services[service.name]).map((service) => service.name).join(", ") || "no services with the expected names"}; the next steps add anything it left out`);
+    });
+  }
   await step(run, "railway.services", "Services Postgres, Redis, migrate, admin and worker", async () => {
     const view = await projectView(run);
     const ids = {};
@@ -1097,6 +1145,75 @@ async function railwaySteps(run) {
     }
     await byHand(["Railway's API didn't take the pre-deploy command. In migrate > Settings > Deploy, set Pre-deploy command to exactly:", MIGRATE_PRE_DEPLOY]);
   });
+}
+
+// ---------------------------------------------------------------- template
+
+// Variables that differ for each deployment, or depend on its settings, stay out of the template.
+const NOT_IN_TEMPLATE = new Set(["DEPLOYMENT_MODE", "BRAND_PRESET", "EMAIL_FROM", "POLAR_ORGANIZATION_ID", "POLAR_API_BASE_URL", "TWILIO_ALERT_SMS_FROM", "REQUIRE_EMAIL_VERIFICATION"]);
+
+/**
+ * Builds a Railway project that holds only the layout (services, volumes, bucket, settings,
+ * pre-deploy command and the variables that are the same everywhere, such as references), then
+ * makes a private template of it. No secret, key or per-deployment value goes in: up sets those.
+ */
+async function makeTemplate(run) {
+  const s = run.settings;
+  const name = s.TEMPLATE_PROJECT || "lobbystack-template";
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("TEMPLATE_PROJECT is a short name in lower case, such as lobbystack-template");
+  if (name === s.NAME) throw new Error("TEMPLATE_PROJECT must differ from NAME: the template is made from a project of its own");
+  const stateFile = run.stateFile.replace(/\.state\.json$/, ".template.state.json");
+  const trun = {
+    file: run.file, stateFile, template: true,
+    settings: { ...s, NAME: name, CUSTOM_HOST: "", ENVIRONMENT: "test" },
+    state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} },
+  };
+  console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}Template: a Railway project "${name}" with the layout only, then a private template of it.`);
+  console.log(`Progress: ${stateFile}\n`);
+  if (!dryRun) await confirm(`This makes the Railway project ${name} in your workspace. Postgres and Redis there start without passwords and stop after a few retries; nothing else deploys.`);
+  console.log("\nRailway");
+  await railwaySteps(trun);
+  await step(trun, "template.variables", "The variables that are the same in every deployment (references, ports, file paths)", async () => {
+    const ids = v(trun, "RAILWAY_SERVICE_IDS");
+    const services = perService(variableSections(trun));
+    services.admin.APP_BASE_URL = "https://${{RAILWAY_PUBLIC_DOMAIN}}";
+    for (const [service, all] of Object.entries(services)) {
+      // A secret's name stays only as a reference to another service, such as ${{Postgres.LOBBYSTACK_APP_PASSWORD}}.
+      const secret = (key, value) => (SECRETS.includes(key) || SECRET_KEYS.has(key)) && !/^\$\{\{[\w-]+\.[A-Z0-9_]+\}\}$/.test(value);
+      const variables = Object.fromEntries(Object.entries(all).filter(([key, value]) => value && !NOT_IN_TEMPLATE.has(key) && !secret(key, value)));
+      await railway(Q.variables, { input: { projectId: v(trun, "RAILWAY_PROJECT_ID"), environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID"), serviceId: ids[service], variables, skipDeploys: true } });
+      console.log(`  ${service}: ${Object.keys(variables).length} variables`);
+    }
+  });
+  await step(trun, "template.generate", `A private template of ${name}`, async () => {
+    const { templateGenerate } = await railway(Q.templateGenerate, { input: { projectId: v(trun, "RAILWAY_PROJECT_ID"), environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID") } });
+    if (!templateGenerate?.code) throw new Error("Railway made no template");
+    console.log(`  made ${templateGenerate.name ?? "the template"} (${templateGenerate.status ?? "draft"}), code ${templateGenerate.code}`);
+    return { TEMPLATE_CODE: templateGenerate.code };
+  });
+  if (dryRun) return;
+  // What Railway put in it, so a missing part shows now rather than at the next up.
+  const code = v(trun, "TEMPLATE_CODE");
+  const { template } = await railway(Q.template, { code });
+  const config = template?.serializedConfig ?? {};
+  const file = `${run.file}.template.json`;
+  fs.writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+  const services = Object.values(config.services ?? {});
+  console.log(`\nWhat the template holds (all of it is in ${file}):`);
+  for (const service of services) {
+    const variables = Object.values(service?.variables ?? {});
+    const source = service?.source?.image ?? service?.source?.repo ?? "no source";
+    console.log(`  ${service?.name ?? "?"}: ${source}, ${variables.length} variables${variables.some((item) => item?.defaultValue) ? "" : " (no values)"}`);
+  }
+  // Railway's layout of serializedConfig isn't documented, so look for each part by key name anywhere outside
+  // the variables (S3_BUCKET is a variable, not a bucket), and count it only when it isn't empty.
+  const holds = (node, pattern) => node && typeof node === "object" && Object.entries(node).some(([key, value]) => key !== "variables" &&
+    ((pattern.test(key) && (Array.isArray(value) ? value.length > 0 : value && typeof value === "object" ? Object.keys(value).length > 0 : Boolean(value))) || holds(value, pattern)));
+  for (const [label, pattern] of [["volumes", /volume/i], ["the bucket", /bucket/i], ["the pre-deploy command", /^preDeployCommand$/], ["start commands", /^startCommand$/]]) {
+    console.log(`  ${holds(config, pattern) ? "has" : "NO "} ${label}`);
+  }
+  console.log(`\nPut this in your settings files, then up makes the layout from it:\n  RAILWAY_TEMPLATE=${code}`);
+  console.log("Anything the template left out, up still makes step by step. Only your workspace lists the template, but anyone with its code can read it: that's why it holds no keys or passwords.");
 }
 
 function cliEnv() {

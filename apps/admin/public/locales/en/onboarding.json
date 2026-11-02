@@ -69,7 +69,7 @@
     "submitFailed": "We couldn't save that business right now. Please try again."
   },
   "website": {
-    "title": "Now let's train {{appName}} on your website",
+    "title": "What is your business's website?",
     "description": "",
     "label": "Website",
     "placeholder": "yourcompany.com",

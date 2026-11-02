@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#114](https://github.com/devresponse/lobbystack/pull/114) | Fix the bootstrap script's tool calls on Windows, where arguments with spaces were split, and keep `status` from writing the log |  | `5e237f0` | [docs](../../devops/bootstrap.md) |
 | [#111](https://github.com/devresponse/lobbystack/pull/111) | Ignore the admin's generated `next-env.d.ts`, run `next typegen` before the admin typecheck, and keep AlloPlace's Zapier logo |  | `70e3ce5` | [docs](../development/README.md) |
 | [#113](https://github.com/devresponse/lobbystack/pull/113) | Add a bootstrap script that sets up a Railway environment and its outside services by API, safe to run again |  | `0ee8167` | [docs](../../devops/bootstrap.md) |
 | [#112](https://github.com/devresponse/lobbystack/pull/112) | Add the RealInfoBot brand for realinfobot.com, so an address no brand claims needs `BRAND_PRESET` |  | `dd5ed7d` | [docs](../branding.md) |

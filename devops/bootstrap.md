@@ -10,7 +10,7 @@
 
 | Step | The script | You |
 | --- | --- | --- |
-| GitHub | Turns on the fork's checks, and checks that the branch has the brand folder | Click **Sync fork** if the brand is missing |
+| GitHub | Checks that the fork's CI, Runtime images and Replacement Platform workflows are on, and turns on any that are off (that needs admin rights on the fork); checks that the branch has the brand folder | Enable the workflows on the fork's Actions tab if `gh` isn't signed in as its owner; click **Sync fork** if the brand is missing |
 | OpenAI | Creates the project and its API key, owned by a service account | Make sure GPT-Live SIP works for the project, set the spending limit, and later create the incoming-call webhook (OpenAI's API can't make that one yet) |
 | Twilio | Creates the subaccount, the SIP trunk (Secure Trunking, transfers) and its origination URI to the OpenAI project. In cloud mode, it buys or reuses the toll-free number and sets its texting address | Geo permissions, business profile, texting registration and toll-free verification, which Twilio reviews |
 | Email | Creates the Resend domain, its DNS records in Cloudflare (or prints them for you), and a key that can only send from that domain | Nothing, unless your DNS isn't at Cloudflare |
@@ -24,7 +24,7 @@
 1. **Accounts** (guide 3.1): Railway on Pro, OpenAI with credit, Twilio upgraded from trial, Resend, Cloudflare, and Polar for cloud mode.
 2. **Your computer:** Node.js 18 or later, and `pnpm install` done in the repository folder. Two tools are optional, and the script asks you to do their step by hand without them:
    - the Railway CLI (`npm install --global @railway/cli`), used only to make the bucket;
-   - the GitHub CLI (`gh`, signed in), used to turn on the fork's checks.
+   - the GitHub CLI (`gh`, signed in), used to check the fork's workflows and brand folder. Turning workflows on needs `gh` signed in as the fork's owner; reading them doesn't.
 3. **Tokens.** The script reads each one from the environment variable of the same name, then from the secrets file ([below](#2-put-your-keys-in-the-secrets-file)), and otherwise asks for it with typing hidden. It never saves a token in its state file.
 
    | Variable | What it is | Where to make it |
@@ -55,12 +55,12 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `REPO`, `BRANCH` | `realinfobot/lobbystack`, `main` | What Railway builds |
 | `DEPLOYMENT_MODE` | `cloud` | Or `self_hosted_standard`. Decision 1 of the guide: hard to change once businesses exist |
 | `OPERATOR_EMAIL` | `you@example.com` | Owns the platform key, and gets the DMARC reports |
-| `RAILWAY_WORKSPACE_ID` | | Empty: your personal workspace |
+| `RAILWAY_WORKSPACE_ID` | the workspace's ID | Needed to make the project: Railway refuses a new project without a workspace. Find it in Railway under the workspace's **Settings**, **General** tab (Workspace ID, with a copy button), or run `doctor`, which lists the workspaces your token reaches. Can stay empty only if the project already exists |
 | `BUCKET_REGION` | `iad` | `sjc`, `iad`, `ams` or `sin`. It never changes |
 | `CUSTOM_HOST` | `test.realinfobot.com` | Optional. Empty: Railway's free address with `BRAND_PRESET` |
 | `EMAIL_DOMAIN`, `EMAIL_FROM` | `notifications.realinfobot.com`, `no-reply@notifications.realinfobot.com` | The subdomain kept for email, and the sender on it |
 | `RESEND_REGION` | `us-east-1` | It can't change later |
-| `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The zone that holds both domains. Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
+| `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The domain name of the zone that holds both domains, not the Zone ID Cloudflare shows beside it; and the Account ID from the zone's Overview page (right-hand column, under API). Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number you already have in the subaccount, or empty |
 | `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | Cloud mode only |
 | `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then takes its values from the secrets file, or asks you for them |
@@ -161,8 +161,10 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 
 | You see | Do this |
 | --- | --- |
+| `You must specify a workspaceId to create a project`, or `RAILWAY_WORKSPACE_ID is empty` | Put the workspace's ID in `RAILWAY_WORKSPACE_ID` (the error lists the ones your token reaches, and so does `doctor`), then run `up` again. It carries on at `railway.project` |
 | `didn't accept RAILWAY_API_TOKEN` (or another token) | Run `doctor`. Copy the token again in full. Railway needs an account or workspace token, not a project token; OpenAI an admin key; Resend a Full access key; Twilio the main account's Auth Token |
 | `isn't allowed to do this` | The token works but lacks a permission: Cloudflare needs **DNS Edit** on the zone and **Turnstile Edit** on the account; Twilio must be upgraded from trial |
+| `can't see a zone named ...` | Check that `CLOUDFLARE_ZONE` is the domain name, such as `realinfobot.com`, and not the Zone ID. If it is, edit the token in Cloudflare (My Profile, API Tokens) so its Zone Resources include that zone |
 | `couldn't be reached` | Check the internet connection, VPN or firewall. Behind a proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` |
 | `Railway has 2 projects named ...` | Delete or rename the extra project in Railway, then run again |
 | `already has a volume, mounted at ...` | Change that volume's mount path in Railway to the one named, then run again |

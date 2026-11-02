@@ -84,7 +84,10 @@ BRANCH=main
 DEPLOYMENT_MODE=self_hosted_standard
 # The operator's email: the platform key's owner, and DMARC reports.
 OPERATOR_EMAIL=
-# Optional: a Railway workspace ID. Empty: your personal workspace.
+# The ID of the Railway workspace the project goes in. Railway refuses to make a project without
+# one, so fill it in unless the project already exists. Find it in Railway under the workspace's
+# Settings, General tab (Workspace ID, with a copy button), or run doctor, which lists the
+# workspaces your token can reach. A workspace token reaches only its own workspace.
 RAILWAY_WORKSPACE_ID=
 # The bucket's region, which never changes: sjc, iad, ams or sin.
 BUCKET_REGION=iad
@@ -97,8 +100,11 @@ EMAIL_FROM=
 # us-east-1, eu-west-1, sa-east-1 or ap-northeast-1. It can't change later.
 RESEND_REGION=us-east-1
 
-# Cloudflare: the zone that holds EMAIL_DOMAIN and CUSTOM_HOST (such as example.com), and the
-# account ID from the zone's Overview page. Empty zone: the script prints the DNS records instead.
+# Cloudflare. CLOUDFLARE_ZONE is the domain name of the zone that holds EMAIL_DOMAIN and
+# CUSTOM_HOST, such as example.com: the name, not the 32-character Zone ID that Cloudflare shows
+# beside it. CLOUDFLARE_ACCOUNT_ID is the Account ID from the zone's Overview page (right-hand
+# column, under API). Empty zone: the script prints the DNS records for you to add instead.
+# Empty account ID: you make the Turnstile widget by hand.
 CLOUDFLARE_ZONE=
 CLOUDFLARE_ACCOUNT_ID=
 
@@ -316,6 +322,9 @@ function loadRun(file) {
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push("CUSTOM_HOST is a host name only, such as test.example.com");
+  if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
+  else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
+  if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
   if (s.DEPLOYMENT_MODE === "cloud" && !s.POLAR_ORGANIZATION_ID) problems.push("POLAR_ORGANIZATION_ID is empty, and DEPLOYMENT_MODE is cloud");
   if (s.TWILIO_TOLLFREE && s.TWILIO_TOLLFREE !== "buy" && !/^\+\d{8,15}$/.test(s.TWILIO_TOLLFREE)) problems.push("TWILIO_TOLLFREE is buy, a number such as +18445550123, or empty");
   if (s.TWILIO_TOLLFREE && s.DEPLOYMENT_MODE !== "cloud") problems.push("TWILIO_TOLLFREE is only for DEPLOYMENT_MODE=cloud");
@@ -688,14 +697,45 @@ async function up(run) {
   }
 }
 
+// The workflows a deployment needs. CodeQL and the landing link check are optional on a fork.
+const NEEDED_WORKFLOWS = ["ci.yml", "runtime-images.yml", "replacement-platform.yml"];
+
+/** The first line of what a command printed when it failed. */
+function firstLine(result) {
+  return (result.stderr || result.stdout || result.error?.message || `exit ${result.status}`).trim().split("\n")[0];
+}
+
 async function githubSteps(run) {
   const s = run.settings;
   if (!s.STEP_GITHUB) return console.log("  skipped (STEP_GITHUB=no)");
-  await step(run, "github.actions", `Turn on the checks of ${s.REPO}`, async () => {
-    const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"]);
-    if (result.error || result.status !== 0) {
-      await byHand([`GitHub CLI couldn't do it (${(result.stderr || result.error?.message || "").trim().split("\n")[0]}).`, `Open https://github.com/${s.REPO}/actions and enable the workflows.`]);
+  await step(run, "github.actions", `Check that the checks of ${s.REPO} are on`, async () => {
+    // Reading the workflows needs only read access; turning them on needs admin rights, so that is
+    // tried only for the ones that are really off.
+    const listed = runTool("gh", ["api", `repos/${s.REPO}/actions/workflows?per_page=100`]);
+    if (listed.error) return byHand([`GitHub CLI isn't installed. Open https://github.com/${s.REPO}/actions and check that CI is on:`, "if GitHub shows a button to enable the workflows, click it."]);
+    let workflows = null;
+    try {
+      if (listed.status === 0) workflows = JSON.parse(listed.stdout).workflows ?? null;
+    } catch {}
+    const needed = (workflows ?? []).filter((workflow) => NEEDED_WORKFLOWS.includes(path.posix.basename(workflow.path ?? "")));
+    const off = needed.filter((workflow) => workflow.state !== "active");
+    if (needed.length && !off.length) {
+      const others = workflows.filter((workflow) => workflow.state !== "active").map((workflow) => workflow.name);
+      return console.log(`  = already on: ${needed.map((workflow) => workflow.name).join(", ")}${others.length ? ` (also off, and not needed: ${others.join(", ")})` : ""}`);
     }
+    const problems = [];
+    // A fork starts with Actions off for the whole repository, which shows as no workflows or as disabled_fork.
+    if (!needed.length || off.some((workflow) => workflow.state === "disabled_fork")) {
+      const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/permissions`, "-F", "enabled=true"]);
+      if (result.error || result.status !== 0) problems.push(firstLine(result));
+    }
+    for (const workflow of off.filter((item) => item.state !== "disabled_fork")) {
+      const result = runTool("gh", ["api", "-X", "PUT", `repos/${s.REPO}/actions/workflows/${workflow.id}/enable`]);
+      if (result.error || result.status !== 0) problems.push(`${workflow.name}: ${firstLine(result)}`);
+    }
+    if (!problems.length) return console.log(`  turned on: ${off.length ? off.map((workflow) => workflow.name).join(", ") : "Actions"}`);
+    const why = listed.status !== 0 ? `GitHub CLI couldn't read the workflows of ${s.REPO} (${firstLine(listed)})` : `The checks are off, and turning them on needs admin rights on ${s.REPO} (${problems[0]})`;
+    await byHand([`${why}.`, `Open https://github.com/${s.REPO}/actions as the repository's owner and enable the workflows,`, "or sign gh in as the owner (gh auth login) and redo github.actions."]);
   });
   await step(run, "github.brand", `Check that ${s.REPO}@${s.BRANCH} has brands/${s.BRAND}`, async () => {
     const result = runTool("gh", ["api", `repos/${s.REPO}/contents/brands/${s.BRAND}/brand.json?ref=${s.BRANCH}`, "--jq", ".name"]);
@@ -861,7 +901,7 @@ function fullName(name, emailDomain, zone) {
 async function zoneId(run) {
   if (v(run, "CLOUDFLARE_ZONE_ID")) return v(run, "CLOUDFLARE_ZONE_ID");
   const zones = await cloudflare(`/zones?name=${encodeURIComponent(run.settings.CLOUDFLARE_ZONE)}`);
-  if (!zones?.length) throw new Error(`the Cloudflare token can't see the zone ${run.settings.CLOUDFLARE_ZONE}`);
+  if (!zones?.length) throw new Error(`the Cloudflare token can't see a zone named ${run.settings.CLOUDFLARE_ZONE}: check the name, and that the token's Zone Resources include it`);
   run.state.values.CLOUDFLARE_ZONE_ID = zones[0].id;
   save(run);
   return zones[0].id;
@@ -900,6 +940,7 @@ async function dnsRecords(run, records) {
 const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
   project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
+  workspaces: "query workspaces { me { workspaces { id name } } }",
   projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name } } } }",
   domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
   readVariables: "query variables($projectId: String!, $environmentId: String!, $serviceId: String!) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true) }",
@@ -929,6 +970,19 @@ async function projectView(run, id = v(run, "RAILWAY_PROJECT_ID")) {
     volumes: project.volumes.edges.flatMap(({ node }) => node.volumeInstances.edges.map(({ node: instance }) => instance)),
     buckets: project.buckets.edges.map(({ node }) => node.name),
   };
+}
+
+/** The workspaces the Railway token can reach, as a sentence for an error or doctor. */
+async function workspaceList(auth) {
+  try {
+    const data = auth
+      ? (await http("Railway", URLS.railway, { method: "POST", headers: { Authorization: `Bearer ${auth}` }, body: { query: Q.workspaces } }))?.data
+      : await railway(Q.workspaces);
+    const list = data?.me?.workspaces ?? [];
+    if (list.length === 1) return `Put RAILWAY_WORKSPACE_ID=${list[0].id} (${list[0].name}) in the settings file.`;
+    if (list.length) return `Put one of these in the settings file as RAILWAY_WORKSPACE_ID: ${list.map((item) => `${item.id} (${item.name})`).join(", ")}.`;
+  } catch {}
+  return "Copy it from the workspace's Settings, General tab in Railway (Workspace ID).";
 }
 
 /** This run's Railway project if it exists, by its saved ID or by name; never creates it. */
@@ -975,6 +1029,7 @@ async function railwaySteps(run) {
     if (!v(run, "RAILWAY_PROJECT_ID")) {
       const existing = await findProject(run);
       if (existing) console.log(`  found the project ${s.NAME}; using it`);
+      if (!existing && !s.RAILWAY_WORKSPACE_ID) throw new Error(`RAILWAY_WORKSPACE_ID is empty, and Railway needs it to make a project. ${await workspaceList()}`);
       const id = existing ?? (await railway(Q.projectCreate, { input: { name: s.NAME, defaultEnvironmentName: s.ENVIRONMENT, ...(s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {}) } })).projectCreate.id;
       run.state.values.RAILWAY_PROJECT_ID = id;
       save(run);
@@ -1404,7 +1459,7 @@ function hints(error) {
   } else if (error.status >= 500 || (!error.status && /problem processing request|internal server error|timed? ?out/i.test(message))) {
     tips.push(`${error.service ?? "The service"} had a problem on its side. Run the same command again in a few minutes${provider ? `, and check ${provider.status}` : ""}.`);
   }
-  if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: workspace settings), and use a token that can reach it.");
+  if (/workspace/i.test(message) && error.service === "Railway") tips.push("Set RAILWAY_WORKSPACE_ID in the settings file to the workspace's ID (Railway: the workspace's Settings, General tab, Workspace ID; doctor lists them), and use a token that can reach it.");
   if (/no valid value given/.test(message)) tips.push("The script needed a value and got none. Put it in the secrets file (see init), or run in a terminal where you can type it.");
   if (currentStep === "resend.key") tips.push("If Resend won't make a key limited to one domain, make a Sending access key for the domain at https://resend.com/api-keys, put it as SMTP_PASSWORD in the secrets file, and run again.");
   if (currentStep === "railway.domain") tips.push("Railway may not give an address before the service's first deploy. Run up again once the admin has deployed once (guide Appendix D).");
@@ -1476,6 +1531,10 @@ async function doctor(run) {
     if (json?.errors?.length) throw Object.assign(new Error(json.errors.map((item) => item.message).join("; ")), { service: "Railway", graphql: json.errors });
     return s.RAILWAY_WORKSPACE_ID ? `workspace ${json.data.workspace.name}` : "your account";
   });
+  if (!s.RAILWAY_WORKSPACE_ID && !run.state.done["railway.project"]) {
+    const value = quietGiven("RAILWAY_API_TOKEN");
+    fix(`RAILWAY_WORKSPACE_ID is empty, and Railway needs it to make a project. ${value ? await workspaceList(value) : "Copy it from the workspace's Settings, General tab in Railway (Workspace ID)."}`);
+  }
   const openaiGiven = config?.flat.OPENAI_API_KEY || config?.flat.OPENAI_PROJECT_ID;
   if (s.STEP_OPENAI && !openaiGiven && !run.state.done["openai.key"]) {
     await check("OpenAI", "OPENAI_ADMIN_KEY", async (value) => {
@@ -1515,7 +1574,7 @@ async function doctor(run) {
       const results = [];
       if (s.CLOUDFLARE_ZONE) {
         const zones = await http("Cloudflare", `${URLS.cloudflare}/zones?name=${encodeURIComponent(s.CLOUDFLARE_ZONE)}`, { headers: bearer(value) });
-        if (!zones?.result?.length) throw Object.assign(new Error(`the token can't see the zone ${s.CLOUDFLARE_ZONE}`), { service: "Cloudflare", status: 403 });
+        if (!zones?.result?.length) throw Object.assign(new Error(`the token can't see a zone named ${s.CLOUDFLARE_ZONE}: check the name, and that the token's Zone Resources include it`), { service: "Cloudflare", status: 403 });
         results.push(`sees ${s.CLOUDFLARE_ZONE}`);
       }
       if (s.STEP_TURNSTILE && s.CLOUDFLARE_ACCOUNT_ID) {

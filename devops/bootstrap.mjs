@@ -1680,7 +1680,8 @@ async function postDeploySteps(run) {
       if (records.length) await dnsRecords(run, records);
       else if (!domain.status?.verified) return byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones under admin > Settings > Networking, DNS only (guide section 11): a CNAME to the target Railway shows.`]);
       const { verified, certificateStatus } = domain.status ?? {};
-      console.log(`  Railway: ${verified ? "verified" : "not verified yet"}, certificate ${String(certificateStatus ?? "status unknown").toLowerCase().replace(/_/g, " ")}${verified ? "" : ". Railway checks again by itself once DNS has spread, usually within minutes"}`);
+      // Railway names the status like CERTIFICATE_STATUS_TYPE_VALID.
+      console.log(`  Railway: ${verified ? "verified" : "not verified yet"}, certificate ${String(certificateStatus ?? "status unknown").replace(/^CERTIFICATE_STATUS_TYPE_/i, "").toLowerCase().replace(/_/g, " ")}${verified ? "" : ". Railway checks again by itself once DNS has spread, usually within minutes"}`);
     });
   }
   await step(run, "post.urls", "The admin's and the worker's APP_BASE_URL and AUTH_TRUSTED_ORIGINS match the settings", async () => {

@@ -124,7 +124,7 @@ The admin accepts OpenAI's signed messages only within 5 minutes of when they we
 
 **Phone calls (SIP)**
 
-OpenAI documents no switch for phone calls. Its guide says only to "Confirm that GPT-Live SIP support is enabled for your project", without saying how. Make a test call once your first number is bought ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)). If it fails and the webhook page shows no delivery, ask OpenAI support (`help.openai.com`) to enable GPT-Live SIP for your project ID.
+OpenAI documents no switch for phone calls. Its guide says only to "Confirm that GPT-Live SIP support is enabled for your project", without saying how. Make a test call once your first number is bought ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)). If it fails and the webhook page shows no delivery, first check that the webhook is in the project the trunk's address names ([3.3](#33-twilio), step 11): OpenAI sends a call only to that project's webhooks. If it is, ask OpenAI support (`help.openai.com`) to enable GPT-Live SIP for your project ID.
 
 **What OpenAI keeps**
 
@@ -146,7 +146,7 @@ OpenAI doesn't train on API data unless you opt in, and keeps abuse-monitoring l
 
 **Not yet confirmed:**
 
-- How SIP gets enabled for a new project.
+- How SIP gets enabled for a new project. On 2026-11-02 a project made in the dashboard took a phone call with no request to OpenAI, once its webhook was in that same project; the calls before rang unanswered because the webhook was in another project.
 - Whether call recordings need the project's "session storage" switched on. OpenAI's docs say "Session storage is disabled by default" and don't say how to enable it; the first test call ([6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls)) shows whether a recording is saved.
 - Whether the webhook page can send a test event, which would check the address and the secret before the first call.
 

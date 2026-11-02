@@ -1,26 +1,26 @@
-# Deploy to Railway with one command
+# Remove a Railway deployment's last manual steps
 
-A new deployment follows the [deployment guide](../deployment/guide/README.md) by hand. A study on 2026-10-14 designed a bootstrap script that would deploy LobbyStack from the fork with one settings file of about six values, one command and one sign-up, without Railway's hosted template, which the maintainer ruled out ([Railway automation](../research/railway-automation.md)).
+Since fork PR #113 (2026-11-01), `devops/bootstrap.mjs` sets up a Railway deployment and its outside services from one settings file, and stops at the steps only a person can do ([devops/bootstrap.md](../../devops/bootstrap.md)). It has set up a real test environment, which answered a phone call on 2026-11-02. A study on 2026-10-14 proposed four changes to the fork that would remove some of the steps still left to a person ([Railway automation](../research/railway-automation.md)).
 
-- **Status:** not started; whether to build it is undecided.
-- **Effort:** a few days of building and testing (an estimate).
+- **Status:** the script is built; the four changes aren't started, and whether to build them is undecided.
+- **Effort:** not estimated.
 
 ## Know what it would do
 
-Create the Railway project and its six parts (Postgres with pgvector, Redis, a storage bucket, the migrator, the admin and the worker), generate the 15 secrets, set about 100 variable entries and the domain, and deploy in the right order. With the master accounts in place, it would also create for each deployment a Twilio subaccount and SIP trunk, an OpenAI project with its key, spend limit and call webhook, a Turnstile widget and an email sending key, then create the business and buy its number with the `lobbystack` CLI.
+- A `bootstrap-owner` command in the migrator that creates the first owner, so no sign-up form is needed before onboarding.
+- A way to adopt a number already bought in Twilio, so numbers can be bought ahead and moved to a client's subaccount with one API call. Today the app buys its own during onboarding.
+- Reading the Turnstile site key and the storage address at run time, so one prebuilt admin image serves every deployment.
+- A sign-up allowlist.
 
-## Build it this way
+Two smaller changes would help the script itself:
 
-- `.railway/selfhost.ts`, a self-hosting definition derived from `.railway/template.ts`; `scripts/bootstrap-railway.mjs`, which wraps the Railway CLI and the providers' APIs; and, if wanted, a GitHub Actions workflow with a "Run workflow" button.
-- The definition is applied twice, since Railway can't make one service wait for another and the admin's build needs the address and keys that exist only after the first apply: first the migrator alone, then the admin and the worker with every build-time value set.
-- Every step looks for what it made before creating anything, so a failed run can be restarted; later changes go through `railway config plan` and `apply`.
+- Set Polar's webhook secret on the admin from the file `pnpm billing apply` writes. Today that takes a rename and `devops/railway-vars.mjs` with a project token.
+- Keep a test for the script in the repository, with stand-ins for each provider's API, such as the one its 2026-11-02 review used. Today `pnpm test` doesn't cover `devops/`.
 
-Four changes to the fork would remove the last manual steps: a `bootstrap-owner` command in the migrator, so no sign-up form is needed before onboarding; adopting a number already bought in Twilio; reading the Turnstile site key and the storage address at run time, so one prebuilt admin image serves every deployment; and a sign-up allowlist.
+## Know what stays by hand
 
-## Prove these first
-
-Whether OpenAI's API can create the call webhook, how GPT-Live SIP gets turned on for a project, whether a later apply can add a source to a service created without one, and whether Twilio trunks need Opus from Twilio's sales team. Test an inbound call on the first OpenAI project before promising a date.
+OpenAI's API can't create the incoming-call webhook or set a project's spending limit, and Polar makes tokens only in its dashboard, so those steps stay with a person whatever the fork changes ([what the script doesn't do](../../devops/bootstrap.md#what-it-doesnt-do-and-why)).
 
 ## Decide these
 
-- Build the script, and with it the four changes to the fork?
+- Build any of the four changes, and which first?

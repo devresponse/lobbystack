@@ -439,7 +439,7 @@ Check each part of the environment once, in this order, with test data only. Eac
    - Twilio charges its monthly fee from now on ($1.15 a month for a US or Canadian local number), until the number is released. Only the command line can release it ([6.7](part-6-first-run.md#67-optional-the-api-and-the-command-line)).
    - Proves: Twilio, the SIP trunk and `NUMBER_CLAIM_TOKEN_SECRET`. If it fails, [6.4](part-6-first-run.md#64-get-a-phone-number-and-make-the-first-calls) says what each message means and where the reason is logged.
 7. **A phone call.** Call the number from your own phone. The receptionist answers and greets you, and afterwards the call is listed in **Calls**.
-   - Proves: the trunk, OpenAI's webhook and its secret, and that your OpenAI project takes phone calls. If it rings with no answer, check whether OpenAI's webhook page shows a delivery ([3.2](part-3-outside-services.md#32-openai), "Phone calls (SIP)").
+   - Proves: the trunk, OpenAI's webhook and its secret, and that your OpenAI project takes phone calls. If it rings with no answer, check whether OpenAI's webhook page shows a delivery, and that the webhook is in the project the trunk sends calls to ([3.2](part-3-outside-services.md#32-openai), "Phone calls (SIP)").
 8. **A text.** Send a text to the number. It appears in **Messages**, and your phone number becomes a contact.
    - The receptionist doesn't answer texts; people reply from **Messages**. A reply reaches a US phone only once the number's texting registration is approved ([3.3](part-3-outside-services.md#33-twilio), step 14).
 9. **Google Calendar (optional).** Open **Integrations**, click **Connect Google** and allow access. Book a test appointment by chat or by phone, and check that it appears in the calendar.

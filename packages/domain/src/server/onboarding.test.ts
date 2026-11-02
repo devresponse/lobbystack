@@ -18,14 +18,20 @@ describe("onboarding stages", () => {
     expect(normalizeOnboardingStage("not-a-stage")).toBe("create_business");
   });
 
+  it("resumes the retired website step on knowledge", () => {
+    expect(isOnboardingStage("website")).toBe(false);
+    expect(normalizeOnboardingStage("website")).toBe("knowledge");
+    expect(resolveOnboardingRoute("website")).toBe("/onboarding/knowledge");
+  });
+
   it("allows only adjacent transitions, with an explicit number-selection skip", () => {
-    expect(isValidOnboardingTransition("create_business", "website")).toBe(true);
-    expect(isValidOnboardingTransition("website", "knowledge")).toBe(true);
+    expect(isValidOnboardingTransition("create_business", "knowledge")).toBe(true);
+    expect(isValidOnboardingTransition("knowledge", "greeting")).toBe(true);
     expect(isValidOnboardingTransition("plan", "attribution")).toBe(true);
     expect(isValidOnboardingTransition("greeting", "plan")).toBe(true);
     expect(isValidOnboardingTransition("greeting", "knowledge")).toBe(false);
-    expect(isValidOnboardingTransition("website", "plan")).toBe(false);
-    expect(isValidOnboardingTransition("complete", "website")).toBe(false);
+    expect(isValidOnboardingTransition("create_business", "greeting")).toBe(false);
+    expect(isValidOnboardingTransition("complete", "knowledge")).toBe(false);
   });
 
   it("rejects unknown persisted values", () => {
@@ -37,8 +43,9 @@ describe("onboarding stages", () => {
   });
 
   it("allows completed and later stages to revisit every reached step", () => {
-    expect(canVisitOnboardingStage("create_business", "website")).toBe(false);
-    expect(canVisitOnboardingStage("website", "website")).toBe(true);
+    expect(canVisitOnboardingStage("create_business", "knowledge")).toBe(false);
+    expect(canVisitOnboardingStage("knowledge", "knowledge")).toBe(true);
+    expect(canVisitOnboardingStage("knowledge", "create_business")).toBe(true);
     expect(canVisitOnboardingStage("plan", "knowledge")).toBe(true);
     expect(canVisitOnboardingStage("plan", "phone_number")).toBe(false);
     expect(canVisitOnboardingStage("phone_number_claiming", "phone_number")).toBe(true);

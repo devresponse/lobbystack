@@ -134,7 +134,7 @@ function fakeWorld(mode: Mode = { key: "platform", access: "all" }) {
       return error(404, "not_found", "Business not found.");
     }
     if (route === "GET /me") return ok(mode.key === "business" ? { api_key: { id: id(), name: "Setup", prefix: "lsk_1a2b3c4d", scopes: [], created_at: "2026-10-12T00:00:00.000Z" }, business: { id: BUSINESS, name: world.business.name } } : { api_key: { id: id(), name: "Partner", prefix: "lsp_1a2b3c4d", scopes: [], created_at: "2026-10-12T00:00:00.000Z" }, business: header ? { id: BUSINESS, name: world.business.name } : null, platform: { partner: "acme", access: mode.access } });
-    if (route === "GET /businesses") return page(world.businesses.filter(() => reachable).map((business) => ({ id: business, name: world.business.name, timezone: world.business.timezone, locale: "en", website_url: null, onboarding_stage: "website", created_at: "2026-10-12T00:00:00.000Z" })));
+    if (route === "GET /businesses") return page(world.businesses.filter(() => reachable).map((business) => ({ id: business, name: world.business.name, timezone: world.business.timezone, locale: "en", website_url: null, onboarding_stage: "knowledge", created_at: "2026-10-12T00:00:00.000Z" })));
     if (route === "POST /businesses") {
       if (world.businesses.length) {
         // A new key makes a second business.

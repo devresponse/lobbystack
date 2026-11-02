@@ -1,6 +1,6 @@
 # Part 2. Local development and testing
 
-**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac. [2.6](#26-sign-in-for-the-first-time-and-create-a-test-business)'s brand line was updated on 2026-11-01 for fork PR #112, from the code only.
+**Status:** written. Way A was tested end to end on 2026-10-18 on a clean Linux machine (4 processor cores, 15 GB of memory) with commit `160b18a`. Way B couldn't be built on that machine, because its network blocked the image builds, so its steps come from the docs and the code and are marked untested. Since then, Way B has run once, on Windows 11 on 2026-10-26 ([2.5](#25-way-b-run-everything-in-docker)). [2.2](#22-install-the-tools)'s pnpm moved to 12.15.0 on 2026-10-28 for fork PR #91: on Linux, `pnpm install`, the build and the tests ran with it, but not yet on Windows or a Mac. [2.6](#26-sign-in-for-the-first-time-and-create-a-test-business)'s brand line was updated on 2026-11-01 for fork PR #112, and its steps on 2026-11-02 for fork PR #126, which took the website step out, both from the code only.
 
 This part puts a complete LobbyStack on your own computer. It's the safest place to learn how LobbyStack works and to try changes, because nothing you do here reaches real customers. There are two ways to run it:
 
@@ -142,11 +142,10 @@ Two things to know about Way B:
 3. The next page asks for a 6-digit code sent by email. Without an email setup it never arrives. Go to `http://localhost:13000/en/login` instead, and sign in with the same email and password. This works because your settings don't require a verified email.
 4. Onboarding walks you through these steps:
    1. Your business's name. The app is already AlloPlace, which `BRAND_PRESET=alloplace` in `.env` picks, so nothing asks you to name it. With `BRAND_PRESET` empty, the app shows LobbyStack and first asks for a name and logo in **Make this app your own** ([6.2](part-6-first-run.md#62-the-brand-step)), because the code has two brands besides LobbyStack, AlloPlace and RealInfoBot (fork PR #112), and nothing says which one `localhost` means.
-   2. Your website, or **I don't have a website**. Importing a website needs a Firecrawl key.
-   3. Knowledge: **Skip for now**.
-   4. The greeting callers hear.
-   5. The plan: choose **Start free**. The page lists the plans of AlloPlace's `brands/alloplace/billing.json`, in Canadian dollars, with **Starter** and **Pro** greyed out, since nothing sells them on your computer (fork PR #88). On your own instance a business has unlimited call minutes anyway.
-   6. How you heard about AlloPlace: **Skip**.
+   2. Knowledge: **Skip for now**. Onboarding doesn't ask for a website; add one later in **Knowledge**, which needs a Firecrawl key.
+   3. The greeting callers hear.
+   4. The plan: choose **Start free**. The page lists the plans of AlloPlace's `brands/alloplace/billing.json`, in Canadian dollars, with **Starter** and **Pro** greyed out, since nothing sells them on your computer (fork PR #88). On your own instance a business has unlimited call minutes anyway.
+   5. How you heard about AlloPlace: **Skip**.
 5. The dashboard opens with your business.
 6. Add at least one service and your opening hours. The receptionist can't book anything until the business has an active service.
 7. With your OpenAI key in `.env.local`, restart `pnpm dev` and use the dashboard's **Test Call** button to talk to your receptionist from the browser. (Not tested yet: the test machine had no OpenAI key.)

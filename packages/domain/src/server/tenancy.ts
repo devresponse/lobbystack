@@ -118,7 +118,8 @@ export async function insertBusinessInTransaction(
       // A self-hosted server's businesses get its unlimited plan, not the cloud's free one. Any other mode, development included, keeps them cloud, as before:
       // every mode but cloud skips billing and the paid-plan check on numbers.
       deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
-      onboardingStage: "website",
+      // The dashboard's next step after naming the business.
+      onboardingStage: "knowledge",
       ...(defaultLocale !== undefined ? { defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
     });

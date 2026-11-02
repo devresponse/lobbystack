@@ -64,7 +64,7 @@ test("an owner deletes their second business for good, and never their first", a
       return businessId;
     };
     const mainId = await createBusiness(mainName);
-    await expect(page).toHaveURL(/\/onboarding\/website$/);
+    await expect(page).toHaveURL(/\/onboarding\/knowledge$/);
     await page.goto("/onboarding/business?create=true");
     const studioId = await createBusiness(studioName);
 

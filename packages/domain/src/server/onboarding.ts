@@ -21,7 +21,6 @@ const ONBOARDING_FOLLOWUP_SUBJECTS: Record<InterfaceLocale, (appName: string) =>
 
 export type OnboardingStage =
   | "create_business"
-  | "website"
   | "knowledge"
   | "greeting"
   | "plan"
@@ -32,7 +31,6 @@ export type OnboardingStage =
 
 const stageRoutes: Record<OnboardingStage, string> = {
   create_business: "/onboarding/business",
-  website: "/onboarding/website",
   knowledge: "/onboarding/knowledge",
   greeting: "/onboarding/greeting",
   plan: "/onboarding/plan",
@@ -44,19 +42,17 @@ const stageRoutes: Record<OnboardingStage, string> = {
 
 const stageSteps: Record<OnboardingStage, number> = {
   create_business: 2,
-  website: 3,
-  knowledge: 4,
-  greeting: 5,
-  plan: 6,
-  phone_number: 7,
-  phone_number_claiming: 7,
-  attribution: 8,
-  complete: 9,
+  knowledge: 3,
+  greeting: 4,
+  plan: 5,
+  phone_number: 6,
+  phone_number_claiming: 6,
+  attribution: 7,
+  complete: 8,
 };
 
 const transitions: Record<OnboardingStage, readonly OnboardingStage[]> = {
-  create_business: ["website"],
-  website: ["knowledge"],
+  create_business: ["knowledge"],
   knowledge: ["greeting"],
   greeting: ["plan"],
   plan: ["phone_number", "attribution"],
@@ -66,10 +62,16 @@ const transitions: Record<OnboardingStage, readonly OnboardingStage[]> = {
   complete: [],
 };
 
-// Personal phone verification was removed from onboarding. Workspaces parked on
-// a verification stage before the removal normalize forward to plan so they
-// resume instead of looping on a step that no longer exists.
-const legacyVerificationStages = new Set(["verify_phone", "verify_phone_code"]);
+// Steps removed from onboarding, and the step each resumes on, so a workspace
+// parked on one before its removal moves on instead of looping on a step that
+// no longer exists. Personal phone verification went first. The website step
+// went next: onboarding no longer reads a website, and the Knowledge page
+// still does.
+const retiredStages: Readonly<Record<string, OnboardingStage>> = {
+  verify_phone: "plan",
+  verify_phone_code: "plan",
+  website: "knowledge",
+};
 
 export function isOnboardingStage(value: unknown): value is OnboardingStage {
   return typeof value === "string" && Object.hasOwn(stageRoutes, value);
@@ -77,7 +79,7 @@ export function isOnboardingStage(value: unknown): value is OnboardingStage {
 
 export function normalizeOnboardingStage(value: unknown): OnboardingStage {
   if (isOnboardingStage(value)) return value;
-  if (typeof value === "string" && legacyVerificationStages.has(value)) return "plan";
+  if (typeof value === "string" && Object.hasOwn(retiredStages, value)) return retiredStages[value]!;
   return "create_business";
 }
 
@@ -189,8 +191,9 @@ export async function advanceOnboardingStage(
     const current = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
     if (!current) throw new Error("Business onboarding state was not found.");
     const currentStage = normalizeOnboardingStage(current.onboardingStage);
-    // Repair a legacy verification stage before reading or advancing it so the
-    // conditional stage write below still matches the persisted value.
+    // Repair a retired stage, such as a verification step or the website step,
+    // before reading or advancing it so the conditional stage write below still
+    // matches the persisted value.
     if (currentStage !== current.onboardingStage) {
       await tx.update(businesses)
         .set({ onboardingStage: currentStage, updatedAt: new Date() })

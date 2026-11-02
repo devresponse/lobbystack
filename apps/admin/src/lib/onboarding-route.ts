@@ -8,7 +8,6 @@ import { getSession } from "./auth";
 
 const routeStages: Record<string, OnboardingStage> = {
   "/onboarding/business": "create_business",
-  "/onboarding/website": "website",
   "/onboarding/knowledge": "knowledge",
   "/onboarding/greeting": "greeting",
   "/onboarding/plan": "plan",

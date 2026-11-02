@@ -10681,7 +10681,7 @@
       "post": {
         "operationId": "createKnowledgeSource",
         "summary": "Add a website",
-        "description": "Starts reading a website the receptionist can answer from. The first crawl reads a sample of the site; POST /knowledge/sources/{source_id}/expand reads the rest. A business still on its website step also takes the address as its website. Sending a site that is already a source returns that source, read again at its own page limit if its last crawl failed or was cancelled. Sending a page an earlier crawl read is a 409.",
+        "description": "Starts reading a website the receptionist can answer from. The first crawl reads a sample of the site; POST /knowledge/sources/{source_id}/expand reads the rest. Sending a site that is already a source returns that source, read again at its own page limit if its last crawl failed or was cancelled. Sending a page an earlier crawl read is a 409.",
         "tags": [
           "Knowledge"
         ],
@@ -13125,7 +13125,6 @@
             "type": "string",
             "enum": [
               "create_business",
-              "website",
               "knowledge",
               "greeting",
               "plan",
@@ -13441,7 +13440,6 @@
             "type": "string",
             "enum": [
               "create_business",
-              "website",
               "knowledge",
               "greeting",
               "plan",
@@ -20266,7 +20264,6 @@
             "type": "string",
             "enum": [
               "create_business",
-              "website",
               "knowledge",
               "greeting",
               "plan",

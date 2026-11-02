@@ -23,7 +23,6 @@
     "landing:build": "pnpm --filter @lobbystack/landing build",
     "landing:preview": "pnpm --filter @lobbystack/landing preview",
     "landing:typecheck": "pnpm --filter @lobbystack/landing typecheck",
-    "dev:onboarding:website": "tsx --tsconfig scripts/tsconfig.json scripts/prepare-onboarding-website.ts",
     "prospect-demo": "tsx --tsconfig scripts/tsconfig.json scripts/prospect-demo.ts",
     "widget:embed:build": "pnpm --filter @lobbystack/embed build && node scripts/copy-widget-embed.mjs",
     "prospect-demo:create": "tsx --tsconfig scripts/tsconfig.json scripts/prospect-demo.ts create",

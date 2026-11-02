@@ -263,11 +263,9 @@
     },
     {
       "referenceTest": "apps/web/src/features/onboarding/OnboardingWebsitePage.test.tsx",
-      "adapterTests": [
-        "apps/admin/src/components/onboarding-website-surface.test.tsx"
-      ],
-      "status": "mapped; see test and gate evidence",
-      "notes": "File mapping is traceability, not a rendered-parity or release certificate."
+      "adapterTests": [],
+      "status": "intentionally excluded",
+      "notes": "The website step left onboarding in fork PR #126, with its surface and test; the Knowledge page still imports websites."
     },
     {
       "referenceTest": "apps/web/src/features/onboarding/components/OnboardingShell.test.tsx",

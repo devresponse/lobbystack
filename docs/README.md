@@ -48,6 +48,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 | [Public page and QR code](features/public-profile-and-qr.md) | `/profile/<slug>` and the printable QR code |
 | [Time zones and calendars](features/timezone-and-calendar.md) | A business's time zone and Google Calendar, and what each symptom means |
 | [Many businesses on one deployment](features/multitenancy.md) | What each business has to itself and what the deployment shares |
+| [Set up a business in onboarding](features/onboarding.md) | The steps from sign-up to the dashboard, what happens to a step that was removed, such as the website step in fork PR #126, and where websites are read now |
 | [Delete a business](features/business-deletion.md) | An owner deleting one of their businesses for good, never an account's first, and what goes with it |
 | [Cancel an account](features/account-cancellation.md) | An owner closing their account's last business without deleting anything, confirmed by email, and bringing it back |
 | [API, CLI and integrations](features/api-cli-integrations.md) | The v1 API, MCP server, CLI, webhooks, Zapier, Make and n8n |

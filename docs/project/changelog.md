@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#124](https://github.com/devresponse/lobbystack/pull/124) | Make the bootstrap script's `connect` use APP_BASE_URL and the admin's current Railway address, and stop when APP_BASE_URL was set after `up` |  | `a771db6` | [docs](../../devops/bootstrap.md#5-connect-the-providers) |
 | [#123](https://github.com/devresponse/lobbystack/pull/123) | Give a Railway template's Postgres and Redis their passwords from the start, and remove a database deployment that isn't running before deploying again, so two Postgres deployments never share the volume |  | `373c5fc` | [docs](../../devops/bootstrap.md#what-isnt-confirmed) |
 | [#122](https://github.com/devresponse/lobbystack/pull/122) | Wait for Railway to finish applying a template, deploy Postgres and Redis through the API, and wait for migrate to pass |  | `60de5d1` | [docs](../../devops/bootstrap.md#4-set-it-up) |
 | [#121](https://github.com/devresponse/lobbystack/pull/121) | Deploy a Railway template again with the code services' source when Railway accepts the deploy and then fails it |  | `2b9e60f` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |

@@ -2,7 +2,7 @@
 
 `bootstrap.mjs` sets up one LobbyStack environment on Railway, such as RealInfoBot's test environment, together with its OpenAI project, Twilio subaccount and trunk, Resend domain, Turnstile widget and DNS records. It replaces most of sections 3 to 12 of the Railway deployment guide with three commands. Where only a person can do a step, it stops, says exactly what to do, and waits.
 
-**Status:** tested on 1 November 2026 against stand-ins for every API it calls, including a second full run with its state file deleted, with the requests checked against each provider's documentation. It hasn't run against the real services yet. Run it on a test environment first, and read [What isn't confirmed](#what-isnt-confirmed).
+**Status:** tested on 1 November 2026 against stand-ins for every API it calls, including a second full run with its state file deleted, with the requests checked against each provider's documentation. Since 2 November 2026 it has set up RealInfoBot's test environment against the real services several times, from a private template. Run it on a test environment first, and read [What isn't confirmed](#what-isnt-confirmed).
 
 **Which guide:** the section numbers here and in the script's messages, such as "guide 3.6" or "Appendix A.1", are those of the single-deployment Railway guide that ships with a white-label fork's deployment kit. That guide isn't in this repository. In this repository's [deployment guide](../docs/deployment/guide/README.md), the same ground is [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (the test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables).
 
@@ -16,7 +16,8 @@
 | Email | Creates the Resend domain, its DNS records in Cloudflare (or prints them for you), and a key that can only send from that domain | Nothing, unless your DNS isn't at Cloudflare |
 | Polar (cloud mode) | Asks for the two tokens | Create the tokens: Polar makes them only in its dashboard |
 | Railway | Creates the project, the five services, both volumes, the bucket, every setting of guide section 9, the admin's address, the 13 secrets and all about 90 variables, then connects the code: migrate first, then the admin and the worker | Nothing: it deploys Postgres and Redis and waits for migrate to pass. If Railway's API won't deploy them, it asks you to click **Deploy** |
-| Turnstile | Creates the widget for the admin's address | Nothing |
+| Its own address (`APP_BASE_URL`) | Adds it to Railway as the admin's custom domain, writes its CNAME (and Railway's `railway-verify` TXT check) in Cloudflare, DNS only, and makes it the admin's `APP_BASE_URL`, with sign-in trusting both it and the Railway address. After the deploy, it checks the records and the admin's and the worker's addresses again, and fixes what differs | Nothing, unless your DNS isn't at Cloudflare |
+| Turnstile | Creates the widget for the admin's addresses. For a widget whose keys you gave, it adds this deployment's addresses to it after the deploy | Nothing, if the Cloudflare token has **Account > Turnstile > Edit** |
 | After the address works | Checks `/api/health/ready`, makes the platform key, sets the webhook secret and the key on the admin | Create the webhook, sign up with the email code, sign the command line in, run `pnpm billing` (cloud mode) and the smoke test |
 
 ## Before you start
@@ -57,7 +58,7 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `OPERATOR_EMAIL` | `you@example.com` | Owns the platform key, and gets the DMARC reports |
 | `RAILWAY_WORKSPACE_ID` | the workspace's ID | Needed to make the project: Railway refuses a new project without a workspace. Find it in Railway under the workspace's **Settings**, **General** tab (Workspace ID, with a copy button), or run `doctor`, which lists the workspaces your token reaches. Can stay empty only if the project already exists |
 | `BUCKET_REGION` | `iad` | `sjc`, `iad`, `ams` or `sin`. It never changes |
-| `CUSTOM_HOST` | `test.realinfobot.com` | Optional. Empty: Railway's free address with `BRAND_PRESET` |
+| `APP_BASE_URL` | `demo.realinfobot.com` | Optional: the dashboard's own address, with or without `https://`, and inside `CLOUDFLARE_ZONE`. The script adds it to Railway, writes its CNAME in Cloudflare, adds it to the Turnstile widget, and sets the admin's `APP_BASE_URL`, `SITE_URL` and `AUTH_TRUSTED_ORIGINS`, and the worker's `APP_BASE_URL`, from it. The brand then comes from the address's domain, so it must be one the brand owns (`realinfobot.com` covers `demo.realinfobot.com`). Empty: Railway's free address, with `BRAND_PRESET`. `CUSTOM_HOST`, its older name, still works |
 | `EMAIL_DOMAIN`, `EMAIL_FROM` | `notifications.realinfobot.com`, `no-reply@notifications.realinfobot.com` | The subdomain kept for email, and the sender on it |
 | `RESEND_REGION` | `us-east-1` | It can't change later |
 | `CLOUDFLARE_ZONE`, `CLOUDFLARE_ACCOUNT_ID` | `realinfobot.com`, the account ID | The domain name of the zone that holds both domains, not the Zone ID Cloudflare shows beside it; and the Account ID from the zone's Overview page (right-hand column, under API). Empty zone: the script prints the DNS records for you to add. Empty account: you make the Turnstile widget by hand |
@@ -118,7 +119,11 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 1. It asks you to type `yes`, since the services it creates bill your accounts. Before buying a toll-free number, it asks again.
 2. It works through the steps, one line each. At a **BY HAND** step, it says what to do and waits for Enter.
 3. Two waits come near the end, and the script does both. It deploys Postgres and Redis with their passwords and waits until Railway reports them running. Then it connects migrate and waits until its deployment succeeds, which means its pre-deploy passed (its log ends with `RLS enabled and forced on <n> tables`); a failed deployment stops the run, and guide 10.3 lists the usual causes. Only then do the admin and the worker connect, and Railway builds them. If Railway's API won't deploy or report a service, the script falls back to telling you what to click and waits for Enter.
-4. It ends with the address. When `https://<address>/api/health/ready` shows `"ok":true`, go on.
+4. After the deploy, three steps settle the admin's addresses. Each reads what's there and changes only what differs:
+   - `post.dns`, with `APP_BASE_URL` set: makes sure the custom domain is on the admin and its CNAME (and Railway's check) is in Cloudflare, DNS only, asking Railway again if it hadn't sent the records yet. An A or AAAA record already at that name is replaced after asking. It prints whether Railway has verified the domain and issued its certificate.
+   - `post.urls`: checks the admin's `APP_BASE_URL`, `SITE_URL` and `AUTH_TRUSTED_ORIGINS`, and the worker's `APP_BASE_URL`, against the settings, and sets any that differ, which redeploys that service. With `APP_BASE_URL`, `AUTH_TRUSTED_ORIGINS` lists both it and the Railway address, so signing in works on either.
+   - `post.turnstile`: adds the Railway address and `APP_BASE_URL` to the Turnstile widget, found by its site key, so a widget whose keys you gave works too. It keeps the widget's name, mode, other addresses and settings. Without **Account > Turnstile > Edit** on the token, it says what to add by hand.
+5. It ends with the address. When `https://<address>/api/health/ready` shows `"ok":true`, go on. With `APP_BASE_URL`, the Railway address answers first, while DNS spreads and Railway issues the certificate.
 
 `--yes` skips the questions and the waits, so use it only to finish a run whose waits are already behind you. `--verbose` also shows each API call as it happens.
 
@@ -186,7 +191,16 @@ node devops/bootstrap.mjs redo .env.bootstrap-realinfobot-test "railway.*" turns
 node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 ```
 
-Redoing `railway.project` also forgets the old project's IDs and address. A project you deleted stays listed in Railway for a few days, but the script never reuses one that's being deleted. Add `railway.custom` and `twilio.tollfree` to the list if you use a custom domain or the toll-free number's texting address.
+Redoing `railway.project` also forgets the old project's IDs and address, and runs the steps after the deploy (`post.*`) again. A project you deleted stays listed in Railway for a few days, but the script never reuses one that's being deleted. `railway.*` includes the custom domain step; add `twilio.tollfree` to the list if you use the toll-free number's texting address.
+
+To give an environment another `APP_BASE_URL`, change it in the settings file, then:
+
+```sh
+node devops/bootstrap.mjs redo .env.bootstrap-realinfobot-test railway.domain railway.custom "post.*"
+node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
+```
+
+`up` adds the new domain and its CNAME, sets the admin's and the worker's addresses and redeploys them, and adds the new address to the Turnstile widget. The old custom domain stays on the admin, and its CNAME in Cloudflare: remove them by hand once you no longer want them. OpenAI's incoming-call webhook still points at the old address, so change it in OpenAI's dashboard. Each new Railway project also leaves its old Railway address on the Turnstile widget; Cloudflare caps how many a widget lists, so remove old ones there now and then.
 
 ## When something goes wrong
 
@@ -207,7 +221,11 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 | `ServiceInstance not found` after a template deploy | Railway hadn't finished applying the template. Run `up` again; the current script waits for it |
 | `migrate's deployment ended failed` | Open migrate's deployment logs in Railway; guide 10.3 lists the usual causes. Fix it, then run `up` again, which connects and waits again |
 | migrate's log ends `Connection terminated due to connection timeout`, and Postgres's log says `data directory lock file is invalid` | Two Postgres deployments overlapped on the volume (an older script let the template start Postgres without its password). Redeploy Postgres in Railway, check it stays up for a couple of minutes, then run `up` again |
-| Sign-up or sign-in fails its Turnstile check | The widget whose keys you gave doesn't list the address. Add it in Cloudflare, Turnstile, the widget, Hostname management |
+| Sign-up or sign-in fails its Turnstile check | The widget doesn't list the address you're on. `post.turnstile` adds the deployment's addresses; if it couldn't (next row), add them in Cloudflare, Turnstile, the widget, Hostname management |
+| `Cloudflare didn't let the script read or change the widget` | The Cloudflare token lacks **Account > Turnstile > Edit**, or the widget is in another account than `CLOUDFLARE_ACCOUNT_ID`. Add the addresses it lists by hand, or give the token that permission and run `redo post.turnstile`, then `up` |
+| `<name> has A ... now. Replace it with a CNAME to ...?` | `APP_BASE_URL`'s name already has an address record in Cloudflare. Type `yes` to replace it with Railway's CNAME (`--yes` replaces it without asking), or choose another `APP_BASE_URL` |
+| `Railway: not verified yet` after `post.dns` | DNS hasn't spread yet. Keep the CNAME **DNS only** (grey cloud) in Cloudflare: Railway checks again by itself and issues the certificate, usually within minutes, and the Railway address works meanwhile |
+| `APP_BASE_URL must be in CLOUDFLARE_ZONE` | The script writes the CNAME only in that zone. Use an address inside it, or empty `CLOUDFLARE_ZONE` and add the records Railway shows by hand |
 | `has 2 origination URIs` | In Twilio, keep only the one to `sip:<project>@sip.api.openai.com;transport=tls`, then run again |
 | Stopped at `resend.key` | Make a Sending access key for the domain at resend.com/api-keys, put it as `SMTP_PASSWORD` in the secrets file, and run again |
 | Stopped at `railway.domain` | Railway may not give an address before the admin's first deploy: run `up` again after it has deployed once |

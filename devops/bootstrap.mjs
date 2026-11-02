@@ -102,8 +102,11 @@ TEMPLATE_PROJECT=
 TEMPLATE_REPO=
 # The bucket's region, which never changes: sjc, iad, ams or sin.
 BUCKET_REGION=iad
-# Optional: the dashboard's own address, such as test.example.com. Empty: Railway's free address.
-CUSTOM_HOST=
+# Optional: the dashboard's own address, such as demo.example.com (https:// in front is fine).
+# up adds it to Railway as the admin's custom domain, writes its CNAME in CLOUDFLARE_ZONE, adds it
+# to the Turnstile widget, and makes it the admin's APP_BASE_URL. Empty: Railway's free address.
+# CUSTOM_HOST is its older name and still works.
+APP_BASE_URL=
 
 # Email through Resend. EMAIL_DOMAIN is the subdomain kept for email; EMAIL_FROM is on it.
 EMAIL_DOMAIN=
@@ -112,7 +115,7 @@ EMAIL_FROM=
 RESEND_REGION=us-east-1
 
 # Cloudflare. CLOUDFLARE_ZONE is the domain name of the zone that holds EMAIL_DOMAIN and
-# CUSTOM_HOST, such as example.com: the name, not the 32-character Zone ID that Cloudflare shows
+# APP_BASE_URL, such as example.com: the name, not the 32-character Zone ID that Cloudflare shows
 # beside it. CLOUDFLARE_ACCOUNT_ID is the Account ID from the zone's Overview page (right-hand
 # column, under API). Empty zone: the script prints the DNS records for you to add instead.
 # Empty account ID: you make the Turnstile widget by hand.
@@ -335,7 +338,14 @@ function loadRun(file) {
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.TEMPLATE_REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.TEMPLATE_REPO)) problems.push("TEMPLATE_REPO is owner/name");
-  if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push("CUSTOM_HOST is a host name only, such as test.example.com");
+  // APP_BASE_URL is the dashboard's own address, and CUSTOM_HOST its older name: both come down to the host name.
+  const appHost = String(s.APP_BASE_URL ?? "").replace(/^https?:\/\//i, "").replace(/\/+$/, "").toLowerCase();
+  if (appHost && s.CUSTOM_HOST && appHost !== s.CUSTOM_HOST.toLowerCase()) problems.push("APP_BASE_URL and CUSTOM_HOST name different addresses: keep only APP_BASE_URL");
+  if (appHost) s.CUSTOM_HOST = appHost;
+  const hostSetting = s.APP_BASE_URL ? "APP_BASE_URL" : "CUSTOM_HOST";
+  const zone = String(s.CLOUDFLARE_ZONE ?? "").toLowerCase();
+  if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push(`${hostSetting} is the dashboard's address, such as demo.example.com or https://demo.example.com, with no path`);
+  else if (s.CUSTOM_HOST && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(zone) && s.CUSTOM_HOST !== zone && !s.CUSTOM_HOST.endsWith(`.${zone}`)) problems.push(`${hostSetting} must be in CLOUDFLARE_ZONE (${s.CLOUDFLARE_ZONE}), where the script writes its CNAME; or empty CLOUDFLARE_ZONE to add the records by hand`);
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
   if (s.CLOUDFLARE_ACCOUNT_ID && !/^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ACCOUNT_ID)) problems.push("CLOUDFLARE_ACCOUNT_ID is the 32-character Account ID from the zone's Overview page");
@@ -706,8 +716,13 @@ async function up(run) {
   await variableSteps(run);
   console.log("\nDeploy");
   await deploySteps(run);
+  console.log("\nAfter the deploy");
+  await postDeploySteps(run);
   if (!dryRun) {
-    console.log(`\nSet up and deploying. Once https://${v(run, "APP_HOST")}/api/health/ready shows "ok":true, run:\n  node devops/bootstrap.mjs connect ${run.file}`);
+    const railwayHost = v(run, "RAILWAY_HOST");
+    const appHost = v(run, "APP_HOST");
+    const first = railwayHost && railwayHost !== appHost ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
+    console.log(`\nSet up and deploying. Once https://${appHost}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}`);
   }
 }
 
@@ -928,11 +943,23 @@ async function dnsRecords(run, records) {
   }
   const zone = await zoneId(run);
   for (const record of records) {
+    // A CNAME target may come with a trailing dot, and host names are compared without case.
+    const norm = (text) => (record.type === "CNAME" ? text.replace(/\.$/, "").toLowerCase() : text);
+    if (record.type === "CNAME") record.content = norm(record.content);
     const existing = (await cloudflare(`/zones/${zone}/dns_records?type=${record.type}&name=${encodeURIComponent(record.name)}`)) ?? [];
-    const same = (item) => item.content.replace(/^"|"$/g, "") === record.content && (record.priority === undefined || item.priority === record.priority);
+    const same = (item) => norm(item.content.replace(/^"|"$/g, "")) === record.content && (record.priority === undefined || item.priority === record.priority);
     if (existing.some((item) => same(item) || (record.onlyIfNone && item.content.includes("v=DMARC1")))) {
       console.log(`  = ${record.type} ${record.name}`);
       continue;
+    }
+    if (record.type === "CNAME" && !existing.length) {
+      // A name with a CNAME can hold no other address, so an A or AAAA record there is replaced, after asking.
+      const others = ((await cloudflare(`/zones/${zone}/dns_records?name=${encodeURIComponent(record.name)}`)) ?? []).filter((item) => item.type === "A" || item.type === "AAAA");
+      if (others.length) {
+        await confirm(`${record.name} has ${others.map((item) => `${item.type} ${item.content}`).join(", ")} now. Replace ${others.length === 1 ? "it" : "them"} with a CNAME to ${record.content}? Visitors to that address then reach this deployment.`);
+        for (const item of others) await cloudflare(`/zones/${zone}/dns_records/${item.id}`, { method: "DELETE" });
+        console.log(`  - ${others.map((item) => item.type).join(", ")} ${record.name} (replaced by the CNAME)`);
+      }
     }
     const { onlyIfNone, ...body } = record;
     // A name holds one CNAME, one DKIM key, one SPF record and one Railway check: an old one is updated, not doubled.
@@ -956,13 +983,13 @@ const Q = {
   project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
   workspaces: "query workspaces { me { workspaces { id name } } }",
   projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name deletedAt } } } }",
-  domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
+  domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
   readVariables: "query variables($projectId: String!, $environmentId: String!, $serviceId: String!) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true) }",
   serviceCreate: "mutation serviceCreate($input: ServiceCreateInput!) { serviceCreate(input: $input) { id name } }",
   volumeCreate: "mutation volumeCreate($input: VolumeCreateInput!) { volumeCreate(input: $input) { id name } }",
   instanceUpdate: "mutation serviceInstanceUpdate($serviceId: String!, $environmentId: String!, $input: ServiceInstanceUpdateInput!) { serviceInstanceUpdate(serviceId: $serviceId, environmentId: $environmentId, input: $input) }",
   domainCreate: "mutation serviceDomainCreate($input: ServiceDomainCreateInput!) { serviceDomainCreate(input: $input) { id domain } }",
-  customDomainCreate: "mutation customDomainCreate($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } }",
+  customDomainCreate: "mutation customDomainCreate($input: CustomDomainCreateInput!) { customDomainCreate(input: $input) { id domain status { verified certificateStatus verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } }",
   variables: "mutation variableCollectionUpsert($input: VariableCollectionUpsertInput!) { variableCollectionUpsert(input: $input) }",
   connect: "mutation serviceConnect($id: String!, $input: ServiceConnectInput!) { serviceConnect(id: $id, input: $input) { id } }",
   templateGenerate: "mutation templateGenerate($input: TemplateGenerateInput!) { templateGenerate(input: $input) { id code name status } }",
@@ -1271,7 +1298,7 @@ async function makeTemplate(run) {
   const stateFile = run.stateFile.replace(/\.state\.json$/, ".template.state.json");
   const trun = {
     file: run.file, stateFile, template: true,
-    settings: { ...s, NAME: name, CUSTOM_HOST: "", ENVIRONMENT: "test" },
+    settings: { ...s, NAME: name, CUSTOM_HOST: "", APP_BASE_URL: "", ENVIRONMENT: "test" },
     state: fs.existsSync(stateFile) ? JSON.parse(fs.readFileSync(stateFile, "utf8")) : { done: {}, values: {} },
   };
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}Template: a Railway project "${name}" with the layout only, then a private template of it.`);
@@ -1374,6 +1401,18 @@ function cliEnv() {
   return { ...process.env, ...(tokens.RAILWAY_API_TOKEN ? { RAILWAY_API_TOKEN: tokens.RAILWAY_API_TOKEN } : {}) };
 }
 
+/** The admin's custom domain (APP_BASE_URL's host) on Railway, made if missing, and the DNS records Railway wants for it. */
+async function customDomain(run) {
+  const s = run.settings;
+  const where = { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: v(run, "RAILWAY_SERVICE_IDS")?.admin };
+  const existing = (await railway(Q.domains, where)).domains.customDomains.find((domain) => domain.domain === s.CUSTOM_HOST);
+  const domain = existing ?? (await railway(Q.customDomainCreate, { input: { ...where, domain: s.CUSTOM_HOST, targetPort: 3000 } })).customDomainCreate;
+  const records = (domain.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue).map((record) => ({ type: record.recordType.replace("DNS_RECORD_TYPE_", ""), name: record.fqdn, content: record.requiredValue }));
+  const { verified, verificationDnsHost, verificationToken } = domain.status ?? {};
+  if (!verified && verificationDnsHost && verificationToken) records.push({ type: "TXT", name: verificationDnsHost, content: `railway-verify=${verificationToken.replace(/^(railway-verify=)+/, "")}` });
+  return { domain, records, existed: Boolean(existing) };
+}
+
 async function addressSteps(run) {
   const s = run.settings;
   const admin = () => v(run, "RAILWAY_SERVICE_IDS")?.admin;
@@ -1385,15 +1424,12 @@ async function addressSteps(run) {
     return { RAILWAY_HOST: domain, APP_HOST: s.CUSTOM_HOST || domain };
   });
   if (s.CUSTOM_HOST) {
-    await step(run, "railway.custom", `The custom domain ${s.CUSTOM_HOST}`, async () => {
-      const existing = (await domains()).customDomains.find((domain) => domain.domain === s.CUSTOM_HOST);
-      if (existing) console.log(`  = ${s.CUSTOM_HOST} is on the admin already`);
-      const domain = existing ?? (await railway(Q.customDomainCreate, { input: { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId: admin(), domain: s.CUSTOM_HOST, targetPort: 3000 } })).customDomainCreate;
-      const records = (domain.status?.dnsRecords ?? []).filter((record) => record.fqdn && record.requiredValue).map((record) => ({ type: record.recordType.replace("DNS_RECORD_TYPE_", ""), name: record.fqdn, content: record.requiredValue }));
-      const { verified, verificationDnsHost, verificationToken } = domain.status ?? {};
-      if (!verified && verificationDnsHost && verificationToken) records.push({ type: "TXT", name: verificationDnsHost, content: `railway-verify=${verificationToken.replace(/^(railway-verify=)+/, "")}` });
+    await step(run, "railway.custom", `The custom domain ${s.CUSTOM_HOST} (APP_BASE_URL), and its CNAME in Cloudflare`, async () => {
+      const { records, existed } = await customDomain(run);
+      if (existed) console.log(`  = ${s.CUSTOM_HOST} is on the admin already`);
       if (!records.length) {
-        await byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones shown under admin > Settings > Networking, DNS only (guide section 11).`]);
+        // Railway may send the records a little after making the domain: post.dns asks again after the deploy.
+        console.log(`  Railway sent no DNS records for ${s.CUSTOM_HOST} yet; the step after the deploy asks again`);
       } else {
         await dnsRecords(run, records);
         if (s.CLOUDFLARE_ZONE) console.log("  Railway checks the records and issues the certificate; the domain shows a green check mark once DNS has spread (guide section 11).");
@@ -1403,10 +1439,9 @@ async function addressSteps(run) {
   await step(run, "turnstile", "The Turnstile widget for the address", async () => {
     const both = fromFile("TURNSTILE_SITE_KEY") && fromFile("TURNSTILE_SECRET_KEY");
     if (both || !s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
+      // A widget given in the secrets file may not list this deployment's addresses (seen on realinfobot-test1):
+      // post.turnstile adds them after the deploy, or says what to add by hand.
       if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${v(run, "APP_HOST")}, Managed, Pre-clearance No (guide 5.3).`]);
-      // A widget given in the secrets file may not list this address (seen on realinfobot-test1), and sign-up
-      // and sign-in then fail their Turnstile check.
-      else await byHand([`Check that the Turnstile widget whose keys are in your secrets file lists ${[...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])].join(" and ")}:`, "Cloudflare > Turnstile > the widget > Hostname management. Sign-up and sign-in fail on an address it doesn't list."]);
       return {
         TURNSTILE_SITE_KEY: await value("TURNSTILE_SITE_KEY", "The widget's Site Key"),
         TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
@@ -1495,7 +1530,9 @@ function variableSections(run) {
     ["admin", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.admin", PORT: "3000", HOSTNAME: "::",
       APP_BASE_URL: s.CUSTOM_HOST ? `https://${s.CUSTOM_HOST}` : "https://${{RAILWAY_PUBLIC_DOMAIN}}",
-      SITE_URL: "${{APP_BASE_URL}}", AUTH_TRUSTED_ORIGINS: "${{APP_BASE_URL}}", TRUSTED_CLIENT_IP_HEADER: "x-real-ip",
+      // With its own address, sign-in also works on Railway's, which answers first while DNS spreads.
+      SITE_URL: "${{APP_BASE_URL}}", AUTH_TRUSTED_ORIGINS: s.CUSTOM_HOST && x("RAILWAY_HOST") ? `\${{APP_BASE_URL}},https://${x("RAILWAY_HOST")}` : "${{APP_BASE_URL}}",
+      TRUSTED_CLIENT_IP_HEADER: "x-real-ip",
       ...(production ? { REQUIRE_EMAIL_VERIFICATION: "true" } : {}), WIDGET_KEY_ISSUANCE_ENABLED: "true",
       WORKER_INTERNAL_URL: "http://${{worker.RAILWAY_PRIVATE_DOMAIN}}:3002",
       DATABASE_URL: role("lobbystack_app", "LOBBYSTACK_APP_PASSWORD"),
@@ -1621,6 +1658,68 @@ async function deploySteps(run) {
   }
 }
 
+// ---------------------------------------------------------------- after the deploy
+
+/**
+ * The admin's own address (APP_BASE_URL) and the Turnstile widget, settled once the deployment exists: Railway may
+ * send a custom domain's DNS records only a while after making the domain, and only now are both of the admin's
+ * addresses known. Each step reads what's there and changes only what differs.
+ */
+async function postDeploySteps(run) {
+  const s = run.settings;
+  const where = () => ({ projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID") });
+  if (s.CUSTOM_HOST) {
+    await step(run, "post.dns", `${s.CUSTOM_HOST} points to this deployment: its CNAME in Cloudflare, and Railway's check`, async () => {
+      const pause = Number(process.env.BOOTSTRAP_POLL_MS ?? 3000);
+      let found = await customDomain(run);
+      for (let tries = 0; tries < 20 && !found.records.length && !found.domain.status?.verified; tries += 1) {
+        await new Promise((resolve) => setTimeout(resolve, pause));
+        found = await customDomain(run);
+      }
+      const { domain, records } = found;
+      if (records.length) await dnsRecords(run, records);
+      else if (!domain.status?.verified) return byHand([`Railway sent no DNS records for ${s.CUSTOM_HOST}. Add the ones under admin > Settings > Networking, DNS only (guide section 11): a CNAME to the target Railway shows.`]);
+      const { verified, certificateStatus } = domain.status ?? {};
+      console.log(`  Railway: ${verified ? "verified" : "not verified yet"}, certificate ${String(certificateStatus ?? "status unknown").toLowerCase().replace(/_/g, " ")}${verified ? "" : ". Railway checks again by itself once DNS has spread, usually within minutes"}`);
+    });
+  }
+  await step(run, "post.urls", "The admin's and the worker's APP_BASE_URL and AUTH_TRUSTED_ORIGINS match the settings", async () => {
+    const wanted = perService(variableSections(run));
+    for (const [service, keys] of [["admin", ["APP_BASE_URL", "SITE_URL", "AUTH_TRUSTED_ORIGINS"]], ["worker", ["APP_BASE_URL"]]]) {
+      const serviceId = v(run, "RAILWAY_SERVICE_IDS")[service];
+      const current = (await railway(Q.readVariables, { ...where(), serviceId })).variables ?? {};
+      const changed = Object.fromEntries(keys.filter((key) => current[key] !== wanted[service][key]).map((key) => [key, wanted[service][key]]));
+      if (!Object.keys(changed).length) {
+        console.log(`  = ${service}: ${keys.map((key) => `${key}=${wanted[service][key]}`).join(", ")}`);
+        continue;
+      }
+      // Set without skipping deploys, so Railway redeploys the service with them.
+      await railway(Q.variables, { input: { ...where(), serviceId, variables: changed } });
+      console.log(`  ~ ${service}: ${Object.entries(changed).map(([key, value]) => `${key}=${value}`).join(", ")} (Railway redeploys it)`);
+    }
+  });
+  await step(run, "post.turnstile", "The Turnstile widget lists this deployment's addresses", async () => {
+    const hosts = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")].filter(Boolean))];
+    const siteKey = v(run, "TURNSTILE_SITE_KEY");
+    const byHandHosts = () => byHand([`In Cloudflare, Turnstile, the widget${siteKey ? ` with site key ${siteKey}` : ""}, Hostname management: make sure it lists ${hosts.join(" and ")}.`, "Sign-up and sign-in fail their Turnstile check on an address it doesn't list."]);
+    if (!s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID || !siteKey) return byHandHosts();
+    // The widget is found by its site key, so this works for a widget given in the secrets file too.
+    const widgetPath = `/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/challenges/widgets/${siteKey}`;
+    try {
+      const widget = await cloudflare(widgetPath);
+      const missing = hosts.filter((host) => !(widget.domains ?? []).includes(host));
+      if (!missing.length) return console.log(`  = the widget "${widget.name}" lists ${hosts.join(" and ")}`);
+      // A PUT replaces the widget's settings, so everything it has goes back, with the new addresses added.
+      const keep = Object.fromEntries(["bot_fight_mode", "clearance_level", "ephemeral_id", "offlabel", "region"].filter((key) => widget[key] !== undefined && widget[key] !== null).map((key) => [key, widget[key]]));
+      await cloudflare(widgetPath, { method: "PUT", body: { ...keep, name: widget.name, mode: widget.mode ?? "managed", domains: [...new Set([...(widget.domains ?? []), ...hosts])] } });
+      console.log(`  ~ the widget "${widget.name}" now also lists ${missing.join(" and ")}`);
+    } catch (error) {
+      console.log(`  Cloudflare didn't let the script read or change the widget (${String(error.message).split("\n")[0]}). Its token needs Account > Turnstile > Edit.`);
+      await byHandHosts();
+    }
+  });
+}
+
 // ---------------------------------------------------------------- connect
 
 async function connect(run) {
@@ -1729,6 +1828,11 @@ function redo(run, wanted) {
   // forget the old project's IDs and address too, or the next steps would keep using them.
   if (matches.includes("railway.project")) {
     for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST"]) delete run.state.values[key];
+    // The steps after the deploy (DNS, URLs, Turnstile) belong to the project, so they run again too.
+    for (const id of Object.keys(run.state.done).filter((item) => item.startsWith("post."))) {
+      delete run.state.done[id];
+      console.log(`  ${id}: runs again next time`);
+    }
     console.log("  forgot the Railway project's IDs and address, so up finds or makes the project again");
   }
   save(run);
@@ -1822,6 +1926,7 @@ async function doctor(run) {
 
   console.log("\nSettings and keys");
   ok(`${s.NAME}: ${s.ENVIRONMENT}, ${s.DEPLOYMENT_MODE}, brand ${s.BRAND}, from ${s.REPO}@${s.BRANCH}`);
+  if (s.CUSTOM_HOST) note(`APP_BASE_URL https://${s.CUSTOM_HOST}: up adds it to Railway, ${s.CLOUDFLARE_ZONE ? `writes its CNAME in ${s.CLOUDFLARE_ZONE}` : "prints its DNS records for you"}, and adds it to the Turnstile widget`);
   const off = ["GITHUB", "OPENAI", "TWILIO", "RESEND", "TURNSTILE"].filter((name) => !s[`STEP_${name}`]);
   if (off.length) note(`turned off: ${off.map((name) => `STEP_${name}`).join(", ")} (their values come from the secrets file, or are asked for)`);
   if (config) ok(`secrets file ${config.file}: ${Object.keys(config.flat).length} values (names only: ${Object.keys(config.flat).sort().join(", ") || "none"})`);

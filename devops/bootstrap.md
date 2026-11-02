@@ -1,8 +1,8 @@
 # Set up a LobbyStack environment with `devops/bootstrap.mjs`
 
-`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, and the Polar tokens in cloud mode. You describe the environment in one small settings file. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
+`bootstrap.mjs` sets up one LobbyStack environment on Railway, with the outside services it needs: an OpenAI project and key, a Twilio subaccount and SIP trunk, a Resend sending domain, Cloudflare DNS records and a Turnstile widget, and the Polar tokens in cloud mode. You describe the environment in one small settings file, and what it makes is named after the dashboard's address (`APP_BASE_URL`), or after `NAME` without one. The script does the rest through each provider's API, records every finished step, and stops with exact instructions where only a person can act.
 
-**Status:** checked on 2 November 2026 against `main` at `a771db6` plus this change. A test harness ran every command against stand-ins for each API: 45 checks covering a fresh run, reruns, `--yes`, `redo`, a deleted project, the lock and the state-file guard. Before that, on 1 and 2 November 2026, the script set up a real test environment several times, from a private template and with its own address, and on 2 November that environment answered a phone call. The parts not yet run against a real service are listed in [What isn't confirmed](#what-isnt-confirmed). Set up a test environment first.
+**Status:** checked on 2 November 2026 against `main` at `df0a0ed` plus this change. A test harness ran every command against stand-ins for each API: 67 checks covering a fresh run named after `APP_BASE_URL` or after `NAME`, an older state file, a changed `APP_BASE_URL`, reruns, `--yes`, `redo`, a deleted project, duplicate names, a running deployment's variables, the lock and the state-file guard. Before that, on 1 and 2 November 2026, the script set up a real test environment several times, from a private template and with its own address, and on 2 November that environment answered a phone call. The parts not yet run against a real service are listed in [What isn't confirmed](#what-isnt-confirmed). Set up a test environment first.
 
 Section numbers such as "guide 3.2" in this page and in the script's messages are those of the [deployment guide](../docs/deployment/guide/README.md): mainly [Part 3](../docs/deployment/guide/part-3-outside-services.md) (outside services), [Part 4](../docs/deployment/guide/part-4-test-environment.md) (a test environment), [Part 5](../docs/deployment/guide/part-5-production.md) (production) and [Appendix A](../docs/deployment/guide/appendix-a-variables.md) (variables). The script does most of Parts 3 and 4.
 
@@ -74,7 +74,7 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 
 | Setting | Example | What it is |
 | --- | --- | --- |
-| `NAME` | `acme-test` | Names the Railway project, the OpenAI project, the Twilio subaccount and the Turnstile widget. Lower-case letters, digits and dashes |
+| `NAME` | `acme-test` | The fallback name: the projects are named after `APP_BASE_URL`'s address when it's set, else after `NAME` ([what things are named](#what-things-are-named)). It also names the command line's profile. Lower-case letters, digits and dashes. It may be empty when `APP_BASE_URL` is set |
 | `BRAND` | `acme` | A folder under `brands/` on `BRANCH`. In cloud mode it also needs a `billing.json` ([guide 3.6](../docs/deployment/guide/part-3-outside-services.md#36-your-brand)) |
 | `ENVIRONMENT` | `test` | `test` or `production`. Production adds `REQUIRE_EMAIL_VERIFICATION=true`, sets no `BRAND_PRESET`, and so needs `APP_BASE_URL` on one of the brand's domains |
 | `REPO`, `BRANCH` | `your-org/lobbystack`, `main` | The fork and the branch Railway builds. Railway's GitHub app must reach the repository: Railway can build a public repository it can't reach, but then never redeploys on a push, and `up` warns about it |
@@ -82,7 +82,7 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 | `OPERATOR_EMAIL` | `ops@example.com` | Owns the platform key, signs up first, and receives DMARC reports |
 | `RAILWAY_WORKSPACE_ID` | the workspace's ID | Railway won't create a project without it. It's in the workspace's **Settings**, **General** tab, and `doctor` lists the workspaces the token reaches |
 | `BUCKET_REGION` | `iad` | `sjc`, `iad`, `ams` or `sin`. It can't change later |
-| `APP_BASE_URL` | `demo.example.com` | Optional: the dashboard's own address, with or without `https://`, inside `CLOUDFLARE_ZONE`. Empty: the admin keeps Railway's free address. See [the address and the brand](#the-address-and-the-brand). `CUSTOM_HOST`, its older name, still works |
+| `APP_BASE_URL` | `demo.example.com` | Optional: the dashboard's own address, with or without `https://`, inside `CLOUDFLARE_ZONE`. It also names the projects. Empty: the admin keeps Railway's free address. See [the address and the brand](#the-address-and-the-brand). `CUSTOM_HOST`, its older name, still works |
 | `EMAIL_DOMAIN`, `EMAIL_FROM` | `mail.example.com`, `Acme <no-reply@mail.example.com>` | The subdomain kept for sending email, inside `CLOUDFLARE_ZONE`, and the sender on it |
 | `RESEND_REGION` | `us-east-1` | `us-east-1`, `eu-west-1`, `sa-east-1` or `ap-northeast-1`. It can't change later |
 | `CLOUDFLARE_ZONE` | `example.com` | The zone's domain name, not its 32-character Zone ID. Empty: the script prints every DNS record for you to add |
@@ -105,6 +105,25 @@ The admin and the worker take their brand from `APP_BASE_URL`'s domain when `bra
 - **Production** sets no `BRAND_PRESET`, so it needs `APP_BASE_URL` on one of the brand's domains. Add the domain to `brands/index.json`, on `BRANCH`, first.
 
 The script reads `brands/index.json` from your copy of the code, so keep that copy up to date with `BRANCH`.
+
+### What things are named
+
+What the script makes at the providers is named after `APP_BASE_URL`'s address, such as `demo.example.com`, or after `NAME` when there's no `APP_BASE_URL`:
+
+| Thing | Name |
+| --- | --- |
+| The Railway project, the OpenAI project, the Twilio subaccount, the Turnstile widget and the Resend key | `demo.example.com` |
+| The OpenAI service account that owns the key | `demo.example.com platform` |
+| The Twilio trunk | `demo.example.com to OpenAI` |
+| The shared toll-free number (cloud mode) | `demo.example.com shared texts` |
+| The two Polar tokens you make | `demo.example.com admin` and `demo.example.com worker` |
+
+An address longer than 50 characters leaves the names to `NAME`, since Twilio's names stop at 64 characters.
+
+- **Names are kept once used.** Each step records the name it gave or found in the state file, and later runs look for that name, or for the thing's ID. Changing `APP_BASE_URL` or `NAME` afterwards renames nothing and makes nothing new. `status`, `doctor` and `up` show each name in use. When the settings would name new things otherwise, they also print one line saying the names stay as recorded. To use new names everywhere, start a new settings file, which sets up a new environment.
+- **A state file from before names were recorded** was named after `NAME`, so the script records those names: on screen with `status` and `doctor`, and in the file at the next `up`, `connect` or `redo`. Keep `NAME` in such a settings file.
+- **Names aren't unique at most providers.** When a name matches two OpenAI projects, Twilio subaccounts, trunks, Turnstile widgets or Resend keys, the run stops and lists their IDs rather than pick one. Delete or rename the extra one, or give the one to use in the secrets file.
+- Things given in the secrets file keep whatever names they have.
 
 ### The secrets file
 
@@ -149,7 +168,7 @@ It asks you to type `yes`, since the services bill your accounts. Then it works 
 1. **GitHub, OpenAI, Twilio, email, Polar:** the outside services, in that order.
 2. **Railway:** the project, found by name or made in `RAILWAY_WORKSPACE_ID`. Then the services, volumes and bucket, from your template or one by one, and each service's settings and migrate's pre-deploy command.
 3. **Address:** the admin's Railway address; with `APP_BASE_URL`, the custom domain and its DNS records; then the Turnstile widget.
-4. **Variables:** the 13 platform secrets (kept, given, read back from Railway, or new), then every service's variables, without deploying yet. They're also written to `.env.bootstrap-<name>.vars`.
+4. **Variables:** the 13 platform secrets (kept, given, read back from Railway, or new), then every service's variables, without deploying yet. They're also written to `.env.bootstrap-<name>.vars`. On a deployment that's already running, this step sets only the values that differ, and Railway deploys each service that changed again; the worker deploys again too when an admin value it refers to changed. It never changes a running database's settings.
 5. **Deploy:**
    1. Postgres and Redis, with their passwords, until Railway reports them running.
    2. migrate, until its deployment succeeds. Its pre-deploy runs the migrations, sets the database roles' passwords and checks RLS.
@@ -285,25 +304,25 @@ With `RAILWAY_TEMPLATE` set, `up` settles the 13 secrets first, then deploys the
 
 ## Running it again is safe
 
-Every command can run again: finished steps show `=`, and every step finds what an earlier run made, by name, and reuses or updates it.
+Every command can run again: finished steps show `=`, and every step finds what an earlier run made, by its recorded ID or name, and reuses or updates it.
 
 - **What exists is found, not made twice:**
-  - the Railway project (by name, never one that's being deleted), its services, volumes, bucket, addresses and custom domain;
-  - the OpenAI project, the Twilio subaccount, trunk and toll-free number, and the Resend domain;
-  - the DNS records, by their full names, so a record Railway names relative to the zone is found again;
-  - the Turnstile widget.
+  - the Railway project (by its ID, else by its recorded name, never one that's being deleted), its services, volumes, bucket, addresses and custom domain;
+  - the OpenAI project, the Twilio subaccount and trunk, and the Turnstile widget, by the IDs an earlier run recorded, else by their names; the toll-free number and the Resend domain;
+  - the DNS records, by their full names, so a record Railway names relative to the zone is found again.
 - **Values are never replaced by mistake.** The 13 platform secrets come from the state file, then the secrets file, then the values already on Railway, and only then are new ones made, so a lost state file can't change the database's passwords. Keys a provider shows once (OpenAI's, Resend's) are read back from Railway; if they never got there, the script asks before replacing them. `connect` keeps the admin's other platform keys. A failed read from Railway stops the run, rather than counting as "not set".
 - **Variables are upserted:** each run sets the values it knows and leaves the others alone.
 
 | To | Run |
 | --- | --- |
 | See what's done, and what's waiting for you by hand | `node devops/bootstrap.mjs status .env.bootstrap-<name>` |
-| Run a finished step again | `node devops/bootstrap.mjs redo .env.bootstrap-<name> <step>` (several names, or a group such as `"twilio.*"`), then `up`, or `connect` for `connect.*` steps |
-| Rebuild in a new Railway project, such as after deleting the old one | Delete the old project in Railway, then `redo … railway.project`, `up` and `connect` |
-| Give the admin another `APP_BASE_URL` | Change the setting, then `redo … railway.domain railway.custom turnstile variables "post.*"`, `up` and `connect`. `connect` asks you to change the webhook's URL. Remove the old domain and its CNAME by hand once you no longer want them |
+| Run a finished step again | `node devops/bootstrap.mjs redo .env.bootstrap-<name> <step>` (several names, or a group such as `"twilio.*"`), then `up`, or `connect` for `connect.*` steps. The steps that pass its values on run again too, and redo lists them: a redone key reaches Railway through `variables`, and a redone webhook through `connect.variables` |
+| Rebuild in a new Railway project, such as after deleting the old one | Delete the old project in Railway, then `redo … railway.project`, `up` and `connect`. The new project gets the old one's name |
+| Give the admin another `APP_BASE_URL` | Change the setting, then `redo … railway.domain railway.custom turnstile variables "post.*"`, `up` and `connect`. `connect` asks you to change the webhook's URL. The projects keep their names. Remove the old domain and its CNAME by hand once you no longer want them |
+| Move to another OpenAI project, such as one that already has the webhook | Put its `OPENAI_PROJECT_ID` and `OPENAI_API_KEY` in the secrets file, then `redo … openai.project` and `up`: the trunk's address, the admin's key and the worker follow. If its webhook's secret differs, put that in the secrets file too, then `redo … connect.webhook` and `connect` |
 | Recover a state file that names an old project, while the live one has the same name | `redo … railway.project`, then `up --yes`, then `connect`: it finds the live project by name and sets it up again, which redeploys its services once. The data and passwords stay |
 
-**What `redo railway.project` does:** it forgets the old project's IDs and addresses, and every step that made or set something in that project runs again: the `railway.*` steps, `turnstile`, `variables`, `deploy.*`, `post.*`, `connect.health` and `connect.variables`. Without `APP_BASE_URL`, `twilio.tollfree` runs again too, since the texting address changes with the Railway address. The rest stays: the OpenAI project, Twilio, Resend, the Polar tokens, the platform secrets, the webhook's secret and the operator's key, which `connect` puts on the new admin.
+**What `redo railway.project` does:** it forgets the old project's IDs and addresses, but not its name, and every step that made or set something in that project runs again: the `railway.*` steps, `turnstile`, `variables`, `deploy.*`, `post.*`, `connect.health` and `connect.variables`. Without `APP_BASE_URL`, `twilio.tollfree` runs again too, since the texting address changes with the Railway address. The rest stays: the OpenAI project, Twilio, Resend, the Polar tokens, the platform secrets, the webhook's secret and the operator's key, which `connect` puts on the new admin.
 
 ## When something goes wrong
 
@@ -323,6 +342,10 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | `another run changed <state file> after this one read it` | Something else saved progress since this run started, such as an old window. Close old windows, then run the command again |
 | `the Railway project … is being deleted`, or `Railway has no project …` | The state file names a deleted project. Run the `redo` it prints, then `up`, then `connect` |
 | `Railway has 2 projects named …` | Delete or rename the extra project |
+| `OpenAI has active projects named "…": 2 of them have that name (…)` (or Twilio subaccounts, trunks, Turnstile widgets, Resend keys) | Names aren't unique there, so the script won't pick one. Archive, delete or rename the extra one, or give the one to use in the secrets file ([what things are named](#what-things-are-named)) |
+| `names stay as first recorded, …` | Not an error: the settings would name new things otherwise, and what exists keeps its recorded name. To name everything after the settings, start a new settings file |
+| `… is from before the script recorded names … put that NAME back` | The state file was made before names were recorded, so the script needs the `NAME` it was made with to know what things are called. Put it back in the settings file |
+| `Postgres's … on Railway differ from the state file's, and the database runs with Railway's` | Someone changed a database setting on Railway, or the state file holds others. The script never changes a running database's passwords: follow [guide 7.18](../docs/deployment/guide/part-7-operations.md#718-rotate-secrets-and-keys) to change one, or set the state file's value to Railway's |
 | `already has a volume, mounted at …` | Change that volume's mount path in Railway to the one named |
 | `WARNING: <service> has no trigger for …` | Railway's GitHub app can't reach `REPO`, so pushes won't redeploy. Add the repository to the app, then in the service's **Settings > Source**, disconnect and connect it again |
 | `migrate's deployment ended failed` | Read migrate's deployment log in Railway ([guide 4.5](../docs/deployment/guide/part-4-test-environment.md#45-add-the-migrate-service-and-set-up-the-database), step 6, and [8.2](../docs/deployment/guide/part-8-troubleshooting.md#82-builds-and-start-up)). `Connection terminated due to connection timeout` means Postgres isn't running: check its logs, redeploy it, then run `up` again |
@@ -376,6 +399,8 @@ The real runs on 1 and 2 November 2026 settled how Railway behaves (templates, v
 
 - **Whether a project the script makes takes phone calls with no request to OpenAI.** On 2 November 2026 the first test calls rang unanswered: the webhook had been made in a different OpenAI project from the one the trunk sends calls to. With the deployment moved to the webhook's project, which was made by hand in OpenAI's dashboard, the next call was answered, with no request to OpenAI support. The project the script made never got a webhook, so it's untested.
 - **The checks added on 2 November 2026,** against the real services rather than stand-ins: the deployment-trigger warning (Railway's `deploymentTriggers` query was read once against a real project), the lock, the deleted-project stop, and the full names given to DNS records that Railway names relative to the zone.
+- **Names taken from `APP_BASE_URL`,** such as `demo.example.com`, on a fresh run. OpenAI, Twilio and Cloudflare already hold things named that way, but no Railway project has been made with a dot in its name. If Railway refuses one, the run stops at `railway.project` with Railway's message. The environment set up so far keeps the names it was made with.
+- **The variables step on a running deployment,** which sets only what differs and deploys the worker again for the admin's values. It uses the same two Railway calls as the one-off move of that environment to another OpenAI project on 2 November 2026, where the admin and the worker deployed again with the new key.
 - **Resend's field that limits a key to one domain** (`domain_id`). The environment set up so far took its sending key from its secrets file. If Resend refuses it, the run stops at `resend.key` with the workaround.
 - **Creating a Turnstile widget,** since that environment gave its keys, and **buying the toll-free number.**
 - **`fullName`,** which turns Resend's record names into names in the zone. Check the email records in Cloudflare after the first run.

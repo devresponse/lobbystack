@@ -970,6 +970,9 @@ const Q = {
   templateDeploy: "mutation templateDeployV2($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { projectId workflowId } }",
   triggerCreate: "mutation deploymentTriggerCreate($input: DeploymentTriggerCreateInput!) { deploymentTriggerCreate(input: $input) { id } }",
   workflowStatus: "query workflowStatus($workflowId: String!) { workflowStatus(workflowId: $workflowId) { status error } }",
+  instance: "query serviceInstance($serviceId: String!, $environmentId: String!) { serviceInstance(serviceId: $serviceId, environmentId: $environmentId) { id } }",
+  deployService: "mutation serviceInstanceDeployV2($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
+  deployments: "query deployments($input: DeploymentListInput!) { deployments(first: 1, input: $input) { edges { node { id status } } } }",
 };
 
 /** Waits for a Railway workflow, such as a template deploy, to finish. */
@@ -983,6 +986,31 @@ async function waitForWorkflow(workflowId, what) {
     await new Promise((resolve) => setTimeout(resolve, pause));
   }
   throw new Error(`Railway was still working on ${what} after ${Math.round((200 * pause) / 60000)} minutes. Check the project in Railway, then run again`);
+}
+
+/** A service's newest deployment in this environment, or undefined. */
+async function latestDeployment(run, serviceId) {
+  const { deployments } = await railway(Q.deployments, { input: { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId } });
+  return deployments?.edges?.[0]?.node;
+}
+
+/**
+ * Waits for a service's deployment to succeed: the one with the id given, or else the first one newer than
+ * `after` (the newest before the change, so a slow or wrong clock doesn't matter). A failed deployment throws
+ * an error marked `deployFailed`, so callers can tell it from a call Railway refused.
+ */
+async function waitForDeployment(run, service, serviceId, { id, after } = {}) {
+  const pause = Number(process.env.BOOTSTRAP_POLL_MS ?? 3000);
+  for (let tries = 0; tries < 300; tries += 1) {
+    const latest = await latestDeployment(run, serviceId);
+    const mine = id ? (latest?.id === id ? latest : undefined) : latest && latest.id !== after ? latest : undefined;
+    if (mine?.status === "SUCCESS") return;
+    if (["FAILED", "CRASHED", "REMOVED"].includes(mine?.status)) {
+      throw Object.assign(new Error(`${service}'s deployment ended ${mine.status.toLowerCase()}: its logs in Railway say why`), { deployFailed: true });
+    }
+    await new Promise((resolve) => setTimeout(resolve, pause));
+  }
+  throw Object.assign(new Error(`${service} still wasn't deployed after ${Math.round((300 * pause) / 60000)} minutes. Check it in Railway, then run again`), { deployFailed: true });
 }
 
 const SERVICES = [
@@ -1055,6 +1083,39 @@ async function railwayVariable(run, service, key) {
   return hide(value);
 }
 
+/**
+ * Railway reports the template deploy complete a few seconds before the project shows what it made (seen on the
+ * first real up from a template: the address step got "ServiceInstance not found", and the volume steps made
+ * two spare volumes because the template's own weren't listed yet). So wait until every service, its instance
+ * in this environment and every volume the template holds can be read.
+ */
+async function waitForTemplateApplied(run, config) {
+  const pause = Number(process.env.BOOTSTRAP_POLL_MS ?? 3000);
+  const services = Object.values(config.services ?? {}).filter((service) => service?.name);
+  const mounts = services.reduce((sum, service) => sum + Object.keys(service.volumeMounts ?? {}).length, 0);
+  let waiting = "the services";
+  for (let tries = 0; tries < 60; tries += 1) {
+    const view = await projectView(run);
+    const missing = services.filter((service) => !view.services[service.name]);
+    if (missing.length) waiting = missing.map((service) => service.name).join(", ");
+    else if (view.volumes.filter((volume) => volume.environmentId === v(run, "RAILWAY_ENVIRONMENT_ID")).length < mounts) waiting = "the volumes";
+    else {
+      const unread = [];
+      for (const service of services) {
+        try {
+          await railway(Q.instance, { serviceId: view.services[service.name], environmentId: v(run, "RAILWAY_ENVIRONMENT_ID") });
+        } catch {
+          unread.push(service.name);
+        }
+      }
+      if (!unread.length) return;
+      waiting = `${unread.join(", ")} in ${run.settings.ENVIRONMENT}`;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pause));
+  }
+  throw new Error(`Railway still didn't show ${waiting} from the template after ${Math.round((60 * pause) / 1000)} seconds. Check the project in Railway, then run again`);
+}
+
 async function railwaySteps(run) {
   const s = run.settings;
   await step(run, "railway.project", `Railway project "${s.NAME}" with the environment ${s.ENVIRONMENT}`, async () => {
@@ -1116,6 +1177,7 @@ async function railwaySteps(run) {
         }
         await deployAndWait(config);
       }
+      await waitForTemplateApplied(run, config);
       const made = await projectView(run);
       console.log(`  made ${SERVICES.filter((service) => made.services[service.name]).map((service) => service.name).join(", ") || "no services with the expected names"}; the next steps add anything it left out`);
     });
@@ -1332,6 +1394,9 @@ async function addressSteps(run) {
     const both = fromFile("TURNSTILE_SITE_KEY") && fromFile("TURNSTILE_SECRET_KEY");
     if (both || !s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
       if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${v(run, "APP_HOST")}, Managed, Pre-clearance No (guide 5.3).`]);
+      // A widget given in the secrets file may not list this address (seen on realinfobot-test1), and sign-up
+      // and sign-in then fail their Turnstile check.
+      else await byHand([`Check that the Turnstile widget whose keys are in your secrets file lists ${[...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])].join(" and ")}:`, "Cloudflare > Turnstile > the widget > Hostname management. Sign-up and sign-in fail on an address it doesn't list."]);
       return {
         TURNSTILE_SITE_KEY: await value("TURNSTILE_SITE_KEY", "The widget's Site Key"),
         TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
@@ -1493,12 +1558,35 @@ async function deploySteps(run) {
   const s = run.settings;
   const ids = () => v(run, "RAILWAY_SERVICE_IDS");
   const source = { repo: s.REPO, branch: s.BRANCH };
+  const environmentId = () => v(run, "RAILWAY_ENVIRONMENT_ID");
+  // Deployed through the API: with a template, Postgres and Redis were deployed before their passwords were set
+  // (Postgres refused to start), and nothing is staged for a Deploy banner, since the variables went in with
+  // skipDeploys. Railway reports an image service's deployment SUCCESS once it's running.
   await step(run, "deploy.databases", "Deploy Postgres and Redis with their passwords", async () => {
-    await byHand(["Railway stages the changes: open the project's canvas and click Deploy on the banner.", "Then check that Postgres's and Redis's logs say they're ready to accept connections (guide 8.3, step 5)."]);
+    try {
+      for (const service of ["Postgres", "Redis"]) {
+        const id = (await railway(Q.deployService, { serviceId: ids()[service], environmentId: environmentId() })).serviceInstanceDeployV2;
+        console.log(`  ${service}: deploying`);
+        await waitForDeployment(run, service, ids()[service], typeof id === "string" && id ? { id } : {});
+        console.log(`  ${service}: running`);
+      }
+    } catch (error) {
+      if (error.deployFailed) throw error;
+      console.log(`  Railway didn't deploy them through its API (${String(error.message).split("\n")[0]}).`);
+      await byHand(["Deploy Postgres and Redis in the project's canvas (the Deploy banner, or each service's Deployments > Redeploy).", "Then check that Postgres's and Redis's logs say they're ready to accept connections (guide 8.3, step 5)."]);
+    }
   });
   await step(run, "deploy.migrate", `Connect migrate to ${s.REPO}@${s.BRANCH}, which deploys it`, async () => {
+    const before = await latestDeployment(run, ids().migrate).catch(() => undefined);
     await railway(Q.connect, { id: ids().migrate, input: source });
-    await byHand(["Wait for migrate's deployment to succeed: its log ends with RLS enabled and forced on <n> tables (guide 10.1).", "If it fails, guide 10.3 lists the usual causes; run this command again once it passes."]);
+    try {
+      console.log("  migrate: building, then its pre-deploy runs the migrations (several minutes)");
+      await waitForDeployment(run, "migrate", ids().migrate, { after: before?.id });
+      console.log("  migrate: succeeded, so its pre-deploy passed (migrations, roles, RLS check)");
+    } catch (error) {
+      if (error.deployFailed) throw new Error(`${error.message}. Guide 10.3 lists the usual causes; run up again once it's fixed`);
+      await byHand(["Wait for migrate's deployment to succeed: its log ends with RLS enabled and forced on <n> tables (guide 10.1).", "If it fails, guide 10.3 lists the usual causes; run this command again once it passes."]);
+    }
   });
   for (const service of ["admin", "worker"]) {
     await step(run, `deploy.${service}`, `Connect the ${service} to ${s.REPO}@${s.BRANCH}, which builds it`, async () => {

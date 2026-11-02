@@ -68,6 +68,22 @@
     "submitting": "Enregistrement...",
     "submitFailed": "Impossible d'enregistrer cette entreprise pour le moment. Réessayez."
   },
+  "website": {
+    "title": "Entraînons {{appName}} avec votre site web",
+    "description": "",
+    "label": "Site web",
+    "placeholder": "votreentreprise.com",
+    "sourceName": "Nom de la source",
+    "sourceNameHint": "Libellé facultatif pour la source importée.",
+    "sourceNamePlaceholder": "Site web de l'entreprise",
+    "continue": "Continuer",
+    "submitting": "Démarrage de l'import...",
+    "skip": "Je n'ai pas de site web",
+    "skipping": "Ignorer...",
+    "submitFailed": "Impossible de démarrer l'import maintenant. Réessayez.",
+    "invalidUrl": "Entrez l'adresse de votre site web, par exemple votreentreprise.com.",
+    "skipFailed": "Impossible d'ignorer cette étape maintenant. Réessayez."
+  },
   "knowledge": {
     "title": "Ajouter des documents d'entraînement",
     "description": "Aidez votre IA à comprendre votre entreprise.",

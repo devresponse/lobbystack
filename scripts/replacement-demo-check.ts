@@ -71,13 +71,13 @@ async function main(): Promise<void> {
     await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async tx => {
       const business = (await tx.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)))[0];
       assert(business?.stage === "create_business", "Claim did not start original business onboarding.");
-      await tx.update(businesses).set({ onboardingStage: "knowledge" }).where(eq(businesses.id, businessId));
+      await tx.update(businesses).set({ onboardingStage: "website" }).where(eq(businesses.id, businessId));
     });
     const replay = await claimProspectDemo({ db: app.db }, { userId: claimantUserId, token });
     assert(replay.status === "already_claimed", "Original claimant could not re-enter their demo.");
     await withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, async tx => {
       const business = (await tx.select({ stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)))[0];
-      assert(business?.stage === "knowledge", "Re-entering a claimed demo reset onboarding progress.");
+      assert(business?.stage === "website", "Re-entering a claimed demo reset onboarding progress.");
     });
     let foreignRejected = false;
     try { await claimProspectDemo({ db: app.db }, { userId: operatorUserId, token }); } catch { foreignRejected = true; }

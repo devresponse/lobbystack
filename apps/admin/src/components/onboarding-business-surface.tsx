@@ -41,11 +41,11 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
       // The next step looks this workspace up before it can save, so it has to
       // be in the cache before we move.
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      navigate("/onboarding/knowledge");
+      navigate("/onboarding/website");
     },
     meta: { inlineError: true },
   });
-  useEffect(() => { prefetch("/onboarding/knowledge"); }, [prefetch]);
+  useEffect(() => { prefetch("/onboarding/website"); }, [prefetch]);
   useEffect(() => {
     if (existing && !createNew) setName(existing.name);
   }, [createNew, existing]);
@@ -57,17 +57,17 @@ export function OnboardingBusinessSurface({ createNew = false }: { createNew?: b
         body: JSON.stringify({ name: name.trim() }),
       });
       // A claimed prospect demo starts on this step, unlike a new signup. The
-      // knowledge step redirects back here until the stage moves on, and the
+      // website step redirects back here until the stage moves on, and the
       // server ignores this for a business that is already further along.
       await requestJson(`/api/onboarding/stage?businessId=${businessId}`, {
         method: "POST",
-        body: JSON.stringify({ to: "knowledge" }),
+        body: JSON.stringify({ to: "website" }),
       });
     },
     onSuccess: async () => {
       if (existing) telemetry.track("web.onboarding.business_name_submitted", { businessId: existing.businessId });
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });
-      navigate("/onboarding/knowledge");
+      navigate("/onboarding/website");
     },
     meta: { inlineError: true },
   });

@@ -64,6 +64,7 @@
       ],
       "actions": [
         "create workspace",
+        "capture website",
         "review knowledge",
         "configure greeting and locale",
         "select or skip number",
@@ -78,6 +79,7 @@
       },
       "implementation": [
         "apps/admin/src/lib/onboarding-route.ts",
+        "apps/admin/src/components/onboarding-website-surface.tsx",
         "apps/admin/src/components/onboarding-knowledge-surface.tsx",
         "apps/admin/src/components/onboarding-greeting-surface.tsx",
         "apps/admin/src/components/onboarding-attribution-surface.tsx",

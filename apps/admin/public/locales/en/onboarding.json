@@ -68,6 +68,22 @@
     "submitting": "Saving...",
     "submitFailed": "We couldn't save that business right now. Please try again."
   },
+  "website": {
+    "title": "Now let's train {{appName}} on your website",
+    "description": "",
+    "label": "Website",
+    "placeholder": "yourcompany.com",
+    "sourceName": "Source name",
+    "sourceNameHint": "Optional label for the imported source.",
+    "sourceNamePlaceholder": "Company website",
+    "continue": "Continue",
+    "submitting": "Starting import...",
+    "skip": "I don't have a website",
+    "skipping": "Skipping...",
+    "submitFailed": "We couldn't start the website import right now. Please try again.",
+    "invalidUrl": "Enter your website address, like yourcompany.com.",
+    "skipFailed": "We couldn't skip this step right now. Please try again."
+  },
   "knowledge": {
     "title": "Add training documents",
     "description": "Help your AI understand your business.",

@@ -99,20 +99,17 @@ async function createWorkspace(page: Page, identity: string): Promise<string> {
   await page.getByRole("button", { name: "Continue", exact: true }).click();
   const createResponse = await createResponsePromise;
   expect(createResponse.ok(), await createResponse.text()).toBe(true);
-  await expect.poll(async () => await readOnboardingState(identity)).toEqual({ businessId: expect.any(String), stage: "knowledge" });
+  await expect.poll(async () => await readOnboardingState(identity)).toEqual({ businessId: expect.any(String), stage: "website" });
   const continueSetup = page.getByRole("button", { name: "Continue setup" });
   await page.waitForTimeout(500);
   if (await continueSetup.isVisible()) await continueSetup.click();
-  if (!page.url().endsWith("/onboarding/knowledge")) await page.goto("/onboarding/knowledge");
-  await expect(page).toHaveURL("/onboarding/knowledge");
-  await expect(page.getByRole("button", { name: "Skip for now" })).toBeVisible();
+  if (!page.url().endsWith("/onboarding/website")) await page.goto("/onboarding/website");
+  await expect(page).toHaveURL("/onboarding/website");
+  await expect(page.getByRole("button", { name: "I don't have a website" })).toBeVisible();
   await page.goto("/onboarding/attribution");
-  await expect(page).toHaveURL("/onboarding/knowledge");
-  // Onboarding no longer asks for a website: the old step's address resumes the current step.
-  await page.goto("/onboarding/website");
-  await expect(page).toHaveURL("/onboarding/knowledge");
+  await expect(page).toHaveURL("/onboarding/website");
   await page.reload();
-  await expect(page.getByRole("button", { name: "Skip for now" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "I don't have a website" })).toBeVisible();
   const result = await page.evaluate(async () => {
     const response = await fetch("/api/businesses", { credentials: "include" });
     return await response.json() as { businesses: Array<{ businessId: string; active: boolean }> };
@@ -123,11 +120,13 @@ async function createWorkspace(page: Page, identity: string): Promise<string> {
 }
 
 async function completeOnboardingBySkippingOptionalInputs(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Skip for now" }).click();
-  await expect(page).toHaveURL("/onboarding/greeting");
-  await page.goBack();
+  await page.getByRole("button", { name: "I don't have a website" }).click();
   await expect(page).toHaveURL("/onboarding/knowledge");
+  await page.goBack();
+  await expect(page).toHaveURL("/onboarding/website");
   await page.goForward();
+  await expect(page).toHaveURL("/onboarding/knowledge");
+  await page.getByRole("button", { name: "Skip" }).click();
   await expect(page).toHaveURL("/onboarding/greeting");
   await page.getByLabel("Greeting").fill("Thanks for calling. How can we help?");
   await page.getByRole("button", { name: "Continue" }).click();

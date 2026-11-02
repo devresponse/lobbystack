@@ -68,6 +68,22 @@
     "submitting": "Guardando...",
     "submitFailed": "No pudimos guardar ese negocio en este momento. Inténtelo de nuevo."
   },
+  "website": {
+    "title": "Ahora entrenemos a {{appName}} con su sitio web",
+    "description": "",
+    "label": "Sitio web",
+    "placeholder": "suempresa.com",
+    "sourceName": "Nombre de la fuente",
+    "sourceNameHint": "Etiqueta opcional para la fuente importada.",
+    "sourceNamePlaceholder": "Sitio web de la empresa",
+    "continue": "Continuar",
+    "submitting": "Iniciando importación...",
+    "skip": "No tengo sitio web",
+    "skipping": "Omitiendo...",
+    "submitFailed": "No pudimos iniciar la importación del sitio web en este momento. Inténtelo de nuevo.",
+    "invalidUrl": "Ingrese la dirección de su sitio web, por ejemplo suempresa.com.",
+    "skipFailed": "No pudimos omitir este paso en este momento. Inténtelo de nuevo."
+  },
   "knowledge": {
     "title": "Añada documentos de entrenamiento",
     "description": "Ayude a su IA a entender su negocio.",

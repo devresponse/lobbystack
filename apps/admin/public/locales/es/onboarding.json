@@ -77,10 +77,10 @@
     "sourceNameHint": "Etiqueta opcional para la fuente importada.",
     "sourceNamePlaceholder": "Sitio web de la empresa",
     "continue": "Continuar",
-    "submitting": "Iniciando importación...",
+    "submitting": "Guardando...",
     "skip": "No tengo sitio web",
     "skipping": "Omitiendo...",
-    "submitFailed": "No pudimos iniciar la importación del sitio web en este momento. Inténtelo de nuevo.",
+    "submitFailed": "No pudimos guardar su sitio web en este momento. Inténtelo de nuevo.",
     "invalidUrl": "Ingrese la dirección de su sitio web, por ejemplo suempresa.com.",
     "skipFailed": "No pudimos omitir este paso en este momento. Inténtelo de nuevo."
   },

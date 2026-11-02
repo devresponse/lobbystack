@@ -77,10 +77,10 @@
     "sourceNameHint": "Optional label for the imported source.",
     "sourceNamePlaceholder": "Company website",
     "continue": "Continue",
-    "submitting": "Starting import...",
+    "submitting": "Saving...",
     "skip": "I don't have a website",
     "skipping": "Skipping...",
-    "submitFailed": "We couldn't start the website import right now. Please try again.",
+    "submitFailed": "We couldn't save your website right now. Please try again.",
     "invalidUrl": "Enter your website address, like yourcompany.com.",
     "skipFailed": "We couldn't skip this step right now. Please try again."
   },

@@ -77,10 +77,10 @@
     "sourceNameHint": "Opcioni naziv za uvezeni izvor.",
     "sourceNamePlaceholder": "Sajt firme",
     "continue": "Nastavi",
-    "submitting": "Pokretanje uvoza...",
+    "submitting": "Čuvanje...",
     "skip": "Nemam sajt",
     "skipping": "Preskakanje...",
-    "submitFailed": "Trenutno ne možemo da pokrenemo uvoz sajta. Pokušajte ponovo.",
+    "submitFailed": "Trenutno ne možemo da sačuvamo Vaš sajt. Pokušajte ponovo.",
     "invalidUrl": "Unesite adresu svog sajta, na primer mojafirma.rs.",
     "skipFailed": "Trenutno ne možemo da preskočimo ovaj korak. Pokušajte ponovo."
   },

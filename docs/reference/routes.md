@@ -5,7 +5,7 @@ Every page and HTTP route in the LobbyStack code, written against **https://demo
 | | |
 |---|---|
 | Base URL | `https://demo.alloplace.com` |
-| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off. Home, the Knowledge page and the two questions routes were updated on 2026-10-31 for fork PR #107, which adds `/agent/questions`, the Questions page, and Home, Messages, `GET /api/dashboard` and `GET` and `PATCH /api/messages` the same day for fork PR #108, which archives conversations. The brand step and its route were updated on 2026-11-01 for fork PR #112, which adds RealInfoBot as a second brand besides LobbyStack |
+| Code | `devresponse/lobbystack`, branch `main` at `da1f548` (2026-10-24). First written at `d18f916` (2026-10-18); the routes fork PRs #50 to #76 added or changed were brought up to `da1f548` on 2026-10-24, and fork PR #84's, for the email after each call and the notice after a call's greeting, added on 2026-10-26 (section 16). The brand step and its route were updated on 2026-10-27 for fork PR #87, which uses the only brand besides LobbyStack on an address no brand claims, and the plan step, `GET /api/billing` and `GET /api/v1/billing/plans` the same day for fork PR #88, which shows the brand's `billing.json` before a deployment's first apply, and again for fork PR #89, which shows a yearly price's month in whole units. The Integrations and API keys pages were updated on 2026-10-28 for fork PR #94's Zapier card and **Set up for Zapier**, and the same day for fork PR #95's Make card and **Set up for Make**. `POST /api/webhooks/openai/live` and `POST /internal/live/attach` were updated on 2026-10-29 for fork PR #96, which opens phone calls with the recorded greeting. Home, Calls, the call and contact pages, `GET /api/dashboard`, `GET /api/calls`, `GET` and `PATCH /api/calls/{callId}` and `GET /api/contacts/{contactId}` were updated on 2026-10-30 for fork PR #100, which archives calls, and the Team page and `GET` and `DELETE /api/businesses` the same day for fork PR #101, which deletes a business, and the Team page, `/{locale}/cancel-account` and `/api/businesses/cancellation` the same day for fork PR #102, which cancels an account. Home, the Knowledge page, the four number searches and the password reset routes were updated the same day for fork PR #105, which adds `/api/knowledge/questions` and `/api/knowledge/questions/{questionId}` for the unanswered questions inbox, answers a number search without Twilio with 503 `phone_numbers_unavailable`, and turns Better Auth's link reset off. Home, the Knowledge page and the two questions routes were updated on 2026-10-31 for fork PR #107, which adds `/agent/questions`, the Questions page, and Home, Messages, `GET /api/dashboard` and `GET` and `PATCH /api/messages` the same day for fork PR #108, which archives conversations. The brand step and its route were updated on 2026-11-01 for fork PR #112, which adds RealInfoBot as a second brand besides LobbyStack. The website, documents and greeting steps and `POST /api/knowledge` were updated on 2026-11-02 for fork PR #127, which adds `POST /api/onboarding/website` so the website step saves the address and reads nothing; the counts in section 1 now include it and fork PR #105's two questions routes |
 | How it was made | Read from the code, including every entry file and the files it calls. No route was tried against the live site. |
 | What runs at the base URL | `apps/admin`: the dashboard, sign-in pages, public business pages, the website widget, every HTTP API and the MCP server |
 | Also listed | The worker's internal routes (section 14) and the marketing site's pages (section 15). Neither is served at demo.alloplace.com. |
@@ -42,7 +42,7 @@ This catalog was written in the project's notes and moved into the repository on
 | Public business page, widget chat window and loader | 2 pages, 1 route | 1 | 6 |
 | Website widget API | 6 | 7 | 6 |
 | Browser calls | 2 | 4 | 7 |
-| Dashboard API | 82 | 132 | 8 |
+| Dashboard API | 85 | 135 | 8 |
 | Public API (v1) | 71 (one catches unknown paths) | 99: 98 operations and the OpenAPI document | 9 |
 | MCP server | 1 | 3 (18 tools) | 10 |
 | OAuth discovery and redirects | 6 | 10 | 10 |
@@ -51,9 +51,9 @@ This catalog was written in the project's notes and moved into the repository on
 | Health and operations | 3 | 3 | 13 |
 | Worker (internal, not at the base URL) | 1 server | 4 | 14 |
 
-In all, `apps/admin` has 58 page files and 179 route files, which answer 268 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
+In all, `apps/admin` has 58 page files and 182 route files, which answer 271 method and path pairs (Better Auth's endpoints counted once, as its catch-all route).
 
-Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 179 route files, 58 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
+Every table also names the **entry file** of each route, the file that receives the request, and a summary of each entry file follows its table: 182 route files, 58 pages, 9 layouts and 1 not-found page in `apps/admin`, the widget loader script, the worker's 2 route files, and the marketing site's 31 pages and files.
 
 ## 2. How to read this catalog
 
@@ -478,23 +478,23 @@ Related files: `apps/admin/src/components/onboarding-business-surface.tsx`, `app
 
 **`apps/admin/app/(onboarding)/onboarding/website/page.tsx`**
 
-Step 3: the owner gives the business's website so the AI receptionist can learn from it, or skips. The site is imported in the background while later steps go on.
+Step 3: the owner gives the business's website, or skips. Since fork PR #127 the step only saves the address: onboarding reads no website and queues no crawl ([onboarding](../features/onboarding.md#know-what-the-website-step-saves)).
 
-- `GET /onboarding/website`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `website` back to their step, so a claimed prospect demo still on `create_business` returns to `/onboarding/business`. `OnboardingWebsiteSurface` prefills the saved `websiteUrl` from `GET /api/businesses`. Continue calls `POST /api/knowledge` with the URL, `sourceType: "website"` and `onboarding: true`; `createKnowledgeDocument` (`packages/domain/src/server/knowledge.ts`) saves it as the business website, moves a business still on `website` to `knowledge`, and queues a sample crawl (`knowledge.crawlWebsite` outbox event). Skip calls `POST /api/onboarding/stage?businessId=` with `{ to: "knowledge" }`. Both go to `/onboarding/knowledge`.
+- `GET /onboarding/website`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `website` back to their step, so a claimed prospect demo still on `create_business` returns to `/onboarding/business`. `OnboardingWebsiteSurface` prefills the saved `websiteUrl` from `GET /api/businesses`. Continue calls `POST /api/onboarding/website?businessId=` with `{ websiteUrl }`, which saves it as the business website and moves a business still on `website` to `knowledge`, with no knowledge source, website import or `knowledge.crawlWebsite` message. Skip calls `POST /api/onboarding/stage?businessId=` with `{ to: "knowledge" }`. Both go to `/onboarding/knowledge`.
 
-Related files: `apps/admin/src/components/onboarding-website-surface.tsx`, `apps/admin/src/lib/onboarding-route.ts`, `packages/domain/src/server/knowledge.ts`, `apps/admin/app/api/knowledge/route.ts`.
+Related files: `apps/admin/src/components/onboarding-website-surface.tsx`, `apps/admin/src/lib/onboarding-route.ts`, `apps/admin/app/api/onboarding/website/route.ts`, `packages/domain/src/server/onboarding.ts`.
 
 **`apps/admin/app/(onboarding)/onboarding/knowledge/page.tsx`**
 
-Step 4: the owner gives the AI receptionist more to learn from by uploading documents or pasting text, while the website import from step 3 runs.
+Step 4: the owner gives the AI receptionist something to learn from by uploading documents or pasting text.
 
-- `GET /onboarding/knowledge`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `knowledge` back to their step. `OnboardingKnowledgeSurface` lists uploads from `GET /api/knowledge?businessId=`, polling every 2 seconds while a website import runs. Each file up to 10 MB goes through `uploadKnowledgeDocument` (`apps/admin/src/lib/storage-upload.ts`): `POST /api/uploads`, a PUT to the returned storage URL, then `PUT /api/uploads` to finalize it. Continue saves pasted text with `POST /api/knowledge/snippets?businessId=`, then calls `POST /api/onboarding/stage?businessId=` with `{ to: "greeting" }`; Skip makes only the stage call. Both go to `/onboarding/greeting`.
+- `GET /onboarding/knowledge`: `requireOnboardingStage` sends signed-out visitors to `/login` and businesses before `knowledge` back to their step. `OnboardingKnowledgeSurface` lists uploads from `GET /api/knowledge?businessId=`, polling every 2 seconds while a website import runs; onboarding starts none since fork PR #127, so only one added another way, such as through the API, shows here. Each file up to 10 MB goes through `uploadKnowledgeDocument` (`apps/admin/src/lib/storage-upload.ts`): `POST /api/uploads`, a PUT to the returned storage URL, then `PUT /api/uploads` to finalize it. Continue saves pasted text with `POST /api/knowledge/snippets?businessId=`, then calls `POST /api/onboarding/stage?businessId=` with `{ to: "greeting" }`; Skip makes only the stage call. Both go to `/onboarding/greeting`.
 
 Related files: `apps/admin/src/components/onboarding-knowledge-surface.tsx`, `apps/admin/src/lib/storage-upload.ts`, `apps/admin/src/lib/onboarding-route.ts`, `apps/admin/app/api/uploads/route.ts`.
 
 **`apps/admin/app/(onboarding)/onboarding/greeting/page.tsx`**
 
-Step 5: the owner writes the AI receptionist's greeting. The page also shows the progress of the website import started in step 3.
+Step 5: the owner writes the AI receptionist's greeting. The page also shows the progress of a website import, when one runs; onboarding starts none since fork PR #127.
 
 - `GET /onboarding/greeting`: `requireOnboardingStage` sends a signed-out visitor to `/login` and a business whose stage comes before `greeting` back to its step; later stages may revisit. `OnboardingGreetingSurface` prefills the greeting from `GET /api/agent` and polls `GET /api/knowledge?businessId=` every 2 seconds while a website import runs. Continue calls `PATCH /api/agent` with the greeting and a `locale`: the interface language when calls can open in it (`en`, `fr` or `es`, since fork PR #82), else `en` (this also sets the business's `defaultLocale`), then `POST /api/onboarding/stage?businessId=` with `{ to: "plan" }`, and goes to `/onboarding/plan`.
 
@@ -1295,10 +1295,10 @@ Related files: `packages/domain/src/server/rules.ts`, `apps/admin/src/components
 
 **`apps/admin/app/api/knowledge/route.ts`**
 
-Lists knowledge sources for the Knowledge screen, onboarding and the setup guide, and adds a website as a source from the onboarding website step and the Knowledge screen.
+Lists knowledge sources for the Knowledge screen, onboarding and the setup guide, and adds a website as a source from the Knowledge screen. The onboarding website step used it too until fork PR #127, which made that step only save the address.
 
 - `GET /api/knowledge`: Any member: `withOperatorTransaction` with no `minimumRole`. Selects the business's `knowledge_documents` sorted by title, each with `websiteImport` (its `website_ingestion_jobs` row as JSON) and `textContent` (the first 500 characters of its first chunk). Changes nothing. Answers 200 `{ documents }`.
-- `POST /api/knowledge`: Requires business_admin or higher, checked by `requireBusinessAdmin` inside `createKnowledgeDocument` (`packages/domain/src/server/knowledge.ts`); the route runs `requireApiSession`. Needs `businessId`, `title` and `sourceType` in the body (400). For a website it normalizes `sourceUrl` (422 `website_url_invalid`), saves it as the business website and advances the onboarding stage during onboarding, reuses an existing source with that URL (re-queuing a failed or cancelled one), or inserts `knowledge_documents` and `website_ingestion_jobs` rows and queues `knowledge.crawlWebsite`. Answers 201 `{ documentId }`.
+- `POST /api/knowledge`: Requires business_admin or higher, checked by `requireBusinessAdmin` inside `createKnowledgeDocument` (`packages/domain/src/server/knowledge.ts`); the route runs `requireApiSession`. Needs `businessId`, `title` and `sourceType` in the body (400). For a website it normalizes `sourceUrl` (422 `website_url_invalid`), saves it as the business website and advances the onboarding stage when `onboarding` is true or the business is still on `website` (the dashboard's onboarding stopped calling this route in fork PR #127), reuses an existing source with that URL (re-queuing a failed or cancelled one), or inserts `knowledge_documents` and `website_ingestion_jobs` rows and queues `knowledge.crawlWebsite`. Answers 201 `{ documentId }`.
 
 Related files: `packages/domain/src/server/knowledge.ts`, `packages/domain/src/server/knowledgeUrl.ts`, `apps/admin/src/components/live-knowledge-surface.tsx`, `apps/admin/src/components/onboarding-website-surface.tsx`.
 
@@ -1435,6 +1435,7 @@ Related files: `packages/domain/src/server/phoneNumbers.ts`, `apps/admin/src/com
 | Method | Address | What it does | Who | Entry file |
 |---|---|---|---|---|
 | POST | `https://demo.alloplace.com/api/onboarding/stage` | Move to a later onboarding step (`to`) | Admin+ | `apps/admin/app/api/onboarding/stage/route.ts` |
+| POST | `https://demo.alloplace.com/api/onboarding/website` | Save the business's website from the website step (`websiteUrl`), reading nothing | Admin+ | `apps/admin/app/api/onboarding/website/route.ts` |
 | GET | `https://demo.alloplace.com/api/onboarding/phone-numbers/suggestion` | Ten suggested numbers | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/suggestion/route.ts` |
 | POST | `https://demo.alloplace.com/api/onboarding/phone-numbers/search` | Search for numbers (`selection`, `limit`) | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/search/route.ts` |
 | POST | `https://demo.alloplace.com/api/onboarding/phone-numbers/claim` | Claim a number (`claimToken`; answers 202). Needs `businessId`. | Admin+ | `apps/admin/app/api/onboarding/phone-numbers/claim/route.ts` |
@@ -1446,9 +1447,15 @@ Related files: `packages/domain/src/server/phoneNumbers.ts`, `apps/admin/src/com
 
 **`apps/admin/app/api/onboarding/stage/route.ts`**
 
-Moves a business forward through onboarding as each onboarding screen (business, website, knowledge, greeting, plan) finishes.
+Moves a business forward through onboarding as each onboarding screen (business, knowledge, greeting, plan, and the website step's skip) finishes.
 
 - `POST /api/onboarding/stage`: `requireOperatorBusiness` and `readJson`; `to` must be an onboarding stage other than `create_business` or `complete` (400). `advanceOnboardingStage` (`packages/domain/src/server/onboarding.ts`) checks business_admin, locks the business row and repairs a legacy verification stage. A target at or before the current step changes nothing. Otherwise the move must be an allowed transition, and the conditional update answers 409 `onboarding_stage_conflict` if the stage changed meanwhile. Answers 200 `{ ok: true, stage }`.
+
+**`apps/admin/app/api/onboarding/website/route.ts`**
+
+Saves the website the owner gives on the website step (fork PR #127). It never reads the site.
+
+- `POST /api/onboarding/website`: `requireOperatorBusiness` and `readJson`; `websiteUrl` must be a string of 1 to 2,000 characters (422 `website_url_invalid`). `saveOnboardingWebsite` (`packages/domain/src/server/onboarding.ts`) normalizes it with `normalizeWebsiteSourceUrl` (422 `website_url_invalid` for anything but a public HTTP or HTTPS address), checks business_admin, locks the business row, saves `website_url`, and moves a business on `website` to `knowledge`; a business further along keeps its stage. It inserts no `knowledge_documents` or `website_ingestion_jobs` row and queues no outbox message. Answers 200 `{ ok: true, websiteUrl, stage }`.
 
 Related files: `packages/domain/src/server/onboarding.ts`, `apps/admin/src/components/onboarding-plan-surface.tsx`.
 
@@ -3162,7 +3169,7 @@ These turned up while the entry files were read for this catalog. Each was check
 | `POST /api/feedback` | Over the rate limit, or the limiter unavailable (429 and 503 were meant); an empty or too long message | `apps/admin/src/lib/feedback-rate-limit.ts:12`, `packages/domain/src/server/feedback.ts:34-35` |
 | `PATCH`, `POST`, `DELETE /api/integrations` | An unknown or disconnected `connectionId`, an unknown staff member | `packages/domain/src/server/calendar.ts:280, 305, 316` |
 | `POST /api/onboarding/phone-numbers/skip` | A business before the plan step | `packages/domain/src/server/phoneNumbers.ts:283` |
-| `POST /api/onboarding/stage` | A move that skips a step or isn't allowed | `packages/domain/src/server/onboarding.ts:164-166` |
+| `POST /api/onboarding/stage` | A move that skips a step or isn't allowed | `packages/domain/src/server/onboarding.ts:169-171` |
 | `DELETE /api/phone-numbers` | A number that isn't active | `packages/domain/src/server/compliance.ts:36` |
 | `GET`, `POST`, `PUT /api/uploads` | Any field that fails its check, a missing `businessId` included; a file over 10 MB, full storage, an upload that doesn't match, an unknown object. The upload form's own messages for these never show. | `apps/admin/app/api/uploads/route.ts:15, 30, 38`, `packages/domain/src/server/storage.ts`, `apps/admin/src/lib/storage-upload.ts:19-23` |
 | `POST`, `PATCH /api/widget-keys` | Invalid `allowedOrigins` or `config`, a missing `id`, an unknown key, an empty change | `apps/admin/app/api/widget-keys/route.ts:14-70` |

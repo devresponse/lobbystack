@@ -8,8 +8,8 @@ function printUsage(): void {
   console.log("Next steps:");
   console.log("1. Open /onboarding/website");
   console.log("2. Submit a website URL");
-  console.log("3. Verify onboarding advances to /onboarding/number");
-  console.log("4. Verify the created website ingestion job stores its workflow ID");
+  console.log("3. Verify onboarding advances to /onboarding/knowledge");
+  console.log("4. Verify the business's website is saved and no knowledge source, website import or crawl was queued");
 }
 
 async function main(): Promise<void> {

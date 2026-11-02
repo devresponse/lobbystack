@@ -81,6 +81,9 @@ export async function createKnowledgeDocument(
  * crawl or extraction. The caller checks who may do that. onboarding (or a
  * business still on its website step) also saves the URL as the business's
  * website; onboarding or sample limit the crawl to a sample of the site.
+ * The dashboard's onboarding no longer sends onboarding: its website step only
+ * saves the address (saveOnboardingWebsite) and reads nothing. The API and the
+ * CLI still read a site here when asked to.
  * Submitting a website that is already a source returns that source.
  */
 export async function createKnowledgeDocumentInTransaction(
@@ -173,8 +176,9 @@ export async function retryKnowledgeDocumentInTransaction(tx: DatabaseTransactio
 }
 
 /**
- * Reads the rest of a site that onboarding only sampled. Re-crawling at the
- * full limit replaces the partial import rather than adding a second copy.
+ * Reads the rest of a site that was only sampled, as the API's first read of
+ * a site is. Re-crawling at the full limit replaces the partial import rather
+ * than adding a second copy.
  */
 export async function expandWebsiteCrawl(context: DomainContext, input: { userId: string; businessId: string; documentId: string }): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {

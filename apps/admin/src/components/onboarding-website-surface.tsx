@@ -28,8 +28,10 @@ export function OnboardingWebsiteSurface() {
   // Continue waits only on the save.
   useEffect(() => { prefetch("/onboarding/knowledge"); }, [prefetch]);
   useEffect(() => { if (!edited.current && business?.websiteUrl) setWebsiteUrl(business.websiteUrl); }, [business?.websiteUrl]);
+  // Continue only saves the address as the business's website. Onboarding
+  // never reads the site: the owner adds it as knowledge on the Knowledge page.
   const add = useMutation({
-    mutationFn: () => requestJson("/api/knowledge", { method: "POST", body: JSON.stringify({ businessId: business!.businessId, title: websiteUrl.trim(), sourceType: "website", sourceUrl: websiteUrl.trim(), onboarding: true }) }),
+    mutationFn: () => requestJson(`/api/onboarding/website?businessId=${encodeURIComponent(business!.businessId)}`, { method: "POST", body: JSON.stringify({ websiteUrl: websiteUrl.trim() }) }),
     onSuccess: async () => {
       if (business) telemetry.track("web.onboarding.website_submitted", { businessId: business.businessId });
       await queryClient.invalidateQueries({ queryKey: ["businesses"] });

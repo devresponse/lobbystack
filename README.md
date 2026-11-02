@@ -134,11 +134,13 @@ The [code map](./docs/project/overview.md#find-your-way-around-the-code) says wh
 ### Set up a business
 
 1. Sign up on your deployment's dashboard.
-2. Verify your mobile number.
-3. Import website knowledge, or skip and add knowledge manually later.
-4. Choose a plan, on a cloud deployment.
-5. Claim a business number on Starter or Pro.
-6. Configure AI settings, services, knowledge, and rules before sending live calls.
+2. Name the business.
+3. Give the business's website, or skip. Onboarding saves the address and reads nothing: import the site from **Knowledge** once the dashboard opens.
+4. Upload documents or paste text, or skip and add knowledge later.
+5. Write the greeting callers hear.
+6. Choose a plan, on a cloud deployment.
+7. Claim a business number on Starter or Pro.
+8. Configure AI settings, services, knowledge, and rules before sending live calls.
 
 [Part 6 of the deployment guide](./docs/deployment/guide/part-6-first-run.md) walks through the first account and business.
 

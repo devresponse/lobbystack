@@ -21,7 +21,7 @@ function setup(options: { websiteUrl?: string; fail?: boolean; invalid?: boolean
       return Response.json({ businesses: [{ businessId: "business-1", active: true, websiteUrl: options.websiteUrl }] });
     }
     if (options.invalid) return Response.json({ error: "Website URL must use HTTP or HTTPS.", code: "website_url_invalid" }, { status: 422 });
-    return options.fail ? Response.json({ error: "Private provider diagnostics" }, { status: 500 }) : Response.json({ documentId: "document-1" });
+    return options.fail ? Response.json({ error: "Private provider diagnostics" }, { status: 500 }) : Response.json({ ok: true, websiteUrl: "https://example.com/", stage: "knowledge" });
   });
   vi.stubGlobal("fetch", fetcher);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -30,14 +30,17 @@ function setup(options: { websiteUrl?: string; fail?: boolean; invalid?: boolean
   return fetcher;
 }
 describe("onboarding website", () => {
-  it("submits the URL with the onboarding context", async () => {
+  it("saves the address as the business's website without adding it as knowledge", async () => {
     const fetcher = setup();
-    fireEvent.change(screen.getByLabelText("website.label"), { target: { value: "example.com" } });
+    fireEvent.change(screen.getByLabelText("website.label"), { target: { value: " example.com " } });
     await waitFor(() => expect((screen.getByRole("button", { name: "website.continue" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "website.continue" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/onboarding/knowledge"));
-    const submission = fetcher.mock.calls.find(([url]) => url === "/api/knowledge");
-    expect(JSON.parse(String(submission?.[1]?.body))).toEqual({ businessId: "business-1", title: "example.com", sourceType: "website", sourceUrl: "example.com", onboarding: true });
+    const submission = fetcher.mock.calls.find(([url]) => url === "/api/onboarding/website?businessId=business-1");
+    expect(submission?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(submission?.[1]?.body))).toEqual({ websiteUrl: "example.com" });
+    // Onboarding never queues a crawl: nothing goes to the knowledge API.
+    expect(fetcher.mock.calls.some(([url]) => url.startsWith("/api/knowledge"))).toBe(false);
     telemetryRef.current!.expectEvent("web.onboarding.website_submitted", { businessId: "business-1" });
   });
   it("asks for a valid address when the server rejects the URL", async () => {

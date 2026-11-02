@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#126](https://github.com/devresponse/lobbystack/pull/126) | Take the website step out of onboarding, and keep the crawler. Fork PR #127 brought the step back the same day, saving the address and reading nothing, as the maintainer meant |  | `6c70332` | [docs](../features/onboarding.md#know-what-changed-with-fork-pr-127) |
 | [#124](https://github.com/devresponse/lobbystack/pull/124) | Make the bootstrap script's `connect` use `APP_BASE_URL` whenever the settings name one, and the admin's current Railway address, read from Railway |  | `a771db6` | [docs](../../devops/bootstrap.md#6-connect-the-incoming-call-webhook-and-make-the-platform-key) |
 | [#123](https://github.com/devresponse/lobbystack/pull/123) | Give a Railway template's Postgres and Redis their passwords from the start, and remove a database deployment that isn't running before deploying again, so two Postgres deployments never share the volume |  | `373c5fc` | [docs](../../devops/bootstrap.md#what-isnt-confirmed) |
 | [#122](https://github.com/devresponse/lobbystack/pull/122) | Wait for Railway to finish applying a template, deploy Postgres and Redis through the API, and wait for migrate to pass |  | `60de5d1` | [docs](../../devops/bootstrap.md#4-set-it-up) |
@@ -258,3 +259,4 @@ These commits reached `main` without a pull request:
 | 2026-11-02 | `970ba1b` | List `9622842` in this table. |
 | 2026-11-02 | `df0a0ed` | Record the first answered phone call: guide 3.2 and 4.9 say to check the webhook's project before asking OpenAI support, and the bootstrap's roadmap page and decision now cover only the four fork changes still proposed ([what isn't confirmed](../../devops/bootstrap.md#what-isnt-confirmed)). |
 | 2026-11-02 | `efca2f4` | Name a deployment's projects after `APP_BASE_URL`, with `NAME` as the fallback, and keep each name once used, so a changed setting renames nothing; find things by their recorded IDs and stop on a name that matches two; pass a redone value on to Railway; and on a running deployment set only the variables that differ ([what things are named](../../devops/bootstrap.md#what-things-are-named)). |
+| 2026-11-02 | `99ab598` | List `efca2f4` in this table. |

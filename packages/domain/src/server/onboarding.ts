@@ -8,6 +8,7 @@ import type { DomainContext } from "./context";
 import { attributeBusiness } from "./affiliates";
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 import { deploymentAppName } from "./branding";
+import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
 import { loadBillingContext } from "./usage";
 
 // French puts no "de" before the name and Serbian never declines it, because
@@ -199,6 +200,30 @@ export async function advanceOnboardingStage(
     // Revisiting an earlier form must never move durable onboarding progress backwards.
     if (canVisitOnboardingStage(currentStage, input.to)) return;
     await advanceOnboardingStageInTransaction(tx, { ...input, from: currentStage });
+  });
+}
+
+/**
+ * Saves the address the owner gives on onboarding's website step as the
+ * business's website, and moves a business on that step to knowledge. It reads
+ * nothing: no knowledge source, website import or crawl is queued, so
+ * onboarding never starts the crawler. The owner adds the site as knowledge
+ * later, from the Knowledge page. Revisiting the step only changes the address.
+ */
+export async function saveOnboardingWebsite(
+  context: DomainContext,
+  input: { userId: string; businessId: string; websiteUrl: string },
+): Promise<{ websiteUrl: string; stage: OnboardingStage }> {
+  const websiteUrl = normalizeWebsiteSourceUrl(input.websiteUrl);
+  return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
+    await requireBusinessAdmin(tx, input);
+    const current = (await tx.select({ onboardingStage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("update"))[0];
+    if (!current) throw new Error("Business onboarding state was not found.");
+    await tx.update(businesses).set({ websiteUrl, updatedAt: new Date() }).where(eq(businesses.id, input.businessId));
+    // A business already past the step keeps its progress.
+    if (current.onboardingStage !== "website") return { websiteUrl, stage: normalizeOnboardingStage(current.onboardingStage) };
+    await moveOnboardingStageInTransaction(tx, { businessId: input.businessId, from: "website", to: "knowledge" });
+    return { websiteUrl, stage: "knowledge" };
   });
 }
 

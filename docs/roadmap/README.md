@@ -17,6 +17,12 @@ Each feature has a status:
 | [Sign in with Google and Microsoft](google-microsoft-sign-in.md) | Google and Microsoft buttons beside the password, joining existing accounts safely | About 11 days in 2 pull requests; Google alone about 8 | Waiting on 8 decisions | [2026-10-25](../research/google-microsoft-sign-in.md) |
 | [Let businesses bring their own OpenAI and Twilio keys](business-provider-keys.md) | Each business on its own provider bills and limits, with the deployment's keys as the default | 32 to 49 days in 6 pull requests; own OpenAI keys for chat and browser calls first, in 11 to 17 | Waiting on 9 decisions | [2026-10-25](../research/business-provider-keys.md) |
 
+**Onboarding**
+
+| Feature | What it gives | Effort | Status | Study |
+| --- | --- | --- | --- | --- |
+| [Read the business's website during onboarding, as an option](onboarding-website-option.md) | The website read during onboarding again, where and when the deployment chooses, now that fork PR #127 makes the website step only save the address | Not estimated; most of the code is kept | Waiting on 4 decisions | None; the maintainer's request of 2026-11-02 |
+
 **Calls and conversations**
 
 | Feature | What it gives | Effort | Status | Study |

@@ -476,6 +476,12 @@ let currentStep = null;
 
 const v = (run, key) => run.state.values[key];
 
+/**
+ * The dashboard's address: APP_BASE_URL's host (CUSTOM_HOST) as the settings say now, else Railway's address. The
+ * settings win over the address an earlier run recorded, so setting APP_BASE_URL later is enough for connect.
+ */
+const appHost = (run) => run.settings.CUSTOM_HOST || v(run, "APP_HOST") || v(run, "RAILWAY_HOST");
+
 // ---------------------------------------------------------------- prompts
 
 function createPrompter() {
@@ -720,9 +726,9 @@ async function up(run) {
   await postDeploySteps(run);
   if (!dryRun) {
     const railwayHost = v(run, "RAILWAY_HOST");
-    const appHost = v(run, "APP_HOST");
-    const first = railwayHost && railwayHost !== appHost ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
-    console.log(`\nSet up and deploying. Once https://${appHost}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}`);
+    const host = appHost(run);
+    const first = railwayHost && railwayHost !== host ? ` (https://${railwayHost} answers first, while DNS spreads and Railway issues the certificate)` : "";
+    console.log(`\nSet up and deploying. Once https://${host}/api/health/ready shows "ok":true${first}, run:\n  node devops/bootstrap.mjs connect ${run.file}`);
   }
 }
 
@@ -1441,13 +1447,13 @@ async function addressSteps(run) {
     if (both || !s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID) {
       // A widget given in the secrets file may not list this deployment's addresses (seen on realinfobot-test1):
       // post.turnstile adds them after the deploy, or says what to add by hand.
-      if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${v(run, "APP_HOST")}, Managed, Pre-clearance No (guide 5.3).`]);
+      if (!both) await byHand([`In Cloudflare, Turnstile > Add widget for ${appHost(run)}, Managed, Pre-clearance No (guide 5.3).`]);
       return {
         TURNSTILE_SITE_KEY: await value("TURNSTILE_SITE_KEY", "The widget's Site Key"),
         TURNSTILE_SECRET_KEY: await secret("TURNSTILE_SECRET_KEY", "The widget's Secret Key", undefined, { envToo: false }),
       };
     }
-    const hosts = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")])];
+    const hosts = [...new Set([appHost(run), v(run, "RAILWAY_HOST")].filter(Boolean))];
     const base = `/accounts/${s.CLOUDFLARE_ACCOUNT_ID}/challenges/widgets`;
     const found = (await cloudflare(`${base}?per_page=100`))?.find((widget) => widget.name === s.NAME);
     if (found) {
@@ -1465,7 +1471,7 @@ async function addressSteps(run) {
 async function tollfreeSteps(run) {
   const s = run.settings;
   await step(run, "twilio.tollfree", s.TWILIO_TOLLFREE === "buy" ? "Buy a toll-free number in the subaccount" : `Use ${s.TWILIO_TOLLFREE}`, async () => {
-    const smsUrl = `https://${v(run, "APP_HOST")}/api/webhooks/twilio/sms`;
+    const smsUrl = `https://${appHost(run)}/api/webhooks/twilio/sms`;
     const base = `${URLS.twilio}/Accounts/${v(run, "TWILIO_ACCOUNT_SID")}`;
     let number = s.TWILIO_TOLLFREE;
     const friendly = `${s.NAME} shared texts`;
@@ -1700,7 +1706,7 @@ async function postDeploySteps(run) {
     }
   });
   await step(run, "post.turnstile", "The Turnstile widget lists this deployment's addresses", async () => {
-    const hosts = [...new Set([v(run, "APP_HOST"), v(run, "RAILWAY_HOST")].filter(Boolean))];
+    const hosts = [...new Set([appHost(run), v(run, "RAILWAY_HOST")].filter(Boolean))];
     const siteKey = v(run, "TURNSTILE_SITE_KEY");
     const byHandHosts = () => byHand([`In Cloudflare, Turnstile, the widget${siteKey ? ` with site key ${siteKey}` : ""}, Hostname management: make sure it lists ${hosts.join(" and ")}.`, "Sign-up and sign-in fail their Turnstile check on an address it doesn't list."]);
     if (!s.STEP_TURNSTILE || !s.CLOUDFLARE_ACCOUNT_ID || !siteKey) return byHandHosts();
@@ -1723,16 +1729,56 @@ async function postDeploySteps(run) {
 
 // ---------------------------------------------------------------- connect
 
+/**
+ * The admin's Railway address as Railway has it now, kept in the state file. A state file left from an earlier
+ * project names that project's address, which answers "Application not found" once the project is gone.
+ */
+async function currentRailwayHost(run) {
+  const recorded = v(run, "RAILWAY_HOST");
+  const serviceId = v(run, "RAILWAY_SERVICE_IDS")?.admin;
+  if (!serviceId || !v(run, "RAILWAY_PROJECT_ID")) return recorded;
+  try {
+    const { domains } = await railway(Q.domains, { projectId: v(run, "RAILWAY_PROJECT_ID"), environmentId: v(run, "RAILWAY_ENVIRONMENT_ID"), serviceId });
+    const now = domains?.serviceDomains?.[0]?.domain;
+    if (now && now !== recorded) {
+      console.log(`  The state file had https://${recorded}; Railway's admin is at https://${now} now, so that's used and kept.`);
+      if (v(run, "APP_HOST") === recorded) run.state.values.APP_HOST = now;
+      run.state.values.RAILWAY_HOST = now;
+      save(run);
+    }
+    return now ?? recorded;
+  } catch (error) {
+    console.log(`  Railway didn't list the admin's addresses (${String(error.message).split("\n")[0]}). If its project was deleted, run: node devops/bootstrap.mjs redo ${run.file} "railway.*" turnstile variables "deploy.*" "post.*" "connect.*", then up.`);
+    return recorded;
+  }
+}
+
 async function connect(run) {
   const s = run.settings;
   if (!run.state.done["deploy.admin"]) throw new Error("run up first, and finish it");
-  const host = v(run, "APP_HOST");
+  // APP_BASE_URL set after up ran: Railway, Cloudflare and the admin's variables don't know the address yet.
+  if (s.CUSTOM_HOST && !run.state.done["post.dns"]) {
+    throw new Error(`up ran before APP_BASE_URL (${s.CUSTOM_HOST}) was set, so the admin isn't on that address yet. Run: node devops/bootstrap.mjs redo ${run.file} railway.domain railway.custom turnstile "post.*", then up, then connect again`);
+  }
+  const host = appHost(run);
   console.log(`${dryRun ? "Dry run: nothing is called or changed.\n" : ""}${s.NAME} at https://${host}${config ? `, keys from ${config.file}` : ""}\n`);
   await step(run, "connect.health", `https://${host}/api/health/ready answers "ok":true with the ${s.BRAND} brand`, async () => {
-    const health = await http("The admin", `${process.env.BOOTSTRAP_APP_URL ?? `https://${host}`}/api/health/ready`).catch((error) => ({ failed: error.message }));
-    if (health?.failed || health?.ok !== true) throw new Error(`the admin isn't ready yet (${health?.failed ?? JSON.stringify(health)}). Check its deployment, then run again`);
-    const brand = typeof health.brand === "string" ? health.brand : health.brand?.id;
-    if (brand && brand !== s.BRAND) throw new Error(`the admin shows the ${brand} brand, not ${s.BRAND}`);
+    // Both of the admin's addresses are tried: APP_BASE_URL's may still wait for DNS or its certificate. The Railway
+    // address is read from Railway, since a state file can still name one from an earlier, deleted project.
+    const railwayHost = await currentRailwayHost(run);
+    const failures = [];
+    for (const candidate of [...new Set([host, railwayHost].filter(Boolean))]) {
+      const health = await http("The admin", `${process.env.BOOTSTRAP_APP_URL ?? `https://${candidate}`}/api/health/ready`).catch((error) => ({ failed: error.message }));
+      if (health?.failed || health?.ok !== true) {
+        failures.push(`https://${candidate}: ${health?.failed ?? JSON.stringify(health)}`);
+        continue;
+      }
+      const brand = typeof health.brand === "string" ? health.brand : health.brand?.id;
+      if (brand && brand !== s.BRAND) throw new Error(`the admin shows the ${brand} brand, not ${s.BRAND}`);
+      if (candidate !== host) console.log(`  https://${host} doesn't answer yet, but https://${candidate} does: DNS or the certificate for ${host} is still on its way. The webhook still uses https://${host}.`);
+      return;
+    }
+    throw new Error(`the admin isn't ready yet (${failures.join("; ")}). Check its deployment, then run again`);
   });
   await step(run, "connect.webhook", "OpenAI's incoming-call webhook (OpenAI's API can't make this one yet)", async () => {
     if (!given("OPENAI_WEBHOOK_SECRET")) {
@@ -1807,7 +1853,7 @@ function status(run) {
   const done = Object.entries(run.state.done);
   if (!done.length) console.log("  nothing done yet: run up");
   for (const [id, at] of done) console.log(`  done  ${at}  ${id}`);
-  const host = run.state.values.APP_HOST;
+  const host = appHost(run);
   if (host) console.log(`  address: https://${host}`);
   console.log(`  values kept (never printed): ${Object.keys(run.state.values).length}`);
   if (done.length) console.log(`\nTo run a step again: node devops/bootstrap.mjs redo ${run.file} <step>, then the same command as before.`);
@@ -2015,7 +2061,7 @@ async function doctor(run) {
       (set ? ok : note)(`Polar: ${name} ${set ? "is set" : "isn't set, so up will ask for it"}`);
     }
   }
-  const host = v(run, "APP_HOST");
+  const host = v(run, "APP_HOST") && appHost(run);
   if (host) {
     console.log("\nThe deployment");
     try {

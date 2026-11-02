@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#119](https://github.com/devresponse/lobbystack/pull/119) | Add `TEMPLATE_REPO`, so the bootstrap template can come from a repository Railway's GitHub access reaches, and stop with what to do when it can't |  | `8593e6e` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#118](https://github.com/devresponse/lobbystack/pull/118) | Link the bootstrap template project's code services to the repository when Railway asks, connecting them as a last resort |  | `14127e7` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#117](https://github.com/devresponse/lobbystack/pull/117) | Give the bootstrap template project's code services a source before Railway makes the template, and deploy a template without them |  | `562f532` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#116](https://github.com/devresponse/lobbystack/pull/116) | Let the bootstrap script make a private Railway template of the layout (`template`) and deploy it (`RAILWAY_TEMPLATE`) |  | `993b35e` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |

@@ -1077,11 +1077,16 @@ async function railwaySteps(run) {
       if (SERVICES.some((service) => view.services[service.name])) return console.log("  = the project has its services already, so the template isn't deployed again");
       const { template } = await railway(Q.template, { code: s.RAILWAY_TEMPLATE });
       if (!template) throw new Error(`Railway has no template with the code ${s.RAILWAY_TEMPLATE}. Run template again, or empty RAILWAY_TEMPLATE`);
-      // Passed through whole, as the Railway CLI does: only the values are filled in, from the template's defaults.
+      // Passed through whole, as the Railway CLI does: only the values are filled in, from the template's
+      // defaults. Railway keeps only references as defaults and drops plain values such as PORT (seen on the
+      // first real template), so those come from this deployment's own variables, as the variable step sets them.
       const config = template.serializedConfig ?? {};
+      const known = perService(variableSections(run));
       for (const service of Object.values(config.services ?? {})) {
-        for (const variable of Object.values(service?.variables ?? {})) {
-          if (variable && variable.value === undefined && variable.defaultValue) variable.value = variable.defaultValue;
+        for (const [key, variable] of Object.entries(service?.variables ?? {})) {
+          if (!variable || variable.value !== undefined) continue;
+          const value = variable.defaultValue || known[service.name]?.[key];
+          if (value) variable.value = value;
         }
       }
       const deploy = async (serializedConfig) => (await railway(Q.templateDeploy, { input: {

@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-11-02
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#115](https://github.com/devresponse/lobbystack/pull/115) | Fix three bootstrap problems from its first real run: the Cloudflare zone is its domain name, GitHub's workflows are read before being turned on, and Railway's workspace ID is required and listed |  | `1ea637a` | [docs](../../devops/bootstrap.md) |
+
 ### 2026-11-01
 
 | PR | What changed | Migrations | Merge | More |

@@ -955,7 +955,7 @@ const Q = {
   projectCreate: "mutation projectCreate($input: ProjectCreateInput!) { projectCreate(input: $input) { id name } }",
   project: "query project($id: String!) { project(id: $id) { id name services { edges { node { id name } } } environments { edges { node { id name } } } volumes { edges { node { id name volumeInstances { edges { node { mountPath serviceId environmentId } } } } } } buckets { edges { node { id name } } } } }",
   workspaces: "query workspaces { me { workspaces { id name } } }",
-  projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name } } } }",
+  projects: "query projects($workspaceId: String) { projects(workspaceId: $workspaceId) { edges { node { id name deletedAt } } } }",
   domains: "query domains($projectId: String!, $environmentId: String!, $serviceId: String!) { domains(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId) { serviceDomains { id domain targetPort } customDomains { id domain status { verified verificationDnsHost verificationToken dnsRecords { recordType fqdn requiredValue } } } } }",
   readVariables: "query variables($projectId: String!, $environmentId: String!, $serviceId: String!) { variables(projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId, unrendered: true) }",
   serviceCreate: "mutation serviceCreate($input: ServiceCreateInput!) { serviceCreate(input: $input) { id name } }",
@@ -1022,7 +1022,8 @@ async function findProject(run) {
   if (v(run, "RAILWAY_PROJECT_ID")) return v(run, "RAILWAY_PROJECT_ID");
   const s = run.settings;
   const { projects } = await railway(Q.projects, s.RAILWAY_WORKSPACE_ID ? { workspaceId: s.RAILWAY_WORKSPACE_ID } : {});
-  const matches = projects.edges.map(({ node }) => node).filter((project) => project.name === s.NAME);
+  // A deleted project stays listed until Railway removes it for good, days later: never reuse one.
+  const matches = projects.edges.map(({ node }) => node).filter((project) => project.name === s.NAME && !project.deletedAt);
   if (matches.length > 1) throw new Error(`Railway has ${matches.length} projects named ${s.NAME}. Delete or rename the extra ones, then run again`);
   return matches[0]?.id ?? null;
 }
@@ -1605,6 +1606,12 @@ function redo(run, wanted) {
   for (const id of matches) {
     delete run.state.done[id];
     console.log(`  ${id}: runs again next time`);
+  }
+  // Redoing the project step means a new project, such as after deleting the old one in Railway:
+  // forget the old project's IDs and address too, or the next steps would keep using them.
+  if (matches.includes("railway.project")) {
+    for (const key of ["RAILWAY_PROJECT_ID", "RAILWAY_ENVIRONMENT_ID", "RAILWAY_SERVICE_IDS", "RAILWAY_HOST", "APP_HOST"]) delete run.state.values[key];
+    console.log("  forgot the Railway project's IDs and address, so up finds or makes the project again");
   }
   save(run);
   console.log(`\nNow run the command that made ${matches.length === 1 ? "it" : "them"} again (up, or connect for connect.* steps). What exists is found and reused or updated, not made twice.`);

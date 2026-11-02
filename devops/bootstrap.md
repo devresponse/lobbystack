@@ -179,6 +179,15 @@ node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
 
 `redo` takes several names, or a group such as `twilio.*`. Steps named `connect.*` run again with `connect`.
 
+To move an environment to a new Railway project, for example after deleting its project in Railway to rebuild it from a template, redo the Railway part and keep the rest (the OpenAI project, Twilio, Resend, Polar and the 13 secrets):
+
+```sh
+node devops/bootstrap.mjs redo .env.bootstrap-realinfobot-test "railway.*" turnstile variables "deploy.*" "connect.*"
+node devops/bootstrap.mjs up .env.bootstrap-realinfobot-test
+```
+
+Redoing `railway.project` also forgets the old project's IDs and address. A project you deleted stays listed in Railway for a few days, but the script never reuses one that's being deleted. Add `railway.custom` and `twilio.tollfree` to the list if you use a custom domain or the toll-free number's texting address.
+
 ## When something goes wrong
 
 When a step fails, the script stops, names the step, and lists **What to try** for that failure: for example, which token was refused and what kind it must be, a network or proxy problem, a provider's status page, or a workaround for that step. Finished steps stay recorded, so fix the problem and run the same command again.

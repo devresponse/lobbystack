@@ -964,6 +964,7 @@ const Q = {
   templateGenerate: "mutation templateGenerate($input: TemplateGenerateInput!) { templateGenerate(input: $input) { id code name status } }",
   template: "query template($code: String!) { template(code: $code) { id code name serializedConfig } }",
   templateDeploy: "mutation templateDeployV2($input: TemplateDeployV2Input!) { templateDeployV2(input: $input) { projectId workflowId } }",
+  triggerCreate: "mutation deploymentTriggerCreate($input: DeploymentTriggerCreateInput!) { deploymentTriggerCreate(input: $input) { id } }",
   workflowStatus: "query workflowStatus($workflowId: String!) { workflowStatus(workflowId: $workflowId) { status error } }",
 };
 
@@ -1218,7 +1219,36 @@ async function makeTemplate(run) {
     }
   });
   await step(trun, "template.generate", `A private template of ${name}`, async () => {
-    const { templateGenerate } = await railway(Q.templateGenerate, { input: { projectId: v(trun, "RAILWAY_PROJECT_ID"), environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID") } });
+    const where = { projectId: v(trun, "RAILWAY_PROJECT_ID"), environmentId: v(trun, "RAILWAY_ENVIRONMENT_ID") };
+    const ids = v(trun, "RAILWAY_SERVICE_IDS");
+    const generate = async () => (await railway(Q.templateGenerate, { input: where })).templateGenerate;
+    const noSource = (error) => /source/i.test(error.message);
+    // Railway wants each code service linked to a repository and branch, not only its source setting
+    // (seen on the first real run). Link them without a build first; connect them only if that isn't enough.
+    const links = [
+      ["linked to", (service) => railway(Q.triggerCreate, { input: { ...where, serviceId: ids[service], provider: "github", repository: s.REPO, branch: s.BRANCH, rootDirectory: "/" } })],
+      ["connected to", (service) => railway(Q.connect, { id: ids[service], input: { repo: s.REPO, branch: s.BRANCH } })],
+    ];
+    let templateGenerate;
+    for (let attempt = 0; !templateGenerate; attempt += 1) {
+      try {
+        templateGenerate = await generate();
+      } catch (error) {
+        if (!noSource(error) || attempt >= links.length) throw error;
+        const [verb, link] = links[attempt];
+        console.log(`  Railway: ${String(error.message).split("\n")[0].replace(/^Railway refused templateGenerate: /, "")}`);
+        if (verb === "connected to") console.log("  Connecting starts builds here, which fail without the secrets: that's expected in this project.");
+        for (const service of ["migrate", "admin", "worker"]) {
+          try {
+            await link(service);
+            console.log(`  ${service}: ${verb} ${s.REPO}@${s.BRANCH}`);
+          } catch (linkError) {
+            if (verb === "connected to") throw linkError;
+            console.log(`  ${service}: couldn't link it (${String(linkError.message).split("\n")[0]})`);
+          }
+        }
+      }
+    }
     if (!templateGenerate?.code) throw new Error("Railway made no template");
     console.log(`  made ${templateGenerate.name ?? "the template"} (${templateGenerate.status ?? "draft"}), code ${templateGenerate.code}`);
     return { TEMPLATE_CODE: templateGenerate.code };

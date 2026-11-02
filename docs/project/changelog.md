@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#117](https://github.com/devresponse/lobbystack/pull/117) | Give the bootstrap template project's code services a source before Railway makes the template, and deploy a template without them |  | `562f532` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#116](https://github.com/devresponse/lobbystack/pull/116) | Let the bootstrap script make a private Railway template of the layout (`template`) and deploy it (`RAILWAY_TEMPLATE`) |  | `993b35e` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#115](https://github.com/devresponse/lobbystack/pull/115) | Fix three bootstrap problems from its first real run: the Cloudflare zone is its domain name, GitHub's workflows are read before being turned on, and Railway's workspace ID is required and listed |  | `1ea637a` | [docs](../../devops/bootstrap.md) |
 

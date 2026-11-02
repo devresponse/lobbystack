@@ -66,6 +66,7 @@ This writes `.env.bootstrap-realinfobot-test` and `.env.bootstrap-realinfobot-te
 | `STEP_GITHUB` ... `STEP_TURNSTILE` | `yes` | `no` skips that service's API. The script then takes its values from the secrets file, or asks you for them |
 | `RAILWAY_TEMPLATE` | the code `template` printed | Optional. With it, `up` makes the services, volumes and settings from your private template in one call; empty, it makes them one by one. See [A private Railway template](#optional-a-private-railway-template) |
 | `TEMPLATE_PROJECT` | `lobbystack-template` | Optional, used only by `template`: the Railway project the template is made from. It must differ from `NAME` |
+| `TEMPLATE_REPO` | `devresponse/lobbystack` | Optional, used only by `template`: the repository the template project's code services point at, if not `REPO`. Railway's GitHub access must reach it. `up` connects each deployment to its own `REPO` either way |
 
 ## 2. Put your keys in the secrets file
 
@@ -130,7 +131,7 @@ node devops/bootstrap.mjs template .env.bootstrap-realinfobot-test
 ```
 
 1. It makes a Railway project named `TEMPLATE_PROJECT` (default `lobbystack-template`) in `RAILWAY_WORKSPACE_ID`, with the same Railway steps as `up`: the five services, both volumes, the bucket, the settings and migrate's pre-deploy command. It never touches the project named in `NAME`.
-2. It gives migrate, admin and worker `REPO` as their source, because Railway makes a template only of services that have one (an image or a repository). It sets the source as a setting, which doesn't start a build. The first real run showed that Railway also wants each one linked to a repository and branch, so if Railway still refuses the template, the script links them to `REPO@BRANCH` (a deployment trigger, which shouldn't build either) and asks again. If that isn't enough, it connects them, which starts builds there that fail without the secrets; that's expected in this project.
+2. It gives migrate, admin and worker `TEMPLATE_REPO` (or `REPO`) as their source, because Railway makes a template only of services that have one (an image or a repository). It sets the source as a setting, which doesn't start a build. The first real run showed that Railway also wants each one linked to a repository and branch, so if Railway still refuses the template, the script links them to that repository's `BRANCH` (a deployment trigger, which shouldn't build either) and asks again. Linking needs Railway's GitHub app to reach the repository; if it can't, the script stops and says so. If that isn't enough, it connects them, which starts builds there that fail without the secrets; that's expected in this project.
 3. It sets only the variables that are the same in every deployment: references between services such as `${{Postgres.LOBBYSTACK_APP_PASSWORD}}`, ports and file paths. No key, password, address, brand, sender or Polar value goes in.
 4. It asks Railway to make a template of that project (`templateGenerate`), saves what Railway put in it to `.env.bootstrap-<name>.template.json`, and lists it: each service's source and variables, and whether it holds the volumes, the bucket, the pre-deploy command and start commands.
 5. It prints `RAILWAY_TEMPLATE=<code>`. Put that line in each settings file that should use the template.
@@ -197,6 +198,7 @@ Each run of `up`, `connect`, `doctor` or `redo` is also written to `.env.bootstr
 | Stopped at `railway.domain` | Railway may not give an address before the admin's first deploy: run `up` again after it has deployed once |
 | Stopped at `connect.health` | The admin isn't ready yet. Check its deployment logs in Railway, then run `connect` again |
 | `Service admin does not have a source that can be used to generate a template` | The script predates the steps that link the code services to the repository: pull the latest script and run `template` again. It carries on from the steps already done |
+| `Railway's GitHub access can't reach <repo>` | Railway links a service only to a repository its GitHub app reaches for someone in your workspace. Add the repository to Railway's GitHub app (GitHub: Settings, Applications, Railway, Configure), or set `TEMPLATE_REPO` to one it reaches, such as your own fork, then run `template` again |
 | `no valid value given` | The script needed a value and got none: put it in the secrets file, or run in a terminal where you can type |
 
 Ctrl+C stops at once; the finished steps stay recorded.

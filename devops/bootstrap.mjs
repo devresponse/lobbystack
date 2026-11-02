@@ -95,8 +95,11 @@ RAILWAY_WORKSPACE_ID=
 # With it, up makes the services, volumes and settings from the template in one call, instead
 # of one by one. Empty: one by one. TEMPLATE_PROJECT names the project the template command
 # builds the template from (default lobbystack-template); it holds no keys or passwords.
+# TEMPLATE_REPO: the repository that project's code services point at, if not REPO. Railway's
+# GitHub access must reach it. up connects each deployment to its own REPO either way.
 RAILWAY_TEMPLATE=
 TEMPLATE_PROJECT=
+TEMPLATE_REPO=
 # The bucket's region, which never changes: sjc, iad, ams or sin.
 BUCKET_REGION=iad
 # Optional: the dashboard's own address, such as test.example.com. Empty: Railway's free address.
@@ -331,6 +334,7 @@ function loadRun(file) {
   if (!["sjc", "iad", "ams", "sin"].includes(s.BUCKET_REGION)) problems.push("BUCKET_REGION is sjc, iad, ams or sin");
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
+  if (s.TEMPLATE_REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.TEMPLATE_REPO)) problems.push("TEMPLATE_REPO is owner/name");
   if (s.CUSTOM_HOST && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CUSTOM_HOST)) problems.push("CUSTOM_HOST is a host name only, such as test.example.com");
   if (s.CLOUDFLARE_ZONE && /^[0-9a-f]{32}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is the zone's domain name, such as example.com, not its Zone ID");
   else if (s.CLOUDFLARE_ZONE && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(s.CLOUDFLARE_ZONE)) problems.push("CLOUDFLARE_ZONE is a domain name only, such as example.com");
@@ -1177,7 +1181,8 @@ const NOT_IN_TEMPLATE = new Set(["DEPLOYMENT_MODE", "BRAND_PRESET", "EMAIL_FROM"
  * makes a private template of it. No secret, key or per-deployment value goes in: up sets those.
  */
 async function makeTemplate(run) {
-  const s = run.settings;
+  // The template project's code services point at TEMPLATE_REPO, which Railway's GitHub access must reach.
+  const s = { ...run.settings, REPO: run.settings.TEMPLATE_REPO || run.settings.REPO };
   const name = s.TEMPLATE_PROJECT || "lobbystack-template";
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("TEMPLATE_PROJECT is a short name in lower case, such as lobbystack-template");
   if (name === s.NAME) throw new Error("TEMPLATE_PROJECT must differ from NAME: the template is made from a project of its own");
@@ -1226,7 +1231,10 @@ async function makeTemplate(run) {
     // Railway wants each code service linked to a repository and branch, not only its source setting
     // (seen on the first real run). Link them without a build first; connect them only if that isn't enough.
     const links = [
-      ["linked to", (service) => railway(Q.triggerCreate, { input: { ...where, serviceId: ids[service], provider: "github", repository: s.REPO, branch: s.BRANCH, rootDirectory: "/" } })],
+      ["linked to", async (service) => {
+        await railway(Q.instanceUpdate, { serviceId: ids[service], environmentId: where.environmentId, input: { source: { repo: s.REPO } } });
+        await railway(Q.triggerCreate, { input: { ...where, serviceId: ids[service], provider: "github", repository: s.REPO, branch: s.BRANCH, rootDirectory: "/" } });
+      }],
       ["connected to", (service) => railway(Q.connect, { id: ids[service], input: { repo: s.REPO, branch: s.BRANCH } })],
     ];
     let templateGenerate;
@@ -1244,6 +1252,8 @@ async function makeTemplate(run) {
             console.log(`  ${service}: ${verb} ${s.REPO}@${s.BRANCH}`);
           } catch (linkError) {
             if (verb === "connected to") throw linkError;
+            // Connecting wouldn't help: Railway builds a public repository it can't link, but makes no template of it.
+            if (/access/i.test(linkError.message)) throw new Error(`Railway's GitHub access can't reach ${s.REPO} (${String(linkError.message).split("\n")[0]}). Add that repository to Railway's GitHub app (GitHub: Settings, Applications, Railway, Configure) for an account linked to your Railway workspace, or set TEMPLATE_REPO to a repository it reaches, then run template again`);
             console.log(`  ${service}: couldn't link it (${String(linkError.message).split("\n")[0]})`);
           }
         }

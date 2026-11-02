@@ -972,6 +972,7 @@ const Q = {
   workflowStatus: "query workflowStatus($workflowId: String!) { workflowStatus(workflowId: $workflowId) { status error } }",
   instance: "query serviceInstance($serviceId: String!, $environmentId: String!) { serviceInstance(serviceId: $serviceId, environmentId: $environmentId) { id } }",
   deployService: "mutation serviceInstanceDeployV2($serviceId: String!, $environmentId: String!) { serviceInstanceDeployV2(serviceId: $serviceId, environmentId: $environmentId) }",
+  deploymentRemove: "mutation deploymentRemove($id: String!) { deploymentRemove(id: $id) }",
   deployments: "query deployments($input: DeploymentListInput!) { deployments(first: 1, input: $input) { edges { node { id status } } } }",
 };
 
@@ -1134,6 +1135,10 @@ async function railwaySteps(run) {
     return { RAILWAY_ENVIRONMENT_ID: environmentId };
   });
   if (s.RAILWAY_TEMPLATE && !run.template) {
+    // The template deploy starts Postgres and Redis at once, so their passwords must be in it: without one,
+    // Postgres refuses to start and restarts, and on the first real run such a restart overlapped the next
+    // deployment on the same volume and shut it down. So the secrets are settled before the template.
+    await secretsStep(run);
     await step(run, "railway.template", `The services, volumes and settings from the template ${s.RAILWAY_TEMPLATE}`, async () => {
       const view = await projectView(run);
       if (SERVICES.some((service) => view.services[service.name])) return console.log("  = the project has its services already, so the template isn't deployed again");
@@ -1149,6 +1154,11 @@ async function railwaySteps(run) {
           if (!variable || variable.value !== undefined) continue;
           const value = variable.defaultValue || known[service.name]?.[key];
           if (value) variable.value = value;
+        }
+        // The template holds no secrets, so the databases' passwords are added here (see secretsStep above).
+        if (service?.name === "Postgres" || service?.name === "Redis") {
+          service.variables ??= {};
+          for (const [key, value] of Object.entries(known[service.name] ?? {})) if (value && !service.variables[key]) service.variables[key] = { value, isOptional: true };
         }
       }
       const deploy = async (serializedConfig) => (await railway(Q.templateDeploy, { input: {
@@ -1521,7 +1531,12 @@ function perService(sections) {
   return services;
 }
 
-async function variableSteps(run) {
+const secretsListed = new WeakSet();
+
+async function secretsStep(run) {
+  // With a template it runs before the Railway steps; a dry run lists it once.
+  if (dryRun && secretsListed.has(run)) return;
+  secretsListed.add(run);
   // Kept, given, or already on Railway (a lost state file must never change the database's passwords), else new.
   const holder = (key) => (key.startsWith("POSTGRES_") || key.startsWith("LOBBYSTACK_") ? "Postgres" : key === "REDIS_PASSWORD" ? "Redis" : "admin");
   await step(run, "secrets", "The 13 passwords and secrets (64 hex characters each)", async () => {
@@ -1529,6 +1544,10 @@ async function variableSteps(run) {
     for (const key of SECRETS) values[key] = run.state.values[key] ?? fromFile(key) ?? (await railwayVariable(run, holder(key), key)) ?? randomBytes(32).toString("hex");
     return values;
   });
+}
+
+async function variableSteps(run) {
+  await secretsStep(run);
   await step(run, "variables", "Every service's variables (guide Appendix A), without deploying yet", async () => {
     const sections = variableSections(run);
     const missing = sections.flatMap(([section, variables]) => Object.entries(variables).filter(([, value]) => !value).map(([key]) => `${key} (${section})`));
@@ -1565,6 +1584,13 @@ async function deploySteps(run) {
   await step(run, "deploy.databases", "Deploy Postgres and Redis with their passwords", async () => {
     try {
       for (const service of ["Postgres", "Redis"]) {
+        // A deployment that isn't running, such as one that started without its password, is removed first:
+        // its restarts must not overlap the new deployment on the same volume.
+        const previous = await latestDeployment(run, ids()[service]);
+        if (previous && previous.status !== "SUCCESS" && previous.status !== "REMOVED") {
+          await railway(Q.deploymentRemove, { id: previous.id });
+          console.log(`  ${service}: removed its ${previous.status.toLowerCase()} deployment first`);
+        }
         const id = (await railway(Q.deployService, { serviceId: ids()[service], environmentId: environmentId() })).serviceInstanceDeployV2;
         console.log(`  ${service}: deploying`);
         await waitForDeployment(run, service, ids()[service], typeof id === "string" && id ? { id } : {});

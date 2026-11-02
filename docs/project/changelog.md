@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#122](https://github.com/devresponse/lobbystack/pull/122) | Wait for Railway to finish applying a template, deploy Postgres and Redis through the API, and wait for migrate to pass |  | `60de5d1` | [docs](../../devops/bootstrap.md#4-set-it-up) |
 | [#121](https://github.com/devresponse/lobbystack/pull/121) | Deploy a Railway template again with the code services' source when Railway accepts the deploy and then fails it |  | `2b9e60f` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |
 | [#120](https://github.com/devresponse/lobbystack/pull/120) | Fill the plain values Railway drops from a template before `up` deploys it, never reuse a Railway project that's being deleted, and forget the old project when its steps are redone |  | `27205df` | [docs](../../devops/bootstrap.md#running-it-again-is-safe) |
 | [#119](https://github.com/devresponse/lobbystack/pull/119) | Add `TEMPLATE_REPO`, so the bootstrap template can come from a repository Railway's GitHub access reaches, and stop with what to do when it can't |  | `8593e6e` | [docs](../../devops/bootstrap.md#optional-a-private-railway-template) |

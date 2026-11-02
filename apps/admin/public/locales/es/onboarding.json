@@ -69,7 +69,7 @@
     "submitFailed": "No pudimos guardar ese negocio en este momento. Inténtelo de nuevo."
   },
   "website": {
-    "title": "Ahora entrenemos a {{appName}} con su sitio web",
+    "title": "¿Cuál es el sitio web de su negocio?",
     "description": "",
     "label": "Sitio web",
     "placeholder": "suempresa.com",

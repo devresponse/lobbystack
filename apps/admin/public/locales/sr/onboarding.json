@@ -69,7 +69,7 @@
     "submitFailed": "Trenutno ne možemo da sačuvamo firmu. Pokušajte ponovo."
   },
   "website": {
-    "title": "Sada ćemo obučiti {{appName}} pomoću Vašeg sajta",
+    "title": "Koji je sajt Vaše firme?",
     "description": "",
     "label": "Sajt",
     "placeholder": "mojafirma.rs",

@@ -11,7 +11,7 @@ Until fork PR #127, **Continue** on onboarding's website step read a sample of 1
 - **Reading a sample and saving the website:** `POST /api/knowledge` with `onboarding: true` reads 10 pages and saves the address as the business's website (`createKnowledgeDocumentInTransaction` in `packages/domain/src/server/knowledge.ts`). Until fork PR #127 the website step sent it; nothing in the dashboard does now.
 - **Showing the progress:** `WebsiteImportProgress` (`apps/admin/src/components/website-import-progress.tsx`), which the documents and greeting steps and the dashboard's activation card show while a website is being read.
 - **Reading the rest:** **Getting started** > **Read the rest of your site**, which reads a sampled site in full, up to 50 pages, as the API's `POST /knowledge/sources/{source_id}/expand` does.
-- **The step as it read the site,** in git history at `99ab598`, before fork PRs #126 and #127: `apps/admin/src/components/onboarding-website-surface.tsx` and its test, and the "Starting import..." wording in each `apps/admin/public/locales/<language>/onboarding.json`.
+- **The step as it read the site,** in git history at `99ab598`, before fork PRs #126 and #127: `apps/admin/src/components/onboarding-website-surface.tsx` and its test, and in each `apps/admin/public/locales/<language>/onboarding.json` the "Starting import..." button and the title "Now let's train {{appName}} on your website", which fork PR #128 changed to "What is your business's website?" since nothing reads the site now. An option that reads it could bring that title back.
 
 ## Choose where it goes
 
@@ -26,4 +26,3 @@ Until fork PR #127, **Continue** on onboarding's website step read a sample of 1
 - Where should it go: a choice on the step, a deployment setting, or only after onboarding?
 - If it's a choice on the step, should the box start ticked?
 - Should **Getting started** offer to read a website that was saved but never read, instead of showing **Read the rest of your site** ticked from the start?
-- The step's title still says "Now let's train <app name> on your website", though nothing reads the site during onboarding now. Keep it, or say something like "What's your business's website?" until the option exists?

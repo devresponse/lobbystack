@@ -69,7 +69,7 @@
     "submitFailed": "Impossible d'enregistrer cette entreprise pour le moment. Réessayez."
   },
   "website": {
-    "title": "Entraînons {{appName}} avec votre site web",
+    "title": "Quel est le site web de votre entreprise ?",
     "description": "",
     "label": "Site web",
     "placeholder": "votreentreprise.com",

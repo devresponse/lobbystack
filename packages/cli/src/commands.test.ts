@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import { writeConfig } from "./config";
 import { exitCodes } from "./errors";
 import { BUSINESS, KEY, fakeApi, runCli, tempDir } from "./testing";
+import { version } from "./version";
 
 const week = [
   { day: "monday", open: "09:00", close: "17:00" },
@@ -268,6 +269,86 @@ describe("knowledge search", () => {
     expect(run.out).toContain("The search was unavailable after 212 ms.\nTerms: parking, fees\nThe keyword search failed: statement_timeout.\nThe semantic search failed: embedding_timeout.");
     expect(run.out).toContain("The receptionist's model gets 0 matches.");
     expect(run.out).not.toContain("On a call");
+  });
+
+  it("saves each answer in --log-dir as a file of its own, with the request but not the key, and the API's answer as it came", async () => {
+    const dir = await tempDir();
+    try {
+      const folder = join(dir.path, "runs", "before");
+      const question = "Où se garer, et à quel prix ?";
+      const api = fakeApi({ "POST /api/v1/knowledge/search": { body: { data: result } } });
+      const run = await runCli(["knowledge", "search", question, "--log-dir", folder], { fetch: api.fetch });
+      expect(run.code).toBe(exitCodes.ok);
+      const [name, ...others] = (await readdir(folder)).sort();
+      expect(others).toEqual([]);
+      expect(name).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-où-se-garer-et-à-quel-prix\.json$/);
+      expect(run.out).toContain("Found 1 passage in 212 ms");
+      expect(run.out.endsWith(`\n\nSaved to ${join(folder, name!)}`)).toBe(true);
+      const text = await readFile(join(folder, name!), "utf8");
+      expect(text).not.toContain(KEY);
+      const saved = JSON.parse(text) as { requested_at: string };
+      expect(saved).toEqual({
+        requested_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+        cli_version: version,
+        request: { method: "POST", url: "https://app.example.com/api/v1/knowledge/search", business_id: BUSINESS, body: { query: question } },
+        response: { data: result },
+      });
+      expect(name!.startsWith(saved.requested_at.replace(/[:.]/g, "-"))).toBe(true);
+      // The same question again gets a file of its own, and the first stays as it was.
+      expect((await runCli(["knowledge", "search", question, "--log-dir", folder], { fetch: api.fetch })).code).toBe(exitCodes.ok);
+      expect(await readdir(folder)).toHaveLength(2);
+      expect(await readFile(join(folder, name!), "utf8")).toBe(text);
+    } finally {
+      await dir.remove();
+    }
+  });
+
+  it("saves every search in LOBBYSTACK_KNOWLEDGE_LOG_DIR without the flag, and --json still prints only the answer", async () => {
+    const dir = await tempDir();
+    try {
+      const session = join(dir.path, "session");
+      const env = { LOBBYSTACK_KNOWLEDGE_LOG_DIR: session };
+      const api = fakeApi({ "POST /api/v1/knowledge/search": { body: { data: result } } });
+      const run = await runCli(["knowledge", "search", "parking fees", "--json"], { fetch: api.fetch, env });
+      expect(run).toMatchObject({ code: exitCodes.ok, err: "" });
+      expect(JSON.parse(run.out)).toEqual(result);
+      const [name] = await readdir(session);
+      expect(name).toMatch(/Z-parking-fees\.json$/);
+      expect(JSON.parse(await readFile(join(session, name!), "utf8"))).toMatchObject({ response: { data: result } });
+      // The flag wins over the variable, and an empty one saves nothing.
+      expect((await runCli(["knowledge", "search", "parking fees", "--log-dir", join(dir.path, "flag")], { fetch: api.fetch, env })).code).toBe(exitCodes.ok);
+      expect(await readdir(join(dir.path, "flag"))).toHaveLength(1);
+      const unsaved = await runCli(["knowledge", "search", "parking fees", "--log-dir", ""], { fetch: api.fetch, env });
+      expect(unsaved.code).toBe(exitCodes.ok);
+      expect(unsaved.out).not.toContain("Saved to");
+      expect(await readdir(session)).toHaveLength(1);
+    } finally {
+      await dir.remove();
+    }
+  });
+
+  it("saves a failed search with the API's error, and searches nothing when the folder can't be made", async () => {
+    const dir = await tempDir();
+    try {
+      const limited = fakeApi({ "POST /api/v1/knowledge/search": { status: 429, body: { error: { code: "rate_limited", message: "Too many requests. Try again in a minute." } } } });
+      const run = await runCli(["knowledge", "search", "parking fees", "--log-dir", dir.path], { fetch: limited.fetch });
+      expect(run).toMatchObject({ code: exitCodes.failed, err: "Too many requests. Try again in a minute." });
+      const [name] = await readdir(dir.path);
+      const saved = JSON.parse(await readFile(join(dir.path, name!), "utf8")) as Record<string, unknown>;
+      expect(saved).toMatchObject({ request: { body: { query: "parking fees" } }, error: { message: "Too many requests. Try again in a minute.", exit_code: exitCodes.failed, status: 429, code: "rate_limited", details: [] } });
+      expect(saved).not.toHaveProperty("response");
+
+      // A file where the folder should be stops the command before the search is sent.
+      const taken = join(dir.path, "taken");
+      await writeFile(taken, "a file, not a folder");
+      const api = fakeApi({ "POST /api/v1/knowledge/search": { body: { data: result } } });
+      expect(await runCli(["knowledge", "search", "parking fees", "--log-dir", taken], { fetch: api.fetch })).toMatchObject({ code: exitCodes.invalid, err: expect.stringContaining(`Couldn't make ${taken}, which --log-dir names, to save the search in:`) });
+      expect(await runCli(["knowledge", "search", "parking fees"], { fetch: api.fetch, env: { LOBBYSTACK_KNOWLEDGE_LOG_DIR: taken } })).toMatchObject({ code: exitCodes.invalid, err: expect.stringContaining("which LOBBYSTACK_KNOWLEDGE_LOG_DIR names") });
+      expect(api.sent).toHaveLength(0);
+      expect(await runCli(["knowledge", "search", " "], { fetch: api.fetch })).toMatchObject({ code: exitCodes.invalid, err: "Usage: lobbystack knowledge search <query> [--log-dir <folder>]" });
+    } finally {
+      await dir.remove();
+    }
   });
 });
 

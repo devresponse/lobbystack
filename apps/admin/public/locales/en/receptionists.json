@@ -200,7 +200,7 @@
   },
   "pageList": {
     "title": "Receptionists on your page",
-    "description": "Visitors pick from these under “Choose who to talk to”. The others open only from their own links, widget keys and page addresses. Changes here save as you make them.",
+    "description": "Visitors pick from these under “You're talking to”. The others open only from their own links, widget keys and page addresses. Changes here save as you make them.",
     "listed": "Listed",
     "chosen_one": "{{count}} chosen",
     "chosen_other": "{{count}} chosen",

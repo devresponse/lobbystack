@@ -125,7 +125,7 @@ export function ScansChart({ scans, className }: { scans: RecentScans; className
             <div
               aria-hidden="true"
               className={cn(
-                "pointer-events-none absolute -top-7 whitespace-nowrap rounded-md bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm ring-1 ring-foreground/10",
+                "pointer-events-none absolute -top-7 whitespace-nowrap rounded-md border border-border bg-popover px-2 py-1 text-xs text-popover-foreground shadow-sm",
                 pointed! < 4 ? "translate-x-0" : pointed! > days.length - 5 ? "-translate-x-full" : "-translate-x-1/2",
               )}
               style={{ left: `${((pointed! + (pointed! < 4 ? 0 : pointed! > days.length - 5 ? 1 : 0.5)) / days.length) * 100}%` }}

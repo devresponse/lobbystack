@@ -6,9 +6,9 @@ import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/l
 export const dynamic = "force-dynamic";
 
 /**
- * Sets which receptionists the business page lists under "Who would you
- * like to talk to?" from receptionistIds, in one step: those and no other
- * besides the default, which always stays. Gives the pickers' list back.
+ * Sets which receptionists the business page lists under "You're talking
+ * to" from receptionistIds, in one step: those and no other besides the
+ * default, which always stays. Gives the pickers' list back.
  * Owners and admins.
  */
 export async function PUT(request: Request) {

@@ -411,7 +411,7 @@ describe("the order", () => {
     expect(screen.queryByRole("button", { name: /^Move / })).toBeNull();
   });
 
-  it("sorts A–Z after a confirmation, the default first", async () => {
+  it("sorts A–Z after a confirmation, which keeps them in name order from then on", async () => {
     const api = fakeApi();
     await openPage();
     await screen.findByText("Kitsilano clinic");
@@ -420,7 +420,20 @@ describe("the order", () => {
     expect(within(confirm).getByText("Sort receptionists A–Z?")).toBeTruthy();
     await userEvent.click(within(confirm).getByRole("button", { name: "Sort A–Z" }));
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Receptionists sorted A–Z."));
-    expect(api.requests("PUT", "/api/receptionists/order")[0]!.body).toEqual({ receptionistIds: [FRONT_DESK.id, BILLING.id, GASTOWN.id, KITSILANO.id] });
+    // The server sorts, the default first, and keeps new and renamed ones in name order too.
+    expect(api.requests("PUT", "/api/receptionists/order").map((call) => call.body)).toEqual([{ order: "alphabetical" }]);
+  });
+
+  it("sends nothing when Sort A–Z is cancelled", async () => {
+    const api = fakeApi();
+    await openPage();
+    await screen.findByText("Kitsilano clinic");
+    await userEvent.click(screen.getByRole("button", { name: "Sort A–Z" }));
+    const confirm = await screen.findByRole("alertdialog");
+    await userEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(api.requests("PUT", "/api/receptionists/order")).toEqual([]);
+    expect(toast.success).not.toHaveBeenCalled();
   });
 });
 

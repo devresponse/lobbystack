@@ -20,7 +20,7 @@ import { receptionistErrorMessage } from "./receptionist-errors";
 import { ReceptionistMultiSelect } from "./receptionist-multi-select";
 
 // Settings → Public profile, "Receptionists on your page": which receptionists
-// the business page offers under "Choose who to talk to", and in what order.
+// the business page offers under "You're talking to", and in what order.
 // The default receptionist answers the page, so it is always there and
 // always first. Changes save as they're made, one after another, and show at
 // once; a refusal puts the list back as the server has it. Hidden while the

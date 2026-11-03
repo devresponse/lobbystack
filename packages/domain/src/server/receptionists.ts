@@ -632,8 +632,8 @@ export async function reorderReceptionistsInTransaction(tx: DatabaseTransaction,
 }
 
 /**
- * Sets which receptionists the business page lists under "Who would you like
- * to talk to?": receptionistIds' ones, and no other. The default receptionist
+ * Sets which receptionists the business page lists under "You're talking
+ * to": receptionistIds' ones, and no other. The default receptionist
  * answers the business page, so it stays listed whether named or not. An
  * unlisted receptionist still opens from its own links, widget keys and page
  * address. A 404 for a receptionist the business doesn't have or archived.

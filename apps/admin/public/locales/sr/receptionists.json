@@ -207,7 +207,7 @@
   },
   "pageList": {
     "title": "Recepcioneri na Vašoj stranici",
-    "description": "Posetioci biraju među njima pod „Izaberite s kim razgovarate“. Ostali se otvaraju samo preko svojih linkova, ključeva vidžeta i adresa stranica. Izmene koje ovde napravite čuvaju se odmah.",
+    "description": "Posetioci biraju među njima pod „Razgovarate sa“. Ostali se otvaraju samo preko svojih linkova, ključeva vidžeta i adresa stranica. Izmene koje ovde napravite čuvaju se odmah.",
     "listed": "Na stranici",
     "chosen_one": "{{count}} izabran",
     "chosen_few": "{{count}} izabrana",

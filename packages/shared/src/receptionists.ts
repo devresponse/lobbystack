@@ -234,7 +234,6 @@ export function receptionistAllowance(planIncluded: number | null | undefined, c
   return Math.max(1, Math.min(included, cap));
 }
 
-/** The language a receptionist's calls open in: its own when set and supported, else the business's. */
 /**
  * Compares receptionists' names as people read them in the business's
  * language: accents and case aside, numbers by value ("Store 2" before
@@ -270,6 +269,7 @@ export function isAlphabeticalReceptionistOrder(receptionists: readonly { id: st
   return alphabeticalReceptionistOrder(receptionists, locale).every((id, index) => receptionists[index]?.id === id);
 }
 
+/** The language a receptionist's calls open in: its own when set and supported, else the business's. */
 export function receptionistLocale(receptionistLocaleValue: string | null | undefined, businessLocale: RuntimeLocale): RuntimeLocale {
   return normalizeRuntimeLocale(receptionistLocaleValue) ?? businessLocale;
 }

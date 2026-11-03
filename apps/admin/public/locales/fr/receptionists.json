@@ -207,7 +207,7 @@
   },
   "pageList": {
     "title": "Réceptionnistes sur votre page",
-    "description": "Les visiteurs choisissent parmi elles sous « Choisir avec qui parler ». Les autres s’ouvrent seulement depuis leurs propres liens, clés de widget et adresses de page. Les changements faits ici sont enregistrés aussitôt.",
+    "description": "Les visiteurs choisissent parmi elles sous « Vous parlez avec ». Les autres s’ouvrent seulement depuis leurs propres liens, clés de widget et adresses de page. Les changements faits ici sont enregistrés aussitôt.",
     "listed": "Affichées",
     "chosen_one": "{{count}} choisie",
     "chosen_many": "{{count}} choisies",

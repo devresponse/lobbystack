@@ -207,7 +207,7 @@
   },
   "pageList": {
     "title": "Recepcionistas en su página",
-    "description": "Los visitantes eligen entre ellas en “Elige con quién hablar”. Las demás solo se abren desde sus propios enlaces, claves de widget y direcciones de página. Los cambios que haga aquí se guardan al momento.",
+    "description": "Los visitantes eligen entre ellas en “Estás hablando con”. Las demás solo se abren desde sus propios enlaces, claves de widget y direcciones de página. Los cambios que haga aquí se guardan al momento.",
     "listed": "En la página",
     "chosen_one": "{{count}} elegida",
     "chosen_many": "{{count}} elegidas",

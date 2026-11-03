@@ -213,6 +213,17 @@ export function readReceptionistOrder(value: unknown): string[] {
   return ids;
 }
 
+/** Reads the receptionists the business page lists besides the default: receptionist ids, once each, none at all allowed. */
+export function readListedReceptionists(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > MAX_RECEPTIONISTS_PER_REQUEST) throw failure("receptionistIds must list the receptionists the business page shows.", 400, "invalid_listed");
+  const ids = value.map((id) => {
+    if (!isUuid(id)) throw failure("receptionistIds must list receptionist ids.", 400, "invalid_listed");
+    return id.toLowerCase();
+  });
+  if (new Set(ids).size !== ids.length) throw failure("A receptionist appears twice.", 400, "invalid_listed");
+  return ids;
+}
+
 /**
  * Holds the business's receptionists until the transaction ends, so two adds,
  * or an add and a resume, can't both take the last place the plan allows, and
@@ -618,6 +629,35 @@ export async function reorderReceptionistsInTransaction(tx: DatabaseTransaction,
   }
   await writeOrder(tx, businessId, input.receptionistIds, known);
   await refreshSnapshotForReceptionists(tx, businessId, "receptionists_reordered");
+}
+
+/**
+ * Sets which receptionists the business page lists under "Who would you like
+ * to talk to?": receptionistIds' ones, and no other. The default receptionist
+ * answers the business page, so it stays listed whether named or not. An
+ * unlisted receptionist still opens from its own links, widget keys and page
+ * address. A 404 for a receptionist the business doesn't have or archived.
+ */
+export async function setListedReceptionistsInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; actorUserId: string | null; receptionistIds: readonly string[] },
+): Promise<void> {
+  const { businessId } = input;
+  await lockReceptionistsInTransaction(tx, businessId);
+  const live = await tx.select({ id: receptionistProfiles.id, isDefault: receptionistProfiles.isDefault, listed: receptionistProfiles.listed }).from(receptionistProfiles)
+    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)));
+  const known = new Set(live.map((row) => row.id));
+  if (input.receptionistIds.some((id) => !known.has(id))) throw notFound();
+  const wanted = new Set(input.receptionistIds);
+  const changed = live.filter((row) => !row.isDefault && row.listed !== wanted.has(row.id));
+  if (!changed.length) return;
+  const now = new Date();
+  for (const row of changed) {
+    await tx.update(receptionistProfiles).set({ listed: !row.listed, updatedAt: now })
+      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, row.id)));
+    await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.updated", receptionistId: row.id, payload: { fields: ["listed"], listed: !row.listed } });
+  }
+  await refreshSnapshotForReceptionists(tx, businessId, "receptionists_listed");
 }
 
 /**

@@ -34,6 +34,7 @@ import {
   receptionistAllowanceInTransaction,
   reorderReceptionistsInTransaction,
   restoreReceptionistInTransaction,
+  setListedReceptionistsInTransaction,
   sortReceptionistsByNameInTransaction,
   setReceptionistStatusInTransaction,
   updateReceptionistInTransaction,
@@ -348,6 +349,37 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       const before = await stamps();
       await sortReceptionistsByNameInTransaction(tx, { businessId });
       expect(await stamps()).toEqual(before);
+    });
+  });
+
+  it("lists exactly the receptionists chosen on the business page, the default always", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const main = (await loadReceptionistView(tx, { businessId }))!;
+      const sales = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Sales" } });
+      const support = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Support", listed: false } });
+      const repairs = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Repairs" } });
+      const listed = async () => (await listReceptionistChoicesInTransaction(tx, { businessId })).filter((choice) => choice.listed).map((choice) => choice.name);
+      expect(await listed()).toEqual(["Front desk", "Repairs", "Sales"]);
+
+      await setListedReceptionistsInTransaction(tx, { businessId, actorUserId: userId, receptionistIds: [support.id, sales.id] });
+      expect(await listed()).toEqual(["Front desk", "Sales", "Support"]);
+      const events = await tx.select({ entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs)
+        .where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.updated")));
+      expect(events.map((event) => [event.entityId, event.payload])).toEqual(expect.arrayContaining([[support.id, { fields: ["listed"], listed: true }], [repairs.id, { fields: ["listed"], listed: false }]]));
+      expect(events).toHaveLength(2);
+
+      // None besides the default: the page then offers no choice. Naming the default changes nothing.
+      await setListedReceptionistsInTransaction(tx, { businessId, actorUserId: userId, receptionistIds: [main.id] });
+      expect(await listed()).toEqual(["Front desk"]);
+
+      // An archived or unknown receptionist can't be listed, and nothing changes.
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: repairs.id });
+      expect(await failure(tx, (inner) => setListedReceptionistsInTransaction(inner, { businessId, actorUserId: userId, receptionistIds: [sales.id, repairs.id] }))).toMatchObject({ status: 404, code: "receptionist_not_found" });
+      expect(await failure(tx, (inner) => setListedReceptionistsInTransaction(inner, { businessId, actorUserId: userId, receptionistIds: [randomUUID()] }))).toMatchObject({ status: 404, code: "receptionist_not_found" });
+      expect(await listed()).toEqual(["Front desk"]);
     });
   });
 

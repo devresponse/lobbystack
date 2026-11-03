@@ -204,5 +204,23 @@
       "archived": "Esa recepcionista se archivó. Actualice la página y elija otra.",
       "gone": "Eso ya no existe. Actualice la página."
     }
+  },
+  "pageList": {
+    "title": "Recepcionistas en su página",
+    "description": "Los visitantes eligen entre ellas en “Elige con quién hablar”. Las demás solo se abren desde sus propios enlaces, claves de widget y direcciones de página. Los cambios que haga aquí se guardan al momento.",
+    "listed": "En la página",
+    "chosen_one": "{{count}} elegida",
+    "chosen_many": "{{count}} elegidas",
+    "chosen_other": "{{count}} elegidas",
+    "listedHint": "Una recepcionista en pausa no aparece en la página hasta que se reanude.",
+    "order": "Orden",
+    "alphabetical": "Alfabético",
+    "custom": "Personalizado",
+    "alphabeticalHint": "Por nombre, después de {{name}}. Una recepcionista que agregue toma su lugar por nombre.",
+    "customHint": "En el orden que usted elija. Una recepcionista que agregue va al final.",
+    "onPage": "Recepcionistas que los visitantes pueden elegir, en orden",
+    "alwaysFirst": "Siempre primero",
+    "paused": "En pausa, por eso no aparece en la página hasta que se reanude",
+    "noneListed": "Solo {{name}} está en la página, así que los visitantes no eligen."
   }
 }

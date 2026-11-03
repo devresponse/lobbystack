@@ -204,5 +204,23 @@
       "archived": "Cette réceptionniste a été archivée. Actualisez la page et choisissez-en une autre.",
       "gone": "Cet élément n'existe plus. Actualisez la page."
     }
+  },
+  "pageList": {
+    "title": "Réceptionnistes sur votre page",
+    "description": "Les visiteurs choisissent parmi elles sous « Choisir avec qui parler ». Les autres s’ouvrent seulement depuis leurs propres liens, clés de widget et adresses de page. Les changements faits ici sont enregistrés aussitôt.",
+    "listed": "Affichées",
+    "chosen_one": "{{count}} choisie",
+    "chosen_many": "{{count}} choisies",
+    "chosen_other": "{{count}} choisies",
+    "listedHint": "Une réceptionniste en pause n’est pas sur la page tant qu’elle n’a pas repris.",
+    "order": "Ordre",
+    "alphabetical": "Alphabétique",
+    "custom": "Personnalisé",
+    "alphabeticalHint": "Par nom, après {{name}}. Une réceptionniste que vous ajoutez prend sa place selon son nom.",
+    "customHint": "Dans l’ordre que vous choisissez. Une réceptionniste que vous ajoutez va à la fin.",
+    "onPage": "Réceptionnistes que les visiteurs peuvent choisir, dans l’ordre",
+    "alwaysFirst": "Toujours en premier",
+    "paused": "En pause, donc absente de la page jusqu’à ce qu’elle reprenne",
+    "noneListed": "Seule {{name}} est sur la page, donc les visiteurs n’ont pas à choisir."
   }
 }

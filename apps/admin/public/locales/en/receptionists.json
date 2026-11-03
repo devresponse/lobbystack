@@ -197,5 +197,22 @@
       "archived": "That receptionist was archived. Refresh the page and pick another one.",
       "gone": "That isn't there any more. Refresh the page."
     }
+  },
+  "pageList": {
+    "title": "Receptionists on your page",
+    "description": "Visitors pick from these under “Choose who to talk to”. The others open only from their own links, widget keys and page addresses. Changes here save as you make them.",
+    "listed": "Listed",
+    "chosen_one": "{{count}} chosen",
+    "chosen_other": "{{count}} chosen",
+    "listedHint": "A paused receptionist stays off the page until it resumes.",
+    "order": "Order",
+    "alphabetical": "Alphabetical",
+    "custom": "Custom",
+    "alphabeticalHint": "By name, after {{name}}. A receptionist you add takes its place by name.",
+    "customHint": "In the order you set. A receptionist you add goes last.",
+    "onPage": "Receptionists visitors can choose, in order",
+    "alwaysFirst": "Always first",
+    "paused": "Paused, so it's off the page until it resumes",
+    "noneListed": "Only {{name}} is on the page, so visitors don't choose."
   }
 }

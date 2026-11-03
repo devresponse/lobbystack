@@ -705,7 +705,9 @@ export async function makeDefaultReceptionistInTransaction(
   }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!shared) throw notFound();
   const now = new Date();
-  await tx.update(receptionistProfiles).set({ ...shared, updatedAt: now })
+  // The default speaks the business's language (AI settings offers it no
+  // language of its own), so the new default gives up the one it had.
+  await tx.update(receptionistProfiles).set({ ...shared, locale: null, updatedAt: now })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)));
   if (previous) {
     const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), await liveHandles(tx, businessId, previous.id));

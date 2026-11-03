@@ -105,7 +105,7 @@
   },
   "makeDefault": {
     "title": "Make {{name}} the default receptionist?",
-    "description": "It will answer the business page and anything that names no receptionist. {{current}} keeps its phone numbers, widgets and QR links, and gets a page of its own.",
+    "description": "It will answer the business page and anything that names no receptionist, in the business's language. {{current}} keeps its phone numbers, widgets and QR links, and gets a page of its own.",
     "confirm": "Make default"
   },
   "sort": {

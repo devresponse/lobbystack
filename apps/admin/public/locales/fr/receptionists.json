@@ -111,7 +111,7 @@
   },
   "makeDefault": {
     "title": "Faire de {{name}} la réceptionniste par défaut ?",
-    "description": "Elle répondra sur la page de l'entreprise et à tout ce qui ne nomme aucune réceptionniste. {{current}} garde ses numéros de téléphone, widgets et liens QR, et reçoit sa propre page.",
+    "description": "Elle répondra sur la page de l'entreprise et à tout ce qui ne nomme aucune réceptionniste, dans la langue de l'entreprise. {{current}} garde ses numéros de téléphone, widgets et liens QR, et reçoit sa propre page.",
     "confirm": "Définir par défaut"
   },
   "sort": {

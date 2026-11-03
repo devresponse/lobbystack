@@ -111,7 +111,7 @@
   },
   "makeDefault": {
     "title": "Postaviti recepcionera {{name}} kao podrazumevanog?",
-    "description": "Odgovaraće na stranici firme i na sve što ne navodi nijednog recepcionera. {{current}} zadržava svoje brojeve telefona, vidžete i QR linkove i dobija svoju stranicu.",
+    "description": "Odgovaraće na stranici firme i na sve što ne navodi nijednog recepcionera, na jeziku firme. {{current}} zadržava svoje brojeve telefona, vidžete i QR linkove i dobija svoju stranicu.",
     "confirm": "Postavi kao podrazumevanog"
   },
   "sort": {

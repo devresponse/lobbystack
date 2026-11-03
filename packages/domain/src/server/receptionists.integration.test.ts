@@ -403,18 +403,20 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       await asOwner(tx, { userId, businessId });
       await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { summary: "Coffee since 1999." } });
       const before = (await loadReceptionistView(tx, { businessId }))!;
-      const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Flagship", listed: false } });
+      const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Flagship", listed: false, locale: "fr" } });
+      expect(store.locale).toBe("fr");
       await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "paused" });
       expect(await failure(tx, (inner) => makeDefaultReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: store.id }))).toMatchObject({ status: 409, code: "receptionist_paused" });
       await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "active" });
 
       const made = await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id });
-      expect(made).toMatchObject({ id: store.id, isDefault: true, listed: true, summary: "Coffee since 1999." });
+      // It speaks the business's language from now on, as AI settings shows the default.
+      expect(made).toMatchObject({ id: store.id, isDefault: true, listed: true, summary: "Coffee since 1999.", locale: null });
       await as(tx, null);
       const previous = (await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.id, before.id)))[0];
       expect(previous).toMatchObject({ isDefault: false, handle: "front-desk" });
       // The new default's row holds the shared settings, and later saves keep both sides equal.
-      expect((await defaultRow(tx, businessId))).toMatchObject({ id: store.id, summary: "Coffee since 1999.", summarySource: "operator" });
+      expect((await defaultRow(tx, businessId))).toMatchObject({ id: store.id, summary: "Coffee since 1999.", summarySource: "operator", locale: null });
       await asOwner(tx, { userId, businessId });
       await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { recordingNotice: false } });
       await as(tx, null);

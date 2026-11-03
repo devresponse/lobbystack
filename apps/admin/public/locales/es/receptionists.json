@@ -111,7 +111,7 @@
   },
   "makeDefault": {
     "title": "¿Hacer de {{name}} la recepcionista predeterminada?",
-    "description": "Responderá en la página del negocio y en todo lo que no nombre a ninguna recepcionista. {{current}} conserva sus números de teléfono, widgets y enlaces QR, y recibe su propia página.",
+    "description": "Responderá en la página del negocio y en todo lo que no nombre a ninguna recepcionista, en el idioma del negocio. {{current}} conserva sus números de teléfono, widgets y enlaces QR, y recibe su propia página.",
     "confirm": "Hacer predeterminada"
   },
   "sort": {

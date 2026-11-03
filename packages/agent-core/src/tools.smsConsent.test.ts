@@ -4,8 +4,8 @@ import type { z } from "zod";
 
 vi.mock("@lobbystack/domain", async () => ({
   countKnowledgeTokens: (await import("../../domain/src/knowledgeRanking")).countKnowledgeTokens,
-  KNOWLEDGE_SEARCH_TOKEN_BUDGET: 3000,
-  knowledgeQueryTerms: (await import("../../domain/src/knowledgeRanking")).knowledgeQueryTerms,
+  knowledgeToolResult: (await import("../../domain/src/receptionistKnowledge")).knowledgeToolResult,
+  matchKnowledgeSnippets: (await import("../../domain/src/receptionistKnowledge")).matchKnowledgeSnippets,
   checkOpening: vi.fn(async () => ({ ok: true, serviceName: "General Checkup", available: true })),
   findCallerBooking: vi.fn(async () => undefined),
   findCallBooking: vi.fn(async () => undefined),

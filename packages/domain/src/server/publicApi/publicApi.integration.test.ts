@@ -5,17 +5,18 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
-import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT } from "../knowledge";
+import { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT, searchKnowledgeEvidence } from "../knowledge";
 import { defaultOperatorNotificationEventPreferences, getNotificationPreferences, setNotificationPreferences } from "../notifications";
 import { claimNumberProvisioning, completeNumberProvisioning } from "../phoneNumbers";
 import { acceptInvitation } from "../tenancy";
 import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
+import { searchKnowledgeForApi } from "./knowledgeSearch";
 import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
@@ -819,6 +820,75 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     await expectApiError(getKnowledgeSourceForApi(context, b.caller, page!.id), 404, "not_found");
     expect(await admin!.db.select({ id: knowledgeChunks.id }).from(knowledgeChunks).where(eq(knowledgeChunks.documentId, page!.id))).toEqual([]);
     expect(await admin!.db.select({ id: auditLogs.id }).from(auditLogs).where(and(eq(auditLogs.entityId, page!.id), eq(auditLogs.eventType, "api.knowledge_source.deleted")))).toHaveLength(1);
+  });
+
+  it("searches knowledge as the receptionist does, with each stage's scores read from the database", async () => {
+    // A business of its own, so no other test's knowledge ranks.
+    const search = await createFixture("search");
+    try {
+      // The query's embedding points one way. A chunk's points the same way, at right angles, or is missing.
+      const along = Array.from({ length: 1536 }, (_, index) => (index === 0 ? 1 : 0));
+      const across = Array.from({ length: 1536 }, (_, index) => (index === 1 ? 1 : 0));
+      const embeddings = { fingerprint: "search-test", embed: async (values: string[]) => values.map(() => along) };
+      const context = { db: worker!.db, embeddings };
+      const [parking, prices, archived] = await admin!.db.insert(knowledgeDocuments).values([
+        { businessId: search.businessId, sourceType: "upload", title: "Parking", status: "indexed" },
+        { businessId: search.businessId, sourceType: "upload", title: "Prices", status: "indexed" },
+        { businessId: search.businessId, sourceType: "upload", title: "Old prices", status: "indexed", active: false },
+      ]).returning({ id: knowledgeDocuments.id });
+      const chunk = (documentId: string, sequence: number, content: string, embedding?: number[]) => ({
+        businessId: search.businessId, documentId, sequence, content, contentHash: `${documentId}-${sequence}`,
+        ...(embedding ? { embedding, embeddingFingerprint: "search-test", embeddingStatus: "completed" } : {}),
+      });
+      const [lot, evening, fees] = await admin!.db.insert(knowledgeChunks).values([
+        chunk(parking!.id, 0, "Parking is free behind the building.", across),
+        chunk(parking!.id, 1, "After six, visitors use the north lot."),
+        chunk(prices!.id, 0, "Parking fees are five dollars an hour on weekdays.", along),
+        chunk(archived!.id, 0, "Parking fees were three dollars.", along),
+      ]).returning({ id: knowledgeChunks.id });
+
+      const result = await searchKnowledgeForApi(context, search.caller, { query: "parking fees" }, { callAnswer: () => "Heard on a call." });
+      expect(apiKnowledgeSearchResultSchema.safeParse(result).success).toBe(true);
+      // The passages the receptionist's own search hands its model.
+      const receptionist = await searchKnowledgeEvidence(context, { businessId: search.businessId, query: "parking fees" });
+      expect(result.evidence.map((match) => [match.chunk_id, match.content])).toEqual(receptionist.matches.map((match) => [match.chunkId, match.content]));
+      expect(result).toMatchObject({ outcome: "found", mode: "hybrid", failure: null, call_answer: "Heard on a call.", trace: { revision_check: "ok", index: { sources: 2, chunks: 3, embedded_chunks: 2 } } });
+      expect(result.evidence.map((match) => match.chunk_id)).toEqual([fees!.id, lot!.id, evening!.id]);
+      // The parking chunk carries the one after it.
+      expect(result.evidence[1]).toMatchObject({ content: "Parking is free behind the building.\n\nAfter six, visitors use the north lot.", supporting_chunk_ids: [lot!.id, evening!.id], focus_start: 0, focus_end: 36 });
+
+      // The lexical search's order comes from the scores the trace reads back: every term first, then any.
+      const lexical = result.trace.lexical.candidates;
+      expect(lexical.map((row) => row.chunk_id)).toEqual([fees!.id, lot!.id, evening!.id]);
+      expect(lexical[0]!.score_all_terms).toBeGreaterThan(0);
+      expect(lexical.slice(1).map((row) => row.score_all_terms)).toEqual([0, 0]);
+      expect(lexical[1]!.score_any_term).toBeGreaterThan(lexical[2]!.score_any_term!);
+      // The semantic search's order comes from the distances it reads back. The chunk with no embedding isn't a candidate.
+      const semantic = result.trace.semantic;
+      expect(semantic).toMatchObject({ status: "ok", error: null, embedding_fingerprint: "search-test", embedding_dimensions: 1536 });
+      expect(semantic.candidates.map((row) => row.chunk_id)).toEqual([fees!.id, lot!.id]);
+      expect(semantic.candidates[0]!.distance).toBeCloseTo(0);
+      expect(semantic.candidates[1]!.distance).toBeCloseTo(1);
+      expect(result.trace.candidates.map((candidate) => [candidate.chunk_id, candidate.lexical_rank, candidate.semantic_rank, candidate.fate])).toEqual([
+        [fees!.id, 1, 1, "evidence"],
+        [lot!.id, 2, 2, "evidence"],
+        [evening!.id, 3, null, "evidence"],
+      ]);
+
+      // Chunks embedded by another model don't count as embedded, and the semantic search finds none of them.
+      const otherModel = await searchKnowledgeForApi({ db: worker!.db, embeddings: { ...embeddings, fingerprint: "another-model" } }, search.caller, { query: "parking fees" }, { callAnswer: () => undefined });
+      expect(otherModel.trace.semantic.candidates).toEqual([]);
+      expect(otherModel.trace.index).toEqual({ sources: 2, chunks: 3, embedded_chunks: 0 });
+      expect(otherModel.call_answer).toBeNull();
+
+      // Another business's key searches only its own knowledge.
+      const elsewhere = await searchKnowledgeForApi(context, a.caller, { query: "parking fees" }, { callAnswer: () => undefined });
+      expect(elsewhere.trace.candidates.map((candidate) => candidate.chunk_id)).not.toEqual(expect.arrayContaining([fees!.id]));
+      expect(elsewhere.trace.candidates.map((candidate) => candidate.document_id)).not.toContain(parking!.id);
+    } finally {
+      await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, search.businessId));
+      await admin!.db.delete(businesses).where(eq(businesses.id, search.businessId));
+    }
   });
 
   it("reads and updates the business type and reads the onboarding stage", async () => {

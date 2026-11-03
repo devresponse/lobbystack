@@ -3,8 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@lobbystack/domain", async () => ({
   countKnowledgeTokens: (await import("../../domain/src/knowledgeRanking")).countKnowledgeTokens,
-  KNOWLEDGE_SEARCH_TOKEN_BUDGET: 3000,
-  knowledgeQueryTerms: (await import("../../domain/src/knowledgeRanking")).knowledgeQueryTerms,
+  knowledgeToolResult: (await import("../../domain/src/receptionistKnowledge")).knowledgeToolResult,
+  matchKnowledgeSnippets: (await import("../../domain/src/receptionistKnowledge")).matchKnowledgeSnippets,
   checkOpening: vi.fn(),
   findCallerBooking: vi.fn(async () => undefined),
   findCallBooking: vi.fn(async () => undefined),

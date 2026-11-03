@@ -28,7 +28,7 @@ import {
 import { snapshotForReceptionist } from "../snapshot";
 import { loadBusinessHoursInput } from "./businessHours";
 import { loadBusinessSummaryInput } from "./businessSummary";
-import { createKnowledgeDocument, createKnowledgeSnippet, loadLatestBusinessSnapshot, refreshBusinessSnapshot, searchKnowledgeEvidence, updateKnowledgeSnippet } from "./knowledge";
+import { createKnowledgeDocument, createKnowledgeSnippet, loadLatestBusinessSnapshot, refreshBusinessSnapshot, searchKnowledgeEvidence, traceKnowledgeSearch, updateKnowledgeSnippet } from "./knowledge";
 import {
   applyWebsiteRulesInTransaction,
   changeKnowledgeAudienceInTransaction,
@@ -575,7 +575,11 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
         await as(tx, "lobbystack_worker");
         const result = await searchKnowledgeEvidence(context, { businessId, query: "parking", receptionistId });
         expect(result).toMatchObject({ mode: "keyword", outcome: "found" });
-        return result.matches.map((match) => match.title).sort();
+        const found = result.matches.map((match) => match.title).sort();
+        // The API's trace counts what the same receptionist may use: here one chunk per article, each about parking.
+        const { trace } = await traceKnowledgeSearch(context, { businessId, query: "parking", receptionistId });
+        expect(trace.index).toEqual({ sources: found.length, chunks: found.length, embeddedChunks: 0 });
+        return found;
       };
       const everything = ["Gastown store", "Kitsilano store", "Menu", "Old store"];
       expect(await titles(gastown.id)).toEqual(["Gastown store", "Menu"]);

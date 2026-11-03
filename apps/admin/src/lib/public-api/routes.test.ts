@@ -36,6 +36,7 @@ const domain = vi.hoisted(() => ({
   completeKnowledgeUploadForApi: vi.fn(),
   listKnowledgeSourcesForApi: vi.fn(),
   getKnowledgeSourceForApi: vi.fn(),
+  searchKnowledgeForApi: vi.fn(),
   updateKnowledgeSourceForApi: vi.fn(),
   deleteKnowledgeSourceForApi: vi.fn(async () => undefined),
   listServicesForApi: vi.fn(async () => []),
@@ -118,6 +119,8 @@ vi.mock("../phone-number-search-limit", () => ({ checkPhoneNumberSearchLimit: nu
 const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => true) }));
 vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
 vi.mock("../auth", () => ({ getAuthDatabase: () => ({ db: "auth" }) }));
+const agent = vi.hoisted(() => ({ knowledgeCallAnswer: vi.fn() }));
+vi.mock("@lobbystack/agent-core/live/directAnswer", () => agent);
 vi.mock("../databases", () => ({ getDatabase: (role: string) => ({ db: role }) }));
 // CI runs these tests with a real Redis, where every file's requests share one key's per-minute budget; the limiter has its own tests.
 vi.mock("./rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("./rate-limit")>()), enforceApiRateLimit: vi.fn(async () => ({ allowed: true, limit: 120, remaining: 119, resetAt: Math.ceil(Date.now() / 60_000) * 60 })) }));
@@ -433,6 +436,26 @@ describe("knowledge sources", () => {
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toEqual({ data: { id: sourceId, deleted: true } });
     expect(domain.deleteKnowledgeSourceForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), sourceId);
+  });
+});
+
+describe("knowledge search", () => {
+  it("runs the receptionist's search for the query, with what a call would hear", async () => {
+    const result = { query: "parking fees", outcome: "empty", mode: "hybrid", failure: null, duration_ms: 41, token_budget: 3000, evidence: [], receptionist_result: { outcome: "empty", matches: [] }, call_answer: "The business's knowledge base has nothing on this question.", snapshot: null, trace: {} };
+    domain.searchKnowledgeForApi.mockResolvedValue(result);
+    const response = await v1.searchKnowledge(call("/knowledge/search", { method: "POST", body: JSON.stringify({ query: "  parking fees " }) }));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ data: result });
+    expect(domain.searchKnowledgeForApi).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f" }), { query: "parking fees" }, { callAnswer: agent.knowledgeCallAnswer });
+  });
+
+  it("needs a query of up to 2,000 characters and knowledge:read", async () => {
+    for (const body of [{}, { query: "   " }, { query: "x".repeat(2001) }, { query: "parking", limit: 3 }]) {
+      expect((await v1.searchKnowledge(call("/knowledge/search", { method: "POST", body: JSON.stringify(body) }))).status).toBe(400);
+    }
+    domain.resolveApiKey.mockResolvedValue({ businessId: "5d0bd9a4-7e1c-4a51-9a50-8e1b2c3d4e5f", apiKeyId: "0b7c1d2e-3f40-4a51-8b62-7c83d94ea5b6", scopes: ["business:read"] });
+    expect((await v1.searchKnowledge(call("/knowledge/search", { method: "POST", body: JSON.stringify({ query: "parking" }) }))).status).toBe(403);
+    expect(domain.searchKnowledgeForApi).not.toHaveBeenCalled();
   });
 });
 

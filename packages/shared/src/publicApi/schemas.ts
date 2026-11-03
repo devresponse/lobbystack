@@ -1098,6 +1098,105 @@ export const apiKnowledgeUploadCompleteSchema = z.strictObject({
   tags: z.array(z.string().trim().min(1).max(255)).max(100).optional(),
 });
 
+// POST /knowledge/search: the receptionist's knowledge search, stage by stage, for
+// troubleshooting answers. A chunk is a piece of a source's text, up to about 1,800
+// characters, and the unit the search ranks.
+export const apiKnowledgeSearchSchema = z.strictObject({
+  query: z.string().trim().min(1).max(2_000).describe("What to search for, as the receptionist's model would write it: it searches with a self-contained query of its own, such as parking fees, which a call's or chat's AI trace shows in its searchKnowledge tool call."),
+});
+
+const knowledgeSearchStageError = z.enum(["embedding_unavailable", "embedding_timeout", "invalid_embedding", "embedding_failed", "statement_timeout", "failed"]).nullable()
+  .describe("Why the stage failed. embedding_unavailable: the deployment has no embedding model. embedding_timeout: the query's embedding took longer than 1.8 seconds. invalid_embedding: the model returned no usable vector. embedding_failed: the model's provider failed. statement_timeout: the database query took longer than 2 seconds. failed: the database query failed. Null when the stage worked or was skipped.");
+
+const knowledgeSearchPassageFields = {
+  rank: z.number().int().describe("Its place after the two searches' results were fused, 1 first."),
+  chunk_id: id,
+  document_id: id.describe("The knowledge source the chunk belongs to, as GET /knowledge/sources/{source_id} reads it."),
+  title: z.string().describe("The source's title."),
+  source_url: z.string().nullable().describe("The page's address, for a website page. Null for a file."),
+  source_revision: z.number().int().describe("The source's revision the search read."),
+  sequence: z.number().int().describe("The chunk's place in its source, 0 first."),
+  rrf_score: z.number().describe("The reciprocal rank fusion score, 1/(60 + rank) summed over the two searches. Higher ranks first."),
+  lexical_rank: z.number().int().nullable().describe("Its place in the keyword search's results. Null when that search didn't return it."),
+  semantic_rank: z.number().int().nullable().describe("Its place in the semantic search's results. Null when that search didn't return it."),
+  tokens: z.number().int().describe("Its size as the token budget counts it, which estimates high."),
+};
+
+export const apiKnowledgeSearchEvidenceSchema = z.object({
+  ...knowledgeSearchPassageFields,
+  content: z.string().describe("The text the receptionist reads: the chunk that ranked, joined with the chunks before and after it in the same source when they fit the token budget."),
+  supporting_chunk_ids: z.array(id).nullable().describe("The chunks content joins, in source order, the ranked one among them. Null when its neighbors didn't fit the budget, so content is the ranked chunk alone."),
+  focus_start: z.number().int().nullable().describe("Where the chunk that ranked starts in content, as a character offset. A call that has little room starts reading here. Null with supporting_chunk_ids."),
+  focus_end: z.number().int().nullable().describe("Where the chunk that ranked ends in content. Null with supporting_chunk_ids."),
+}).describe("A passage the search handed the receptionist.");
+
+export const apiKnowledgeSearchCandidateSchema = z.object({
+  ...knowledgeSearchPassageFields,
+  content: z.string().describe("The chunk's text exactly as stored, without its neighbors."),
+  fate: z.enum(["evidence", "below_limit", "stale", "unverified", "over_budget"]).describe("What became of it. evidence: the receptionist got it. below_limit: it ranked below the 6 the search keeps. stale: its source changed or was turned off while the search ran. unverified: the revision check failed, so the search kept nothing. over_budget: it didn't fit what the passages ranked above it left of the token budget."),
+}).describe("A result of the keyword or semantic search, or both.");
+
+export const apiKnowledgeSearchTraceSchema = z.object({
+  terms: z.array(z.string()).describe("The words the keyword search looked for: the query's words in lowercase, without common words such as the or what, at most 16."),
+  lexical_query: z.object({
+    any: z.string().describe("Finds the chunks with any term, in their text or their source's title."),
+    all: z.string().describe("Ranks the chunks with every term first."),
+  }).nullable().describe("The PostgreSQL text search queries built from terms. Null when the query has no terms."),
+  lexical: z.object({
+    status: z.enum(["ok", "skipped", "failed"]).describe("skipped: the query has no terms to look for."),
+    error: knowledgeSearchStageError,
+    candidates: z.array(z.object({
+      rank: z.number().int(),
+      chunk_id: id,
+      score_all_terms: z.number().nullable().describe("ts_rank_cd for every term, the results' first sort key."),
+      score_any_term: z.number().nullable().describe("ts_rank_cd for any term, the second key. Both are null when the read that fills them failed."),
+    })).describe("The keyword search's results in order, at most 12."),
+  }),
+  semantic: z.object({
+    status: z.enum(["ok", "failed"]),
+    error: knowledgeSearchStageError,
+    embedding_fingerprint: z.string().nullable().describe("Identifies the deployment's embedding model. The search only reaches chunks embedded with the same one. Null when the deployment has none."),
+    embedding_dimensions: z.number().int().nullable().describe("The length of the query's embedding. Null when there was none."),
+    candidates: z.array(z.object({
+      rank: z.number().int(),
+      chunk_id: id,
+      distance: z.number().nullable().describe("The cosine distance between the query's embedding and the chunk's, the results' sort key: 0 for the same direction, 2 for the opposite. Null when the read that fills it failed."),
+    })).describe("The semantic search's results in order, at most 12."),
+  }),
+  revision_check: z.enum(["ok", "failed"]).nullable().describe("The read that checks each kept candidate's source is still active and at the revision the search read, and finds its neighbors. Null when there were no candidates."),
+  candidates: z.array(apiKnowledgeSearchCandidateSchema).describe("Every result of both searches, fused best first."),
+  index: z.object({
+    sources: z.number().int().describe("Active, indexed sources with text."),
+    chunks: z.number().int().describe("Their chunks: what the keyword search can reach."),
+    embedded_chunks: z.number().int().describe("Those embedded with the deployment's embedding model: what the semantic search can reach."),
+  }).nullable().describe("What the search can reach in the business's knowledge. Null when the count failed."),
+});
+
+export const apiKnowledgeSearchResultSchema = z.object({
+  query: z.string().describe("The query as searched: trimmed, and cut to 2,000 characters."),
+  outcome: z.enum(["found", "empty", "unavailable"]).describe("found: evidence has passages. empty: the search worked and found nothing. unavailable: both searches failed, or the revision check did."),
+  mode: z.enum(["hybrid", "keyword"]).describe("hybrid: the semantic search worked and its results were fused with the keyword search's. keyword: the keyword search's alone."),
+  failure: z.enum(["embedding_unavailable", "search_unavailable"]).nullable().describe("embedding_unavailable: the semantic search failed, so mode is keyword. search_unavailable: outcome is unavailable. trace says which stage failed and why."),
+  duration_ms: z.number().int().describe("How long the search took, as the receptionist would wait for it. The reads that fill the trace's scores come after it."),
+  token_budget: z.number().int().describe("The tokens one search may hand the receptionist, evidence and the business's entries together."),
+  evidence: z.array(apiKnowledgeSearchEvidenceSchema).describe("What the search returned from the database after fusing, checking and fitting the budget, best first: the passages the receptionist's searchKnowledge tool gets."),
+  receptionist_result: z.object({
+    outcome: z.string().describe("found when matches has any; otherwise the search's outcome."),
+    matches: z.array(z.object({
+      title: z.string(),
+      text: z.string(),
+      focusStart: z.number().int().optional(),
+      focusEnd: z.number().int().optional(),
+    })).describe("The evidence first, then the business's text entries and FAQs that share the query's words and fit the budget, at most 6."),
+  }).describe("What the receptionist's model receives from its searchKnowledge tool on a call or website chat, exactly as the tool returns it, so its keys are camelCase."),
+  call_answer: z.string().nullable().describe("What the voice model hears on a phone call when the agent's step only searched knowledge: receptionist_result as facts, cut to about 380 tokens. Null when receptionist_result's outcome is unavailable, so the agent answers in its own words."),
+  snapshot: z.object({
+    version: z.string(),
+    generated_at: z.string(),
+  }).nullable().describe("The business snapshot whose text entries and FAQs receptionist_result matched: the one a new call or chat uses. Null when the business has none yet."),
+  trace: apiKnowledgeSearchTraceSchema.describe("Each stage of the search, from the query's terms to every candidate's fate."),
+}).describe("One knowledge search, the way a call or chat runs it.");
+
 export const apiWebhookEventTypeSchema = z.enum(webhookEventTypes);
 
 export const apiWebhookEndpointSchema = z.object({
@@ -1247,6 +1346,8 @@ export type ApiKnowledgeSourceUpdate = z.infer<typeof apiKnowledgeSourceUpdateSc
 export type ApiKnowledgeUpload = z.infer<typeof apiKnowledgeUploadSchema>;
 export type ApiKnowledgeUploadCreate = z.infer<typeof apiKnowledgeUploadCreateSchema>;
 export type ApiKnowledgeUploadComplete = z.infer<typeof apiKnowledgeUploadCompleteSchema>;
+export type ApiKnowledgeSearch = z.infer<typeof apiKnowledgeSearchSchema>;
+export type ApiKnowledgeSearchResult = z.infer<typeof apiKnowledgeSearchResultSchema>;
 export type ApiWebhookEndpoint = z.infer<typeof apiWebhookEndpointSchema>;
 export type ApiWebhookEndpointCreate = z.infer<typeof apiWebhookEndpointCreateSchema>;
 export type ApiWebhookEndpointUpdate = z.infer<typeof apiWebhookEndpointUpdateSchema>;

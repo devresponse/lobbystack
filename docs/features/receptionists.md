@@ -67,7 +67,7 @@ The business keeps one knowledge library. Each article (a file, a website page o
 - **Website rules** give a website's pages under a path, such as `/stores/kitsilano/`, to one receptionist, on this crawl and every later one. **Website rules** on the Knowledge page lists them with how many pages each gave, adds and deletes them, and importing a website can add rules as it starts (**Page rules**). Deleting a rule gives its pages back to everyone, unless someone also chose receptionists for them. A page a rule chose says **by rule**, and a choice made by hand stays when the rule goes.
 - **The business summary is written from articles for everyone,** so a receptionist's private articles never reach the other receptionists' prompts.
 
-Calls and chats search only the articles the answering receptionist may use (`searchKnowledgeEvidence` filters by the receptionist; `receptionistMayUse` in `packages/shared/src/receptionists.ts` is the same rule in code). The business's snapshot keeps up to 50 text entries and a digest of 40 documents for each receptionist, chosen from what it may use.
+Calls and chats search only the articles the answering receptionist may use (`searchKnowledgeEvidence` filters by the receptionist; `receptionistMayUse` in `packages/shared/src/receptionists.ts` is the same rule in code). The v1 API's `POST /knowledge/search` (fork PR #130) searches as the default receptionist, with its text entries, and counts only what it may use. The business's snapshot keeps up to 50 text entries and a digest of 40 documents for each receptionist, chosen from what it may use.
 
 ## Know what visitors see
 

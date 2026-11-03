@@ -198,3 +198,5 @@ Sans fichier d'état, une clé de plateforme ne crée pas d'entreprise si vous e
 ## Autres commandes
 
 `lobbystack` a une commande pour chaque point de terminaison de l'API, regroupées comme l'API : `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, etc. `lobbystack --help` liste les groupes, et `--help` après n'importe quelle commande liste ses options.
+
+Pour voir ce que la réceptionniste IA trouve dans vos connaissances pour une question, lancez `lobbystack knowledge search "<question>"`. La commande fait la même recherche qu'un appel ou une discussion, et ne change rien. Elle affiche les passages trouvés, ceux laissés de côté et pourquoi, et ce que la réceptionniste reçoit. `--json` ajoute les scores de chaque passage. La clé doit avoir `knowledge:read`.

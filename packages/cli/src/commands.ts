@@ -208,6 +208,45 @@ function planTable(data: Row): string {
   return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "receptionists", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
 }
 
+const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+const indent = (text: string) => text.split("\n").map((line) => (line ? `   ${line}` : line)).join("\n");
+
+/**
+ * One knowledge search, as the receptionist runs it: the passages it handed over in
+ * full, the candidates it didn't keep and why, and what a call's voice model hears.
+ * --json shows every stage.
+ */
+function knowledgeSearchText(data: Row): string {
+  const evidence = data.evidence as Row[];
+  const trace = data.trace as Row;
+  const lexical = trace.lexical as Row;
+  const semantic = trace.semantic as Row;
+  const searched = data.mode === "hybrid" ? "keyword and semantic search" : "keyword search only";
+  const lines = [data.outcome === "found" ? `Found ${plural(evidence.length, "passage")} in ${String(data.duration_ms)} ms, ${searched}.` : data.outcome === "empty" ? `Found nothing in ${String(data.duration_ms)} ms, ${searched}.` : `The search was unavailable after ${String(data.duration_ms)} ms.`];
+  const terms = trace.terms as string[];
+  lines.push(terms.length ? `Terms: ${terms.join(", ")}` : "No terms to look for, so the keyword search was skipped.");
+  if (lexical.error) lines.push(`The keyword search failed: ${String(lexical.error)}.`);
+  if (semantic.error) lines.push(`The semantic search failed: ${String(semantic.error)}.`);
+  if (trace.revision_check === "failed") lines.push("The revision check failed, so the search kept nothing.");
+  evidence.forEach((passage, index) => {
+    const ranks = [passage.lexical_rank ? `keyword #${String(passage.lexical_rank)}` : "", passage.semantic_rank ? `semantic #${String(passage.semantic_rank)}` : ""].filter(Boolean).join(", ");
+    lines.push("", `${index + 1}. ${String(passage.title)}, chunk ${String(passage.sequence)} (rank ${String(passage.rank)}: ${ranks}; ${String(passage.tokens)} tokens)`);
+    if (passage.source_url) lines.push(`   ${String(passage.source_url)}`);
+    lines.push(indent(String(passage.content)));
+  });
+  const dropped = (trace.candidates as Row[]).filter((candidate) => candidate.fate !== "evidence");
+  if (dropped.length) {
+    const rows = dropped.map((candidate) => ({ rank: candidate.rank, fate: candidate.fate, keyword: candidate.lexical_rank, semantic: candidate.semantic_rank, chunk: candidate.sequence, title: candidate.title }));
+    lines.push("", `Not handed over: ${plural(dropped.length, "candidate")}`, formatTable(rows, columns("rank", "fate", "keyword", "semantic", "chunk", "title")));
+  }
+  const matches = (data.receptionist_result as Row).matches as Row[];
+  const entries = matches.length - evidence.length;
+  lines.push("", `The receptionist's model gets ${plural(matches.length, "match", "matches")}${entries > 0 ? `, ${plural(entries, "text entry or FAQ", "text entries or FAQs")} among them` : ""}.`);
+  if (typeof data.call_answer === "string") lines.push("On a call, the voice model hears:", indent(data.call_answer));
+  lines.push("", "--json shows every stage: each candidate's text and scores, and the result the model receives.");
+  return lines.join("\n");
+}
+
 /** Every plan the deployment holds with its live prices and how many Polar sells, whether the applied file is the deployed one, and the Polar organization it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
@@ -337,6 +376,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     expand: { operation: "expandKnowledgeSource", wait: sourceWait },
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
+    search: { operation: "searchKnowledge", args: ["query"], show: knowledgeSearchText },
   }),
   group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
     status: { operation: "getBilling" },

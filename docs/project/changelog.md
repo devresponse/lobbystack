@@ -10,7 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
-| [#128](https://github.com/devresponse/lobbystack/pull/128) | Ask "What is your business's website?" on the onboarding website step, in all four languages, since the step no longer reads the site |  | `2a4004c` | [docs](../features/onboarding.md#know-what-the-website-step-saves) |
+| [#128](https://github.com/devresponse/lobbystack/pull/128) | Ask for the business's website in the onboarding step's title: "What is your business's website?" in all four languages |  | `2a4004c` | [docs](../features/onboarding.md#know-what-changed-with-fork-pr-127) |
 | [#127](https://github.com/devresponse/lobbystack/pull/127) | Bring the onboarding website step back, saving the address without reading the site: **Continue** calls `POST /api/onboarding/website`, which queues no crawl |  | `432a7e4` | [docs](../features/onboarding.md#know-what-the-website-step-saves) |
 | [#126](https://github.com/devresponse/lobbystack/pull/126) | Take the website step out of onboarding, and keep the crawler. Fork PR #127 brought the step back the same day, saving the address and reading nothing, as the maintainer meant |  | `6c70332` | [docs](../features/onboarding.md#know-what-changed-with-fork-pr-127) |
 | [#124](https://github.com/devresponse/lobbystack/pull/124) | Make the bootstrap script's `connect` use `APP_BASE_URL` whenever the settings name one, and the admin's current Railway address, read from Railway |  | `a771db6` | [docs](../../devops/bootstrap.md#6-connect-the-incoming-call-webhook-and-make-the-platform-key) |

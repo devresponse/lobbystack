@@ -11807,6 +11807,131 @@
         }
       }
     },
+    "/knowledge/search": {
+      "post": {
+        "operationId": "searchKnowledge",
+        "summary": "Search knowledge as the receptionist does",
+        "description": "Runs the receptionist's knowledge search for a query, with the same code a call or website chat runs, and shows every stage. It searches as the business's default receptionist, with the articles, text entries and FAQs that receptionist may use. evidence is what the search returned from the database after ranking: the passages the receptionist's searchKnowledge tool gets. receptionist_result is what its model receives, with the business's text entries and FAQs added, and call_answer what a phone call's voice model hears. trace has the keyword and semantic searches' results with their scores, and every candidate with what became of it. Nothing in the business changes, so the same query can be compared before and after a change to the knowledge.",
+        "tags": [
+          "Knowledge"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "knowledge:read",
+        "parameters": [
+          {
+            "name": "LobbyStack-Business",
+            "in": "header",
+            "description": "The business a platform key acts on. Required with a platform key. A per-business key may leave it out; if it sends one, it must be the key's own business.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KnowledgeSearch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/KnowledgeSearchResult"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request), or a platform key sent no LobbyStack-Business header (business_required).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the knowledge:read scope. forbidden: a per-business key named another business in LobbyStack-Business. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "A platform key named a business it cannot act on (not_found).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
     "/webhooks": {
       "get": {
         "operationId": "listWebhooks",
@@ -21515,6 +21640,701 @@
           }
         },
         "additionalProperties": false
+      },
+      "KnowledgeSearch": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "What to search for, as the receptionist's model would write it: it searches with a self-contained query of its own, such as parking fees, which a call's or chat's AI trace shows in its searchKnowledge tool call."
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "KnowledgeSearchResult": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The query as searched: trimmed, and cut to 2,000 characters."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "found",
+              "empty",
+              "unavailable"
+            ],
+            "description": "found: evidence has passages. empty: the search worked and found nothing. unavailable: both searches failed, or the revision check did."
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "hybrid",
+              "keyword"
+            ],
+            "description": "hybrid: the semantic search worked and its results were fused with the keyword search's. keyword: the keyword search's alone."
+          },
+          "failure": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "embedding_unavailable",
+                  "search_unavailable"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "embedding_unavailable: the semantic search failed, so mode is keyword. search_unavailable: outcome is unavailable. trace says which stage failed and why."
+          },
+          "duration_ms": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "How long the search took, as the receptionist would wait for it. The reads that fill the trace's scores come after it."
+          },
+          "token_budget": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The tokens one search may hand the receptionist, evidence and the business's entries together."
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "rank": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Its place after the two searches' results were fused, 1 first."
+                },
+                "chunk_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Stable identifier (UUID)."
+                },
+                "document_id": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "The knowledge source the chunk belongs to, as GET /knowledge/sources/{source_id} reads it."
+                },
+                "title": {
+                  "type": "string",
+                  "description": "The source's title."
+                },
+                "source_url": {
+                  "description": "The page's address, for a website page. Null for a file.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "source_revision": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The source's revision the search read."
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "The chunk's place in its source, 0 first."
+                },
+                "rrf_score": {
+                  "type": "number",
+                  "description": "The reciprocal rank fusion score, 1/(60 + rank) summed over the two searches. Higher ranks first."
+                },
+                "lexical_rank": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Its place in the keyword search's results. Null when that search didn't return it."
+                },
+                "semantic_rank": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Its place in the semantic search's results. Null when that search didn't return it."
+                },
+                "tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Its size as the token budget counts it, which estimates high."
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The text the receptionist reads: the chunk that ranked, joined with the chunks before and after it in the same source when they fit the token budget."
+                },
+                "supporting_chunk_ids": {
+                  "anyOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid",
+                        "description": "Stable identifier (UUID)."
+                      }
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The chunks content joins, in source order, the ranked one among them. Null when its neighbors didn't fit the budget, so content is the ranked chunk alone."
+                },
+                "focus_start": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Where the chunk that ranked starts in content, as a character offset. A call that has little room starts reading here. Null with supporting_chunk_ids."
+                },
+                "focus_end": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Where the chunk that ranked ends in content. Null with supporting_chunk_ids."
+                }
+              },
+              "required": [
+                "rank",
+                "chunk_id",
+                "document_id",
+                "title",
+                "source_url",
+                "source_revision",
+                "sequence",
+                "rrf_score",
+                "lexical_rank",
+                "semantic_rank",
+                "tokens",
+                "content",
+                "supporting_chunk_ids",
+                "focus_start",
+                "focus_end"
+              ],
+              "additionalProperties": false,
+              "description": "A passage the search handed the receptionist."
+            },
+            "description": "What the search returned from the database after fusing, checking and fitting the budget, best first: the passages the receptionist's searchKnowledge tool gets."
+          },
+          "receptionist_result": {
+            "type": "object",
+            "properties": {
+              "outcome": {
+                "type": "string",
+                "description": "found when matches has any; otherwise the search's outcome."
+              },
+              "matches": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "title": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    },
+                    "focusStart": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "focusEnd": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "title",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The evidence first, then the business's text entries and FAQs that share the query's words and fit the budget, at most 6."
+              }
+            },
+            "required": [
+              "outcome",
+              "matches"
+            ],
+            "additionalProperties": false,
+            "description": "What the receptionist's model receives from its searchKnowledge tool on a call or website chat, exactly as the tool returns it, so its keys are camelCase."
+          },
+          "call_answer": {
+            "description": "What the voice model hears on a phone call when the agent's step only searched knowledge: receptionist_result as facts, cut to about 380 tokens. Null when receptionist_result's outcome is unavailable, so the agent answers in its own words.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "snapshot": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "version": {
+                    "type": "string"
+                  },
+                  "generated_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "version",
+                  "generated_at"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The business snapshot whose text entries and FAQs receptionist_result matched: the one a new call or chat uses. Null when the business has none yet."
+          },
+          "trace": {
+            "type": "object",
+            "properties": {
+              "terms": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "The words the keyword search looked for: the query's words in lowercase, without common words such as the or what, at most 16."
+              },
+              "lexical_query": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "any": {
+                        "type": "string",
+                        "description": "Finds the chunks with any term, in their text or their source's title."
+                      },
+                      "all": {
+                        "type": "string",
+                        "description": "Ranks the chunks with every term first."
+                      }
+                    },
+                    "required": [
+                      "any",
+                      "all"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The PostgreSQL text search queries built from terms. Null when the query has no terms."
+              },
+              "lexical": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "skipped",
+                      "failed"
+                    ],
+                    "description": "skipped: the query has no terms to look for."
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "embedding_unavailable",
+                          "embedding_timeout",
+                          "invalid_embedding",
+                          "embedding_failed",
+                          "statement_timeout",
+                          "failed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Why the stage failed. embedding_unavailable: the deployment has no embedding model. embedding_timeout: the query's embedding took longer than 1.8 seconds. invalid_embedding: the model returned no usable vector. embedding_failed: the model's provider failed. statement_timeout: the database query took longer than 2 seconds. failed: the database query failed. Null when the stage worked or was skipped."
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "rank": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "chunk_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Stable identifier (UUID)."
+                        },
+                        "score_all_terms": {
+                          "description": "ts_rank_cd for every term, the results' first sort key.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "score_any_term": {
+                          "description": "ts_rank_cd for any term, the second key. Both are null when the read that fills them failed.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "rank",
+                        "chunk_id",
+                        "score_all_terms",
+                        "score_any_term"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The keyword search's results in order, at most 12."
+                  }
+                },
+                "required": [
+                  "status",
+                  "error",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              },
+              "semantic": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "failed"
+                    ]
+                  },
+                  "error": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "embedding_unavailable",
+                          "embedding_timeout",
+                          "invalid_embedding",
+                          "embedding_failed",
+                          "statement_timeout",
+                          "failed"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Why the stage failed. embedding_unavailable: the deployment has no embedding model. embedding_timeout: the query's embedding took longer than 1.8 seconds. invalid_embedding: the model returned no usable vector. embedding_failed: the model's provider failed. statement_timeout: the database query took longer than 2 seconds. failed: the database query failed. Null when the stage worked or was skipped."
+                  },
+                  "embedding_fingerprint": {
+                    "description": "Identifies the deployment's embedding model. The search only reaches chunks embedded with the same one. Null when the deployment has none.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "embedding_dimensions": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The length of the query's embedding. Null when there was none."
+                  },
+                  "candidates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "rank": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "chunk_id": {
+                          "type": "string",
+                          "format": "uuid",
+                          "description": "Stable identifier (UUID)."
+                        },
+                        "distance": {
+                          "description": "The cosine distance between the query's embedding and the chunk's, the results' sort key: 0 for the same direction, 2 for the opposite. Null when the read that fills it failed.",
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "rank",
+                        "chunk_id",
+                        "distance"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "description": "The semantic search's results in order, at most 12."
+                  }
+                },
+                "required": [
+                  "status",
+                  "error",
+                  "embedding_fingerprint",
+                  "embedding_dimensions",
+                  "candidates"
+                ],
+                "additionalProperties": false
+              },
+              "revision_check": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "ok",
+                      "failed"
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The read that checks each kept candidate's source is still active and at the revision the search read, and finds its neighbors. Null when there were no candidates."
+              },
+              "candidates": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "rank": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Its place after the two searches' results were fused, 1 first."
+                    },
+                    "chunk_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "Stable identifier (UUID)."
+                    },
+                    "document_id": {
+                      "type": "string",
+                      "format": "uuid",
+                      "description": "The knowledge source the chunk belongs to, as GET /knowledge/sources/{source_id} reads it."
+                    },
+                    "title": {
+                      "type": "string",
+                      "description": "The source's title."
+                    },
+                    "source_url": {
+                      "description": "The page's address, for a website page. Null for a file.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "source_revision": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "The source's revision the search read."
+                    },
+                    "sequence": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "The chunk's place in its source, 0 first."
+                    },
+                    "rrf_score": {
+                      "type": "number",
+                      "description": "The reciprocal rank fusion score, 1/(60 + rank) summed over the two searches. Higher ranks first."
+                    },
+                    "lexical_rank": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Its place in the keyword search's results. Null when that search didn't return it."
+                    },
+                    "semantic_rank": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Its place in the semantic search's results. Null when that search didn't return it."
+                    },
+                    "tokens": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Its size as the token budget counts it, which estimates high."
+                    },
+                    "content": {
+                      "type": "string",
+                      "description": "The chunk's text exactly as stored, without its neighbors."
+                    },
+                    "fate": {
+                      "type": "string",
+                      "enum": [
+                        "evidence",
+                        "below_limit",
+                        "stale",
+                        "unverified",
+                        "over_budget"
+                      ],
+                      "description": "What became of it. evidence: the receptionist got it. below_limit: it ranked below the 6 the search keeps. stale: its source changed or was turned off while the search ran. unverified: the revision check failed, so the search kept nothing. over_budget: it didn't fit what the passages ranked above it left of the token budget."
+                    }
+                  },
+                  "required": [
+                    "rank",
+                    "chunk_id",
+                    "document_id",
+                    "title",
+                    "source_url",
+                    "source_revision",
+                    "sequence",
+                    "rrf_score",
+                    "lexical_rank",
+                    "semantic_rank",
+                    "tokens",
+                    "content",
+                    "fate"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A result of the keyword or semantic search, or both."
+                },
+                "description": "Every result of both searches, fused best first."
+              },
+              "index": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "sources": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Active, indexed sources with text."
+                      },
+                      "chunks": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Their chunks: what the keyword search can reach."
+                      },
+                      "embedded_chunks": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991,
+                        "description": "Those embedded with the deployment's embedding model: what the semantic search can reach."
+                      }
+                    },
+                    "required": [
+                      "sources",
+                      "chunks",
+                      "embedded_chunks"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the search can reach in the business's knowledge. Null when the count failed."
+              }
+            },
+            "required": [
+              "terms",
+              "lexical_query",
+              "lexical",
+              "semantic",
+              "revision_check",
+              "candidates",
+              "index"
+            ],
+            "additionalProperties": false,
+            "description": "Each stage of the search, from the query's terms to every candidate's fate."
+          }
+        },
+        "required": [
+          "query",
+          "outcome",
+          "mode",
+          "failure",
+          "duration_ms",
+          "token_budget",
+          "evidence",
+          "receptionist_result",
+          "call_answer",
+          "snapshot",
+          "trace"
+        ],
+        "additionalProperties": false,
+        "description": "One knowledge search, the way a call or chat runs it."
       },
       "WebhookEndpoint": {
         "type": "object",

@@ -1,6 +1,7 @@
 export * from "./apiKeys";
 export * from "./errors";
 export * from "./idempotency";
+export * from "./knowledgeSearch";
 export * from "./operations";
 export * from "./platformKeys";
 export * from "./resources";

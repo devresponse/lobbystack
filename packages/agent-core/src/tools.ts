@@ -4,13 +4,12 @@ import {
   checkOpening,
   findCallBooking,
   findCallerBooking,
-  countKnowledgeTokens,
   findOpenings,
   getSmsConsentOnFile,
   issueAppointmentChangeOtp,
-  KNOWLEDGE_SEARCH_TOKEN_BUDGET,
-  knowledgeQueryTerms,
+  knowledgeToolResult,
   lookupCallerAppointments,
+  matchKnowledgeSnippets,
   requestCancellationForCaller,
   recordTextConsentForCaller,
   recordUnansweredQuestion,
@@ -22,6 +21,7 @@ import {
   verifyCallerChangePasscode,
   verifyCallerForChange,
   type DomainContext,
+  type KnowledgeToolResult,
   type SmsConsentOnFile,
   type UnavailableReason,
 } from "@lobbystack/domain";
@@ -98,47 +98,6 @@ export type AgentToolContext = {
    */
   liveChat?: { locale: InterfaceLocale; onTeamRequested?: () => void };
 };
-
-// A plural always counts ("fee" finds "fees"). Other endings only count for terms of four
-// or more letters and at most three extra letters ("park" finds "parking"), so "car"
-// doesn't find "care".
-function wordMatchesTerm(word: string, term: string): boolean {
-  if (word === term || word === `${term}s` || word === `${term}es`) return true;
-  return term.length >= 4 && word.startsWith(term) && word.length - term.length <= 3;
-}
-
-// Curated FAQs from the snapshot fill the slots knowledge search leaves, or stand in
-// when it is unavailable. The document digest is an inventory, not evidence.
-// Pasted snippets are long, so one shared word proves little. A snippet must contain a
-// meaningful query term (see wordMatchesTerm), and two distinct terms once the query has
-// three or more. More terms matched ranks first, then higher priority.
-function snapshotKnowledgeMatches(snapshot: BusinessContextSnapshot, query: string) {
-  const terms = knowledgeQueryTerms(query);
-  if (!terms.length) return [];
-  const needed = terms.length >= 3 ? 2 : 1;
-  return (snapshot.knowledgeSnippets ?? []).flatMap((snippet) => {
-    const words = `${snippet.title} ${snippet.content}`.toLocaleLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-    const matched = terms.filter((term) => words.some((word) => wordMatchesTerm(word, term))).length;
-    return matched >= needed ? [{ matched, priority: snippet.priority, title: snippet.title, text: snippet.content.trim() }] : [];
-  }).sort((a, b) => b.matched - a.matched || b.priority - a.priority).map(({ title, text }) => ({ title, text }));
-}
-
-// focusStart and focusEnd mark the chunk that ranked inside text, which also
-// holds its neighbors, so a reader with little room starts there (live/directAnswer.ts).
-type KnowledgeMatch = { title: string; text: string; focusStart?: number; focusEnd?: number };
-
-// Evidence already fits the token budget, so it stays whole. Snippets get what it leaves,
-// in rank order, so a long pasted snippet can't push a reply past the budget.
-function withSnippetsInBudget(evidence: KnowledgeMatch[], snippets: KnowledgeMatch[]): KnowledgeMatch[] {
-  let used = evidence.reduce((sum, match) => sum + countKnowledgeTokens(`${match.title}\n${match.text}\n`), 0);
-  const fitting = snippets.filter((snippet) => {
-    const size = countKnowledgeTokens(`${snippet.title}\n${snippet.text}\n`);
-    if (used + size > KNOWLEDGE_SEARCH_TOKEN_BUDGET) return false;
-    used += size;
-    return true;
-  });
-  return [...evidence, ...fitting].slice(0, 6);
-}
 
 const phone = z.string().describe("Phone number in E.164 format, for example +14165550134.");
 
@@ -234,17 +193,17 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
     if (start <= DateTime.now()) return { ok: false as const, reason: "That time has already passed. Offer a later time." };
     return { ok: true as const, startsAt: start.toISO()! };
   };
-  async function searchKnowledge(query: string): Promise<{ outcome: string; matches: KnowledgeMatch[] }> {
-    const fallback = snapshotKnowledgeMatches(snapshot, query);
+  // The business's FAQs and text entries fill what the evidence leaves, or stand in
+  // when the search fails (knowledgeToolResult in packages/domain, which the v1
+  // knowledge search shows too).
+  async function searchKnowledge(query: string): Promise<KnowledgeToolResult> {
+    const fallback = matchKnowledgeSnippets(snapshot.knowledgeSnippets, query);
     try {
       const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}), ...answeredBy });
-      // Evidence first. Snippets only fill the slots and tokens it leaves.
-      const matches = withSnippetsInBudget(evidence.matches.map((match) => ({ title: match.title, text: match.content, ...(match.focusStart !== undefined && match.focusEnd !== undefined ? { focusStart: match.focusStart, focusEnd: match.focusEnd } : {}) })), fallback);
-      return { outcome: matches.length ? "found" : evidence.outcome, matches };
+      return knowledgeToolResult(evidence, fallback);
     } catch (error) {
       logEvent("warn", "knowledge.search_failed", { businessId, error });
-      const matches = withSnippetsInBudget([], fallback);
-      return { outcome: matches.length ? "found" : "unavailable", matches };
+      return knowledgeToolResult(null, fallback);
     }
   }
 

@@ -3,8 +3,8 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 
 vi.mock("@lobbystack/domain", async () => ({
   countKnowledgeTokens: (await import("../../domain/src/knowledgeRanking")).countKnowledgeTokens,
-  KNOWLEDGE_SEARCH_TOKEN_BUDGET: 3000,
-  knowledgeQueryTerms: (await import("../../domain/src/knowledgeRanking")).knowledgeQueryTerms,
+  knowledgeToolResult: (await import("../../domain/src/receptionistKnowledge")).knowledgeToolResult,
+  matchKnowledgeSnippets: (await import("../../domain/src/receptionistKnowledge")).matchKnowledgeSnippets,
   requestTeamForWidgetChat: vi.fn(),
 }));
 

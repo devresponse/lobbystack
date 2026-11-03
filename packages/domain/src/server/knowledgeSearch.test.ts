@@ -5,7 +5,8 @@ import type { KnowledgePassage } from "../knowledgeRanking";
 
 const mocks = vi.hoisted(() => ({ transaction: vi.fn() }));
 vi.mock("@lobbystack/db", async original => ({ ...(await original<typeof import("@lobbystack/db")>()), withBusinessTransaction: mocks.transaction }));
-import { chunkText, searchKnowledgeEvidence } from "./knowledge";
+import { chunkText, searchKnowledgeEvidence, traceKnowledgeSearch } from "./knowledge";
+import { searchKnowledgeForApi } from "./publicApi/knowledgeSearch";
 
 const primary: KnowledgePassage = { chunkId: "chunk", documentId: "document", title: "BAA", content: "Management", sourceUrl: "https://example.com/baa", sourceRevision: 3, sequence: 1 };
 const adjacent: KnowledgePassage = { ...primary, chunkId: "adjacent", sequence: 2, content: "MNGT 10407 — Approches du management." };
@@ -89,6 +90,200 @@ describe("knowledge evidence", () => {
   it("returns empty when both indexes have no matches", async () => {
     lexical = []; semantic = [];
     expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "unknown" })).toMatchObject({ matches: [], outcome: "empty" });
+  });
+});
+
+describe("knowledge search trace", () => {
+  const passage = (chunkId: string, extra: Partial<KnowledgePassage> = {}): KnowledgePassage => ({ ...primary, chunkId, documentId: `document-${chunkId}`, title: `Title ${chunkId}`, content: `Parking ${chunkId}`, sequence: 1, ...extra });
+  let scores: Array<{ chunkId: string; allTerms: number; anyTerm: number }>;
+  let distances: Array<{ chunkId: string; distance: number }>;
+  let failReads: boolean;
+  let failCurrent: boolean;
+  let counted: { sql: string; params: unknown[] } | undefined;
+  const traced = (embed = vi.fn().mockResolvedValue([[0.1, 0.2, 0.3]])): DomainContext => ({ db: {} as never, embeddings: { fingerprint: "fp-1", embed } });
+
+  beforeEach(() => {
+    scores = []; distances = []; failReads = false; failCurrent = false; counted = undefined;
+    mocks.transaction.mockImplementation(async (_db, actor, callback) => {
+      expect(actor).toMatchObject({ businessId: "tenant-a", actorType: "worker" });
+      return callback({ execute: async (statement: Parameters<typeof dialect.sqlToQuery>[0]) => {
+        const query = dialect.sqlToQuery(statement);
+        statements.push(query.sql);
+        if (query.sql.startsWith("SET")) return { rows: [] };
+        expect(query.params).toContain("tenant-a");
+        // The reads the trace adds after the search.
+        if (query.sql.includes('AS "allTerms"')) { if (failReads) throw new Error("database unavailable"); return { rows: scores }; }
+        if (query.sql.includes("AS distance")) { if (failReads) throw new Error("database unavailable"); return { rows: distances }; }
+        if (query.sql.includes("count(DISTINCT")) { counted = { sql: query.sql, params: query.params }; if (failReads) throw new Error("database unavailable"); return { rows: [{ sources: "2", chunks: "9", embeddedChunks: "7" }] }; }
+        // The search's own statements.
+        if (query.sql.includes("BETWEEN")) { if (failCurrent) throw new Error("database unavailable"); return { rows: current }; }
+        return { rows: query.sql.includes("<=>") ? semantic : lexical };
+      } });
+    });
+  });
+
+  it("answers exactly as the receptionist's search does", async () => {
+    const receptionist = await searchKnowledgeEvidence(traced(), { businessId: "tenant-a", query: "management" });
+    const { result } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "management", source: "api" });
+    expect({ ...result, durationMs: 0 }).toEqual({ ...receptionist, durationMs: 0 });
+    expect(result.matches[0]).toMatchObject({ supportingChunkIds: ["chunk", "adjacent"] });
+  });
+
+  it("ranks every candidate with its scores and says what became of it", async () => {
+    // b is found by both searches, so it ranks first; g ranks seventh, below the six kept.
+    lexical = ["a", "b", "c", "d", "e", "f", "g"].map(id => passage(id, id === "d" ? { content: "word ".repeat(3500) } : {}));
+    semantic = [lexical[1]!];
+    // c's source changed while the search ran, so the recheck doesn't return it.
+    current = lexical.filter(row => row.chunkId !== "c" && row.chunkId !== "g");
+    scores = [{ chunkId: "a", allTerms: 0.5, anyTerm: 0.25 }, { chunkId: "b", allTerms: "0.1" as never, anyTerm: 0.05 }];
+    distances = [{ chunkId: "b", distance: 0.12 }];
+    const { result, trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "parking fees" });
+    expect(result.matches.map(row => row.chunkId)).toEqual(["b", "a", "e", "f"]);
+    expect(trace.candidates.map(row => [row.passage.chunkId, row.rank, row.lexicalRank, row.semanticRank, row.fate])).toEqual([
+      ["b", 1, 2, 1, "evidence"],
+      ["a", 2, 1, null, "evidence"],
+      ["c", 3, 3, null, "stale"],
+      ["d", 4, 4, null, "over_budget"],
+      ["e", 5, 5, null, "evidence"],
+      ["f", 6, 6, null, "evidence"],
+      ["g", 7, 7, null, "below_limit"],
+    ]);
+    expect(trace.candidates[0]!.score).toBeCloseTo(1 / 62 + 1 / 61);
+    expect(trace.candidates[3]!.tokens).toBeGreaterThan(trace.tokenBudget);
+    expect(trace).toMatchObject({
+      query: "parking fees",
+      terms: ["parking", "fees"],
+      lexicalQuery: { any: "parking | (fees | f.e.e.s)", all: "parking & (fees | f.e.e.s)" },
+      limit: 6,
+      tokenBudget: 3000,
+      revisionCheck: "ok",
+      index: { sources: 2, chunks: 9, embeddedChunks: 7 },
+      semantic: { status: "ok", error: null, embeddingFingerprint: "fp-1", embeddingDimensions: 3, candidates: [{ chunkId: "b", rank: 1, distance: 0.12 }] },
+    });
+    expect(trace.lexical).toMatchObject({ status: "ok", error: null });
+    expect(trace.lexical.candidates.slice(0, 3)).toEqual([
+      { chunkId: "a", rank: 1, scoreAllTerms: 0.5, scoreAnyTerm: 0.25 },
+      { chunkId: "b", rank: 2, scoreAllTerms: 0.1, scoreAnyTerm: 0.05 },
+      { chunkId: "c", rank: 3, scoreAllTerms: null, scoreAnyTerm: null },
+    ]);
+    // The scores are read for the search's own results, and the count only reaches this model's embeddings.
+    const scoreRead = statements.find(value => value.includes('AS "allTerms"'))!;
+    expect(scoreRead).toContain("ts_rank_cd");
+    expect(statements.find(value => value.includes("count(DISTINCT"))).toContain("c.embedding_fingerprint = ");
+  });
+
+  it("keeps scores and counts null when the reads that fill them fail, and the answer unchanged", async () => {
+    failReads = true;
+    const receptionist = await searchKnowledgeEvidence(traced(), { businessId: "tenant-a", query: "management" });
+    const { result, trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "management" });
+    expect({ ...result, durationMs: 0 }).toEqual({ ...receptionist, durationMs: 0 });
+    expect(trace.lexical.candidates).toEqual([{ chunkId: "chunk", rank: 1, scoreAllTerms: null, scoreAnyTerm: null }]);
+    expect(trace.semantic.candidates).toEqual([{ chunkId: "chunk", rank: 1, distance: null }]);
+    expect(trace.index).toBeNull();
+  });
+
+  it("names a failed stage by code, never by the provider's or database's message", async () => {
+    const timeout = Object.assign(new Error("Failed query: canceling statement due to statement timeout"), { cause: Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }) });
+    mocks.transaction.mockImplementationOnce(async (_db, _actor, callback) => callback({ execute: async (statement: Parameters<typeof dialect.sqlToQuery>[0]) => {
+      if (dialect.sqlToQuery(statement).sql.startsWith("SET")) return { rows: [] };
+      throw timeout;
+    } }));
+    const { result, trace } = await traceKnowledgeSearch(traced(vi.fn().mockRejectedValue(new Error("private provider error"))), { businessId: "tenant-a", query: "management" });
+    expect(result).toMatchObject({ outcome: "unavailable", mode: "keyword", failure: "search_unavailable" });
+    expect(trace.lexical).toMatchObject({ status: "failed", error: "statement_timeout", candidates: [] });
+    expect(trace.semantic).toMatchObject({ status: "failed", error: "embedding_failed", embeddingDimensions: null, candidates: [] });
+    expect(trace.revisionCheck).toBeNull();
+    expect(JSON.stringify(trace)).not.toMatch(/private provider error|canceling statement/);
+    const unconfigured = await traceKnowledgeSearch({ db: {} as never }, { businessId: "tenant-a", query: "management" });
+    expect(unconfigured.trace.semantic).toMatchObject({ status: "failed", error: "embedding_unavailable", embeddingFingerprint: null });
+  });
+
+  it("marks the kept candidates unverified when the revision check fails", async () => {
+    failCurrent = true;
+    const { result, trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "management" });
+    expect(result).toMatchObject({ matches: [], outcome: "unavailable", failure: "search_unavailable" });
+    expect(trace.revisionCheck).toBe("failed");
+    expect(trace.candidates.map(row => row.fate)).toEqual(["unverified"]);
+  });
+
+  it("counts only the sources and chunks the receptionist answering may use", async () => {
+    const receptionistId = "6f1c2b9e-8a4d-4f3e-9b7a-2c5d8e1f0a3b";
+    const { trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "management", receptionistId });
+    expect(trace.index).toEqual({ sources: 2, chunks: 9, embeddedChunks: 7 });
+    // The search's own reader and audience filters, so the count matches what the search can find.
+    expect(counted?.sql).toContain("WITH reader AS (");
+    expect(counted?.sql).toContain("knowledge_document_receptionists");
+    expect(counted?.sql).toContain("d.active = true AND d.status = 'indexed'");
+    expect(counted?.params).toContain(receptionistId);
+    expect(statements.filter(value => value.includes("WITH reader AS (")).length).toBeGreaterThan(1);
+  });
+
+  it("skips the keyword search for a query of only common words", async () => {
+    const { trace } = await traceKnowledgeSearch(traced(), { businessId: "tenant-a", query: "what is the" });
+    expect(trace).toMatchObject({ terms: [], lexicalQuery: null, lexical: { status: "skipped", error: null, candidates: [] }, semantic: { status: "ok" } });
+  });
+});
+
+describe("v1 knowledge search", () => {
+  const caller = { businessId: "tenant-a", apiKeyId: "key" };
+  const snapshot = { version: "v7", generatedAt: "2026-11-03T12:00:00.000Z", knowledgeSnippets: [{ title: "Parking", content: "Parking is free after 6 pm. ", priority: 0 }, { title: "Hours", content: "Open daily.", priority: 0 }] };
+  const withSnapshot = (): DomainContext => ({ ...context(), snapshotCache: { get: vi.fn(async () => snapshot as never), set: vi.fn(async () => undefined) } });
+
+  it("returns the evidence, what the model receives and what a call hears, with every stage", async () => {
+    lexical = [{ ...primary, content: "Management parking" }];
+    semantic = [lexical[0]!];
+    current = [lexical[0]!];
+    const callAnswer = vi.fn(() => "Facts for the call.");
+    const result = await searchKnowledgeForApi(withSnapshot(), caller, { query: "management parking" }, { callAnswer });
+    expect(result).toMatchObject({
+      query: "management parking",
+      outcome: "found",
+      mode: "hybrid",
+      failure: null,
+      token_budget: 3000,
+      snapshot: { version: "v7", generated_at: "2026-11-03T12:00:00.000Z" },
+      call_answer: "Facts for the call.",
+    });
+    expect(Number.isInteger(result.duration_ms)).toBe(true);
+    expect(result.evidence).toEqual([{
+      rank: 1, chunk_id: "chunk", document_id: "document", title: "BAA", source_url: "https://example.com/baa", source_revision: 3, sequence: 1,
+      rrf_score: 2 / 61, lexical_rank: 1, semantic_rank: 1, tokens: expect.any(Number),
+      content: "Management parking", supporting_chunk_ids: ["chunk"], focus_start: 0, focus_end: 18,
+    }]);
+    // The receptionist's tool result: the evidence first, then the matching text entry, whole.
+    expect(result.receptionist_result).toEqual({ outcome: "found", matches: [{ title: "BAA", text: "Management parking", focusStart: 0, focusEnd: 18 }, { title: "Parking", text: "Parking is free after 6 pm." }] });
+    expect(callAnswer).toHaveBeenCalledWith("management parking", result.receptionist_result);
+    expect(result.trace.candidates).toEqual([expect.objectContaining({ chunk_id: "chunk", rank: 1, content: "Management parking", fate: "evidence" })]);
+    expect(result.trace).toMatchObject({ terms: ["management", "parking"], revision_check: "ok", lexical: { status: "ok", candidates: [{ rank: 1, chunk_id: "chunk" }] }, semantic: { status: "ok", embedding_dimensions: 2, candidates: [{ rank: 1, chunk_id: "chunk" }] } });
+  });
+
+  it("answers as the default receptionist, with only the text entries it may use", async () => {
+    lexical = []; semantic = [];
+    const each = { status: "active", listed: true, description: null, locale: null, greeting: null, voiceInstructions: null, smsInstructions: null, chatInstructions: null, bookingPolicy: null, bookingMode: "request", transferPolicy: null };
+    const shared = {
+      ...snapshot,
+      knowledgeSnippets: [{ id: "parking", title: "Parking", content: "Parking is free after 6 pm.", priority: 0 }, { id: "hours", title: "Hours", content: "Parking lot hours: open daily.", priority: 0 }],
+      receptionists: [{ ...each, id: "front", name: "Front desk", isDefault: true, snippetIds: ["hours"] }, { ...each, id: "valet", name: "Valet", isDefault: false, snippetIds: ["parking", "hours"] }],
+    };
+    const withReceptionists: DomainContext = { ...context(), snapshotCache: { get: vi.fn(async () => shared as never), set: vi.fn(async () => undefined) } };
+    const result = await searchKnowledgeForApi(withReceptionists, caller, { query: "parking" }, { callAnswer: () => undefined });
+    // Only the valet may use the parking entry, so the default's result leaves it out.
+    expect(result.receptionist_result).toEqual({ outcome: "found", matches: [{ title: "Hours", text: "Parking lot hours: open daily." }] });
+    // The documents come from the same reader: the default, as no receptionist is named.
+    expect(statements.some(value => value.includes("WITH reader AS ("))).toBe(true);
+  });
+
+  it("keeps the business's entries when the search finds nothing, and says when a call would get nothing", async () => {
+    lexical = []; semantic = [];
+    const empty = await searchKnowledgeForApi(withSnapshot(), caller, { query: "parking" }, { callAnswer: () => undefined });
+    expect(empty).toMatchObject({ outcome: "empty", evidence: [], call_answer: null, receptionist_result: { outcome: "found", matches: [{ title: "Parking" }] } });
+    // No snapshot yet, and both searches fail.
+    failAll = true;
+    const noSnapshot = vi.fn(async (_db: unknown, _actor: unknown, callback: (tx: unknown) => unknown) => callback({ select: () => ({ from: () => ({ where: () => ({ orderBy: () => ({ limit: async () => [] }) }) }) }) }));
+    mocks.transaction.mockImplementationOnce(noSnapshot);
+    const down = await searchKnowledgeForApi({ db: {} as never }, caller, { query: "hours" }, { callAnswer: () => undefined });
+    expect(noSnapshot).toHaveBeenCalledTimes(1);
+    expect(down).toMatchObject({ outcome: "unavailable", failure: "search_unavailable", snapshot: null, receptionist_result: { outcome: "unavailable", matches: [] } });
   });
 });
 

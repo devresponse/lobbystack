@@ -96,6 +96,8 @@ test("an owner adds receptionists once the plan allows more, gives one its own g
     await page.getByRole("button", { name: copy.toolbar.add, exact: true }).click();
     const upgrade = page.getByRole("dialog", { name: settings.billing.upgradeDialog.title });
     await expect(upgrade).toBeVisible();
+    // Its plan cards say how many receptionists each plan includes.
+    await expect(upgrade.getByText(fill(settings.billing.upgradeDialog.plans.pro.highlights.receptionists_other, { count: 5 }), { exact: true })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(upgrade).toHaveCount(0);
 

@@ -26,10 +26,10 @@ type CheckoutInput = { target: "starter" | "pro"; billingEmail?: string };
 type BillingStatus = { checkoutAvailable: boolean; effectivePlan?: string; availableCheckoutPlans?: Array<"starter" | "pro">; availableCheckoutIntervals?: { starter: BillingInterval[]; pro: BillingInterval[] }; plans: BillingPlanList };
 
 const tiers: Array<{ slug: Plan; highlight?: boolean; features: string[] }> = [
-  { slug: "free_cloud", features: ["voiceMinutes", "bookingContacts", "support"] },
-  { slug: "starter", features: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"] },
-  { slug: "pro", highlight: true, features: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"] },
-  { slug: "enterprise", features: ["phoneNumbers", "selfHosted", "support"] },
+  { slug: "free_cloud", features: ["voiceMinutes", "receptionists", "bookingContacts", "support"] },
+  { slug: "starter", features: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"] },
+  { slug: "pro", highlight: true, features: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"] },
+  { slug: "enterprise", features: ["phoneNumbers", "customReceptionists", "selfHosted", "support"] },
 ];
 
 const REPORTED_CHECKOUT_KEY = "lobbystack.onboarding.checkoutReported";

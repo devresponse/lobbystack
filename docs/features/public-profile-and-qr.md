@@ -16,7 +16,7 @@ The page shows, in the deployment brand's colour:
 
 Unpublished pages answer 404. Publishing writes an audit log entry. The page has its own root layout (`apps/admin/app/(profile)`) and allows Google's map frame in its content security policy.
 
-With several receptionists, the default one answers the business page, and a **You're talking to** dropdown under the business's name lets visitors pick one of the others the business listed in the **Receptionists on your page** card, in **Settings > Public profile**. Each receptionist also has its own page, `/profile/<slug>/<handle>`, answered by it whether it's listed or not; its chat and browser call go to that receptionist through a signed token ([what visitors see](receptionists.md#know-what-visitors-see)). Both pages show the same business; what differs is who answers, which the dropdown and the page's title name.
+With several receptionists, the default one answers the business page, and a **You're talking to** dropdown under the business's name lets visitors pick one of the others the business listed in the **Receptionists on your page** card, in **Settings > Public profile**. Each receptionist also has its own page, `/profile/<slug>/<handle>`, answered by it whether it's listed or not; its chat and browser call go to that receptionist through a signed token ([what visitors see](receptionists.md#know-what-visitors-see)). Both pages show the same business; what differs is who answers, which the dropdown and the page's title name, and the phone number: a receptionist's own, or the business's main line, the default receptionist's, when it has none.
 
 | Piece | Where |
 | --- | --- |
@@ -49,4 +49,4 @@ The code is in `apps/admin/src/lib/qr-code*.ts` and `apps/admin/src/components/q
 
 - A business needs a published page and a widget key for the page's chat. For the call button it also needs its phone number in its context snapshot ([website widget](website-widget.md#switch-it-on)).
 - On a deployment with a long domain, check that the page's address is 58 bytes or less if you want the brand's mark in the code, or print a QR link's sign, whose address is shorter.
-- A QR link counts a scan only when a phone opens it with `GET`. Link previews that ask with `HEAD` aren't counted, and the business page's own address is never counted.
+- A QR link counts a scan only when a phone opens it with `GET` while the page is published. Link previews that ask with `HEAD` aren't counted, nor are scans while the page isn't published, which answer 404, and the business page's own address is never counted.

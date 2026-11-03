@@ -18,6 +18,5 @@ Since fork PR #129 a business can have several receptionists, each with its own 
 
 ## Know the smaller items
 
-- **The plan cards** don't show how many receptionists each plan includes, though `GET /api/billing` returns it (`included.receptionists`).
 - **A voice for each receptionist** comes with a voice picker ([custom voices](custom-voices.md)).
 - **A very large snapshot:** each text entry is stored once in the business's snapshot, and each receptionist keeps its best 50. If a business's snapshot ever passes 1 MB, text entries should move to the database search that files already use.

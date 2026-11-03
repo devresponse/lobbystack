@@ -12,9 +12,11 @@ export const dynamic = "force-dynamic";
 
 // A QR sign's short link, /q/<code> (followEntryLink): it counts the scan and
 // opens the page of the receptionist the link names, or the business page
-// when the link or that receptionist is paused or archived. The link can be
-// pointed elsewhere at any time, so the redirect is temporary and never
-// cached. Nothing about the visitor is kept.
+// when the link or that receptionist is paused or archived. While the business
+// page isn't published, every page it could open is a 404, so the link
+// answers 404 itself and counts nothing. The link can be pointed elsewhere at
+// any time, so the redirect is temporary and never cached. Nothing about the
+// visitor is kept.
 
 type Params = { params: Promise<{ code: string }> };
 

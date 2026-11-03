@@ -93,7 +93,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function readIds(value: unknown, field: string, max: number, code: string): string[] {
   if (value === undefined || value === null) return [];
   if (!Array.isArray(value) || value.some((id) => typeof id !== "string" || !isUuid(id))) throw failure(`${field} must be a list of ids.`, 400, code);
-  const ids = [...new Set(value as string[])];
+  // In lower case, as the database gives them back, so an id sent in capitals
+  // still matches its row, as on every other route.
+  const ids = [...new Set((value as string[]).map((id) => id.toLowerCase()))];
   if (ids.length > max) throw failure(`${field} can name up to ${max}.`, 400, code);
   return ids;
 }
@@ -137,7 +139,7 @@ function readRuleTarget(body: Record<string, unknown>): WebsiteImportRule {
 export function readWebsiteRuleInput(body: unknown): WebsiteRuleInput {
   if (!isRecord(body)) throw failure("A JSON object is required.", 400, "invalid_website_rule");
   if (typeof body.rootDocumentId !== "string" || !isUuid(body.rootDocumentId)) throw failure("rootDocumentId must be a website's id.", 400, "invalid_website_rule");
-  return { rootDocumentId: body.rootDocumentId, ...readRuleTarget(body) };
+  return { rootDocumentId: body.rootDocumentId.toLowerCase(), ...readRuleTarget(body) };
 }
 
 /**

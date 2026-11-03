@@ -18,6 +18,7 @@ import {
   isReceptionistHandle,
   normalizeEntryLinkCode,
   normalizeWebsiteRulePath,
+  websiteRulePathLabel,
   maxReceptionistsPerBusiness,
   receptionistMayUse,
   websitePageUnderRule,
@@ -232,12 +233,25 @@ describe("website rule paths", () => {
     ["/", "/"],
     ["https://kitsilanocoffee.ca/stores/kitsilano", "/stores/kitsilano/"],
     ["https://kitsilanocoffee.ca", "/"],
+    ["/café/", "/caf%C3%A9/"],
+    ["/caf%C3%A9", "/caf%C3%A9/"],
+    ["https://kitsilanocoffee.ca/caf%C3%A9/menu", "/caf%C3%A9/menu/"],
+    ["/stores\\kitsilano", "/stores/kitsilano/"],
   ])("keeps %j as %j", (value, path) => {
     expect(normalizeWebsiteRulePath(value)).toBe(path);
   });
 
-  it.each(["", "  ", "/stores?city=vancouver", "/menu#drinks", "/two words/", "//", "/stores//kitsilano/", "https://kitsilanocoffee.ca/menu?x=1", `/${"a".repeat(300)}/`])("refuses %j", (value) => {
+  it.each(["", "  ", "/stores?city=vancouver", "/menu#drinks", "/two words/", "//", "/stores//kitsilano/", "https://kitsilanocoffee.ca/menu?x=1", `/${"a".repeat(300)}/`, "/\\other.example/", `/${"é".repeat(60)}/`])("refuses %j", (value) => {
     expect(normalizeWebsiteRulePath(value)).toBeNull();
+  });
+
+  it("covers the pages of a path typed with accents, and shows it as typed", () => {
+    const path = normalizeWebsiteRulePath("/café/");
+    expect(path).not.toBeNull();
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/caf%C3%A9/menu", "https://kitsilanocoffee.ca/", path!)).toBe(true);
+    expect(websiteRulePathLabel(path!)).toBe("/café/");
+    expect(websiteRulePathLabel("/stores/kitsilano/")).toBe("/stores/kitsilano/");
+    expect(websiteRulePathLabel("/100%/")).toBe("/100%/");
   });
 
   it("covers a page at the path and below it, on the same site with or without www", () => {

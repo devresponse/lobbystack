@@ -430,6 +430,9 @@
       "includedVoice_one": "{{count}} minut razgovora",
       "includedVoice_few": "{{count}} minuta razgovora",
       "includedVoice_other": "{{count}} minuta razgovora",
+      "includedReceptionists_one": "{{count}} recepcioner",
+      "includedReceptionists_few": "{{count}} recepcionera",
+      "includedReceptionists_other": "{{count}} recepcionera",
       "includedSms_one": "{{count}} SMS upozorenje",
       "includedSms_few": "{{count}} SMS upozorenja",
       "includedSms_other": "{{count}} SMS upozorenja",
@@ -438,6 +441,7 @@
       "includedOutbound_other": "{{count}} pokušaja preusmeravanja",
       "includedStorageCustom": "Prilagođen skladišni prostor",
       "includedVoiceCustom": "Prilagođen broj minuta razgovora",
+      "includedReceptionistsCustom": "Prilagođen broj recepcionera",
       "includedSmsCustom": "Prilagođen broj SMS poruka",
       "includedOutboundCustom": "Prilagođen broj preusmeravanja",
       "includedStorage": "{{amount}} {{unit}} skladišnog prostora"
@@ -476,6 +480,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora u pregledaču",
             "voiceMinutes_few": "{{count}} minuta razgovora u pregledaču",
             "voiceMinutes_other": "{{count}} minuta razgovora u pregledaču",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "allFeatures": "Bez broja telefona",
             "support": "Podrška zajednice"
           }
@@ -490,6 +497,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
             "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
             "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "dedicatedNumber_one": "{{count}} namenski poslovni broj",
             "dedicatedNumber_few": "{{count}} namenska poslovna broja",
             "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -509,6 +519,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
             "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
             "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "dedicatedNumber_one": "{{count}} namenski poslovni broj",
             "dedicatedNumber_few": "{{count}} namenska poslovna broja",
             "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -526,6 +539,7 @@
           },
           "highlights": {
             "phoneNumbers": "Više namenskih brojeva",
+            "customReceptionists": "Broj recepcionera po dogovoru",
             "selfHosted": "Mogućnost samostalnog hostovanja",
             "support": "Namenska podrška pri uvođenju"
           }

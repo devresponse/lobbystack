@@ -42,6 +42,8 @@ function usageRows(plans: BillingPlanList, locale: string): ComparisonRow[] {
     const size = storageSize(bytes, locale);
     return { includedKey: size.unit === "GB" ? "usage.knowledgeStorage.gigabytes" : "usage.knowledgeStorage.megabytes", params: { amount: size.amount } };
   };
+  // Receptionists active at once, the default included.
+  const receptionists = (count: number | null | undefined): ComparisonValue => count === null || count === undefined ? custom : { includedKey: "usage.receptionists.included", params: { count } };
   const paid = (slug: "starter" | "pro") => {
     const offer = findPlan(plans, slug);
     const values = planValues(offer, plans.currency, locale);
@@ -58,6 +60,7 @@ function usageRows(plans: BillingPlanList, locale: string): ComparisonRow[] {
       outboundCalls: allowance("outboundCalls", offer?.included.outboundCallAttempts, values.outboundCallAttempts, values.outboundCallRate),
       alertSms: allowance("alertSms", offer?.included.alertSmsSegments, values.alertSmsSegments, values.alertSmsRate),
       knowledgeStorage: storage(offer?.included.knowledgeStorageBytes),
+      receptionists: receptionists(offer?.included.receptionists),
       phoneNumbers: offer?.included.businessNumbers === null || offer?.included.businessNumbers === undefined
         ? custom
         : { includedKey: "usage.phoneNumbers.dedicated", params: { count: values.businessNumbers } },
@@ -74,6 +77,7 @@ function usageRows(plans: BillingPlanList, locale: string): ComparisonRow[] {
       pro: pro.voiceMinutes,
       enterprise: custom,
     },
+    { key: "receptionists", free: receptionists(free?.included.receptionists), starter: starter.receptionists, pro: pro.receptionists, enterprise: custom },
     { key: "outboundCalls", free: false, starter: starter.outboundCalls, pro: pro.outboundCalls, enterprise: custom },
     { key: "alertSms", free: false, starter: starter.alertSms, pro: pro.alertSms, enterprise: custom },
     { key: "knowledgeStorage", free: storage(free?.included.knowledgeStorageBytes), starter: starter.knowledgeStorage, pro: pro.knowledgeStorage, enterprise: custom },

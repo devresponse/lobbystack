@@ -430,6 +430,9 @@
       "includedVoice_one": "{{count}} minuto de voz",
       "includedVoice_many": "{{count}} minutos de voz",
       "includedVoice_other": "{{count}} minutos de voz",
+      "includedReceptionists_one": "{{count}} recepcionista",
+      "includedReceptionists_many": "{{count}} recepcionistas",
+      "includedReceptionists_other": "{{count}} recepcionistas",
       "includedSms_one": "{{count}} alerta por SMS",
       "includedSms_many": "{{count}} alertas por SMS",
       "includedSms_other": "{{count}} alertas por SMS",
@@ -438,6 +441,7 @@
       "includedOutbound_other": "{{count}} intentos de transferencia",
       "includedStorageCustom": "Almacenamiento personalizado",
       "includedVoiceCustom": "Minutos de voz personalizados",
+      "includedReceptionistsCustom": "Recepcionistas personalizadas",
       "includedSmsCustom": "SMS personalizados",
       "includedOutboundCustom": "Transferencias personalizadas",
       "includedStorage": "{{amount}} {{unit}} de almacenamiento"
@@ -476,6 +480,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz en el navegador incluido",
             "voiceMinutes_many": "{{count}} minutos de voz en el navegador incluidos",
             "voiceMinutes_other": "{{count}} minutos de voz en el navegador incluidos",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "allFeatures": "Sin número de teléfono",
             "support": "Soporte de la comunidad"
           }
@@ -490,6 +497,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "dedicatedNumber_one": "{{count}} número del negocio dedicado",
             "dedicatedNumber_many": "{{count}} números del negocio dedicados",
             "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -509,6 +519,9 @@
             "voiceMinutes_one": "{{count}} minuto de voz incluido\nLuego {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutos de voz incluidos\nLuego {{rate}}/min",
+            "receptionists_one": "{{count}} recepcionista",
+            "receptionists_many": "{{count}} recepcionistas",
+            "receptionists_other": "{{count}} recepcionistas",
             "dedicatedNumber_one": "{{count}} número del negocio dedicado",
             "dedicatedNumber_many": "{{count}} números del negocio dedicados",
             "dedicatedNumber_other": "{{count}} números del negocio dedicados",
@@ -526,6 +539,7 @@
           },
           "highlights": {
             "phoneNumbers": "Varios números dedicados",
+            "customReceptionists": "Número de recepcionistas a medida",
             "selfHosted": "Opción de implementación autoalojada",
             "support": "Soporte dedicado para la implementación"
           }

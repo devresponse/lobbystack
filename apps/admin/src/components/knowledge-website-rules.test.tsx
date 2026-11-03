@@ -113,6 +113,13 @@ describe("the Website rules dialog", () => {
     expect(screen.queryByRole("combobox", { name: "Website" })).toBeNull();
   });
 
+  it("shows a path typed with accents as it was typed, though it's saved encoded", async () => {
+    setup({ rules: [rule(20, BIKES_SITE, "/caf%C3%A9/", SALES.id, 4)], siteId: BIKES_SITE.id });
+    const row = (await list()).getByRole("listitem");
+    expect(within(row).getByText(/^\//).textContent).toBe("/café/");
+    expect(within(row).getByRole("button", { name: /\/café\// })).toBeTruthy();
+  });
+
   it("shows five rules, then all of them on request", async () => {
     const many = Array.from({ length: 7 }, (_, index) => rule(index + 10, BIKES_SITE, `/stores/store-${index + 1}/`, SALES.id, 2));
     setup({ rules: many });

@@ -265,6 +265,28 @@ describe.skipIf(!testUrl)("QR links, against PostgreSQL under RLS", () => {
     });
   });
 
+  it("opens nothing and counts nothing while the business page isn't published, since the page would answer 404", async () => {
+    await rollbackTest(async (tx) => {
+      const chain = await seedChain(tx);
+      const link = await owner(tx, chain, () => createEntryLinkInTransaction(tx, { businessId: chain.businessId, actorUserId: chain.userId, link: { receptionistId: chain.storeId, label: "Front window" } }));
+      const desk = await owner(tx, chain, () => createEntryLinkInTransaction(tx, { businessId: chain.businessId, actorUserId: chain.userId, link: { receptionistId: chain.mainId, label: "Counter" } }));
+      const counted = async () => (await tx.select({ scans: entryLinkDailyScans.scans }).from(entryLinkDailyScans).where(eq(entryLinkDailyScans.businessId, chain.businessId))).map((row) => row.scans);
+      await tx.update(businessPublicProfiles).set({ published: false }).where(eq(businessPublicProfiles.businessId, chain.businessId));
+      expect(await page(tx, { slug: chain.slug, handle: "gastown" })).toBeNull();
+      expect(await scan(tx, link.code)).toBeNull();
+      expect(await scan(tx, desk.code)).toBeNull();
+      expect(await scan(tx, link.code, { count: false })).toBeNull();
+      // A business that never set up its page has none to open either.
+      await tx.delete(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, chain.businessId));
+      expect(await scan(tx, link.code)).toBeNull();
+      expect(await counted()).toEqual([]);
+      // Once the page is published, the same sign opens it and counts.
+      await tx.insert(businessPublicProfiles).values({ businessId: chain.businessId, published: true, publishedAt: new Date(), widgetKeyId: chain.widgetKeyId });
+      expect((await scan(tx, link.code))?.path).toBe(`/profile/${chain.slug}/gastown`);
+      expect(await counted()).toEqual([1]);
+    });
+  });
+
   it("filters the list by receptionist, status and a search of the label and code, a page at a time", async () => {
     await rollbackTest(async (tx) => {
       const chain = await seedChain(tx);

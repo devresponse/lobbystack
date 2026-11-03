@@ -289,6 +289,22 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
     });
   });
 
+  it("names the receptionist of a number the business bought again, not the released row's", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, mainId, storeId } = await seedChain(tx);
+      // The store's number was released, then bought again for the default receptionist:
+      // the released row stays as 'reclaimed' beside the new one (migration 0124).
+      const reboughtNumber = phone();
+      await tx.insert(phoneNumbers).values({ businessId, e164: reboughtNumber, receptionistId: storeId, status: "reclaimed", voiceEnabled: false, smsEnabled: false });
+      await tx.insert(phoneNumbers).values({ businessId, e164: reboughtNumber, receptionistId: mainId });
+      await as(tx, "lobbystack_worker");
+      await receiveInboundSms(context, { businessId, providerMessageId: `SM${randomUUID()}`, from: phone(), to: reboughtNumber, body: "Do you deliver?", payload: {} });
+      await as(tx, null);
+      const rows = await tx.select({ receptionistId: conversations.receptionistId }).from(conversations).where(and(eq(conversations.businessId, businessId), eq(conversations.channel, "sms")));
+      expect(rows).toEqual([{ receptionistId: mainId }]);
+    });
+  });
+
   it("keeps a website visitor's chat with one receptionist, while a chat the team has stays theirs on any page", async () => {
     await rollbackTest(async (tx) => {
       const { context, userId, businessId, mainId, storeId } = await seedChain(tx);

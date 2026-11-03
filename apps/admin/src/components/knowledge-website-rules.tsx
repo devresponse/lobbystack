@@ -6,7 +6,7 @@ import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { normalizeWebsiteRulePath, trimTrailingSlashes } from "@lobbystack/shared";
+import { normalizeWebsiteRulePath, trimTrailingSlashes, websiteRulePathLabel } from "@lobbystack/shared";
 
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { audienceErrorMessage } from "@/components/knowledge-audience";
@@ -225,14 +225,14 @@ function WebsiteRulesBody({ businessId, sites, siteId, receptionists, onChanged 
             {visible.map((rule) => (
               <li className="flex items-center gap-3 px-3 py-2" key={rule.id}>
                 <div className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate font-mono text-sm">{siteId ? rule.pathPrefix : `${siteLabel(rule.siteUrl)}${rule.pathPrefix}`}</span>
+                  <span className="truncate font-mono text-sm">{siteId ? websiteRulePathLabel(rule.pathPrefix) : `${siteLabel(rule.siteUrl)}${websiteRulePathLabel(rule.pathPrefix)}`}</span>
                   <span className="truncate text-xs text-muted-foreground">
                     {t("agent:sections.knowledge.receptionists.rules.goesToName", { name: nameOf(rule) ?? t("receptionists:picker.unknown") })}
                     {" · "}
                     {t("agent:sections.knowledge.receptionists.rules.pages", { count: rule.pages })}
                   </span>
                 </div>
-                <Button aria-label={t("agent:sections.knowledge.receptionists.rules.delete", { path: rule.pathPrefix })} onClick={() => setDeleting(rule)} size="icon-sm" type="button" variant="ghost">
+                <Button aria-label={t("agent:sections.knowledge.receptionists.rules.delete", { path: websiteRulePathLabel(rule.pathPrefix) })} onClick={() => setDeleting(rule)} size="icon-sm" type="button" variant="ghost">
                   <Trash2 />
                 </Button>
               </li>
@@ -290,7 +290,7 @@ function WebsiteRulesBody({ businessId, sites, siteId, receptionists, onChanged 
         onOpenChange={(open) => { if (!open && !remove.isPending) setDeleting(null); }}
         open={deleting !== null}
         pending={remove.isPending}
-        title={t("agent:sections.knowledge.receptionists.rules.deleteTitle", { path: deleting?.pathPrefix ?? "" })}
+        title={t("agent:sections.knowledge.receptionists.rules.deleteTitle", { path: deleting ? websiteRulePathLabel(deleting.pathPrefix) : "" })}
       />
     </div>
   );

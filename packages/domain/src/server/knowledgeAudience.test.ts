@@ -24,6 +24,13 @@ describe("reading who one article is for", () => {
     expect(readKnowledgeAudienceChoice({ audience: "chosen", receptionistIds: [gastown, kitsilano, gastown] })).toEqual({ audience: "chosen", receptionistIds: [gastown, kitsilano] });
   });
 
+  it("reads ids sent in capitals in lower case, as the database keeps them", () => {
+    expect(readKnowledgeAudienceChoice({ audience: "chosen", receptionistIds: [gastown.toUpperCase(), gastown, kitsilano.toUpperCase()] })).toEqual({ audience: "chosen", receptionistIds: [gastown, kitsilano] });
+    expect(readKnowledgeAudienceChange({ documentIds: [menu.toUpperCase()], snippetIds: [hours.toUpperCase(), hours], audience: "chosen", mode: "add", receptionistIds: [gastown.toUpperCase()] }))
+      .toEqual({ documentIds: [menu], snippetIds: [hours], audience: "chosen", mode: "add", receptionistIds: [gastown] });
+    expect(readWebsiteRuleInput({ rootDocumentId: menu.toUpperCase(), pathPrefix: "/stores/", receptionistId: kitsilano.toUpperCase() })).toEqual({ rootDocumentId: menu, pathPrefix: "/stores/", receptionistId: kitsilano });
+  });
+
   it("refuses an unknown audience, chosen without receptionists, and ids that aren't ids", () => {
     for (const body of [null, [], "everyone", { audience: "some" }, { audience: "chosen" }, { audience: "chosen", receptionistIds: [] }, { audience: "chosen", receptionistIds: ["gastown"] }, { audience: "chosen", receptionistIds: gastown }]) {
       expect(refusal(() => readKnowledgeAudienceChoice(body))).toMatchObject({ status: 400, code: "invalid_audience" });

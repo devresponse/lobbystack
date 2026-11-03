@@ -85,9 +85,12 @@ export function receptionistMayUse(receptionist: AudienceReader, article: Articl
 /**
  * A website rule's path as the database keeps it: from the leading slash to a
  * trailing slash, so /stores/kitsilano covers /stores/kitsilano/hours but not
- * /stores/kitsilano-west. A full address keeps only its path. Null for a path
- * the rule can't use: a query, a fragment, a space, an empty segment or one
- * longer than 300 characters. The root, "/", covers the whole site.
+ * /stores/kitsilano-west. A full address keeps only its path. Letters outside
+ * ASCII are percent-encoded as a page's address is (/café/ as /caf%C3%A9/),
+ * so a typed path matches the pages it names; an encoded one stays as it is.
+ * Null for a path the rule can't use: a query, a fragment, a space, an empty
+ * segment or one longer than 300 characters once encoded. The root, "/",
+ * covers the whole site.
  */
 export function normalizeWebsiteRulePath(value: string): string | null {
   let path = value.trim();
@@ -103,9 +106,25 @@ export function normalizeWebsiteRulePath(value: string): string | null {
   }
   if (/[?#\s]/.test(path)) return null;
   if (!path.startsWith("/")) path = `/${path}`;
+  try {
+    // Appended to an origin, never resolved against one, so the path can't
+    // name a host; a backslash becomes a slash, as in a browser.
+    path = new URL(`https://site.invalid${path}`).pathname;
+  } catch {
+    return null;
+  }
   if (!path.endsWith("/")) path = `${path}/`;
   if (path !== "/" && !/^\/([^/]+\/)+$/.test(path)) return null;
   return path.length <= WEBSITE_RULE_PATH_MAX_LENGTH ? path : null;
+}
+
+/** A rule's path as people read it, with its percent-encoded letters decoded (/caf%C3%A9/ as /café/). */
+export function websiteRulePathLabel(path: string): string {
+  try {
+    return decodeURI(path);
+  } catch {
+    return path;
+  }
 }
 
 /**

@@ -31,6 +31,8 @@ export * from "./demos";
 export * from "./feedback";
 export * from "./email";
 export * from "./knowledge";
+export * from "./knowledgeAudience";
+export * from "./snapshotKnowledge";
 export * from "./unansweredQuestions";
 export * from "./liveCalls";
 export * from "./notifications";

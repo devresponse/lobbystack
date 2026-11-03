@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 import { and, asc, desc, eq, ilike, lt, ne, sql } from "drizzle-orm";
 
-import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { FULL_CRAWL_PAGE_LIMIT, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeRuntimeLocale, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
-import { buildBusinessContextSnapshot, MAX_KNOWLEDGE_SNIPPETS_PER_SNAPSHOT } from "../snapshot";
+import { agentRules, businessContextSnapshots, businessHours, businesses, businessPublicProfiles, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { FULL_CRAWL_PAGE_LIMIT, isUuid, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeRuntimeLocale, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, publicProfilePath, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { buildBusinessContextSnapshot, knowledgeDigestOf } from "../snapshot";
 import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
@@ -17,6 +17,8 @@ import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
 import { loadBusinessPlanLimits } from "./usage";
 import { resolveSmsSender } from "./smsSender";
+import { applyWebsiteRulesInTransaction, type RankedReceptionist } from "./knowledgeAudience";
+import { loadSnapshotKnowledge, loadSnapshotReceptionistRows, rankedReceptionistOf, snapshotReceptionistOf } from "./snapshotKnowledge";
 
 const ragMeter = getMeter("lobbystack-rag");
 const searchDuration = ragMeter.createHistogram("rag.search.duration_ms", { unit: "ms" });
@@ -393,7 +395,10 @@ export async function indexCrawledWebsitePage(context: DomainContext, input: Ind
     const sourceUrl = normalizeWebsiteSourceUrl(input.sourceUrl);
     const [page] = await tx.insert(knowledgeDocuments).values({ businessId: input.businessId, sourceType: "website", title: input.title, sourceUrl, status: "processing" }).onConflictDoUpdate({ target: [knowledgeDocuments.businessId, knowledgeDocuments.sourceUrl], set: { title: input.title, status: "processing", error: null, updatedAt: new Date() } }).returning({ id: knowledgeDocuments.id });
     if (!page) throw new Error("Website page could not be saved.");
-    return await indexDocumentTextInTransaction(tx, { ...input, documentId: page.id }, page.id === source.id);
+    const indexed = await indexDocumentTextInTransaction(tx, { ...input, documentId: page.id }, page.id === source.id);
+    // The site's rules give the page to their receptionists, on every crawl.
+    await applyWebsiteRulesInTransaction(tx, { businessId: input.businessId, rootDocumentId: source.id, documentIds: [page.id] });
+    return indexed;
   });
   if (result.indexed) await recordKnowledgeDocumentIndexed(context, { businessId: input.businessId, documentId: result.documentId });
   return { chunkCount: result.chunkCount };
@@ -453,14 +458,21 @@ export async function upsertWebsiteDocument(
 
 export async function searchKnowledge(
   context: DomainContext,
-  input: { userId?: string; businessId: string; query: string; limit?: number },
+  input: { userId?: string; businessId: string; query: string; limit?: number; receptionistId?: string | null },
 ): Promise<Array<{ chunkId: string; title: string; content: string }>> {
   return (await searchKnowledgeEvidence(context, input)).matches;
 }
 
+/**
+ * Searches the files and website pages the receptionist answering may use:
+ * the one named when it is active, else the default receptionist, as its
+ * entry points answer as the default (receptionistMayUse in
+ * @lobbystack/shared, here in SQL). A business from before receptionists
+ * searches everything.
+ */
 export async function searchKnowledgeEvidence(
   context: DomainContext,
-  input: { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string },
+  input: { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string; receptionistId?: string | null },
 ): Promise<{ matches: KnowledgePassage[]; mode: "hybrid" | "keyword"; outcome: "found" | "empty" | "unavailable"; failure?: "embedding_unavailable" | "search_unavailable"; durationMs: number }> {
   const startedAt = performance.now();
   const actor = { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" as const : "worker" as const };
@@ -470,9 +482,27 @@ export async function searchKnowledgeEvidence(
   const fields = sql`c.id AS "chunkId", c.document_id AS "documentId", d.title, c.content,
     d.source_url AS "sourceUrl", d.revision AS "sourceRevision", c.sequence`;
   const from = sql`FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id`;
-  const select = sql`SELECT ${fields} ${from}`;
+  const receptionistId = input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null;
+  // Who is answering: the receptionist named while it is active, else the default.
+  const reader = sql`reader AS (
+    SELECT id, is_default, knowledge_scope FROM receptionist_profiles
+    WHERE business_id = ${input.businessId} AND archived_at IS NULL AND (status = 'active' OR is_default)
+    ORDER BY (id = ${receptionistId}::uuid) IS TRUE DESC, is_default DESC, id
+    LIMIT 1
+  )`;
+  const select = sql`WITH ${reader} SELECT ${fields} ${from}`;
+  // Documents for everyone, every document for a receptionist that sees them
+  // all, and those chosen for it; the default also answers from documents
+  // chosen only for archived receptionists.
   const filters = sql`c.business_id = ${input.businessId} AND d.business_id = ${input.businessId}
-    AND d.active = true AND d.status = 'indexed'`;
+    AND d.active = true AND d.status = 'indexed'
+    AND (d.audience = 'everyone'
+      OR NOT EXISTS (SELECT 1 FROM reader WHERE reader.knowledge_scope = 'audience')
+      OR EXISTS (SELECT 1 FROM reader JOIN knowledge_document_receptionists l ON l.document_id = d.id AND l.receptionist_id = reader.id)
+      OR EXISTS (SELECT 1 FROM reader WHERE reader.is_default AND NOT EXISTS (
+        SELECT 1 FROM knowledge_document_receptionists l
+        JOIN receptionist_profiles p ON p.business_id = l.business_id AND p.id = l.receptionist_id AND p.archived_at IS NULL
+        WHERE l.document_id = d.id)))`;
   const execute = (statement: ReturnType<typeof sql>) => withBusinessTransaction(context.db, actor, async tx => {
     await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
     return (await tx.execute<KnowledgePassage>(statement)).rows;
@@ -492,7 +522,7 @@ export async function searchKnowledgeEvidence(
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("embedding_timeout")), 1800); }),
       ]);
       if (!embedding?.length || embedding.some(value => !Number.isFinite(value))) throw new Error("invalid_embedding");
-      return await execute(sql`WITH eligible AS MATERIALIZED (SELECT ${fields}, c.embedding ${from} WHERE ${filters} AND c.embedding IS NOT NULL
+      return await execute(sql`WITH ${reader}, eligible AS MATERIALIZED (SELECT ${fields}, c.embedding ${from} WHERE ${filters} AND c.embedding IS NOT NULL
         AND c.embedding_status = 'completed'
         ${context.embeddings.fingerprint ? sql`AND c.embedding_fingerprint = ${context.embeddings.fingerprint}` : sql``})
         SELECT "chunkId", "documentId", title, content, "sourceUrl", "sourceRevision", sequence FROM eligible
@@ -555,6 +585,20 @@ export async function loadLatestBusinessSnapshot(
   });
 }
 
+/** The business page's address on this deployment, when the page is published and the deployment's address is known. */
+export function businessPageUrl(slug: string, published: boolean, environment: Readonly<Record<string, string | undefined>> = process.env): string | undefined {
+  const base = environment.APP_BASE_URL?.trim();
+  if (!published || !base) return undefined;
+  try {
+    return new URL(publicProfilePath(slug), base).toString();
+  } catch {
+    return undefined;
+  }
+}
+
+/** A business from before receptionists answers as one receptionist that sees every article. */
+const LEGACY_RECEPTIONIST: RankedReceptionist = { id: "00000000-0000-0000-0000-000000000000", isDefault: true, status: "active", knowledgeScope: "all" };
+
 export async function refreshBusinessSnapshot(
   context: DomainContext,
   input: { businessId: string },
@@ -562,47 +606,59 @@ export async function refreshBusinessSnapshot(
   const startedAt = performance.now();
   let builtSnapshot: BusinessContextSnapshot | undefined;
   const version = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const business = await tx.select().from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
-    if (!business[0]) {
+    const [found] = await tx.select({ business: businesses, published: businessPublicProfiles.published }).from(businesses)
+      .leftJoin(businessPublicProfiles, eq(businessPublicProfiles.businessId, businesses.id))
+      .where(eq(businesses.id, input.businessId))
+      .limit(1);
+    if (!found) {
       throw new Error("Business not found.");
     }
-    const profile = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
+    const { business } = found;
+    // Every business has one default receptionist; should none be left, the
+    // first stands in so its numbers and pages still answer.
+    const loaded = await loadSnapshotReceptionistRows(tx, input.businessId);
+    const profiles = loaded.length && !loaded.some((row) => row.isDefault) ? loaded.map((row, index) => index === 0 ? { ...row, isDefault: true } : row) : loaded;
+    const defaultProfile = profiles.find((row) => row.isDefault);
     const hours = await tx.select().from(businessHours).where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
     const closureRows = await tx.select().from(closures).where(eq(closures.businessId, input.businessId)).orderBy(asc(closures.startsAt));
     const serviceRows = await tx.select().from(services).where(and(eq(services.businessId, input.businessId), eq(services.active, true))).orderBy(asc(services.name));
     const ruleRows = await tx.select().from(agentRules).where(and(eq(agentRules.businessId, input.businessId), eq(agentRules.active, true))).orderBy(asc(agentRules.sortOrder), asc(agentRules.createdAt), asc(agentRules.id));
-    const snippets = await tx.select().from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true))).orderBy(desc(knowledgeSnippets.priority), desc(knowledgeSnippets.updatedAt), asc(knowledgeSnippets.id)).limit(MAX_KNOWLEDGE_SNIPPETS_PER_SNAPSHOT);
-    const documents = await tx.select({ title: knowledgeDocuments.title, sourceUrl: knowledgeDocuments.sourceUrl, tags: knowledgeDocuments.tags, revision: knowledgeDocuments.revision }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, "indexed"))).orderBy(desc(knowledgeDocuments.updatedAt), asc(knowledgeDocuments.id)).limit(40);
+    const knowledge = await loadSnapshotKnowledge(tx, { businessId: input.businessId, receptionists: defaultProfile ? profiles.map(rankedReceptionistOf) : [LEGACY_RECEPTIONIST] });
     const numbers = await tx.select().from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id));
-    const currentProfile = profile[0];
     const phoneNumber = numbers.find((number) => number.status === "active" && number.voiceEnabled)?.e164;
     // The number customer texts come from, so the agent offers texts only to
     // callers it can reach: the business's own SMS number, or the shared
     // sender for a cloud business without one.
     const smsNumber = await resolveSmsSender(tx, input.businessId);
+    const publicPageUrl = businessPageUrl(business.slug, found.published === true);
+    const receptionists = defaultProfile
+      ? profiles.map((row) => snapshotReceptionistOf(row, { displayName: business.name, timezone: business.timezone, publicPageUrl, snippetIds: knowledge.snippetIds.get(row.id) ?? [] }))
+      : undefined;
     const version = `${Date.now()}`;
     builtSnapshot = buildBusinessContextSnapshot({
       businessId: input.businessId,
       version,
       generatedAt: new Date().toISOString(),
-      displayName: business[0].name,
-      ...(business[0].legalName ? { legalName: business[0].legalName } : {}),
-      timezone: business[0].timezone,
-      defaultLocale: normalizeRuntimeLocale(business[0].defaultLocale) ?? "en",
-      businessType: ["clinic", "repair_shop", "salon", "service_company"].includes(business[0].businessType) ? business[0].businessType as BusinessContextSnapshot["businessType"] : "other",
-      telemetryEnabled: business[0].telemetryEnabled,
+      displayName: business.name,
+      ...(business.legalName ? { legalName: business.legalName } : {}),
+      timezone: business.timezone,
+      // The fields below the shared ones are the default receptionist's, as calls read them before receptionists.
+      defaultLocale: normalizeRuntimeLocale(defaultProfile?.locale) ?? normalizeRuntimeLocale(business.defaultLocale) ?? "en",
+      businessType: ["clinic", "repair_shop", "salon", "service_company"].includes(business.businessType) ? business.businessType as BusinessContextSnapshot["businessType"] : "other",
+      telemetryEnabled: business.telemetryEnabled,
       ...(phoneNumber ? { phoneNumber } : {}),
       ...(smsNumber ? { smsNumber } : {}),
-      greeting: currentProfile?.greeting ?? `Thank you for calling ${business[0].name}.`,
-      recordingNotice: currentProfile?.recordingNotice ?? true,
-      tone: currentProfile?.tone ?? "professional",
-      bookingPolicy: currentProfile?.bookingPolicy ?? "Confirm availability before booking.",
-      ...(currentProfile?.voiceInstructions ? { voiceInstructions: currentProfile.voiceInstructions } : {}),
-      ...(currentProfile?.smsInstructions ? { smsInstructions: currentProfile.smsInstructions } : {}),
-      ...(currentProfile?.chatInstructions ? { chatInstructions: currentProfile.chatInstructions } : {}),
+      greeting: defaultProfile?.greeting ?? `Thank you for calling ${business.name}.`,
+      // Every receptionist shares the AI notice, the summary and the appointment change rules: they are the business's.
+      recordingNotice: business.recordingNotice,
+      tone: defaultProfile?.tone ?? "professional",
+      bookingPolicy: defaultProfile?.bookingPolicy ?? "Confirm availability before booking.",
+      ...(defaultProfile?.voiceInstructions ? { voiceInstructions: defaultProfile.voiceInstructions } : {}),
+      ...(defaultProfile?.smsInstructions ? { smsInstructions: defaultProfile.smsInstructions } : {}),
+      ...(defaultProfile?.chatInstructions ? { chatInstructions: defaultProfile.chatInstructions } : {}),
       // A sign-up placeholder says nothing about the business, so prompts get no summary until AI or a person writes one.
-      summary: currentProfile && currentProfile.summarySource !== "placeholder" ? currentProfile.summary : "",
-      knowledgeDigest: withinKnowledgeBudget(documents, 1600, row => JSON.stringify(row)).map(row => JSON.stringify(row)).join("\n"),
+      summary: business.summarySource !== "placeholder" ? business.summary : "",
+      knowledgeDigest: knowledgeDigestOf(knowledge.defaultDocuments),
       hours: hours.map((row) => ({ dayOfWeek: row.dayOfWeek, openMinutes: row.openMinutes, closeMinutes: row.closeMinutes })),
       closures: closureRows.map((row) => ({ startsAt: row.startsAt.toISOString(), endsAt: row.endsAt.toISOString(), reason: row.reason })),
       services: serviceRows.map((row) => ({
@@ -614,10 +670,14 @@ export async function refreshBusinessSnapshot(
         } } : {}),
       })),
       rules: ruleRows.map((row) => ({ id: row.id, title: row.title, content: row.content, order: row.sortOrder })),
-      snippets: snippets.map((row) => ({ id: row.id, title: row.title, content: row.content, tags: row.tags, priority: row.priority })),
-      appointmentChangePolicy: normalizeAppointmentChangePolicy(currentProfile?.appointmentChangePolicy),
-      bookingMode: normalizeBookingMode(currentProfile?.bookingMode),
-      transferPolicy: { mode: normalizeTransferMode(currentProfile?.transferMode), ...(currentProfile?.transferNumber ? { transferNumber: currentProfile.transferNumber } : {}) },
+      snippets: knowledge.defaultSnippets,
+      appointmentChangePolicy: normalizeAppointmentChangePolicy(business.appointmentChangePolicy),
+      bookingMode: normalizeBookingMode(defaultProfile?.bookingMode),
+      transferPolicy: { mode: normalizeTransferMode(defaultProfile?.transferMode), ...(defaultProfile?.transferNumber ? { transferNumber: defaultProfile.transferNumber } : {}) },
+      ...(receptionists ? { receptionists } : {}),
+      ...(knowledge.extraSnippets.length ? { extraSnippets: knowledge.extraSnippets } : {}),
+      ...(knowledge.documents ? { knowledgeDocuments: knowledge.documents } : {}),
+      ...(publicPageUrl ? { publicPageUrl } : {}),
     });
     await tx.insert(businessContextSnapshots).values({ businessId: input.businessId, version, snapshot: builtSnapshot as unknown as Record<string, unknown> });
     // Readers only use the newest row. now() is this transaction's start, the

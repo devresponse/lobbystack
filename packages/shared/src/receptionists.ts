@@ -47,6 +47,88 @@ export const MAX_RECEPTIONISTS_PER_REQUEST = MAX_RECEPTIONISTS_PER_BUSINESS_CEIL
 /** Articles one bulk Available to change may name. */
 export const MAX_ARTICLES_PER_AUDIENCE_CHANGE = 500;
 
+/** Text entries the snapshot keeps for each receptionist, best first, for knowledge search and its prompt. */
+export const MAX_SNIPPETS_PER_RECEPTIONIST = 50;
+
+/** Documents each receptionist's knowledge digest lists, newest first, within its token budget. */
+export const MAX_DIGEST_DOCUMENTS_PER_RECEPTIONIST = 40;
+
+/** Longest website rule path, as migration 0136 allows. */
+export const WEBSITE_RULE_PATH_MAX_LENGTH = 300;
+
+/**
+ * Who may use an article, as a receptionist sees it: its audience and, for a
+ * chosen one, the receptionists it was chosen for that aren't archived.
+ */
+export type ArticleAudience = { audience?: KnowledgeAudience | undefined; receptionistIds?: readonly string[] | undefined };
+
+/** What decides which articles a receptionist may use. */
+export type AudienceReader = { id: string; isDefault: boolean; knowledgeScope: ReceptionistKnowledgeScope };
+
+/**
+ * Whether a receptionist may use an article. One whose scope is all, as the
+ * default receptionist's is unless the owner limits it, uses every article.
+ * Otherwise it uses the articles for everyone and those chosen for it. An
+ * article chosen only for archived receptionists, or for none, is left to the
+ * default receptionist, never to everyone. The search filter in SQL
+ * (searchKnowledgeEvidence) follows the same rule.
+ */
+export function receptionistMayUse(receptionist: AudienceReader, article: ArticleAudience): boolean {
+  if (receptionist.knowledgeScope === "all" || article.audience !== "chosen") return true;
+  const chosen = article.receptionistIds ?? [];
+  if (chosen.includes(receptionist.id)) return true;
+  return receptionist.isDefault && chosen.length === 0;
+}
+
+/**
+ * A website rule's path as the database keeps it: from the leading slash to a
+ * trailing slash, so /stores/kitsilano covers /stores/kitsilano/hours but not
+ * /stores/kitsilano-west. A full address keeps only its path. Null for a path
+ * the rule can't use: a query, a fragment, a space, an empty segment or one
+ * longer than 300 characters. The root, "/", covers the whole site.
+ */
+export function normalizeWebsiteRulePath(value: string): string | null {
+  let path = value.trim();
+  if (!path) return null;
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      const url = new URL(path);
+      if (url.search || url.hash) return null;
+      path = url.pathname;
+    } catch {
+      return null;
+    }
+  }
+  if (/[?#\s]/.test(path)) return null;
+  if (!path.startsWith("/")) path = `/${path}`;
+  if (!path.endsWith("/")) path = `${path}/`;
+  if (path !== "/" && !/^\/([^/]+\/)+$/.test(path)) return null;
+  return path.length <= WEBSITE_RULE_PATH_MAX_LENGTH ? path : null;
+}
+
+/**
+ * Whether a website page falls under a rule: the same site as the rule's
+ * source, and a path the rule's path starts. A site is its host and port,
+ * with or without "www." and over HTTP or HTTPS, since a crawl can land on
+ * either. Addresses are compared as the crawler saves them
+ * (normalizeWebsiteSourceUrl): a page's path has no trailing slash, so
+ * /stores/kitsilano itself is under /stores/kitsilano/.
+ */
+export function websitePageUnderRule(pageUrl: string, siteUrl: string, rulePath: string): boolean {
+  let page: URL;
+  let site: URL;
+  try {
+    page = new URL(pageUrl);
+    site = new URL(siteUrl);
+  } catch {
+    return false;
+  }
+  const host = (url: URL) => url.host.toLowerCase().replace(/^www\./, "");
+  if (host(page) !== host(site)) return false;
+  const pagePath = page.pathname.endsWith("/") ? page.pathname : `${page.pathname}/`;
+  return pagePath.startsWith(rulePath);
+}
+
 /**
  * The default receptionist's name in each language calls and the dashboard
  * use. Migration 0133 names each business's existing receptionist from this

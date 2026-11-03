@@ -51,18 +51,24 @@ export type BusinessSummaryInput = {
   sources: BusinessSummarySource[];
 };
 
-/** The knowledge to summarize: text entries first, then the start of each indexed document, within a token budget. */
+/**
+ * The knowledge to summarize: text entries first, then the start of each
+ * indexed document, within a token budget. The summary describes the whole
+ * business to every receptionist, so it reads only articles for everyone:
+ * an article chosen for some receptionists, such as one store's page, stays
+ * theirs.
+ */
 export async function loadBusinessSummaryInput(context: DomainContext, input: { businessId: string }): Promise<BusinessSummaryInput | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const [business] = await tx.select({ name: businesses.name, defaultLocale: businesses.defaultLocale, summarySource: businesses.summarySource, summaryFingerprint: businesses.summaryFingerprint }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
     if (!business) return null;
     const snippets = await tx.select({ title: knowledgeSnippets.title, content: knowledgeSnippets.content }).from(knowledgeSnippets)
-      .where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true)))
+      .where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true), eq(knowledgeSnippets.audience, "everyone")))
       .orderBy(desc(knowledgeSnippets.priority), asc(knowledgeSnippets.createdAt)).limit(SUMMARY_MAX_SNIPPETS);
     // Uploads first, then website pages in the order they were imported, which
     // puts the home page near the front.
     const documents = await tx.select({ id: knowledgeDocuments.id, title: knowledgeDocuments.title }).from(knowledgeDocuments)
-      .where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, "indexed")))
+      .where(and(eq(knowledgeDocuments.businessId, input.businessId), eq(knowledgeDocuments.active, true), eq(knowledgeDocuments.status, "indexed"), eq(knowledgeDocuments.audience, "everyone")))
       .orderBy(sql`case when ${knowledgeDocuments.sourceType} = 'upload' then 0 else 1 end`, asc(knowledgeDocuments.createdAt)).limit(SUMMARY_MAX_DOCUMENTS);
     const chunks = documents.length
       ? await tx.select({ documentId: knowledgeChunks.documentId, content: knowledgeChunks.content }).from(knowledgeChunks)

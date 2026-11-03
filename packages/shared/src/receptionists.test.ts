@@ -14,7 +14,10 @@ import {
   entryLinkCode,
   isReceptionistHandle,
   normalizeEntryLinkCode,
+  normalizeWebsiteRulePath,
   maxReceptionistsPerBusiness,
+  receptionistMayUse,
+  websitePageUnderRule,
   receptionistAllowance,
   receptionistHandleFrom,
   receptionistInitials,
@@ -159,5 +162,72 @@ describe("QR link codes", () => {
     expect(normalizeEntryLinkCode("")).toBeNull();
     expect(normalizeEntryLinkCode(null)).toBeNull();
     expect(normalizeEntryLinkCode(undefined)).toBeNull();
+  });
+});
+
+describe("who may use an article", () => {
+  const frontDesk = { id: "front", isDefault: true, knowledgeScope: "all" as const };
+  const gastown = { id: "gastown", isDefault: false, knowledgeScope: "audience" as const };
+  const limitedDefault = { ...frontDesk, knowledgeScope: "audience" as const };
+
+  it("gives every receptionist the articles for everyone, which every article from before receptionists is", () => {
+    for (const receptionist of [frontDesk, gastown, limitedDefault]) {
+      expect(receptionistMayUse(receptionist, { audience: "everyone" })).toBe(true);
+      expect(receptionistMayUse(receptionist, {})).toBe(true);
+    }
+  });
+
+  it("gives a chosen article to its receptionists, and to the default one only when it sees every article", () => {
+    const chosen = { audience: "chosen" as const, receptionistIds: ["gastown"] };
+    expect(receptionistMayUse(gastown, chosen)).toBe(true);
+    expect(receptionistMayUse({ ...gastown, id: "kitsilano" }, chosen)).toBe(false);
+    expect(receptionistMayUse(frontDesk, chosen)).toBe(true);
+    expect(receptionistMayUse(limitedDefault, chosen)).toBe(false);
+    // A receptionist told to see every article does.
+    expect(receptionistMayUse({ ...gastown, id: "kitsilano", knowledgeScope: "all" }, chosen)).toBe(true);
+  });
+
+  it("leaves an article chosen only for archived receptionists to the default one, never to everyone", () => {
+    const orphan = { audience: "chosen" as const, receptionistIds: [] };
+    expect(receptionistMayUse(limitedDefault, orphan)).toBe(true);
+    expect(receptionistMayUse(frontDesk, orphan)).toBe(true);
+    expect(receptionistMayUse(gastown, orphan)).toBe(false);
+    expect(receptionistMayUse(gastown, { audience: "chosen" })).toBe(false);
+  });
+});
+
+describe("website rule paths", () => {
+  it.each([
+    ["/stores/kitsilano/", "/stores/kitsilano/"],
+    ["/stores/kitsilano", "/stores/kitsilano/"],
+    ["stores/kitsilano", "/stores/kitsilano/"],
+    [" /menu ", "/menu/"],
+    ["/", "/"],
+    ["https://kitsilanocoffee.ca/stores/kitsilano", "/stores/kitsilano/"],
+    ["https://kitsilanocoffee.ca", "/"],
+  ])("keeps %j as %j", (value, path) => {
+    expect(normalizeWebsiteRulePath(value)).toBe(path);
+  });
+
+  it.each(["", "  ", "/stores?city=vancouver", "/menu#drinks", "/two words/", "//", "/stores//kitsilano/", "https://kitsilanocoffee.ca/menu?x=1", `/${"a".repeat(300)}/`])("refuses %j", (value) => {
+    expect(normalizeWebsiteRulePath(value)).toBeNull();
+  });
+
+  it("covers a page at the path and below it, on the same site with or without www", () => {
+    const site = "https://kitsilanocoffee.ca/";
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/stores/kitsilano", site, "/stores/kitsilano/")).toBe(true);
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/stores/kitsilano/hours", site, "/stores/kitsilano/")).toBe(true);
+    expect(websitePageUnderRule("https://www.kitsilanocoffee.ca/stores/kitsilano/hours", site, "/stores/kitsilano/")).toBe(true);
+    expect(websitePageUnderRule("http://kitsilanocoffee.ca/stores/kitsilano", site, "/stores/kitsilano/")).toBe(true);
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/menu", site, "/")).toBe(true);
+  });
+
+  it("leaves out a page whose path only starts with the same letters, and other sites", () => {
+    const site = "https://kitsilanocoffee.ca/";
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/stores/kitsilano-west", site, "/stores/kitsilano/")).toBe(false);
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca/stores", site, "/stores/kitsilano/")).toBe(false);
+    expect(websitePageUnderRule("https://othercoffee.ca/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
+    expect(websitePageUnderRule("https://kitsilanocoffee.ca:8443/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
+    expect(websitePageUnderRule("not a url", site, "/")).toBe(false);
   });
 });

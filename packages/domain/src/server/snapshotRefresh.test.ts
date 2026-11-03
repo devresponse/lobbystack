@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   withBusinessTransaction: vi.fn(),
   enqueueOutbox: vi.fn(),
   resolveSmsSender: vi.fn(),
+  loadSnapshotKnowledge: vi.fn(),
 }));
 
 vi.mock("@lobbystack/db", async (importOriginal) => ({
@@ -16,6 +17,11 @@ vi.mock("@lobbystack/db", async (importOriginal) => ({
   enqueueOutbox: mocks.enqueueOutbox,
 }));
 vi.mock("./smsSender", () => ({ resolveSmsSender: mocks.resolveSmsSender }));
+// Each receptionist's articles are ranked in SQL, which the database tests cover (knowledgeAudience.integration.test.ts).
+vi.mock("./snapshotKnowledge", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./snapshotKnowledge")>()),
+  loadSnapshotKnowledge: mocks.loadSnapshotKnowledge,
+}));
 
 import type { SnapshotCacheClient } from "./snapshotCache";
 import { refreshBusinessSnapshot } from "./knowledge";
@@ -29,11 +35,22 @@ function memoryCache(): SnapshotCacheClient {
 const profileRow = {
   id: "00000000-0000-4000-8000-000000000002",
   businessId,
+  name: "Front desk",
+  description: "",
+  isDefault: true,
+  status: "active",
+  archivedAt: null,
+  listed: true,
+  sortOrder: 0,
+  handle: null,
+  locale: null,
+  knowledgeScope: "all",
   greeting: "Hello",
   tone: "professional",
   summary: "A clinic",
   bookingPolicy: "Confirm before booking.",
 };
+const noKnowledge = { defaultSnippets: [], extraSnippets: [], defaultDocuments: [], snippetIds: new Map() };
 
 function tableName(table: unknown): string {
   if (table && typeof table === "object") {
@@ -70,6 +87,8 @@ function makeTx(selectRows: Record<string, unknown>) {
         }
         return {
           where: () => whenable(rows(table)),
+          // The business with its public page: none here, as a left join leaves it.
+          leftJoin: () => ({ where: () => whenable((rows(table) as unknown[]).map((row) => ({ business: row, published: null }))) }),
         };
       },
     };
@@ -86,6 +105,7 @@ beforeEach(() => {
   mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => await callback(makeTx({ businesses: [businessRow], receptionist_profiles: [profileRow] })));
   mocks.enqueueOutbox.mockResolvedValue(undefined);
   mocks.resolveSmsSender.mockResolvedValue(null);
+  mocks.loadSnapshotKnowledge.mockResolvedValue(noKnowledge);
 });
 
 afterEach(() => {
@@ -120,13 +140,26 @@ describe("refreshBusinessSnapshot write-through", () => {
     }
   });
 
-  it("keeps up to the snapshot's snippet limit, not just the few that prompts list", async () => {
+  it("keeps every text entry the default receptionist's ranking gives, not just the few that prompts list", async () => {
     // Answers saved from the unanswered questions inbox are text entries too; knowledge search needs them all.
     const snippetRows = Array.from({ length: 12 }, (_, index) => ({ id: `snippet-${index}`, title: `Question ${index}`, content: `Answer ${index}`, tags: [], priority: 100 - index }));
-    mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => callback(makeTx({ businesses: [businessRow], receptionist_profiles: [profileRow], knowledge_snippets: snippetRows })));
+    mocks.loadSnapshotKnowledge.mockResolvedValue({ ...noKnowledge, defaultSnippets: snippetRows, snippetIds: new Map([[profileRow.id, snippetRows.map((row) => row.id)]]) });
     const cache = memoryCache();
     await refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId });
-    expect((await cache.get(businessId))?.knowledgeSnippets?.map((snippet) => snippet.id)).toEqual(snippetRows.map((row) => row.id));
+    const cached = await cache.get(businessId);
+    expect(cached?.knowledgeSnippets?.map((snippet) => snippet.id)).toEqual(snippetRows.map((row) => row.id));
+    expect(cached?.receptionists?.[0]?.snippetIds).toEqual(snippetRows.map((row) => row.id));
+    expect(mocks.loadSnapshotKnowledge).toHaveBeenCalledWith(expect.anything(), { businessId, receptionists: [{ id: profileRow.id, isDefault: true, status: "active", knowledgeScope: "all" }] });
+  });
+
+  it("ranks a business from before receptionists as one receptionist that sees every article", async () => {
+    mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => callback(makeTx({ businesses: [businessRow] })));
+    const cache = memoryCache();
+    await refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId });
+    expect(mocks.loadSnapshotKnowledge).toHaveBeenCalledWith(expect.anything(), { businessId, receptionists: [expect.objectContaining({ isDefault: true, status: "active", knowledgeScope: "all" })] });
+    const cached = await cache.get(businessId);
+    expect(cached).not.toHaveProperty("receptionists");
+    expect(cached).toMatchObject({ greeting: "Thank you for calling Maple Family Clinic.", bookingPolicy: "Confirm availability before booking." });
   });
 
   it("pushes the regenerated snapshot into the shared cache", async () => {

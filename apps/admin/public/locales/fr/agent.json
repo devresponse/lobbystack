@@ -9,6 +9,10 @@
       "title": "Paramètres IA",
       "description": "Message d'accueil et paramètres de transfert de votre réceptionniste."
     },
+    "receptionists": {
+      "title": "Réceptionnistes",
+      "description": "Qui répond à vos appels, à vos chats et sur vos pages. Ajoutez-en un pour chaque lieu, équipe ou langue."
+    },
     "knowledge": {
       "title": "Connaissances",
       "description": "Informations et directives que votre réceptionniste utilise pour répondre aux questions.",

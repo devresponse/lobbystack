@@ -45,20 +45,20 @@ describe("the Receptionists page's list", () => {
     const response = await list();
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ...page, allowance });
-    expect(fixture.list).toHaveBeenCalledWith(tx, { businessId: "business", view: "current", status: undefined, search: undefined, page: 1 });
+    expect(fixture.list).toHaveBeenCalledWith(tx, { businessId: "business", view: "current", status: undefined, search: undefined, page: 1, pageSize: 10 });
     expect(fixture.allowance).toHaveBeenCalledWith(tx, { businessId: "business" });
     expect(fixture.options).toHaveBeenCalledWith(undefined);
   });
 
   it("passes the archived view, a status, a trimmed search and the page asked for", async () => {
-    await list("?view=archived&status=paused&search=%20%20gastown%20&page=3");
-    expect(fixture.list).toHaveBeenCalledWith(tx, { businessId: "business", view: "archived", status: "paused", search: "gastown", page: 3 });
+    await list("?view=archived&status=paused&search=%20%20gastown%20&page=3&pageSize=20");
+    expect(fixture.list).toHaveBeenCalledWith(tx, { businessId: "business", view: "archived", status: "paused", search: "gastown", page: 3, pageSize: 20 });
   });
 
-  it("reads anything else as the first page of current receptionists, without a search", async () => {
-    for (const query of ["?view=everything&page=0", "?page=two", "?page=1.5&search=%20", "?page=10001"]) {
+  it("reads anything else as the first page of 10 current receptionists, without a search", async () => {
+    for (const query of ["?view=everything&page=0", "?page=two&pageSize=0", "?page=1.5&search=%20&pageSize=51", "?page=10001&pageSize=ten"]) {
       await list(query);
-      expect(fixture.list).toHaveBeenLastCalledWith(tx, { businessId: "business", view: "current", status: undefined, search: undefined, page: 1 });
+      expect(fixture.list).toHaveBeenLastCalledWith(tx, { businessId: "business", view: "current", status: undefined, search: undefined, page: 1, pageSize: 10 });
     }
   });
 

@@ -444,6 +444,12 @@
       "comparison": "frozen-main"
     },
     {
+      "path": "/agent/receptionists",
+      "fixtureState": "operator",
+      "state": "default",
+      "comparison": "port-baseline"
+    },
+    {
       "path": "/agent/knowledge",
       "fixtureState": "operator",
       "state": "default",

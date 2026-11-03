@@ -9,6 +9,10 @@
       "title": "AI podešavanja",
       "description": "Pozdrav i podešavanja preusmeravanja za Vašeg recepcionera."
     },
+    "receptionists": {
+      "title": "Recepcioneri",
+      "description": "Ko odgovara na Vaše pozive, četove i stranice. Dodajte po jednog za svaku lokaciju, tim ili jezik."
+    },
     "knowledge": {
       "title": "Znanje",
       "description": "Informacije i smernice koje recepcioner koristi da odgovara na pitanja.",

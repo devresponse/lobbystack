@@ -9,6 +9,10 @@
       "title": "Ajustes de IA",
       "description": "Saludo y ajustes de transferencia de su recepcionista."
     },
+    "receptionists": {
+      "title": "Recepcionistas",
+      "description": "Quién responde a sus llamadas, chats y páginas. Agregue uno para cada sede, equipo o idioma."
+    },
     "knowledge": {
       "title": "Conocimiento",
       "description": "Información y pautas que su recepcionista usa para responder preguntas.",

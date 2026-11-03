@@ -12,6 +12,7 @@ import {
   BookText,
   ChartColumnIncreasing,
   ClipboardCheck,
+  Headset,
   House,
   MessageCircleQuestionMark,
   MessageSquareMore,
@@ -135,6 +136,7 @@ function ReplacementSidebar({ user }: Pick<DashboardShellProps, "user">) {
   ];
   const receptionist: NavigationItem[] = [
     { label: t("agent:sections.basicSettings.title"), href: "/agent", icon: ClipboardCheck },
+    { label: t("agent:sections.receptionists.title"), href: "/agent/receptionists", icon: Headset },
     { label: t("agent:sections.knowledge.title"), href: "/agent/knowledge", icon: BookText },
     { label: t("agent:sections.questions.title"), href: "/agent/questions", icon: MessageCircleQuestionMark },
     { label: t("agent:sections.services.title"), href: "/agent/services", icon: Blocks },

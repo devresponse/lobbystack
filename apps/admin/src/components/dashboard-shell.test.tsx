@@ -36,7 +36,7 @@ describe("original shared navigation", () => {
     setup();
     // The sidebar header carries the workspace switcher alone; no brand mark.
     expect(screen.queryByRole("img", { name: "LobbyStack" })).toBeNull();
-    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/messages", "/contacts", "/agent", "/agent/knowledge", "/agent/questions", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/widget", "/settings/usage"]);
+    expect(screen.getAllByRole("link").map(link => link.getAttribute("href"))).toEqual(["#dashboard-main-content", "/", "/calls", "/messages", "/contacts", "/agent", "/agent/receptionists", "/agent/knowledge", "/agent/questions", "/agent/services", "/agent/rules", "/analytics", "/integrations", "/settings/widget", "/settings/usage"]);
     expect(document.getElementById("dashboard-main-content")?.tabIndex).toBe(-1);
   });
   it("links the website widget and messages from every page", () => {

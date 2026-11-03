@@ -28,5 +28,140 @@
     "everyone": "Everyone",
     "more": "+{{count}}",
     "defaultOnly": "Default receptionist only"
+  },
+  "page": {
+    "unavailable": "Receptionists couldn't be loaded. Try again in a moment."
+  },
+  "allowance": {
+    "used_one": "{{active}} of {{count}} active receptionist on your plan",
+    "used_other": "{{active}} of {{count}} active receptionists on your plan",
+    "full": "All the active receptionists your plan includes are in use. Pause one or upgrade to add another.",
+    "cap_one": "A business can keep up to {{count}} receptionist.",
+    "cap_other": "A business can keep up to {{count}} receptionists. Archive one to add another.",
+    "upgradeTitle": "A receptionist for each location, team or language",
+    "upgradeDescription": "Your plan includes one receptionist. Upgrade to add more, each with its own name, phone number, knowledge and page.",
+    "upgrade": "See plans",
+    "upgradeAsk": "An owner or admin of the business can upgrade."
+  },
+  "toolbar": {
+    "search": "Search by name or what it helps with",
+    "status": "Status",
+    "all": "All ({{number}})",
+    "active": "Active ({{number}})",
+    "paused": "Paused ({{number}})",
+    "archived": "Archived ({{number}})",
+    "sort": "Sort A–Z",
+    "add": "Add receptionist"
+  },
+  "table": {
+    "receptionist": "Receptionist",
+    "page": "Page",
+    "status": "Status",
+    "answers": "Answers on",
+    "language": "Language",
+    "order": "Order",
+    "actions": "Actions",
+    "default": "Default",
+    "notListed": "Not listed on the business page",
+    "businessLanguage": "Business language",
+    "numbers_one": "{{count}} phone number",
+    "numbers_other": "{{count}} phone numbers",
+    "widgets_one": "{{count}} website widget",
+    "widgets_other": "{{count}} website widgets",
+    "links_one": "{{count}} QR link",
+    "links_other": "{{count}} QR links",
+    "pageOnly": "Its page only",
+    "archivedOn": "Archived {{date}}",
+    "empty": "No receptionist matches that.",
+    "emptyArchived": "No archived receptionists.",
+    "moveUp": "Move {{name}} up",
+    "moveDown": "Move {{name}} down",
+    "moreOptions": "More options for {{name}}"
+  },
+  "status": {
+    "active": "Active",
+    "paused": "Paused",
+    "archived": "Archived"
+  },
+  "actions": {
+    "edit": "Edit details",
+    "aiSettings": "AI settings",
+    "pause": "Pause",
+    "resume": "Resume",
+    "makeDefault": "Make default",
+    "archive": "Archive",
+    "restore": "Restore",
+    "cancel": "Cancel"
+  },
+  "archive": {
+    "title": "Archive {{name}}?",
+    "description": "It leaves every list, and its phone numbers, widgets and QR links answer as the default receptionist. Its calls, chats and questions stay, and you can restore it from Archived.",
+    "confirm": "Archive"
+  },
+  "makeDefault": {
+    "title": "Make {{name}} the default receptionist?",
+    "description": "It will answer the business page and anything that names no receptionist. {{current}} keeps its phone numbers, widgets and QR links, and gets a page of its own.",
+    "confirm": "Make default"
+  },
+  "sort": {
+    "title": "Sort receptionists A–Z?",
+    "description": "Dropdowns and the business page will list them by name, after the default. This replaces the order you set.",
+    "confirm": "Sort A–Z"
+  },
+  "toast": {
+    "added": "{{name}} added.",
+    "saved": "{{name}} saved.",
+    "paused": "{{name}} paused. Its phone numbers, widgets and QR links answer as the default receptionist.",
+    "resumed": "{{name}} answers again.",
+    "archived": "{{name}} archived.",
+    "restored": "{{name}} restored.",
+    "restoredPaused": "{{name}} restored, paused: the active receptionists your plan includes are all in use.",
+    "madeDefault": "{{name}} is the default receptionist now.",
+    "sorted": "Receptionists sorted A–Z."
+  },
+  "errors": {
+    "handleTaken": "Another receptionist already uses this page address.",
+    "limit": "All the active receptionists your plan includes are in use. Pause one or upgrade to add another.",
+    "limitOne": "Your plan includes one receptionist. Upgrade to add more.",
+    "cap": "This business keeps as many receptionists as it can. Archive one to add another.",
+    "defaultPaused": "The default receptionist always answers. Make another one the default first.",
+    "defaultArchived": "The default receptionist can't be archived. Make another one the default first.",
+    "defaultListed": "The default receptionist answers the business page, so it stays listed.",
+    "resumeFirst": "Resume the receptionist before making it the default.",
+    "notFound": "That receptionist isn't there any more. Refresh the page.",
+    "invalid": "Check the fields and try again.",
+    "generic": "That didn't work. Try again in a moment.",
+    "withErrorId": "{{message}} Error ID: {{errorId}}"
+  },
+  "editor": {
+    "editTitle": "Edit {{name}}",
+    "addTitle": "Add a receptionist",
+    "editDescription": "Its name, page, language and knowledge. Greeting, booking and instructions are in AI settings.",
+    "addDescription": "A new receptionist starts with another one's greeting, booking, transfer and instructions. AI settings changes them.",
+    "name": "Name",
+    "nameHint": "Visitors see it when they choose who to talk to, such as Kitsilano clinic or Billing.",
+    "nameRequired": "Give the receptionist a name.",
+    "description": "What it helps with",
+    "descriptionHint": "One line under its name, such as Bookings at our West 4th clinic.",
+    "handle": "Page address",
+    "handleDefault": "The default receptionist answers the business page itself.",
+    "handleHint": "Lower-case letters and digits, joined by dashes. Left empty, it's made from the name.",
+    "handleInvalid": "Use lower-case letters and digits, joined by single dashes.",
+    "language": "Language",
+    "languageDefault": "The default receptionist speaks the business's language, which AI settings sets.",
+    "languageHint": "Its calls open in this language, and switch when a caller speaks another one.",
+    "businessLanguage": "Business language ({{language}})",
+    "knowledge": "Knowledge",
+    "knowledgeAll": "Every article",
+    "knowledgeAudience": "Articles for everyone, and the ones chosen for it",
+    "listed": "Listed on the business page",
+    "listedDefault": "The default receptionist is always listed.",
+    "listedHint": "Visitors to the business page can choose it. Its own page, phone numbers and QR links work either way.",
+    "copyFrom": "Copy settings from",
+    "copyFromHint": "Its greeting, booking, transfer and instructions.",
+    "saving": "Saving…",
+    "save": "Save changes",
+    "adding": "Adding…",
+    "add": "Add receptionist"
   }
 }

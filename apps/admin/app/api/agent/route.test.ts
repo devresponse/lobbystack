@@ -11,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   updateBusiness: vi.fn(),
   loadView: vi.fn(),
   choices: vi.fn(),
+  updateReceptionist: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({ select: () => ({ from: () => ({ where: () => ({ limit: async () => fixture.business }) }) }) }));
 vi.mock("@/lib/api-helpers", async (original) => ({
@@ -18,7 +19,7 @@ vi.mock("@/lib/api-helpers", async (original) => ({
   withOperatorTransaction: async (_request: Request, callback: (input: unknown) => unknown, options: unknown) => {
     fixture.transaction(options);
     if (fixture.denied) throw Object.assign(new Error("Forbidden"), { status: 403 });
-    return callback({ businessId: "business", tx });
+    return callback({ session: { user: { id: "owner" } }, businessId: "business", tx });
   },
 }));
 vi.mock("@lobbystack/domain", async (original) => ({
@@ -27,6 +28,7 @@ vi.mock("@lobbystack/domain", async (original) => ({
   updateBusinessInTransaction: fixture.updateBusiness,
   loadReceptionistView: fixture.loadView,
   listReceptionistChoicesInTransaction: fixture.choices,
+  updateReceptionistInTransaction: fixture.updateReceptionist,
 }));
 import { GET, PATCH } from "./route";
 
@@ -62,6 +64,35 @@ describe("agent settings validation", () => {
     expect(await response.json()).toEqual({ profile: { id: "profile", isDefault: true } });
     expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr", timezone: "Europe/Belgrade" });
     expect(saved()).toEqual({ businessId: "business", businessName: "Clinic", receptionistId: null, patch: { greeting: "Bonjour, la clinique." }, regenerateSummary: false });
+  });
+
+  it("saves another receptionist's language as its own, leaving the business's alone", async () => {
+    fixture.loadView.mockResolvedValue({ id: kitsilanoId, isDefault: false, name: "Kitsilano store", locale: null });
+    expect((await patch({ locale: "es" }, `?receptionist=${kitsilanoId}`)).status).toBe(200);
+    expect(fixture.updateBusiness).not.toHaveBeenCalled();
+    expect(fixture.updateReceptionist).toHaveBeenCalledWith(tx, { businessId: "business", actorUserId: "owner", receptionistId: kitsilanoId, patch: { locale: "es" } });
+  });
+
+  it("still moves the business's timezone when another receptionist's settings are open", async () => {
+    fixture.loadView.mockResolvedValue({ id: kitsilanoId, isDefault: false, name: "Kitsilano store", locale: "es" });
+    expect((await patch({ locale: "es", timezone: "America/Vancouver" }, `?receptionist=${kitsilanoId}`)).status).toBe(200);
+    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", timezone: "America/Vancouver" });
+    // Its language is already Spanish.
+    expect(fixture.updateReceptionist).not.toHaveBeenCalled();
+  });
+
+  it("lines a default receptionist's own language up with the business's when the language changes", async () => {
+    fixture.loadView.mockResolvedValue({ id: "profile", isDefault: true, name: "Recepción", locale: "es" });
+    expect((await patch({ locale: "fr" })).status).toBe(200);
+    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr" });
+    expect(fixture.updateReceptionist).toHaveBeenCalledWith(tx, { businessId: "business", actorUserId: "owner", receptionistId: "profile", patch: { locale: null } });
+  });
+
+  it("answers 404 for a language change of a receptionist the business doesn't have", async () => {
+    fixture.loadView.mockResolvedValue(null);
+    expect((await patch({ locale: "fr" }, `?receptionist=${kitsilanoId}`)).status).toBe(404);
+    expect(fixture.updateBusiness).not.toHaveBeenCalled();
+    expect(fixture.save).not.toHaveBeenCalled();
   });
 
   it("saves nothing when the business refuses the timezone", async () => {

@@ -53,6 +53,7 @@ export * from "./oauth";
 export * from "./receptionistActions";
 export * from "./receptionistProfile";
 export * from "./receptionists";
+export * from "./receptionistEntryPoints";
 export * from "./receptionistRecords";
 export * from "./productEvents";
 export * from "./rules";

@@ -25,6 +25,7 @@ import {
 
 import type { DomainContext } from "./context";
 import { loadReceptionistView, type ReceptionistView } from "./receptionistProfile";
+import { failure, isRecord, isUniqueViolation } from "./requestHelpers";
 import { loadBusinessPlanLimits } from "./usage";
 
 // Several receptionists per business. Each is a receptionist_profiles row; the
@@ -117,15 +118,7 @@ const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 50;
 const MAX_SEARCH_LENGTH = 80;
 
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
-
 const notFound = () => failure("Receptionist not found.", 404, "receptionist_not_found");
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readName(value: unknown): string {
   if (typeof value !== "string") throw failure("name must be a string.", 400, "invalid_name");
@@ -389,12 +382,6 @@ function planLimitReached(limit: number): Error {
 /** The business keeps the deployment's cap of receptionists that aren't archived. */
 function capReached(cap: number): Error {
   return failure(`A business can keep up to ${cap} receptionists. Archive one to add another.`, 409, "receptionist_cap");
-}
-
-/** Whether a query failed on the unique index named; Drizzle wraps the driver's error as its cause. */
-function isUniqueViolation(error: unknown, constraint: string): boolean {
-  return [error, (error as { cause?: unknown } | null)?.cause].some((value) => typeof value === "object" && value !== null
-    && (value as { code?: unknown }).code === "23505" && (value as { constraint?: unknown }).constraint === constraint);
 }
 
 const handleTaken = () => failure("Another receptionist already uses this page address.", 409, "handle_taken");

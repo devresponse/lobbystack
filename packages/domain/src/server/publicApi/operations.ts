@@ -118,6 +118,7 @@ import { completeUploadInTransaction, insertPendingUploadInTransaction, planUplo
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
+import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
 import { defaultReceptionistProfile, loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
@@ -262,11 +263,6 @@ async function audit(tx: DatabaseTransaction, caller: ApiCaller, input: { eventT
 
 function apiChange(caller: ApiCaller) {
   return { source: "api" as const, audit: callerAudit(caller) };
-}
-
-function isUniqueViolation(error: unknown): boolean {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  return [error, cause].some((value) => typeof value === "object" && value !== null && "code" in value && (value as { code: unknown }).code === "23505");
 }
 
 function assertTimeZone(value: string, field: string): void {

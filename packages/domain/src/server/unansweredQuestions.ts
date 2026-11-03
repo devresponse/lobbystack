@@ -8,6 +8,7 @@ import type { DomainContext } from "./context";
 import { contentExpiryForPlan, isContentRetentionEnabled, resolveBusinessBillingPlan } from "./contentRetentionPolicy";
 import { createKnowledgeSnippetInTransaction } from "./knowledge";
 import { readKnowledgeAudienceChoice, setKnowledgeArticleAudienceInTransaction, type KnowledgeAudienceChoice } from "./knowledgeAudience";
+import { failure } from "./requestHelpers";
 
 /** The longest question kept, in characters. Longer lookups are cut, so an answered question fits as a text entry's title. */
 export const MAX_UNANSWERED_QUESTION_LENGTH = 300;
@@ -48,10 +49,6 @@ export type OpenUnansweredQuestion = {
  * that heard the question ("asked"), read when the answer is saved.
  */
 export type UnansweredAnswerAudience = KnowledgeAudienceChoice | { audience: "asked" };
-
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
 
 function cleanQuestion(question: string): string {
   return question.replace(/\s+/gu, " ").trim().slice(0, MAX_UNANSWERED_QUESTION_LENGTH).trim();

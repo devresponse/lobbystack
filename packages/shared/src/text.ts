@@ -9,3 +9,8 @@ export function trimEndWhere(text: string, drop: (character: string) => boolean)
   while (end > 0 && drop(text[end - 1]!)) end -= 1;
   return text.slice(0, end);
 }
+
+/** text without its trailing slashes; a `/\/+$/` regex backtracks on a long run of them. */
+export function trimTrailingSlashes(text: string): string {
+  return trimEndWhere(text, (character) => character === "/");
+}

@@ -448,13 +448,7 @@ export type {
   NotificationDeliveryStatus,
   SmsMessageStatus,
 } from "./twilioMessageStatus";
-/** Strips trailing slashes with a linear scan; a `/\/+$/` regex backtracks on long runs of slashes. */
-export function trimTrailingSlashes(value: string): string {
-  let end = value.length;
-  while (end > 0 && value.charCodeAt(end - 1) === 47) end -= 1;
-  return value.slice(0, end);
-}
-export { trimEndWhere } from "./text";
+export { trimEndWhere, trimTrailingSlashes } from "./text";
 
 export * from "./billing";
 export * from "./billingProfile";

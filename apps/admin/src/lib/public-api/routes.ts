@@ -1,3 +1,4 @@
+import { knowledgeCallAnswer } from "@lobbystack/agent-core/live/directAnswer";
 import {
   applyBillingCatalogForApi,
   billingDeploymentPolar,
@@ -605,8 +606,6 @@ export const v1 = {
   cancelKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "cancelKnowledgeSource", async ({ context, caller }) => ({ body: data(await cancelKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
   searchKnowledge: (request: Request) => handleApiRequest(request, "searchKnowledge", async ({ context, caller }) => {
     const input = await readApiBody(request, apiKnowledgeSearchSchema);
-    // agent-core brings the AI SDK, which no other v1 route needs, so only this one loads it.
-    const { knowledgeCallAnswer } = await import("@lobbystack/agent-core");
     return { body: data(await searchKnowledgeForApi(context, caller, input, { callAnswer: knowledgeCallAnswer })) };
   }),
 

@@ -120,7 +120,7 @@ const phones = vi.hoisted(() => ({ verified: vi.fn(async (_userId: string) => tr
 vi.mock("../verified-phone", () => ({ hasVerifiedPhone: phones.verified }));
 vi.mock("../auth", () => ({ getAuthDatabase: () => ({ db: "auth" }) }));
 const agent = vi.hoisted(() => ({ knowledgeCallAnswer: vi.fn() }));
-vi.mock("@lobbystack/agent-core", () => agent);
+vi.mock("@lobbystack/agent-core/live/directAnswer", () => agent);
 vi.mock("../databases", () => ({ getDatabase: (role: string) => ({ db: role }) }));
 // CI runs these tests with a real Redis, where every file's requests share one key's per-minute budget; the limiter has its own tests.
 vi.mock("./rate-limit", async (importOriginal) => ({ ...(await importOriginal<typeof import("./rate-limit")>()), enforceApiRateLimit: vi.fn(async () => ({ allowed: true, limit: 120, remaining: 119, resetAt: Math.ceil(Date.now() / 60_000) * 60 })) }));

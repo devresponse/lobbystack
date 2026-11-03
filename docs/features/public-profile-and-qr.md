@@ -16,7 +16,7 @@ The page shows, in the deployment brand's colour:
 
 Unpublished pages answer 404. Publishing writes an audit log entry. The page has its own root layout (`apps/admin/app/(profile)`) and allows Google's map frame in its content security policy.
 
-With several receptionists, the default one answers the business page, and a **You're talking to** dropdown under the business's name lets visitors pick one of the others the business listed in the **Receptionists on your page** card, in **Settings > Public profile**. Each receptionist also has its own page, `/profile/<slug>/<handle>`, answered by it whether it's listed or not; its chat and browser call go to that receptionist through a signed token ([what visitors see](receptionists.md#know-what-visitors-see)). Both pages show the same business; what differs is who answers, which the dropdown and the page's title name.
+With several receptionists, the default one answers the business page, and a **You're talking to** dropdown under the business's name lets visitors pick one of the others the business listed in the **Receptionists on your page** card, in **Settings > Public profile**. Each receptionist also has its own page, `/profile/<slug>/<handle>`, answered by it whether it's listed or not; its chat and browser call go to that receptionist through a signed token ([what visitors see](receptionists.md#know-what-visitors-see)). Both pages show the same business; what differs is who answers, which the dropdown and the page's title name, and the phone number: a receptionist's own, or the business's main line, the default receptionist's, when it has none.
 
 | Piece | Where |
 | --- | --- |

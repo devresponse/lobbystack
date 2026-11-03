@@ -189,5 +189,13 @@
       "rulePath": "Enter a path on the site, such as /stores/kitsilano/.",
       "ruleGone": "That rule isn't there any more. Refresh the page."
     }
+  },
+  "entry": {
+    "paused": "{{name}} is paused, so {{default}} answers for now.",
+    "archived": "The receptionist chosen here was archived, so {{default}} answers. Pick another one.",
+    "errors": {
+      "archived": "That receptionist was archived. Refresh the page and pick another one.",
+      "gone": "That isn't there any more. Refresh the page."
+    }
   }
 }

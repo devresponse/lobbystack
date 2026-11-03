@@ -62,7 +62,9 @@
       "requirePhone": "Obavezan telefon",
       "showBeforeChat": "Pitaj pre ćaskanja",
       "liveChat": "Dozvolite posetiocima da razgovaraju sa Vašim timom",
-      "liveChatHint": "Tokom radnog vremena, posetilac koji traži osobu dobija nekoga iz Vašeg tima u razgovoru. Vaš tim dobija upozorenje i odgovara iz Poruka. Ako niko ne odgovori u roku od 3 minuta, recepcioner nudi da primi poruku."
+      "liveChatHint": "Tokom radnog vremena, posetilac koji traži osobu dobija nekoga iz Vašeg tima u razgovoru. Vaš tim dobija upozorenje i odgovara iz Poruka. Ako niko ne odgovori u roku od 3 minuta, recepcioner nudi da primi poruku.",
+      "receptionist": "Recepcioner",
+      "receptionistHint": "Razgovori i pozivi iz ovog vidžeta idu recepcioneru kog izaberete. Dok je pauziran, na njih odgovara {{name}}."
     },
     "positions": {
       "bottomRight": "Dole desno",
@@ -639,6 +641,13 @@
     "toast": {
       "changed": "Broj telefona je promenjen. Prethodni broj ostaje aktivan još 30 dana.",
       "added": "Broj telefona je dodat."
+    },
+    "answeredBy": {
+      "label": "Odgovara",
+      "hint": "Pozivi i SMS poruke na ovaj broj idu recepcioneru kog izaberete. Dok je pauziran, na njih odgovara {{name}}.",
+      "saved": "Pozivi i SMS poruke na {{number}} sada idu recepcioneru {{name}}.",
+      "otherNumbers": "Ostali brojevi",
+      "otherNumbersDescription": "Pozivi i SMS poruke na svaki broj idu recepcioneru kog izaberete."
     }
   },
   "appearance": {

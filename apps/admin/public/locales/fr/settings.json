@@ -62,7 +62,9 @@
       "requirePhone": "Téléphone obligatoire",
       "showBeforeChat": "Demander avant le clavardage",
       "liveChat": "Permettre aux visiteurs de clavarder avec votre équipe",
-      "liveChatHint": "Pendant les heures d'ouverture, un visiteur qui demande à parler à une personne retrouve quelqu'un de votre équipe dans le clavardage. Votre équipe reçoit une alerte et répond depuis Messages. Si personne ne répond dans les 3 minutes, la réceptionniste propose de prendre un message."
+      "liveChatHint": "Pendant les heures d'ouverture, un visiteur qui demande à parler à une personne retrouve quelqu'un de votre équipe dans le clavardage. Votre équipe reçoit une alerte et répond depuis Messages. Si personne ne répond dans les 3 minutes, la réceptionniste propose de prendre un message.",
+      "receptionist": "Réceptionniste",
+      "receptionistHint": "Les clavardages et appels de ce widget vont à la réceptionniste choisie. Tant qu'elle est en pause, {{name}} y répond."
     },
     "positions": {
       "bottomRight": "Bas à droite",
@@ -350,9 +352,9 @@
       "enterpriseSubject": "Forfait Entreprise",
       "billingIntervalLabel": "Intervalle de facturation",
       "annualDiscount": "Économisez {{percent}} %",
-      "annualFreeMonths_one": "Obtenez {{count}} mois gratuit\u00a0!",
-      "annualFreeMonths_many": "Obtenez {{count}} mois gratuits\u00a0!",
-      "annualFreeMonths_other": "Obtenez {{count}} mois gratuits\u00a0!",
+      "annualFreeMonths_one": "Obtenez {{count}} mois gratuit !",
+      "annualFreeMonths_many": "Obtenez {{count}} mois gratuits !",
+      "annualFreeMonths_other": "Obtenez {{count}} mois gratuits !",
       "customPrice": "Sur mesure",
       "perMonth": "/mois",
       "billingIntervals": {
@@ -639,6 +641,13 @@
     "toast": {
       "changed": "Numéro de téléphone modifié. Votre ancien numéro restera actif pendant 30 jours.",
       "added": "Numéro de téléphone ajouté."
+    },
+    "answeredBy": {
+      "label": "Réceptionniste qui répond",
+      "hint": "Les appels et textos vers ce numéro vont à la réceptionniste choisie. Tant qu'elle est en pause, {{name}} y répond.",
+      "saved": "Les appels et textos vers {{number}} vont maintenant à {{name}}.",
+      "otherNumbers": "Autres numéros",
+      "otherNumbersDescription": "Les appels et textos de chaque numéro vont à la réceptionniste choisie."
     }
   },
   "appearance": {
@@ -735,7 +744,7 @@
       "steps": {
         "invite": "Acceptez l'invitation à utiliser {{appName}} dans Zapier. Zapier vous demande d'abord de vous connecter ou de créer un compte gratuit.",
         "key": "Créez une clé API pour Zapier. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
-        "zap": "Dans Zapier, créez un Zap et choisissez {{appName}}. Quand Zapier vous demande de vous connecter, collez la clé dans «\u00a0API Key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+        "zap": "Dans Zapier, créez un Zap et choisissez {{appName}}. Quand Zapier vous demande de vous connecter, collez la clé dans « API Key » et vérifiez que « {{appName}} URL » indique {{url}}."
       },
       "openInvite": "Ouvrir {{appName}} dans Zapier",
       "createKey": "Créer une clé pour Zapier",
@@ -747,7 +756,7 @@
       "steps": {
         "invite": "Installez {{appName}} dans votre organisation Make à partir de son lien d'invitation. Make vous demande d'abord de vous connecter ou de créer un compte gratuit.",
         "key": "Créez une clé API pour Make. Vous ne la verrez qu'une fois, alors copiez-la avant de fermer la fenêtre.",
-        "scenario": "Dans Make, ajoutez un module {{appName}} à un scénario et choisissez Create a connection. Collez la clé dans «\u00a0API key\u00a0» et vérifiez que «\u00a0{{appName}} URL\u00a0» indique {{url}}."
+        "scenario": "Dans Make, ajoutez un module {{appName}} à un scénario et choisissez Create a connection. Collez la clé dans « API key » et vérifiez que « {{appName}} URL » indique {{url}}."
       },
       "openInvite": "Ouvrir {{appName}} dans Make",
       "createKey": "Créer une clé pour Make",
@@ -927,7 +936,7 @@
         "onlyBusiness": "C'est la seule entreprise dont vous êtes propriétaire, elle ne peut donc pas être supprimée."
       },
       "action": "Supprimer l'entreprise",
-      "dialogTitle": "Supprimer {{name}}\u00a0?",
+      "dialogTitle": "Supprimer {{name}} ?",
       "dialogDescription": "Ses appels et enregistrements, conversations, contacts, rendez-vous, connaissances, paramètres, historique de facturation et les accès de l'équipe sont effacés. Ses numéros de téléphone sont rendus à l'opérateur, la réceptionniste cesse de répondre et un forfait payant est résilié immédiatement.",
       "permanent": "Cette suppression est définitive. Rien ne peut être restauré, ni par vous ni par le support.",
       "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",
@@ -956,7 +965,7 @@
       "title": "Annuler le compte",
       "description": "Fermez cette entreprise et arrêtez d'utiliser le service. Rien n'est supprimé, et vous pourrez recommencer plus tard avec une nouvelle entreprise.",
       "action": "Annuler le compte",
-      "dialogTitle": "Annuler {{name}}\u00a0?",
+      "dialogTitle": "Annuler {{name}} ?",
       "dialogDescription": "Une fois l'annulation confirmée, plus personne dans l'équipe ne peut l'ouvrir, sa réceptionniste ne répond plus aux appels ni aux textos, son clavardage sur le site web, sa page publique, ses clés d'API et ses applications connectées cessent de fonctionner, et un forfait payant est résilié. Ses numéros de téléphone sont rendus à l'opérateur après 30 jours.",
       "notice": "Rien n'est supprimé, et rien ne change pour l'instant. Nous vous enverrons par courriel un lien de confirmation, valide pendant 24 heures, qui vous demandera de vous connecter et de saisir votre mot de passe.",
       "confirmLabel": "Saisissez <name>{{name}}</name> pour confirmer",

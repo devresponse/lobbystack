@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { builtInBillingPlanLimits, type BillingPlanSlug } from "@lobbystack/shared";
 import { LivePhoneNumberSettingsSurface } from "./live-phone-number-settings-surface";
+import { receptionistChoicesQueryKey } from "./receptionists/receptionist-choices";
 
 const actions = vi.hoisted(() => ({ upgrade: vi.fn(), navigate: vi.fn() }));
 vi.mock("./upgrade-plan-dialog-context", () => ({ useOpenUpgradePlanDialog: () => actions.upgrade }));
@@ -19,6 +20,8 @@ function setup(plan: string, role = "business_owner", usedAt: string | null = nu
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true, role }] });
   client.setQueryData(["phone-numbers", "business"], { phoneNumbers: primary ? [{ id: "phone", e164: "+14165550100", status: "active", reclaimScheduledAt }] : [], replacement: { usedAt, activeClaim: pending ? { id: "claim", status: "provisioning" } : null } });
   client.setQueryData(["billing", "business"], { effectivePlan: plan, account: { plan }, limits: builtInBillingPlanLimits[plan as BillingPlanSlug] });
+  // One receptionist, the default, as most businesses have, so the "Answered by" dropdown stays hidden and nothing more is fetched.
+  client.setQueryData(receptionistChoicesQueryKey("business"), { receptionists: [{ id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk", description: "", handle: null, isDefault: true, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: "all" }] });
   const fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
     if (input.includes("/claim/claim?")) return Response.json({ claim: { status: "claimed", phoneNumberId: "claimed-phone", requestedE164: "+14165550200" } });
     if (input.includes("/claim?")) return Response.json({ claimId: "claim" });

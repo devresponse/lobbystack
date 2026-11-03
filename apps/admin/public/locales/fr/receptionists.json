@@ -196,5 +196,13 @@
       "rulePath": "Saisissez un chemin du site, par exemple /stores/kitsilano/.",
       "ruleGone": "Cette règle n'existe plus. Actualisez la page."
     }
+  },
+  "entry": {
+    "paused": "{{name}} est en pause, donc {{default}} répond pour le moment.",
+    "archived": "La réceptionniste choisie ici a été archivée, donc {{default}} répond. Choisissez-en une autre.",
+    "errors": {
+      "archived": "Cette réceptionniste a été archivée. Actualisez la page et choisissez-en une autre.",
+      "gone": "Cet élément n'existe plus. Actualisez la page."
+    }
   }
 }

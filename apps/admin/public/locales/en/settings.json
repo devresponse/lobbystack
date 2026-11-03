@@ -62,7 +62,9 @@
       "requirePhone": "Require phone",
       "showBeforeChat": "Ask before chat",
       "liveChat": "Let visitors chat with your team",
-      "liveChatHint": "During opening hours, a visitor who asks for a person gets someone from your team in the chat. Your team gets an alert and replies from Messages. If nobody replies within 3 minutes, the receptionist offers to take a message."
+      "liveChatHint": "During opening hours, a visitor who asks for a person gets someone from your team in the chat. Your team gets an alert and replies from Messages. If nobody replies within 3 minutes, the receptionist offers to take a message.",
+      "receptionist": "Receptionist",
+      "receptionistHint": "Chats and calls from this widget go to the receptionist you pick. While it's paused, {{name}} answers them."
     },
     "positions": {
       "bottomRight": "Bottom right",
@@ -627,6 +629,13 @@
     "toast": {
       "changed": "Phone number changed. Your previous number will stay active for 30 days.",
       "added": "Phone number added."
+    },
+    "answeredBy": {
+      "label": "Answered by",
+      "hint": "Calls and texts to this number go to the receptionist you pick. While it's paused, {{name}} answers them.",
+      "saved": "Calls and texts to {{number}} go to {{name}} now.",
+      "otherNumbers": "Other numbers",
+      "otherNumbersDescription": "Each number's calls and texts go to the receptionist you pick."
     }
   },
   "appearance": {

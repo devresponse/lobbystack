@@ -196,5 +196,13 @@
       "rulePath": "Unesite putanju na sajtu, na primer /stores/kitsilano/.",
       "ruleGone": "To pravilo više ne postoji. Osvežite stranicu."
     }
+  },
+  "entry": {
+    "paused": "{{name}} je pauziran, pa za sada odgovara {{default}}.",
+    "archived": "Recepcioner izabran ovde je arhiviran, pa odgovara {{default}}. Izaberite drugog.",
+    "errors": {
+      "archived": "Taj recepcioner je arhiviran. Osvežite stranicu i izaberite drugog.",
+      "gone": "To više ne postoji. Osvežite stranicu."
+    }
   }
 }

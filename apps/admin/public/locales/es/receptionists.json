@@ -196,5 +196,13 @@
       "rulePath": "Escriba una ruta del sitio, como /stores/kitsilano/.",
       "ruleGone": "Esa regla ya no existe. Actualice la página."
     }
+  },
+  "entry": {
+    "paused": "{{name}} está en pausa, así que por ahora atiende {{default}}.",
+    "archived": "La recepcionista elegida aquí se archivó, así que atiende {{default}}. Elija otra.",
+    "errors": {
+      "archived": "Esa recepcionista se archivó. Actualice la página y elija otra.",
+      "gone": "Eso ya no existe. Actualice la página."
+    }
   }
 }

@@ -62,7 +62,9 @@
       "requirePhone": "Exigir teléfono",
       "showBeforeChat": "Pedir antes del chat",
       "liveChat": "Permitir que los visitantes chateen con su equipo",
-      "liveChatHint": "Durante el horario de atención, un visitante que pide hablar con una persona recibe a alguien de su equipo en el chat. Su equipo recibe una alerta y responde desde Mensajes. Si nadie responde en 3 minutos, la recepcionista ofrece tomar un mensaje."
+      "liveChatHint": "Durante el horario de atención, un visitante que pide hablar con una persona recibe a alguien de su equipo en el chat. Su equipo recibe una alerta y responde desde Mensajes. Si nadie responde en 3 minutos, la recepcionista ofrece tomar un mensaje.",
+      "receptionist": "Recepcionista",
+      "receptionistHint": "Los chats y llamadas de este widget van a la recepcionista que elija. Mientras esté en pausa, los atiende {{name}}."
     },
     "positions": {
       "bottomRight": "Abajo a la derecha",
@@ -639,6 +641,13 @@
     "toast": {
       "changed": "Número de teléfono cambiado. Su número anterior seguirá activo durante 30 días.",
       "added": "Número de teléfono agregado."
+    },
+    "answeredBy": {
+      "label": "Atendido por",
+      "hint": "Las llamadas y los mensajes de texto a este número van a la recepcionista que elija. Mientras esté en pausa, los atiende {{name}}.",
+      "saved": "Las llamadas y los mensajes de texto a {{number}} ahora van a {{name}}.",
+      "otherNumbers": "Otros números",
+      "otherNumbersDescription": "Las llamadas y los mensajes de texto de cada número van a la recepcionista que elija."
     }
   },
   "appearance": {

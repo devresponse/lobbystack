@@ -41,3 +41,24 @@ export function receptionistErrorMessage(error: unknown, t: Translate, action: R
   if (typeof errorId === "string" && errorId) return t("errors.withErrorId", { message: t("errors.generic", {}), errorId });
   return t("errors.generic", {});
 }
+
+const entryPointCodes = new Set(["receptionist_archived", "receptionist_not_found", "invalid_receptionist", "phone_number_not_found", "widget_key_not_found", "entry_link_not_found"]);
+
+/** Whether the server refused a change to who answers, which entryPointErrorMessage explains. */
+export function isEntryPointError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined;
+  return typeof code === "string" && entryPointCodes.has(code);
+}
+
+/**
+ * Explains a refused change to who answers a phone number, widget key or QR
+ * link, as keys in the receptionists namespace (pass a t that reads it).
+ */
+export function entryPointErrorMessage(error: unknown, t: Translate): string {
+  const { code, errorId } = typeof error === "object" && error !== null ? error as { code?: unknown; errorId?: unknown } : {};
+  if (code === "receptionist_archived") return t("receptionists:entry.errors.archived", {});
+  if (code === "receptionist_not_found") return t("receptionists:errors.notFound", {});
+  if (code === "phone_number_not_found" || code === "widget_key_not_found" || code === "entry_link_not_found") return t("receptionists:entry.errors.gone", {});
+  if (typeof errorId === "string" && errorId) return t("receptionists:errors.withErrorId", { message: t("receptionists:errors.generic", {}), errorId });
+  return t("receptionists:errors.generic", {});
+}

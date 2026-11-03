@@ -93,6 +93,8 @@ export type PhoneNumberViewModel = {
   status: string;
   reclaimScheduledAt: string | null;
   reclaimReason: string | null;
+  /** Who answers the number's calls and texts. */
+  receptionistId?: string | null;
 };
 
 export type BillingUsageViewModel = {

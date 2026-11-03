@@ -65,6 +65,20 @@ export function publicProfileSecurityHeaders(env: Record<string, string | undefi
   };
 }
 
+/** A QR sign's short link, /q/<code> (entryLinkPath in @lobbystack/shared). */
+export function isEntryLinkPath(pathname: string): boolean {
+  return /^\/q\/[^/]+$/.test(pathname);
+}
+
+/**
+ * A QR link only redirects to a business's page, and passes no referrer on to
+ * it. The proxy and next.config.ts set their headers over the route's, so the
+ * policy lives here.
+ */
+export function entryLinkSecurityHeaders(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  return { ...securityHeaders(env), "Referrer-Policy": "no-referrer" };
+}
+
 /**
  * The logo onboarding saved may be an SVG, and an SVG opened on its own is a
  * document. Serve it with no script, no requests and a sandbox, whichever of

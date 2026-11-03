@@ -45,6 +45,7 @@ async function follow(request: Request, code: string, count: boolean): Promise<R
   }
   if (!destination) return await notFound(request);
   // A relative address keeps the visitor on the domain the sign named. The page's language choice, if any, goes along.
+  // The proxy and next.config.ts send the same referrer policy (entryLinkSecurityHeaders), since their headers replace a route's.
   const language = new URL(request.url).searchParams.get("lng");
   const location = language && /^[a-z]{2}$/.test(language) ? `${destination.path}?lng=${language}` : destination.path;
   return new Response(null, { status: 307, headers: { location, "cache-control": "private, no-store", "referrer-policy": "no-referrer" } });

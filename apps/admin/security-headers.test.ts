@@ -1,8 +1,8 @@
 import { expect, it } from "vitest";
 
-import { publicProfilePath, receptionistPagePath } from "@lobbystack/shared";
+import { entryLinkPath, publicProfilePath, receptionistPagePath } from "@lobbystack/shared";
 
-import { EMBED_PATH_PREFIXES, embeddableSecurityHeaders, isEmbeddablePath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
+import { EMBED_PATH_PREFIXES, embeddableSecurityHeaders, entryLinkSecurityHeaders, isEmbeddablePath, isEntryLinkPath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
 const env = { NODE_ENV: "production" } as Record<string, string | undefined>;
 
@@ -48,4 +48,14 @@ it("lets a business's public page frame its chat and a Google map, and nothing e
   expect(isPublicProfilePath(receptionistPagePath("acme-dental", "kitsilano"))).toBe(true);
   expect(isPublicProfilePath("/profile")).toBe(false);
   expect(isPublicProfilePath("/settings/profile")).toBe(false);
+});
+
+it("sends a QR link's redirect with no referrer, and every other header as on the rest of the app", () => {
+  const { "Referrer-Policy": referrer, ...rest } = entryLinkSecurityHeaders(env);
+  expect(referrer).toBe("no-referrer");
+  const { "Referrer-Policy": usual, ...others } = securityHeaders(env);
+  expect(usual).toBe("strict-origin-when-cross-origin");
+  expect(rest).toEqual(others);
+  expect(isEntryLinkPath(entryLinkPath("k7m2pq"))).toBe(true);
+  for (const path of ["/q", "/q/", "/q/k7m2pq/more", "/qr/k7m2pq", "/settings/qrcode"]) expect(isEntryLinkPath(path), path).toBe(false);
 });

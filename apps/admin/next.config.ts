@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 
 import { publicAssetVersion } from "./asset-version";
 import { displayVersion, releaseVersion } from "./src/lib/release-version";
-import { brandLogoSecurityHeaders, embeddableSecurityHeaders, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
+import { brandLogoSecurityHeaders, embeddableSecurityHeaders, entryLinkSecurityHeaders, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
 // One release identifies the build everywhere: browser error reports, the source
 // maps uploaded to PostHog, and the deployment ID below.
@@ -102,8 +102,9 @@ const nextConfig: NextConfig = {
       { source: "/brand/:path*", headers: immutableAssetCache },
       { source: "/lobbystack-logo.svg", headers: immutableAssetCache },
       { source: "/embed/embed.js", headers: immutableAssetCache },
-      { source: "/((?!embed\\.js|embed/|api/branding/logo$|profile/).*)", headers: toNextHeaderList(securityHeaders()) },
+      { source: "/((?!embed\\.js|embed/|api/branding/logo$|profile/|q/[^/]+$).*)", headers: toNextHeaderList(securityHeaders()) },
       { source: "/api/branding/logo", headers: toNextHeaderList(brandLogoSecurityHeaders()) },
+      { source: "/q/:code", headers: toNextHeaderList(entryLinkSecurityHeaders()) },
       { source: "/profile/:slug*", headers: toNextHeaderList(publicProfileSecurityHeaders()) },
       { source: "/embed.js", missing: [{ type: "query", key: "key" }], headers: [...embeddable, ...embedLoaderCache] },
       { source: "/embed.js", has: [{ type: "query", key: "key" }], headers: [...embeddable, ...keyedEmbedLoaderCache] },

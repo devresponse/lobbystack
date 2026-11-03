@@ -139,6 +139,16 @@ it("keeps sensitive and dynamic responses private while caching fixed public pag
   expect(publicResponse.headers.get("vary")).toBe("Accept-Encoding");
 });
 
+it("sends a QR link's redirect with no referrer, and the usual policy everywhere else", () => {
+  const link = proxy(new NextRequest("http://localhost:3210/q/k7m2pq"));
+  expect(link.headers.get("referrer-policy")).toBe("no-referrer");
+  expect(link.headers.get("x-frame-options")).toBe("DENY");
+  expect(link.headers.get("x-content-type-options")).toBe("nosniff");
+  for (const path of ["/settings/qrcode", "/profile/acme-dental"]) {
+    expect(proxy(new NextRequest(`http://localhost:3210${path}`)).headers.get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
+  }
+});
+
 it("serves a business's public page privately in the visitor's language, with a policy that allows its map", () => {
   const page = proxy(new NextRequest("http://localhost:3210/profile/acme-dental", { headers: { "accept-language": "es-MX,es;q=0.9" } }));
   expect(page.status).toBe(200);

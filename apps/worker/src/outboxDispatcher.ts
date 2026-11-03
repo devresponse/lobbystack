@@ -25,6 +25,7 @@ export class OutboxDispatcher {
   private readonly publishDuration = getMeter("lobbystack-worker").createHistogram("lobbystack.outbox.publish_duration_ms", { unit: "ms" });
   private readonly published = getMeter("lobbystack-worker").createCounter("lobbystack.outbox.published");
   private readonly publishAge = getMeter("lobbystack-worker").createHistogram("lobbystack.outbox.publish_age_ms", { unit: "ms" });
+  private readonly coalesced = getMeter("lobbystack-worker").createCounter("lobbystack.outbox.coalesced");
   private nextPruneAt = 0;
 
   constructor(private readonly db: Database, private readonly queues: Map<string, ReturnType<typeof createQueue>>) {}
@@ -38,11 +39,30 @@ export class OutboxDispatcher {
     // with. Writing the event here would require an unsafe grant or a
     // null-business RLS bypass. See scripts/telemetry-registry-coverage.ts.
     const rows = await claimOutboxBatch(this.db, { dispatcherId: this.dispatcherId, limit: 50 });
+    // A snapshot rebuild reads the business as it stands when it runs, and every
+    // row in this batch was committed before the claim read it, so one rebuild
+    // queued here covers all of a business's snapshot.refresh rows in the batch:
+    // a save that queues two or three (an entry and its audience, AI settings
+    // with a language), or the pages of a crawl. The others are marked
+    // published without a job of their own.
+    const rebuildQueued = new Set<string>();
     for (const row of rows) {
       const started = performance.now();
       let outcome = "success";
       const topic = isKnownJobType(row.topic) ? row.topic : "unknown";
+      const rebuild = row.topic === "snapshot.refresh" && row.businessId ? row.businessId : null;
       try {
+        if (rebuild && rebuildQueued.has(rebuild)) {
+          if (!await markOutboxPublished(this.db, row)) {
+            outcome = "fenced";
+            continue;
+          }
+          outcome = "coalesced";
+          this.coalesced.add(1, { topic });
+          this.published.add(1, { topic });
+          this.publishAge.record(Math.max(0, Date.now() - row.createdAt.getTime()), { topic });
+          continue;
+        }
         const payload = outboxMessageSchema.parse({ id: row.id, topic: row.topic, businessId: row.businessId, aggregateType: row.aggregateType, aggregateId: row.aggregateId, dedupeKey: row.dedupeKey, payload: row.payload, trace: { ...(row.traceparent ? { traceparent: row.traceparent } : {}), ...(row.tracestate ? { tracestate: row.tracestate } : {}) } });
         const type = payload.topic as JobType;
         const queueName = queueForJobType[type];
@@ -51,6 +71,7 @@ export class OutboxDispatcher {
           throw new Error(`No queue configured for outbox topic ${payload.topic}.`);
         }
         await enqueueJob(queue, { type, businessId: payload.businessId ?? undefined, payload: payload.payload, trace: payload.trace, idempotencyKey: payload.dedupeKey });
+        if (rebuild) rebuildQueued.add(rebuild);
         // A false result means another dispatcher reclaimed the lease after ours
         // expired. The job is already enqueued and consumers stay idempotent, but
         // this dispatcher must not report the message as published.

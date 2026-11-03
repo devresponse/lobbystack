@@ -33,7 +33,7 @@ Since fork PR #129 a business can have several receptionists ([receptionists](re
 - `widget.receptionist_token_archived`: the page's receptionist was archived after the visitor opened the page.
 - `public_profile.receptionist_token_failed`, an error: a business or receptionist page couldn't sign its token, which happens only on a production admin with neither `WIDGET_SESSION_SECRET` nor `BETTER_AUTH_SECRET`.
 
-The worker writes `receptionists.backfill` each time it fills in the receptionist on older calls, conversations and follow-ups, with how many of each, until none is left. A QR link that can't open its page right now answers 503, and the failure is an `[admin] exception:` line, and a PostHog error, with the operation `entry_link.follow`.
+The worker writes `receptionists.backfill` each time it fills in the receptionist on older calls, conversations and follow-ups, with how many of each, until none is left. Its job dispatcher counts `lobbystack.outbox.coalesced`, by `topic`: the `snapshot.refresh` rows it marked published without a job of their own, since a rebuild it had already queued for the same business in that batch covers them; they count in `lobbystack.outbox.published` too, with the outcome `coalesced` on `lobbystack.outbox.publish_duration_ms`. A QR link that can't open its page right now answers 503, and the failure is an `[admin] exception:` line, and a PostHog error, with the operation `entry_link.follow`.
 
 ## Follow a sign-in
 

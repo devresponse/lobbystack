@@ -83,6 +83,11 @@ describe("receptionist handles", () => {
     }
   });
 
+  it("makes a handle from a name with long runs of punctuation or spaces", () => {
+    expect(receptionistHandleFrom(`${"-".repeat(100_000)}Kitsilano${"\t".repeat(100_000)}store${"!".repeat(100_000)}`)).toBe("kitsilano-store");
+    expect(receptionistHandleFrom(`a${"-".repeat(100_000)}`)).toBe("a");
+  });
+
   it("cuts a long name at a dash so the handle fits", () => {
     const handle = receptionistHandleFrom(`${"word ".repeat(20)}end`);
     expect(handle.length).toBeLessThanOrEqual(RECEPTIONIST_HANDLE_MAX_LENGTH);

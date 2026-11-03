@@ -1,4 +1,4 @@
-import { callOpening, canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, canTextNumber, normalizeAppointmentChangePolicy, normalizeBookingMode, runtimeLocaleNames, trimEndWhere, type BookingMode, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { countKnowledgeTokens } from "@lobbystack/domain";
 import { DateTime } from "luxon";
 
@@ -126,8 +126,9 @@ export function receptionistGuidance(snapshot: BusinessContextSnapshot, channel:
   if (!self || (!others.length && !more)) return "";
   const chat = channel === "web_chat";
   const flat = (text: string) => text.trim().replace(/\s+/g, " ");
-  // The sentence ends with its own full stop.
-  const helpsWith = flat(self.description).replace(/[\s.;:,]+$/, "");
+  // The sentence ends with its own full stop, so the description's own
+  // closing punctuation and spaces go.
+  const helpsWith = trimEndWhere(flat(self.description), (character) => character.trim() === "" || ".;:,".includes(character));
   const businessPage = chat && snapshot.publicPageUrl ? ` at ${snapshot.publicPageUrl}` : "";
   return [
     `You are ${flat(self.name)}, one of the receptionists of ${snapshot.displayName}${helpsWith ? `, and you help with: ${helpsWith}` : ""}.`,

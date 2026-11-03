@@ -554,6 +554,14 @@ describe("several receptionists", () => {
     expect(buildAgentInstructions(vaccines, "web_chat")).toContain(guidance);
   });
 
+  it("drops the closing punctuation and spaces of what a receptionist helps with, since its sentence ends with its own full stop", () => {
+    const description = `Flu shots, travel vaccines ;:, .${"\t".repeat(50_000)}`;
+    const punctuated = snapshotForReceptionist({ ...stored, receptionists: stored.receptionists!.map((entry) => (entry.id === vaccinesId ? { ...entry, description } : entry)) }, vaccinesId);
+    expect(receptionistGuidance(punctuated, "web_chat")).toContain("You are Vaccines, one of the receptionists of Maple Family Clinic, and you help with: Flu shots, travel vaccines.\n");
+    const unsaid = snapshotForReceptionist({ ...stored, receptionists: stored.receptionists!.map((entry) => (entry.id === vaccinesId ? { ...entry, description: " .;\t" } : entry)) }, vaccinesId);
+    expect(receptionistGuidance(unsaid, "web_chat")).toContain("You are Vaccines, one of the receptionists of Maple Family Clinic.\n");
+  });
+
   it("gives a website chat the other receptionists' page links", () => {
     const guidance = receptionistGuidance(frontDesk, "web_chat");
     expect(guidance).toContain("You are Front desk, one of the receptionists of Maple Family Clinic, and you help with: Appointments, referrals and parking.");

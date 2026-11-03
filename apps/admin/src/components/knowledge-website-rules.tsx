@@ -6,7 +6,7 @@ import { useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { normalizeWebsiteRulePath } from "@lobbystack/shared";
+import { normalizeWebsiteRulePath, trimTrailingSlashes } from "@lobbystack/shared";
 
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { audienceErrorMessage } from "@/components/knowledge-audience";
@@ -42,7 +42,7 @@ export type DraftRule = { key: string; path: string; receptionistId: string | nu
 export function siteLabel(url: string): string {
   try {
     const parsed = new URL(url);
-    return `${parsed.host.replace(/^www\./u, "")}${parsed.pathname === "/" ? "" : parsed.pathname.replace(/\/+$/u, "")}`;
+    return `${parsed.host.replace(/^www\./u, "")}${parsed.pathname === "/" ? "" : trimTrailingSlashes(parsed.pathname)}`;
   } catch {
     return url;
   }

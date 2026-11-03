@@ -5,6 +5,7 @@
 
 import { normalizeRuntimeLocale, type InterfaceLocale, type RuntimeLocale } from "./locales";
 import { publicProfilePath } from "./publicProfile";
+import { trimEndWhere } from "./text";
 
 /** Longest receptionist name. */
 export const RECEPTIONIST_NAME_MAX_LENGTH = 80;
@@ -182,12 +183,13 @@ export function receptionistHandleFrom(name: string): string {
     .replace(/[đð]/g, "d")
     .replace(/[ł]/g, "l")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    // The line above leaves single dashes, so one at each end is all there is.
+    .replace(/^-|-$/g, "");
   if (!ascii) return "receptionist";
   if (ascii.length <= RECEPTIONIST_HANDLE_MAX_LENGTH) return ascii;
   const cut = ascii.slice(0, RECEPTIONIST_HANDLE_MAX_LENGTH);
   const lastDash = cut.lastIndexOf("-");
-  return (lastDash > 0 ? cut.slice(0, lastDash) : cut).replace(/-+$/g, "");
+  return withoutTrailingDashes(lastDash > 0 ? cut.slice(0, lastDash) : cut);
 }
 
 /**
@@ -199,10 +201,14 @@ export function availableReceptionistHandle(handle: string, taken: Iterable<stri
   if (!used.has(handle)) return handle;
   for (let number = 2; ; number += 1) {
     const suffix = `-${number}`;
-    const base = handle.slice(0, RECEPTIONIST_HANDLE_MAX_LENGTH - suffix.length).replace(/-+$/g, "");
+    const base = withoutTrailingDashes(handle.slice(0, RECEPTIONIST_HANDLE_MAX_LENGTH - suffix.length));
     const candidate = `${base}${suffix}`;
     if (!used.has(candidate)) return candidate;
   }
+}
+
+function withoutTrailingDashes(text: string): string {
+  return trimEndWhere(text, (character) => character === "-");
 }
 
 /** Up to two initials for a receptionist's badge: the first letters of its first two words. */

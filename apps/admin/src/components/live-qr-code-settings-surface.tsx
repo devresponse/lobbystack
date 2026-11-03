@@ -8,7 +8,7 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
-import { receptionistPagePath } from "@lobbystack/shared";
+import { receptionistPagePath, trimEndWhere } from "@lobbystack/shared";
 
 import { useBranding } from "@/components/branding-provider";
 import { useActiveBusiness } from "@/hooks/use-active-business";
@@ -138,7 +138,9 @@ function TemplateThumbnail({ template }: { template: QrSignTemplate }) {
 
 /** A file-name part from a link's label, such as "front-window": plain letters and digits, at most 40. */
 export function fileNamePart(label: string): string {
-  return label.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+  // Runs of anything else become single dashes, so one at each end is all there is.
+  const part = label.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return trimEndWhere(part.slice(0, 40), (character) => character === "-");
 }
 
 /** The name a link's code downloads under, after the page and the link: acme-dental-front-window-7kq2mx. */

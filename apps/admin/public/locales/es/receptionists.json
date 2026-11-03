@@ -1,0 +1,33 @@
+{
+  "picker": {
+    "choose": "Elija un recepcionista",
+    "search": "Buscar recepcionistas",
+    "noMatches": "Ningún recepcionista coincide.",
+    "default": "Predeterminado",
+    "paused": "En pausa",
+    "unknown": "Un recepcionista que ya no aparece",
+    "add": "Agregar recepcionista",
+    "manage": "Administrar recepcionistas"
+  },
+  "filter": {
+    "label": "Recepcionista",
+    "all": "Todos los recepcionistas"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} de {{count}} recepcionista",
+    "summary_other": "{{chosen}} de {{count}} recepcionistas",
+    "summary_many": "{{chosen}} de {{count}} recepcionistas",
+    "none": "Elegir",
+    "change": "Cambiar",
+    "search": "Buscar recepcionistas",
+    "selectShown": "Seleccionar los mostrados",
+    "clear": "Borrar",
+    "remove": "Quitar a {{name}}",
+    "more": "+{{count}} más"
+  },
+  "names": {
+    "everyone": "Todos",
+    "more": "+{{count}}",
+    "defaultOnly": "Solo el recepcionista predeterminado"
+  }
+}

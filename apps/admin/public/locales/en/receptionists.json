@@ -1,0 +1,32 @@
+{
+  "picker": {
+    "choose": "Choose a receptionist",
+    "search": "Search receptionists",
+    "noMatches": "No receptionist matches that.",
+    "default": "Default",
+    "paused": "Paused",
+    "unknown": "A receptionist that's no longer listed",
+    "add": "Add receptionist",
+    "manage": "Manage receptionists"
+  },
+  "filter": {
+    "label": "Receptionist",
+    "all": "All receptionists"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} of {{count}} receptionist",
+    "summary_other": "{{chosen}} of {{count}} receptionists",
+    "none": "Choose",
+    "change": "Change",
+    "search": "Search receptionists",
+    "selectShown": "Select all shown",
+    "clear": "Clear",
+    "remove": "Remove {{name}}",
+    "more": "+{{count}} more"
+  },
+  "names": {
+    "everyone": "Everyone",
+    "more": "+{{count}}",
+    "defaultOnly": "Default receptionist only"
+  }
+}

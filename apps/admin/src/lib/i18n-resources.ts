@@ -15,6 +15,7 @@ import enMessages from "../../public/locales/en/messages.json";
 import enNav from "../../public/locales/en/nav.json";
 import enOnboarding from "../../public/locales/en/onboarding.json";
 import enProfile from "../../public/locales/en/profile.json";
+import enReceptionists from "../../public/locales/en/receptionists.json";
 import enSettings from "../../public/locales/en/settings.json";
 import enWidget from "../../public/locales/en/widget.json";
 import frAdmin from "../../public/locales/fr/admin.json";
@@ -32,6 +33,7 @@ import frMessages from "../../public/locales/fr/messages.json";
 import frNav from "../../public/locales/fr/nav.json";
 import frOnboarding from "../../public/locales/fr/onboarding.json";
 import frProfile from "../../public/locales/fr/profile.json";
+import frReceptionists from "../../public/locales/fr/receptionists.json";
 import frSettings from "../../public/locales/fr/settings.json";
 import frWidget from "../../public/locales/fr/widget.json";
 import esAdmin from "../../public/locales/es/admin.json";
@@ -49,6 +51,7 @@ import esMessages from "../../public/locales/es/messages.json";
 import esNav from "../../public/locales/es/nav.json";
 import esOnboarding from "../../public/locales/es/onboarding.json";
 import esProfile from "../../public/locales/es/profile.json";
+import esReceptionists from "../../public/locales/es/receptionists.json";
 import esSettings from "../../public/locales/es/settings.json";
 import esWidget from "../../public/locales/es/widget.json";
 import srAdmin from "../../public/locales/sr/admin.json";
@@ -66,6 +69,7 @@ import srMessages from "../../public/locales/sr/messages.json";
 import srNav from "../../public/locales/sr/nav.json";
 import srOnboarding from "../../public/locales/sr/onboarding.json";
 import srProfile from "../../public/locales/sr/profile.json";
+import srReceptionists from "../../public/locales/sr/receptionists.json";
 import srSettings from "../../public/locales/sr/settings.json";
 import srWidget from "../../public/locales/sr/widget.json";
 
@@ -90,6 +94,7 @@ export const localeResources: Record<SupportedLocale, Record<string, Record<stri
     nav: enNav,
     onboarding: enOnboarding,
     profile: enProfile,
+    receptionists: enReceptionists,
     settings: enSettings,
     widget: enWidget,
   },
@@ -109,6 +114,7 @@ export const localeResources: Record<SupportedLocale, Record<string, Record<stri
     nav: frNav,
     onboarding: frOnboarding,
     profile: frProfile,
+    receptionists: frReceptionists,
     settings: frSettings,
     widget: frWidget,
   },
@@ -128,6 +134,7 @@ export const localeResources: Record<SupportedLocale, Record<string, Record<stri
     nav: esNav,
     onboarding: esOnboarding,
     profile: esProfile,
+    receptionists: esReceptionists,
     settings: esSettings,
     widget: esWidget,
   },
@@ -147,6 +154,7 @@ export const localeResources: Record<SupportedLocale, Record<string, Record<stri
     nav: srNav,
     onboarding: srOnboarding,
     profile: srProfile,
+    receptionists: srReceptionists,
     settings: srSettings,
     widget: srWidget,
   },

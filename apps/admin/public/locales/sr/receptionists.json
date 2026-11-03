@@ -1,0 +1,33 @@
+{
+  "picker": {
+    "choose": "Izaberite recepcionera",
+    "search": "Pretražite recepcionere",
+    "noMatches": "Nijedan recepcioner ne odgovara pretrazi.",
+    "default": "Podrazumevani",
+    "paused": "Pauziran",
+    "unknown": "Recepcioner koji više nije na listi",
+    "add": "Dodaj recepcionera",
+    "manage": "Upravljaj recepcionerima"
+  },
+  "filter": {
+    "label": "Recepcioner",
+    "all": "Svi recepcioneri"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} od {{count}} recepcionera",
+    "summary_few": "{{chosen}} od {{count}} recepcionera",
+    "summary_other": "{{chosen}} od {{count}} recepcionera",
+    "none": "Izaberite",
+    "change": "Izmeni",
+    "search": "Pretražite recepcionere",
+    "selectShown": "Izaberi sve prikazane",
+    "clear": "Obriši",
+    "remove": "Ukloni: {{name}}",
+    "more": "+{{count}} još"
+  },
+  "names": {
+    "everyone": "Svi",
+    "more": "+{{count}}",
+    "defaultOnly": "Samo podrazumevani recepcioner"
+  }
+}

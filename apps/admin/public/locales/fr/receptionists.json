@@ -1,0 +1,33 @@
+{
+  "picker": {
+    "choose": "Choisir un réceptionniste",
+    "search": "Rechercher un réceptionniste",
+    "noMatches": "Aucun réceptionniste ne correspond.",
+    "default": "Par défaut",
+    "paused": "En pause",
+    "unknown": "Un réceptionniste qui n'est plus listé",
+    "add": "Ajouter un réceptionniste",
+    "manage": "Gérer les réceptionnistes"
+  },
+  "filter": {
+    "label": "Réceptionniste",
+    "all": "Tous les réceptionnistes"
+  },
+  "multi": {
+    "summary_one": "{{chosen}} sur {{count}} réceptionniste",
+    "summary_other": "{{chosen}} sur {{count}} réceptionnistes",
+    "summary_many": "{{chosen}} sur {{count}} réceptionnistes",
+    "none": "Choisir",
+    "change": "Modifier",
+    "search": "Rechercher un réceptionniste",
+    "selectShown": "Tout sélectionner (affichés)",
+    "clear": "Effacer",
+    "remove": "Retirer {{name}}",
+    "more": "+{{count}} de plus"
+  },
+  "names": {
+    "everyone": "Tous",
+    "more": "+{{count}}",
+    "defaultOnly": "Réceptionniste par défaut seulement"
+  }
+}

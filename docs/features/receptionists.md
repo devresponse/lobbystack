@@ -109,10 +109,11 @@ A QR link is a short address, `/q/<code>`, that a printed sign carries. It opens
 
 ## Deploy it
 
-Migrations `0133` to `0140` only add, so the code of the release before keeps working while a deploy finishes, and `0135`, `0138` and `0139` build their indexes concurrently, so large tables aren't locked. Nothing needs to be set: `MAX_RECEPTIONISTS_PER_BUSINESS` is optional. Two things to know:
+Migrations `0133` to `0140` only add, so the code of the release before keeps working while a deploy finishes, and `0135`, `0138` and `0139` build their indexes concurrently, so large tables aren't locked. Nothing needs to be set: `MAX_RECEPTIONISTS_PER_BUSINESS` is optional. Three things to know:
 
 - **One short window.** `0140` drops the one-receptionist-per-business index that the previous release's AI settings save names, so between migrate finishing and the new admin serving, a save on **AI settings** in the old admin fails. Deploying `0133` to `0140` together, as this pull request does, accepts that window.
 - **The backfill.** Old calls, conversations and follow-ups name no receptionist; every reader takes that as the default receptionist, so they show correctly at once. The worker's `receptionists.backfillRecords` job fills them in batches of 5,000, skipping rows another transaction holds; it runs once a day per business on the maintenance queue, and a new worker runs it right away. Migrate's last step logs how many are left: `Records naming no receptionist yet, which the worker's backfill fills: calls 0, conversations 0, inbox_items 0.` It fails the deploy if a business's shared settings differ from its default receptionist's copy, which the code keeps the same until the clean-up deploy.
+- **The billing file.** Both brands' `billing.json` gain `limits.receptionists`, so after the deploy, apply the file as after any billing change (`pnpm billing apply`, [billing](../billing/README.md#sign-in-preview-apply-and-check)). Migration `0134` already wrote the same numbers to the plans, and Polar never sees them, so the apply changes no plan and no Polar product, and the plans' numbers hold meanwhile. Until it runs, the daily `billing.verifyCatalog` check reports the newer file as drift.
 
 **Rolling back** to the release before is safe only while no business has a second receptionist. That release reads a business's receptionist rows as if there were one, so with several it could answer as any of them, and its **AI settings** save fails without the index `0140` drops. Once businesses have added receptionists, fix forward instead.
 

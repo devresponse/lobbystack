@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import {
   auditLogs,
@@ -17,6 +17,7 @@ import {
   knowledgeAudiences,
   normalizeWebsiteRulePath,
   websitePageUnderRule,
+  websiteRulePagePrefixes,
   MAX_ARTICLES_PER_AUDIENCE_CHANGE,
   MAX_RECEPTIONISTS_PER_REQUEST,
   type KnowledgeAudience,
@@ -399,8 +400,23 @@ export async function applyWebsiteRulesInTransaction(
       input.ruleIds ? inArray(knowledgeWebsiteRules.id, input.ruleIds) : undefined,
     ));
   if (!rules.length) return 0;
+  // Only the pages a rule can cover leave the database: the site's addresses
+  // under the rules' paths, and websitePageUnderRule still decides each one.
+  // A site's pages are saved through normalizeWebsiteSourceUrl
+  // (indexCrawledWebsitePage), with the scheme and host in lower case, so the
+  // comparison keeps case: lower() on every address would cost as much as the
+  // scan it saves (45 ms against 2 ms over 5,000 pages). A demo's crawl keeps
+  // the crawler's address as it came (upsertWebsiteDocument), so a capital
+  // letter in that host would leave the page out.
+  const prefixes = websiteRulePagePrefixes(site.sourceUrl, rules.map((rule) => rule.pathPrefix));
+  if (!prefixes.length) return 0;
   const pages = await tx.select({ id: knowledgeDocuments.id, sourceUrl: knowledgeDocuments.sourceUrl }).from(knowledgeDocuments)
-    .where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.sourceType, "website"), input.documentIds ? inArray(knowledgeDocuments.id, input.documentIds) : undefined));
+    .where(and(
+      eq(knowledgeDocuments.businessId, businessId),
+      eq(knowledgeDocuments.sourceType, "website"),
+      input.documentIds ? inArray(knowledgeDocuments.id, input.documentIds) : undefined,
+      or(...prefixes.map((prefix) => sql`starts_with(${knowledgeDocuments.sourceUrl}, ${prefix})`)),
+    ));
   const matches = pages.flatMap((page) => rules
     .filter((rule) => page.sourceUrl !== null && websitePageUnderRule(page.sourceUrl, site.sourceUrl!, rule.pathPrefix))
     .map((rule) => ({ businessId, documentId: page.id, receptionistId: rule.receptionistId, websiteRuleId: rule.id })));

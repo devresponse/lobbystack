@@ -21,6 +21,7 @@ import {
   maxReceptionistsPerBusiness,
   receptionistMayUse,
   websitePageUnderRule,
+  websiteRulePagePrefixes,
   receptionistAllowance,
   receptionistHandleFrom,
   receptionistInitials,
@@ -255,6 +256,40 @@ describe("website rule paths", () => {
     expect(websitePageUnderRule("https://othercoffee.ca/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
     expect(websitePageUnderRule("https://kitsilanocoffee.ca:8443/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
     expect(websitePageUnderRule("not a url", site, "/")).toBe(false);
+  });
+
+  it("gives the address prefixes a query narrows the site's pages by", () => {
+    expect(websiteRulePagePrefixes("https://www.kitsilanocoffee.ca/", ["/stores/kitsilano/"])).toEqual([
+      "http://kitsilanocoffee.ca/stores/kitsilano",
+      "http://www.kitsilanocoffee.ca/stores/kitsilano",
+      "https://kitsilanocoffee.ca/stores/kitsilano",
+      "https://www.kitsilanocoffee.ca/stores/kitsilano",
+    ]);
+    // The whole site's rule makes the stores' prefixes redundant; a port stays in the site.
+    expect(websiteRulePagePrefixes("https://kitsilanocoffee.ca:8443/", ["/stores/kitsilano/", "/"])).toEqual([
+      "http://kitsilanocoffee.ca:8443",
+      "http://www.kitsilanocoffee.ca:8443",
+      "https://kitsilanocoffee.ca:8443",
+      "https://www.kitsilanocoffee.ca:8443",
+    ]);
+    expect(websiteRulePagePrefixes("not a url", ["/"])).toEqual([]);
+    expect(websiteRulePagePrefixes("https://kitsilanocoffee.ca/", [])).toEqual([]);
+  });
+
+  it("never leaves out a page a rule covers", () => {
+    const site = "https://kitsilanocoffee.ca/stores/";
+    const rules = ["/", "/stores/", "/stores/kitsilano/", "/menu/drinks/"];
+    const pages = ["https://kitsilanocoffee.ca/", "https://kitsilanocoffee.ca/menu", "https://www.kitsilanocoffee.ca/menu/drinks", "http://kitsilanocoffee.ca/menu/drinks/tea",
+      "https://kitsilanocoffee.ca/stores", "https://kitsilanocoffee.ca/stores/kitsilano", "https://www.kitsilanocoffee.ca/stores/kitsilano/hours", "https://kitsilanocoffee.ca/stores/kitsilano-west",
+      "https://kitsilanocoffee.ca:8443/stores/kitsilano", "https://othercoffee.ca/stores/kitsilano", "https://kitsilanocoffee.ca.example.com/menu"];
+    for (const rule of rules) {
+      const prefixes = websiteRulePagePrefixes(site, [rule]);
+      for (const page of pages) {
+        if (websitePageUnderRule(page, site, rule)) expect(prefixes.some((prefix) => page.startsWith(prefix)), `${page} under ${rule}`).toBe(true);
+      }
+      // And only the site's own pages, whatever the path.
+      expect(pages.filter((page) => prefixes.some((prefix) => page.startsWith(prefix))).some((page) => page.startsWith("https://othercoffee.ca"))).toBe(false);
+    }
   });
 });
 

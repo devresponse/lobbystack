@@ -363,18 +363,22 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
       const lookalike = await page("/stores/gastownish");
       const about = await page("/about");
       const elsewhere = await page("/stores/gastown", "https://other.example");
+      // The same site over www. and HTTP, a page saved with its last slash, and a lookalike path there.
+      const storeHours = await page("/stores/gastown/hours", "https://www.kitsilanocoffee.ca");
+      const storeParking = await page("/stores/gastown/parking", "http://kitsilanocoffee.ca");
+      const storeDeals = await page("/stores/gastown/deals/", "http://www.kitsilanocoffee.ca");
+      const otherPath = await page("/stores/gastownish/hours", "https://www.kitsilanocoffee.ca");
       const upload = await addDocument(tx, businessId, { title: "Menu PDF" });
 
       await asOwner(tx, { userId, businessId });
       const rule = await createWebsiteRuleInTransaction(tx, { businessId, actorUserId: userId, rule: { rootDocumentId: site, pathPrefix: "/stores/gastown/", receptionistId: gastown.id } });
-      expect(rule).toMatchObject({ rootDocumentId: site, siteUrl: "https://kitsilanocoffee.ca/", pathPrefix: "/stores/gastown/", receptionistId: gastown.id, pages: 2 });
-      expect(await audienceOf(tx, "document", store)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
-      expect(await audienceOf(tx, "document", storeMenu)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
-      for (const id of [lookalike, about, elsewhere, site]) expect(await audienceOf(tx, "document", id)).toEqual({ audience: "everyone", receptionistIds: [] });
+      expect(rule).toMatchObject({ rootDocumentId: site, siteUrl: "https://kitsilanocoffee.ca/", pathPrefix: "/stores/gastown/", receptionistId: gastown.id, pages: 5 });
+      for (const id of [store, storeMenu, storeHours, storeParking, storeDeals]) expect(await audienceOf(tx, "document", id)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
+      for (const id of [lookalike, about, elsewhere, otherPath, site]) expect(await audienceOf(tx, "document", id)).toEqual({ audience: "everyone", receptionistIds: [] });
       await asOwner(tx, { userId, businessId });
       expect((await knowledgeAudienceLinksInTransaction(tx, { businessId })).documents[store]).toEqual([{ receptionistId: gastown.id, websiteRuleId: rule.id }]);
       await asOwner(tx, { userId, businessId });
-      expect(await listWebsiteRulesInTransaction(tx, { businessId })).toEqual([expect.objectContaining({ id: rule.id, pages: 2, siteUrl: "https://kitsilanocoffee.ca/" })]);
+      expect(await listWebsiteRulesInTransaction(tx, { businessId })).toEqual([expect.objectContaining({ id: rule.id, pages: 5, siteUrl: "https://kitsilanocoffee.ca/" })]);
 
       // The same rule twice, a file instead of a site, and an archived receptionist.
       await asOwner(tx, { userId, businessId });

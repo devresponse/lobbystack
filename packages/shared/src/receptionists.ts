@@ -132,6 +132,33 @@ export function websitePageUnderRule(pageUrl: string, siteUrl: string, rulePath:
 }
 
 /**
+ * The address prefixes of every page the site's rules can cover, so a query
+ * reads only those pages before websitePageUnderRule decides: the site over
+ * HTTP and HTTPS, with and without "www.", then each rule's path without its
+ * last slash. A prefix can take more than its rule (/stores/kitsilano-west for
+ * /stores/kitsilano/, or another port), never less. A prefix that starts with
+ * another one is left out; none for a site address that doesn't parse.
+ */
+export function websiteRulePagePrefixes(siteUrl: string, rulePaths: readonly string[]): string[] {
+  let site: URL;
+  try {
+    site = new URL(siteUrl);
+  } catch {
+    return [];
+  }
+  const host = site.host.toLowerCase().replace(/^www\./, "");
+  const prefixes = new Set<string>();
+  for (const rulePath of rulePaths) {
+    const path = rulePath.endsWith("/") ? rulePath.slice(0, -1) : rulePath;
+    for (const scheme of ["http", "https"]) for (const name of [host, `www.${host}`]) prefixes.add(`${scheme}://${name}${path}`);
+  }
+  // Sorted, a prefix comes after any shorter prefix it starts with.
+  const kept: string[] = [];
+  for (const prefix of [...prefixes].sort()) if (!kept.some((shorter) => prefix.startsWith(shorter))) kept.push(prefix);
+  return kept;
+}
+
+/**
  * The default receptionist's name in each language calls and the dashboard
  * use. Migration 0133 names each business's existing receptionist from this
  * list, and a test keeps the two the same.

@@ -199,7 +199,8 @@ export function toPublicBusinessProfile(rows: PublicProfileRows, input: { now: D
 
 /**
  * The number a page shows: the newest of the business's active voice numbers
- * that rings its receptionist, else the newest one, which the business page
+ * that rings its receptionist, else the newest that rings the default one,
+ * the business's main line, else the newest of all, which the business page
  * always showed. A number rings the receptionist it names while that one is
  * active, else the default one (app.effective_receptionist).
  */
@@ -207,7 +208,8 @@ export function pageNumber(numbers: Array<{ e164: string; receptionistId: string
   const fallback = receptionists.find((row) => row.isDefault)?.id ?? null;
   const answering = pageReceptionistId ?? fallback;
   const rings = (number: { receptionistId: string | null }) => (receptionists.some((row) => row.id === number.receptionistId && row.status === "active") ? number.receptionistId : fallback);
-  return (numbers.find((number) => answering !== null && rings(number) === answering) ?? numbers[0])?.e164 ?? null;
+  const ringing = (receptionistId: string | null) => (receptionistId === null ? undefined : numbers.find((number) => rings(number) === receptionistId));
+  return (ringing(answering) ?? ringing(fallback) ?? numbers[0])?.e164 ?? null;
 }
 
 async function loadPublicProfileRows(tx: DatabaseTransaction, businessId: string, pageReceptionistId: string | null = null): Promise<PublicProfileRows | null> {

@@ -126,12 +126,17 @@ describe("a page's receptionists", () => {
     expect(profile.receptionists).toEqual([]);
   });
 
-  it("shows the number that rings the page's receptionist, else the business's newest", () => {
+  it("shows the number that rings the page's receptionist, else the default one's, else the business's newest", () => {
     const numbers = [{ e164: "+16045550101", receptionistId: "r-front" }, { e164: "+16045550102", receptionistId: "r-kits" }, { e164: "+16045550103", receptionistId: "r-down" }];
     expect(pageNumber(numbers, several.receptionists, null)).toBe("+16045550101");
     expect(pageNumber(numbers, several.receptionists, "r-kits")).toBe("+16045550102");
-    // Billing has no number of its own; the business's newest still reaches someone.
+    // Billing has no number of its own, so its page shows the default receptionist's,
+    // even when another receptionist's number is newer.
     expect(pageNumber(numbers, several.receptionists, "r-billing")).toBe("+16045550101");
+    expect(pageNumber([numbers[1]!, numbers[0]!], several.receptionists, "r-billing")).toBe("+16045550101");
+    // With no number for the default either, the business's newest still reaches someone.
+    expect(pageNumber([numbers[1]!], several.receptionists, "r-billing")).toBe("+16045550102");
+    expect(pageNumber([numbers[1]!], several.receptionists, null)).toBe("+16045550102");
     // A paused receptionist's number rings the default one, so it is the business page's number too.
     expect(pageNumber([numbers[2]!, numbers[0]!], several.receptionists, null)).toBe("+16045550103");
     // A number that names no receptionist rings the default one.

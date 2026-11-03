@@ -287,8 +287,12 @@ describe("website rule paths", () => {
       for (const page of pages) {
         if (websitePageUnderRule(page, site, rule)) expect(prefixes.some((prefix) => page.startsWith(prefix)), `${page} under ${rule}`).toBe(true);
       }
-      // And only the site's own pages, whatever the path.
-      expect(pages.filter((page) => prefixes.some((prefix) => page.startsWith(prefix))).some((page) => page.startsWith("https://othercoffee.ca"))).toBe(false);
+      // Never another site's pages, whatever the path. A host that only starts
+      // with the site's (kitsilanocoffee.ca.example.com) can pass the root's
+      // prefixes, and websitePageUnderRule turns it away.
+      const taken = pages.filter((page) => prefixes.some((prefix) => page.startsWith(prefix)));
+      expect(taken.some((page) => new URL(page).hostname === "othercoffee.ca")).toBe(false);
+      expect(taken.filter((page) => new URL(page).hostname === "kitsilanocoffee.ca.example.com").every((page) => !websitePageUnderRule(page, site, rule))).toBe(true);
     }
   });
 });

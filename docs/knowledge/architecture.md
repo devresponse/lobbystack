@@ -25,6 +25,17 @@ Text entries reach calls and chats only through the business's snapshot, which `
 
 A question the receptionist couldn't answer goes on the business's list of [unanswered questions](../features/unanswered-questions.md), whose answers become text entries. A website chat saves it as the receptionist replies; a call's come from the summary written after it (fork PR #106). An empty search isn't the test, because the search returns its closest passages even when none answers.
 
+## Search knowledge the way the receptionist does
+
+The receptionist's `searchKnowledge` tool calls `searchKnowledgeEvidence` in `packages/domain/src/server/knowledge.ts`. It runs two searches at once, each with a 2-second statement timeout:
+
+- **Keyword:** PostgreSQL `simple` text search over each chunk's text and its source's title, ranked by `ts_rank_cd` for every term, then for any term. A query of only common words has no terms and skips it.
+- **Semantic:** the query's embedding (1.8 seconds at most) against the chunks embedded with the same fingerprint, by cosine distance.
+
+Each returns up to 12 chunks. Reciprocal rank fusion (`rankKnowledgeCandidates` in `packages/domain/src/knowledgeRanking.ts`, k = 60) merges them, and the search keeps the top 6. It rechecks that their sources are still active and at the revision it read, keeps those that fit the 3,000-token budget, and joins each with its neighboring chunks when they fit too. The tool then adds the snapshot's matching text entries and FAQs in the slots and tokens left (`knowledgeToolResult` in `packages/domain/src/receptionistKnowledge.ts`). On a phone call, a step that only searched knowledge hands the voice model those matches as facts, cut to about 380 tokens (`packages/agent-core/src/live/directAnswer.ts`).
+
+`POST /api/v1/knowledge/search` and `lobbystack knowledge search` (fork PR #130) run that same code through `traceKnowledgeSearch` and return every stage: the evidence, the tool's result, the call's answer, each search's results with their scores, and every candidate with what became of it. Use it to see why the receptionist answered as it did, or to compare answers before and after a change to how documents are read ([API, CLI and integrations](../features/api-cli-integrations.md#test-the-receptionists-knowledge-search)). Checked against `main` at `2a4004c` with fork PR #130.
+
 ## Keep provider boundaries
 
 - Configured OpenAI-compatible adapters handle non-realtime text generation and embeddings behind `packages/providers`. Chat and embedding models/endpoints are deployment-wide and independently configurable.

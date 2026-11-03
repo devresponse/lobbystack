@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { countKnowledgeTokens, fuseKnowledgeRanks, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "./knowledgeRanking";
+import { countKnowledgeTokens, fuseKnowledgeRanks, knowledgeLexicalQueries, knowledgeQueryTerms, rankKnowledgeCandidates, withinKnowledgeBudget, type KnowledgePassage } from "./knowledgeRanking";
 
 const passage = (id: string): KnowledgePassage => ({ chunkId: id, documentId: "document", title: "Management", content: "MNGT 10407", sourceUrl: "https://example.com/courses", sourceRevision: 2, sequence: 0 });
 
@@ -16,6 +16,15 @@ describe("knowledge ranking", () => {
   });
   it("caps the number of passages", () => {
     expect(fuseKnowledgeRanks([Array.from({ length: 20 }, (_, i) => passage(String(i)))])).toHaveLength(6);
+  });
+  it("scores every candidate with its place in each list, in the order fusion keeps", () => {
+    const lists = [[passage("a"), passage("b"), passage("a")], [passage("c"), passage("b")]];
+    const ranked = rankKnowledgeCandidates(lists);
+    expect(ranked.map(row => [row.passage.chunkId, row.ranks])).toEqual([["b", [2, 2]], ["a", [1, null]], ["c", [null, 1]]]);
+    expect(ranked[0]!.score).toBeCloseTo(2 / 62);
+    // a and c tie on 1/61; the chunk id breaks the tie, as it always has.
+    expect(ranked[1]!.score).toBe(ranked[2]!.score);
+    expect(fuseKnowledgeRanks(lists, 2)).toEqual(ranked.slice(0, 2).map(row => row.passage));
   });
   it("preserves French terms and exact identifier components", () => {
     expect(knowledgeQueryTerms("Quel est le numéro du cours de stratégie MNGT 10407 ?")).toEqual(["stratégie", "mngt", "10407"]);

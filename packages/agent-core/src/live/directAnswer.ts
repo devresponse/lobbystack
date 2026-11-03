@@ -180,3 +180,12 @@ export function directToolAnswer(step: DirectAnswerStep | undefined): string | u
   }
   return fitToAppend(kept.join("\n\n"));
 }
+
+/**
+ * What GPT-Live hears after an agent step whose only tool call searched knowledge, or
+ * undefined when the agent phrases the answer itself (the search was unavailable). The
+ * v1 knowledge search (POST /knowledge/search) shows it as call_answer.
+ */
+export function knowledgeCallAnswer(query: string, result: unknown): string | undefined {
+  return directToolAnswer({ toolCalls: [{ toolCallId: "search", toolName: "searchKnowledge" }], toolResults: [{ toolCallId: "search", toolName: "searchKnowledge", input: { query }, output: result }] });
+}

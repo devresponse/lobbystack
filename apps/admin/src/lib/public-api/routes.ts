@@ -1,3 +1,4 @@
+import { knowledgeCallAnswer } from "@lobbystack/agent-core/live/directAnswer";
 import {
   applyBillingCatalogForApi,
   billingDeploymentPolar,
@@ -86,6 +87,7 @@ import {
   resolveActingUserId,
   retryKnowledgeSourceForApi,
   revokeTeamInvitationForApi,
+  searchKnowledgeForApi,
   searchPhoneNumbersForApi,
   sendWebhookTestEvent,
   setContactPasscodesForApi,
@@ -137,6 +139,7 @@ import {
   apiContactUpdateSchema,
   apiKnowledgeEntryCreateSchema,
   apiKnowledgeEntryUpdateSchema,
+  apiKnowledgeSearchSchema,
   apiKnowledgeSourceCreateSchema,
   apiKnowledgeSourceUpdateSchema,
   apiKnowledgeUploadCompleteSchema,
@@ -601,6 +604,10 @@ export const v1 = {
     return { body: data(await completeKnowledgeUploadForApi(context, caller, uploadId, await readApiBody(request, apiKnowledgeUploadCompleteSchema), getStorageProvider())) };
   }),
   cancelKnowledgeSource: (request: Request, { params }: Params<"source_id">) => handleApiRequest(request, "cancelKnowledgeSource", async ({ context, caller }) => ({ body: data(await cancelKnowledgeSourceForApi(context, caller, uuidParam((await params).source_id, "source_id"))) })),
+  searchKnowledge: (request: Request) => handleApiRequest(request, "searchKnowledge", async ({ context, caller }) => {
+    const input = await readApiBody(request, apiKnowledgeSearchSchema);
+    return { body: data(await searchKnowledgeForApi(context, caller, input, { callAnswer: knowledgeCallAnswer })) };
+  }),
 
   listWebhooks: (request: Request) => handleApiRequest(request, "listWebhooks", async ({ context, caller }) => ({ body: { data: (await listWebhookEndpoints(context, { businessId: caller.businessId, manager: webhookManager(caller) })).map(toApiEndpoint), next_cursor: null, has_more: false } })),
   createWebhook: (request: Request) => handleApiRequest(request, "createWebhook", async ({ context, caller, credential }) => {

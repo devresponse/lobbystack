@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { countKnowledgeTokens } from "@lobbystack/domain";
 
-import { directToolAnswer, type DirectAnswerStep } from "./directAnswer";
+import { directToolAnswer, knowledgeCallAnswer, type DirectAnswerStep } from "./directAnswer";
 
 function step(...results: Array<{ toolName: string; input?: Record<string, unknown>; output?: unknown }>): DirectAnswerStep {
   return {
@@ -85,6 +85,13 @@ describe("directToolAnswer", () => {
       "- Payment: We accept debit, Visa and Mastercard.",
       "- Parking: Free parking behind the building.",
     ].join("\n"));
+  });
+
+  it("gives the v1 knowledge search what a call hears after a step that only searched knowledge", () => {
+    const found = { outcome: "found", matches: [{ title: "Payment", text: "Cards accepted." }] };
+    expect(knowledgeCallAnswer("payment methods", found)).toBe(directToolAnswer(step({ toolName: "searchKnowledge", input: { query: "payment methods" }, output: found })));
+    expect(knowledgeCallAnswer("parking", { outcome: "empty", matches: [] })).toBe("The business's knowledge base has nothing on this question.");
+    expect(knowledgeCallAnswer("parking", { outcome: "unavailable", matches: [] })).toBeUndefined();
   });
 
   it("keeps knowledge answers inside the 500-token append limit in any script", () => {

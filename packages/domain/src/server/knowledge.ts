@@ -1,11 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, ilike, lt, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, lt, ne, sql, type SQL } from "drizzle-orm";
 
 import { agentRules, businessContextSnapshots, businessHours, businesses, closures, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, phoneNumbers, receptionistProfiles, services, storageObjects, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { FULL_CRAWL_PAGE_LIMIT, normalizeAppointmentChangePolicy, normalizeBookingMode, normalizeRuntimeLocale, normalizeTransferMode, ONBOARDING_CRAWL_PAGE_LIMIT, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { buildBusinessContextSnapshot, MAX_KNOWLEDGE_SNIPPETS_PER_SNAPSHOT } from "../snapshot";
-import { countKnowledgeTokens, fuseKnowledgeRanks, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, withinKnowledgeBudget, type KnowledgePassage } from "../knowledgeRanking";
+import { countKnowledgeTokens, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQueries, knowledgeQueryTerms, rankKnowledgeCandidates, withinKnowledgeBudget, type KnowledgePassage, type RankedKnowledgeCandidate } from "../knowledgeRanking";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
@@ -458,10 +458,39 @@ export async function searchKnowledge(
   return (await searchKnowledgeEvidence(context, input)).matches;
 }
 
-export async function searchKnowledgeEvidence(
-  context: DomainContext,
-  input: { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string },
-): Promise<{ matches: KnowledgePassage[]; mode: "hybrid" | "keyword"; outcome: "found" | "empty" | "unavailable"; failure?: "embedding_unavailable" | "search_unavailable"; durationMs: number }> {
+type KnowledgeSearchInput = { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string };
+
+/** A knowledge search's answer: the passages the receptionist's searchKnowledge tool gets, best first. */
+export type KnowledgeSearchEvidence = { matches: KnowledgePassage[]; mode: "hybrid" | "keyword"; outcome: "found" | "empty" | "unavailable"; failure?: "embedding_unavailable" | "search_unavailable"; durationMs: number };
+
+// The values one search holds on its way to the answer. traceKnowledgeSearch reports
+// them; searchKnowledgeEvidence drops them.
+type KnowledgeSearchStages = {
+  query: string;
+  terms: string[];
+  lexicalQuery: { any: string; all: string } | null;
+  lexical: PromiseSettledResult<KnowledgePassage[]>;
+  semantic: PromiseSettledResult<KnowledgePassage[]>;
+  /** The query's embedding, once the provider returned a valid one. */
+  embedding: number[] | null;
+  limit: number;
+  ranked: RankedKnowledgeCandidate[];
+  /** null when no candidate needed the check. */
+  revisionCheck: "ok" | "failed" | null;
+  /** Chunks the revision recheck found current, the candidates' neighbors included. */
+  current: ReadonlySet<string>;
+  /** Candidates the token budget kept. */
+  kept: ReadonlySet<string>;
+};
+
+export async function searchKnowledgeEvidence(context: DomainContext, input: KnowledgeSearchInput): Promise<KnowledgeSearchEvidence> {
+  return (await runKnowledgeSearch(context, input)).result;
+}
+
+// The receptionist's knowledge search. Keeping its stages changes nothing about it:
+// they are values the search holds anyway. source marks a search the v1 API ran, in
+// its metrics and product event, so a dashboard can leave troubleshooting out.
+async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearchInput & { source?: "api" }): Promise<{ result: KnowledgeSearchEvidence; stages: KnowledgeSearchStages }> {
   const startedAt = performance.now();
   const actor = { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" as const : "worker" as const };
   if (input.userId) await withBusinessTransaction(context.db, actor, tx => requireBusinessMembership(tx, { userId: input.userId!, businessId: input.businessId }));
@@ -477,12 +506,14 @@ export async function searchKnowledgeEvidence(
     await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
     return (await tx.execute<KnowledgePassage>(statement)).rows;
   });
-  const { any: lexicalQuery, all: allTermsQuery } = knowledgeLexicalQueries(terms);
+  const lexicalQueries = knowledgeLexicalQueries(terms);
+  const { any: lexicalQuery, all: allTermsQuery } = lexicalQueries;
   const lexical = terms.length ? execute(sql`${select} WHERE ${filters}
     AND (to_tsvector('simple', c.content) @@ to_tsquery('simple', ${lexicalQuery})
       OR to_tsvector('simple', d.title) @@ to_tsquery('simple', ${lexicalQuery}))
     ORDER BY ts_rank_cd(to_tsvector('simple', d.title || ' ' || c.content), to_tsquery('simple', ${allTermsQuery})) DESC,
       ts_rank_cd(to_tsvector('simple', d.title || ' ' || c.content), to_tsquery('simple', ${lexicalQuery})) DESC, c.id LIMIT 12`) : Promise.resolve([]);
+  let queryEmbedding: number[] | null = null;
   const semantic = (async () => {
     if (!query || !context.embeddings) throw new Error("embedding_unavailable");
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -492,6 +523,7 @@ export async function searchKnowledgeEvidence(
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("embedding_timeout")), 1800); }),
       ]);
       if (!embedding?.length || embedding.some(value => !Number.isFinite(value))) throw new Error("invalid_embedding");
+      queryEmbedding = embedding;
       return await execute(sql`WITH eligible AS MATERIALIZED (SELECT ${fields}, c.embedding ${from} WHERE ${filters} AND c.embedding IS NOT NULL
         AND c.embedding_status = 'completed'
         ${context.embeddings.fingerprint ? sql`AND c.embedding_fingerprint = ${context.embeddings.fingerprint}` : sql``})
@@ -501,16 +533,19 @@ export async function searchKnowledgeEvidence(
   })();
   const [lexicalResult, semanticResult] = await Promise.allSettled([lexical, semantic]);
   const mode = semanticResult.status === "fulfilled" ? "hybrid" as const : "keyword" as const;
-  const candidates = fuseKnowledgeRanks([
+  const limit = Math.min(6, Math.max(1, input.limit ?? 6));
+  const fused = rankKnowledgeCandidates([
     lexicalResult.status === "fulfilled" ? lexicalResult.value : [],
     semanticResult.status === "fulfilled" ? semanticResult.value : [],
-  ], Math.min(6, Math.max(1, input.limit ?? 6)));
+  ]);
+  const candidates = fused.slice(0, limit).map(row => row.passage);
   // Recheck revisions after parallel retrieval so an in-flight edit cannot label old chunks as current.
   let validationFailed = false;
   const current = candidates.length ? await execute(sql`${select} WHERE ${filters} AND (${sql.join(candidates.map(p => sql`(c.document_id = ${p.documentId} AND d.revision = ${p.sourceRevision} AND c.sequence BETWEEN ${p.sequence - 1} AND ${p.sequence + 1})`), sql` OR `)})`).catch(() => { validationFailed = true; return []; }) : [];
   const valid = new Map(current.map(p => [p.chunkId, p]));
   // Reserve the ranked primary passages first. Neighbors must not crowd out distinct candidates.
   const matches = withinKnowledgeBudget(candidates.filter(p => valid.has(p.chunkId)), KNOWLEDGE_SEARCH_TOKEN_BUDGET, p => JSON.stringify(p));
+  const kept = new Set(matches.map(p => p.chunkId));
   for (let index = 0; index < matches.length; index += 1) {
     const p = matches[index]!;
     const neighbors = current.filter(row => row.documentId === p.documentId && row.sourceRevision === p.sourceRevision && Math.abs(row.sequence - p.sequence) <= 1).sort((a, b) => a.sequence - b.sequence);
@@ -524,15 +559,155 @@ export async function searchKnowledgeEvidence(
   const failed = validationFailed || (lexicalResult.status === "rejected" && semanticResult.status === "rejected");
   const outcome = matches.length ? "found" as const : failed ? "unavailable" as const : "empty" as const;
   const durationMs = performance.now() - startedAt;
-  searchDuration.record(durationMs, { operation: "knowledge.search", mode, outcome });
-  searchResultCount.record(matches.length, { operation: "knowledge.search", mode, outcome });
+  const source = input.source ? { source: input.source } : {};
+  searchDuration.record(durationMs, { operation: "knowledge.search", mode, outcome, ...source });
+  searchResultCount.record(matches.length, { operation: "knowledge.search", mode, outcome, ...source });
   await recordProductEventBestEffort(context, {
     name: "knowledge.search_executed",
     businessId: input.businessId,
     distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-    properties: { mode, outcome, resultCount: matches.length, durationMs, fallbackUsed: mode === "keyword", ...(input.callId ? { callId: input.callId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) },
+    properties: { mode, outcome, resultCount: matches.length, durationMs, fallbackUsed: mode === "keyword", ...source, ...(input.callId ? { callId: input.callId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) },
   });
-  return { matches, mode, outcome, durationMs, ...(failed ? { failure: "search_unavailable" as const } : semanticResult.status === "rejected" ? { failure: "embedding_unavailable" as const } : {}) };
+  return {
+    result: { matches, mode, outcome, durationMs, ...(failed ? { failure: "search_unavailable" as const } : semanticResult.status === "rejected" ? { failure: "embedding_unavailable" as const } : {}) },
+    stages: {
+      query,
+      terms,
+      lexicalQuery: terms.length ? lexicalQueries : null,
+      lexical: lexicalResult,
+      semantic: semanticResult,
+      embedding: queryEmbedding,
+      limit,
+      ranked: fused,
+      revisionCheck: candidates.length ? (validationFailed ? "failed" : "ok") : null,
+      current: new Set(valid.keys()),
+      kept,
+    },
+  };
+}
+
+/** What became of a candidate the fusion ranked. */
+export type KnowledgeCandidateFate =
+  /** The receptionist got it. */
+  | "evidence"
+  /** It ranked below the search's limit of 6. */
+  | "below_limit"
+  /** Its document changed or was turned off while the search ran. */
+  | "stale"
+  /** The revision recheck failed, so the search kept nothing. */
+  | "unverified"
+  /** It didn't fit the token budget the passages ranked above it left. */
+  | "over_budget";
+
+/** Why a search stage failed, as a code. The provider's and the database's own messages stay on the server. */
+export type KnowledgeSearchStageError = "embedding_unavailable" | "embedding_timeout" | "invalid_embedding" | "embedding_failed" | "statement_timeout" | "failed";
+
+/** Each stage of one knowledge search, from the query's terms to the candidates' fates. */
+export type KnowledgeSearchTrace = {
+  /** The query as searched: trimmed, and cut to 2,000 characters. */
+  query: string;
+  terms: string[];
+  lexicalQuery: { any: string; all: string } | null;
+  limit: number;
+  tokenBudget: number;
+  lexical: { status: "ok" | "skipped" | "failed"; error: KnowledgeSearchStageError | null; candidates: Array<{ chunkId: string; rank: number; scoreAllTerms: number | null; scoreAnyTerm: number | null }> };
+  semantic: { status: "ok" | "failed"; error: KnowledgeSearchStageError | null; embeddingFingerprint: string | null; embeddingDimensions: number | null; candidates: Array<{ chunkId: string; rank: number; distance: number | null }> };
+  revisionCheck: "ok" | "failed" | null;
+  /** Every candidate, best first, with its fused score and size as the budget counts it. */
+  candidates: Array<{ passage: KnowledgePassage; rank: number; score: number; lexicalRank: number | null; semanticRank: number | null; tokens: number; fate: KnowledgeCandidateFate }>;
+  /** What the search can reach in the business's knowledge. */
+  index: { sources: number; chunks: number; embeddedChunks: number } | null;
+};
+
+/**
+ * Runs the receptionist's knowledge search, the same code as searchKnowledgeEvidence,
+ * and reports each stage on the way to its answer. The lexical scores, the semantic
+ * distances and the index counts come from reads after the search, so durationMs is
+ * the search's own time. Each read is best effort: what it would fill stays null when
+ * it fails.
+ */
+export async function traceKnowledgeSearch(context: DomainContext, input: { businessId: string; query: string; limit?: number; source?: "api" }): Promise<{ result: KnowledgeSearchEvidence; trace: KnowledgeSearchTrace }> {
+  const { result, stages } = await runKnowledgeSearch(context, input);
+  const read = async <T extends Record<string, unknown>>(statement: SQL): Promise<T[]> => await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async tx => {
+    await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+    return (await tx.execute<T>(statement)).rows as T[];
+  });
+  const lexicalRows = stages.lexical.status === "fulfilled" ? stages.lexical.value : [];
+  const semanticRows = stages.semantic.status === "fulfilled" ? stages.semantic.value : [];
+  const chunkIds = (rows: KnowledgePassage[]) => sql.join(rows.map(row => sql`${row.chunkId}`), sql`, `);
+  const searchedText = sql`to_tsvector('simple', d.title || ' ' || c.content)`;
+  const fingerprint = context.embeddings?.fingerprint;
+  const [scores, distances, index] = await Promise.all([
+    // The lexical search's two ORDER BY values: rank for every term, then for any term.
+    stages.lexicalQuery && lexicalRows.length
+      ? read<{ chunkId: string; allTerms: unknown; anyTerm: unknown }>(sql`SELECT c.id AS "chunkId",
+          ts_rank_cd(${searchedText}, to_tsquery('simple', ${stages.lexicalQuery.all})) AS "allTerms",
+          ts_rank_cd(${searchedText}, to_tsquery('simple', ${stages.lexicalQuery.any})) AS "anyTerm"
+          FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id
+          WHERE c.business_id = ${input.businessId} AND d.business_id = ${input.businessId} AND c.id IN (${chunkIds(lexicalRows)})`).catch(() => [])
+      : [],
+    // The semantic search's ORDER BY value: cosine distance, 0 for the same direction.
+    stages.embedding && semanticRows.length
+      ? read<{ chunkId: string; distance: unknown }>(sql`SELECT c.id AS "chunkId", c.embedding <=> ${JSON.stringify(stages.embedding)}::vector AS distance
+          FROM knowledge_chunks c WHERE c.business_id = ${input.businessId} AND c.id IN (${chunkIds(semanticRows)})`).catch(() => [])
+      : [],
+    read<{ sources: unknown; chunks: unknown; embeddedChunks: unknown }>(sql`SELECT count(DISTINCT d.id) AS sources, count(*) AS chunks,
+        count(*) FILTER (WHERE c.embedding IS NOT NULL AND c.embedding_status = 'completed'
+          ${fingerprint ? sql`AND c.embedding_fingerprint = ${fingerprint}` : sql``}) AS "embeddedChunks"
+        FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id
+        WHERE c.business_id = ${input.businessId} AND d.business_id = ${input.businessId} AND d.active = true AND d.status = 'indexed'`)
+      .then(([row]) => row ? { sources: Number(row.sources), chunks: Number(row.chunks), embeddedChunks: Number(row.embeddedChunks) } : null)
+      .catch(() => null),
+  ]);
+  const lexicalScores = new Map(scores.map(row => [row.chunkId, row]));
+  const semanticDistances = new Map(distances.map(row => [row.chunkId, finiteNumber(row.distance)]));
+  const fate = (chunkId: string, rank: number): KnowledgeCandidateFate => stages.kept.has(chunkId) ? "evidence"
+    : rank > stages.limit ? "below_limit"
+    : stages.revisionCheck === "failed" ? "unverified"
+    : stages.current.has(chunkId) ? "over_budget"
+    : "stale";
+  return {
+    result,
+    trace: {
+      query: stages.query,
+      terms: stages.terms,
+      lexicalQuery: stages.lexicalQuery,
+      limit: stages.limit,
+      tokenBudget: KNOWLEDGE_SEARCH_TOKEN_BUDGET,
+      lexical: {
+        status: !stages.terms.length ? "skipped" : stages.lexical.status === "fulfilled" ? "ok" : "failed",
+        error: stages.lexical.status === "rejected" ? searchStageError(stages.lexical.reason, true) : null,
+        candidates: lexicalRows.map((row, rank) => ({ chunkId: row.chunkId, rank: rank + 1, scoreAllTerms: finiteNumber(lexicalScores.get(row.chunkId)?.allTerms), scoreAnyTerm: finiteNumber(lexicalScores.get(row.chunkId)?.anyTerm) })),
+      },
+      semantic: {
+        status: stages.semantic.status === "fulfilled" ? "ok" : "failed",
+        error: stages.semantic.status === "rejected" ? searchStageError(stages.semantic.reason, stages.embedding !== null) : null,
+        embeddingFingerprint: fingerprint ?? null,
+        embeddingDimensions: stages.embedding?.length ?? null,
+        candidates: semanticRows.map((row, rank) => ({ chunkId: row.chunkId, rank: rank + 1, distance: semanticDistances.get(row.chunkId) ?? null })),
+      },
+      revisionCheck: stages.revisionCheck,
+      candidates: stages.ranked.map((row, rank) => ({ passage: row.passage, rank: rank + 1, score: row.score, lexicalRank: row.ranks[0] ?? null, semanticRank: row.ranks[1] ?? null, tokens: countKnowledgeTokens(JSON.stringify(row.passage) + "\n"), fate: fate(row.passage.chunkId, rank + 1) })),
+      index,
+    },
+  };
+}
+
+function finiteNumber(value: unknown): number | null {
+  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+// A failed stage as a code. queried: the stage got as far as its database query, so a
+// failure that isn't one of the search's own codes came from there, not the provider.
+function searchStageError(reason: unknown, queried: boolean): KnowledgeSearchStageError {
+  const message = reason instanceof Error ? reason.message : "";
+  if (message === "embedding_unavailable" || message === "embedding_timeout" || message === "invalid_embedding") return message;
+  if (!queried) return "embedding_failed";
+  for (let current: unknown = reason, depth = 0; current && typeof current === "object" && depth < 4; current = (current as { cause?: unknown }).cause, depth += 1) {
+    if ((current as { code?: unknown }).code === "57014") return "statement_timeout";
+  }
+  return "failed";
 }
 
 export async function loadLatestBusinessSnapshot(

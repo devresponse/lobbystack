@@ -64,18 +64,28 @@ export type KnowledgePassage = {
   focusEnd?: number;
 };
 
-export function fuseKnowledgeRanks(lists: KnowledgePassage[][], limit = 6): KnowledgePassage[] {
-  const ranked = new Map<string, { passage: KnowledgePassage; score: number }>();
-  for (const list of lists) {
+/** A candidate after reciprocal rank fusion: its score, and its place in each list (1 first), null where a list didn't have it. */
+export type RankedKnowledgeCandidate = { passage: KnowledgePassage; score: number; ranks: Array<number | null> };
+
+/** Every candidate of the lists, best first, scored by reciprocal rank fusion (k = 60). */
+export function rankKnowledgeCandidates(lists: KnowledgePassage[][]): RankedKnowledgeCandidate[] {
+  const ranked = new Map<string, RankedKnowledgeCandidate>();
+  lists.forEach((list, listIndex) => {
     const seen = new Set<string>();
     list.forEach((passage, index) => {
       if (seen.has(passage.chunkId)) return;
       seen.add(passage.chunkId);
       const existing = ranked.get(passage.chunkId);
-      ranked.set(passage.chunkId, { passage, score: (existing?.score ?? 0) + 1 / (60 + index + 1) });
+      const ranks = existing?.ranks ?? lists.map(() => null);
+      ranks[listIndex] = index + 1;
+      ranked.set(passage.chunkId, { passage, score: (existing?.score ?? 0) + 1 / (60 + index + 1), ranks });
     });
-  }
-  return [...ranked.values()].sort((a, b) => b.score - a.score || a.passage.chunkId.localeCompare(b.passage.chunkId)).slice(0, limit).map(row => row.passage);
+  });
+  return [...ranked.values()].sort((a, b) => b.score - a.score || a.passage.chunkId.localeCompare(b.passage.chunkId));
+}
+
+export function fuseKnowledgeRanks(lists: KnowledgePassage[][], limit = 6): KnowledgePassage[] {
+  return rankKnowledgeCandidates(lists).slice(0, limit).map(row => row.passage);
 }
 
 // Stop words cover English, French, Spanish and Serbian (Latin script) function words, plus elided French articles like the "l" in "l'heure".

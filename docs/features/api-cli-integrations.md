@@ -1,12 +1,12 @@
 # Use the API, the CLI and integrations
 
-Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, and how Zapier, Make and n8n connect. Checked against `main` at `5682041`, with fork PR #95's changes.
+Everything an owner does in the dashboard, a program can do through the v1 HTTP API, its `lobbystack` command line, or the MCP server for AI assistants. Webhooks tell other systems what happened. This page says which key to use, what the fork added, how to test the receptionist's knowledge search, and how Zapier, Make and n8n connect. Checked against `main` at `5682041`, with fork PR #95's changes; the knowledge search section against `main` at `2a4004c`, with fork PR #130's.
 
 ## Know the pieces
 
 | Piece | Where | What it is |
 | --- | --- | --- |
-| v1 API | `/api/v1/...` | 98 operations, all listed in one registry, `packages/shared/src/publicApi/operations.ts`, which also produces the OpenAPI file (`pnpm api:openapi`). |
+| v1 API | `/api/v1/...` | 99 operations, all listed in one registry, `packages/shared/src/publicApi/operations.ts`, which also produces the OpenAPI file (`pnpm api:openapi`). |
 | MCP server | `/api/mcp` | 18 tools for AI assistants over Streamable HTTP, with an API key or OAuth. |
 | CLI | `packages/cli`, the `lobbystack` command | Works only through the v1 API, never the database. Every v1 operation has a command. |
 | Webhooks | **Integrations > Webhooks**, or `POST /api/v1/webhooks` | Signed events (Standard Webhooks) for calls, appointments, messages and contacts, delivered by the worker. |
@@ -35,6 +35,29 @@ pnpm lobbystack onboard manifest.yaml
 
 `--key-stdin` reads the key from standard input, so it stays out of the shell history. Profiles are saved in `~/.config/lobbystack/config.json`. `lobbystack onboard` creates or updates a business from a YAML manifest: its details, services, hours, knowledge, public profile, team and phone number. Leave `plan` out of a self-hosted deployment's manifests.
 
+## Test the receptionist's knowledge search
+
+`POST /knowledge/search` runs the receptionist's knowledge search for one query, with the code a call or website chat runs, and returns every stage. It changes nothing in the business, so the same questions can be asked before and after a change to how documents are read, and the answers compared. It needs `knowledge:read`.
+
+```bash
+pnpm lobbystack knowledge search "parking fees"
+pnpm lobbystack knowledge search "parking fees" --json > parking-before.json
+```
+
+The command prints the passages the search handed over in full, the candidates it dropped and why, how many matches the receptionist's model gets, and what a phone call's voice model hears. `--json` prints the whole answer:
+
+| Field | What it holds |
+| --- | --- |
+| `evidence` | What the search returned from the database after ranking, the revision check and the 3,000-token budget, best first: the passages the `searchKnowledge` tool gets. Each has its chunk and source IDs, its text joined with the neighboring chunks that fit, where the ranked chunk sits in that text, its fused score, its place in each search, and its size in tokens. |
+| `receptionist_result` | What the receptionist's model receives: the evidence, then the business's text entries and FAQs that share the query's words and fit, at most 6. It is the tool's own output, so its keys are camelCase. |
+| `call_answer` | What a phone call's voice model hears after a step that only searched knowledge: the same matches as facts, cut to about 380 tokens. |
+| `trace` | The query's terms and text search queries; the keyword search's results with their two `ts_rank_cd` scores and the semantic search's with their cosine distances, at most 12 each; every candidate after fusion with its text and what became of it (`evidence`, `below_limit`, `stale`, `unverified` or `over_budget`); and how many sources, chunks and embedded chunks the search can reach. |
+
+- **Where it runs.** In the admin app, with the worker database role, the Redis snapshot cache and the embedding settings a website chat's search uses. Phone calls run the same code in the worker, so a call's search matches when the worker has the same `OPENAI_API_KEY` and `AI_EMBEDDING_*` settings; `trace.semantic.embedding_fingerprint` names the model.
+- **Which query.** The receptionist's model writes its own query. A call's or chat's AI trace (`lobbystack calls trace <trace_id>`) shows it in the `searchKnowledge` tool call, so that search can be repeated.
+- **Comparing runs.** Reading a source again replaces its chunks, so chunk IDs change: compare titles, text and ranks.
+- **Telemetry.** `duration_ms` is the search's own time; the score reads come after it. Each search counts in the `rag.search.*` metrics and the `knowledge.search_executed` event with `source: "api"`, so dashboards can leave these out. It never logs or sends passage text.
+
 ## Know what the fork added
 
 | Pull request | Change |
@@ -50,6 +73,7 @@ pnpm lobbystack onboard manifest.yaml
 | #58 to #75 | Billing operations: the catalog, Polar links, plans, checkout, promo codes and promo plans ([billing](../billing/README.md#run-billing-from-the-command-line)). |
 | #94 | The Zapier integration under each brand's own name and account: `npm run push` for a brand, a Zapier card on the **Integrations** page, **Set up for Zapier** in the Create dialog, and the contact and service fields its samples were missing. |
 | #95 | The Make app under each brand's own name and account: `npm run build` for a brand, a Make card on the **Integrations** page and **Set up for Make** in the Create dialog. |
+| #130 | `POST /knowledge/search` and `lobbystack knowledge search`: the receptionist's knowledge search with every stage shown (see below). |
 
 ## Connect Zapier
 

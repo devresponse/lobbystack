@@ -198,3 +198,5 @@ Without a state file, a platform key won't create a business when you already on
 ## Other commands
 
 `lobbystack` has a command for every API endpoint, grouped like the API: `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, and so on. `lobbystack --help` lists the groups, and `--help` after any command lists its options.
+
+To see what the AI receptionist finds in your knowledge for a question, run `lobbystack knowledge search "<question>"`. It runs the same search a call or a chat runs and changes nothing. It shows the passages it found, the ones it left out and why, and what the receptionist gets. `--json` adds each passage's scores. The key needs `knowledge:read`.

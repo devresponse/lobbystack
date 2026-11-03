@@ -198,3 +198,5 @@ Sin un archivo de estado, una clave de plataforma no crea un negocio si ya incor
 ## Otros comandos
 
 `lobbystack` tiene un comando para cada endpoint de la API, agrupados como la API: `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, etc. `lobbystack --help` enumera los grupos, y `--help` después de cualquier comando enumera sus opciones.
+
+Para ver lo que la recepcionista con IA encuentra en su conocimiento para una pregunta, ejecute `lobbystack knowledge search "<pregunta>"`. Hace la misma búsqueda que una llamada o un chat, y no cambia nada. Muestra los pasajes que encontró, los que dejó fuera y por qué, y lo que recibe la recepcionista. `--json` agrega las puntuaciones de cada pasaje. La clave necesita `knowledge:read`.

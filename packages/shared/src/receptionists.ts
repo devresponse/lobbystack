@@ -4,6 +4,7 @@
 // answers whatever names no receptionist, or one that is paused or archived.
 
 import { normalizeRuntimeLocale, type InterfaceLocale, type RuntimeLocale } from "./locales";
+import { publicProfilePath } from "./publicProfile";
 
 /** Longest receptionist name. */
 export const RECEPTIONIST_NAME_MAX_LENGTH = 80;
@@ -252,6 +253,23 @@ export const ENTRY_LINK_LABEL_MAX_LENGTH = 80;
 
 /** Months of daily scan counts kept for the chart; the privacy sweep deletes older days. */
 export const ENTRY_LINK_SCAN_RETENTION_MONTHS = 13;
+
+/** Most QR links a business keeps: a sign per door, desk and window of a chain's stores. Links are paused, never deleted. */
+export const MAX_ENTRY_LINKS_PER_BUSINESS = 1_000;
+
+/** The days a QR link's scan chart covers. */
+export const ENTRY_LINK_CHART_DAYS = 90;
+
+/** The address a QR link's sign carries. */
+export function entryLinkPath(code: string): string {
+  return `/q/${code}`;
+}
+
+/** A receptionist's page: the business page for the default receptionist, else a handle under it. */
+export function receptionistPagePath(slug: string, handle: string | null | undefined): string {
+  const page = publicProfilePath(slug);
+  return handle ? `${page}/${encodeURIComponent(handle)}` : page;
+}
 
 /** A link status: a paused link opens the default receptionist. */
 export const entryLinkStatuses = ["active", "paused"] as const;

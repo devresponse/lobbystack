@@ -46,6 +46,7 @@ export * from "./providerPricing";
 export * from "./widgetKeys";
 export * from "./widgetLiveChat";
 export * from "./privacy";
+export * from "./entryLinks";
 export * from "./publicApi";
 export * from "./publicProfiles";
 export * from "./oauth";

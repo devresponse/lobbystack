@@ -30,6 +30,7 @@
     "/onboarding/brand",
     "/settings/profile",
     "/profile/[slug]",
+    "/profile/[slug]/[handle]",
     "/settings/qrcode"
   ],
   "localizedPortRoutes": [
@@ -1392,6 +1393,13 @@
       "state": "default",
       "comparison": "excluded",
       "reason": "New public business profile page"
+    },
+    {
+      "path": "/profile/[slug]/[handle]",
+      "fixtureState": "public",
+      "state": "default",
+      "comparison": "excluded",
+      "reason": "New public receptionist page: the business profile page answered by one of its receptionists"
     },
     {
       "path": "/settings/qrcode",

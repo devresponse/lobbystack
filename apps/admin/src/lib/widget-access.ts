@@ -21,9 +21,10 @@ export type WidgetSession = {
   config: WidgetConfig;
   visitorId?: string;
   /**
-   * The receptionist the widget names, which answers its chats and calls
-   * unless it is paused or archived (then the default one does). Null means
-   * the default receptionist.
+   * The receptionist that answers the widget's chats and calls: the one the
+   * page named with its signed token when the session started, else the one
+   * the key names. A paused or archived one's chats go to the default
+   * receptionist; null means the default receptionist.
    */
   receptionistId: string | null;
 };
@@ -94,7 +95,8 @@ export async function resolveWidgetSessionAccess(request: Request): Promise<Widg
   }
   const loaded = await loadWidgetSession(payload.businessId, payload.widgetKeyId);
   if (!loaded) return { ok: false, response: jsonError("The widget session is invalid.", 401, "widget_session_invalid") };
-  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId };
+  // The receptionist the page named when the session started wins over the key's.
+  const session = { ...loaded.session, keyHash: "", origin: payload.origin, visitorId: payload.visitorId, receptionistId: payload.receptionistId ?? loaded.session.receptionistId };
   if (session.key.status !== "active") return { ok: false, response: jsonError("The widget is disabled.", 403, "widget_disabled") };
   if (!isAllowedOrigin(payload.origin, loaded, { strictOrigin: true })) {
     return { ok: false, response: jsonError("This website is not authorized to load this widget.", 403, "widget_origin_denied") };

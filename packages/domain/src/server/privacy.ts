@@ -5,11 +5,12 @@ import { aiTraceContexts, aiTraces, calls, conversations, conversationSessions, 
 import { EXPIRED_FOLLOW_UP_BODY, EXPIRED_FOLLOW_UP_TITLE } from "./followUpRetention";
 import type { DomainContext } from "./context";
 import { isContentRetentionEnabled } from "./contentRetentionPolicy";
+import { deleteExpiredEntryLinkScansInTransaction } from "./entryLinks";
 
 export async function runPrivacyRetentionSweep(
   context: DomainContext,
   input: { businessId: string; now?: Date },
-): Promise<{ scrubbedFollowUps: number; scrubbedMessages: number; scrubbedOperatorDeliveries: number; deletedTranscripts: number; deletedUnansweredQuestions: number; deletedAiTraces: number; queuedRecordings: number }> {
+): Promise<{ scrubbedFollowUps: number; scrubbedMessages: number; scrubbedOperatorDeliveries: number; deletedTranscripts: number; deletedUnansweredQuestions: number; deletedAiTraces: number; deletedEntryLinkScanDays: number; queuedRecordings: number }> {
   const now = input.now ?? new Date();
   const contentRetentionEnabled = isContentRetentionEnabled();
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
@@ -52,6 +53,8 @@ export async function runPrivacyRetentionSweep(
     if (contentRetentionEnabled) {
       await tx.delete(aiTraceContexts).where(and(eq(aiTraceContexts.businessId, input.businessId), lt(aiTraceContexts.expiresAt, now)));
     }
+    // QR link scan counts carry nothing about the visitor, and go once the 13 months the chart shows have passed.
+    const deletedEntryLinkScanDays = !contentRetentionEnabled ? 0 : await deleteExpiredEntryLinkScansInTransaction(tx, { businessId: input.businessId, now });
     const scrubbedOperatorDeliveries = await tx.update(operatorNotificationDeliveries)
       .set({ subject: "[content expired]", body: "[content expired]", destination: "[expired]", sender: null, contentExpiresAt: new Date("9999-12-31T00:00:00.000Z"), updatedAt: now })
       .where(and(eq(operatorNotificationDeliveries.businessId, input.businessId), lt(operatorNotificationDeliveries.contentExpiresAt, now)))
@@ -98,6 +101,7 @@ export async function runPrivacyRetentionSweep(
       deletedTranscripts: deletedTranscripts.length,
       deletedUnansweredQuestions: deletedUnansweredQuestions.length,
       deletedAiTraces: deletedAiTraces.length,
+      deletedEntryLinkScanDays,
       queuedRecordings: expiredRecordings.length,
     };
   });

@@ -12,6 +12,7 @@ import {
   availableReceptionistHandle,
   defaultReceptionistName,
   entryLinkCode,
+  entryLinkPath,
   isReceptionistHandle,
   normalizeEntryLinkCode,
   normalizeWebsiteRulePath,
@@ -22,6 +23,7 @@ import {
   receptionistHandleFrom,
   receptionistInitials,
   receptionistLocale,
+  receptionistPagePath,
 } from "./receptionists";
 
 describe("default receptionist names", () => {
@@ -162,6 +164,23 @@ describe("QR link codes", () => {
     expect(normalizeEntryLinkCode("")).toBeNull();
     expect(normalizeEntryLinkCode(null)).toBeNull();
     expect(normalizeEntryLinkCode(undefined)).toBeNull();
+  });
+
+  it("prints a short address on the sign", () => {
+    expect(entryLinkPath("a9fp8b")).toBe("/q/a9fp8b");
+  });
+});
+
+describe("receptionist pages", () => {
+  it("gives the default receptionist the business page and the others a page under it", () => {
+    expect(receptionistPagePath("acme-dental", null)).toBe("/profile/acme-dental");
+    expect(receptionistPagePath("acme-dental", undefined)).toBe("/profile/acme-dental");
+    expect(receptionistPagePath("acme-dental", "")).toBe("/profile/acme-dental");
+    expect(receptionistPagePath("acme-dental", "billing-desk")).toBe("/profile/acme-dental/billing-desk");
+  });
+
+  it("escapes a slug as the business page does", () => {
+    expect(receptionistPagePath("café du coin", "front")).toBe("/profile/caf%C3%A9%20du%20coin/front");
   });
 });
 

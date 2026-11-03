@@ -46,7 +46,7 @@ export function embeddableSecurityHeaders(env: Record<string, string | undefined
   };
 }
 
-/** A business's public page, /profile/<slug> (publicProfilePath in @lobbystack/shared). */
+/** A business's public page, /profile/<slug>, or one of its receptionists' pages, /profile/<slug>/<handle> (receptionistPagePath in @lobbystack/shared). */
 export function isPublicProfilePath(pathname: string): boolean {
   return pathname.startsWith("/profile/");
 }

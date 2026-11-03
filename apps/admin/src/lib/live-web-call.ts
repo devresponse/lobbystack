@@ -122,8 +122,9 @@ export async function resolveLiveWebCallAccess(request: Request, body: LiveWebCa
       // The business's own profile page, on this deployment's domain.
       || isPublicProfileWidgetOrigin(token.origin, { published: key.profilePublished ?? null, widgetKeyId: key.profileWidgetKeyId ?? null }, token.widgetKeyId));
     if (!key || key.status !== "active" || !allowed) return { status: 403, code: "widget_origin_denied" };
-    // The widget's receptionist, never one the request names.
-    return { businessId: token.businessId, origin: token.origin, widgetId: WIDGET_VOICE_ID, visitorId: token.visitorId, dashboardTestCall: false, ...(key.receptionistId ? { receptionistId: key.receptionistId } : {}) };
+    // The receptionist the page named when the chat's session started, else the key's: never one the request names.
+    const receptionistId = token.receptionistId ?? key.receptionistId;
+    return { businessId: token.businessId, origin: token.origin, widgetId: WIDGET_VOICE_ID, visitorId: token.visitorId, dashboardTestCall: false, ...(receptionistId ? { receptionistId } : {}) };
   }
 
   if (body.prospectDemoToken && body.businessSlug) {

@@ -2,18 +2,20 @@ import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
 import { auditLogs, businesses, businessHours, businessMemberships, businessPublicProfiles, closures, phoneNumbers, receptionistProfiles, services, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { normalizeBookingMode, normalizeInterfaceLocale, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type InterfaceLocale, type PublicProfileAddress, type PublicProfileSettings, type ServiceNameLocale } from "@lobbystack/shared";
+import { isReceptionistHandle, normalizeBookingMode, normalizeInterfaceLocale, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type InterfaceLocale, type PublicProfileAddress, type PublicProfileSettings, type ServiceNameLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
 import { checkAvailability } from "./booking";
 import type { DomainContext } from "./context";
 import { candidateStartTimes } from "./receptionistActions";
 
-// A business's public page at /profile/<slug>. The page reads everything
-// through getPublicBusinessProfile, which returns only what an owner can see
-// and switch off in Settings, plus the business's own name, hours, services
-// and number that the receptionist already gives callers. Knowledge, rules,
-// the transfer number, staff, contacts, calls and messages never leave here.
+// A business's public page at /profile/<slug>, and its receptionists' pages
+// at /profile/<slug>/<handle>. The pages read everything through
+// getPublicProfilePage, which returns only what an owner can see and switch
+// off in Settings or on the Receptionists page, plus the business's own name,
+// hours, services and number that the receptionist already gives callers.
+// Knowledge, rules, the transfer number, staff, contacts, calls and messages
+// never leave here.
 
 /** A service as the page lists it. */
 export type PublicProfileService = {
@@ -33,6 +35,15 @@ export type PublicProfileOpening = {
 
 /** When a caller can ask the receptionist for a person: at any time, while the business is open, or never. */
 export type PublicProfilePersonRequests = "any_time" | "business_hours" | "never";
+
+/** A receptionist as the public pages name it, with what it helps with. */
+export type PublicProfileReceptionist = {
+  name: string;
+  description: string;
+  /** Its page under the business page; null for the default receptionist, whose page is the business page. */
+  handle: string | null;
+  isDefault: boolean;
+};
 
 /** Everything the public page shows. A field an owner switched off is null. */
 export type PublicBusinessProfile = {
@@ -63,6 +74,10 @@ export type PublicBusinessProfile = {
   /** The public key of the website widget the page shows. */
   widgetKey: string | null;
   nextOpening: PublicProfileOpening | null;
+  /** Who answers the page: the default receptionist on the business page. Null for a business without one yet. */
+  receptionist: PublicProfileReceptionist | null;
+  /** The receptionists a visitor can choose from: the default first, then the listed, active ones in the Receptionists page's order. */
+  receptionists: PublicProfileReceptionist[];
 };
 
 const CLOSURE_LOOKAHEAD_DAYS = 30;
@@ -103,11 +118,30 @@ export function personRequestsFor(transferMode: string | null | undefined, trans
   return mode === "always" || mode === "on_request" ? "any_time" : mode === "during_business_hours" ? "business_hours" : "never";
 }
 
+/** A receptionist that isn't archived, as the pages read it. */
+export type PublicProfileReceptionistRow = {
+  id: string;
+  name: string;
+  description: string;
+  handle: string | null;
+  isDefault: boolean;
+  status: string;
+  listed: boolean;
+  bookingMode: string;
+  transferMode: string;
+  transferNumber: string | null;
+};
+
 /** The rows the page is built from, read under the business's own RLS context. */
 export type PublicProfileRows = {
   business: { slug: string; name: string; timezone: string; defaultLocale: string; websiteUrl: string | null };
   profile: ProfileRow;
+  /** The booking and transfer settings of the receptionist that answers the page. */
   receptionist: { bookingMode: string; transferMode: string; transferNumber: string | null } | null;
+  /** The business's receptionists that aren't archived, in list order. */
+  receptionists: PublicProfileReceptionistRow[];
+  /** The receptionist that answers the page; null for the business page, which the default one answers. */
+  pageReceptionistId: string | null;
   hours: HoursWindow[];
   closures: Array<{ startsAt: Date; endsAt: Date; reason: string }>;
   services: Array<{ id: string; name: string; localizedNames: Record<string, string> | null; description: string | null; durationMinutes: number }>;
@@ -122,6 +156,10 @@ export type PublicProfileRows = {
 export function toPublicBusinessProfile(rows: PublicProfileRows, input: { now: Date; nextOpening?: PublicProfileOpening | null }): PublicBusinessProfile {
   const { profile } = rows;
   const address = addressOf(profile);
+  const named = (row: PublicProfileReceptionistRow): PublicProfileReceptionist => ({ name: row.name, description: row.description, handle: row.isDefault ? null : row.handle, isDefault: row.isDefault });
+  const answering = rows.receptionists.find((row) => (rows.pageReceptionistId ? row.id === rows.pageReceptionistId : row.isDefault));
+  // The default receptionist is always a choice; others when they are listed, active and have a page.
+  const choices = rows.receptionists.filter((row) => row.isDefault || (row.listed && row.status === "active" && row.handle));
   const lookahead = input.now.getTime() + CLOSURE_LOOKAHEAD_DAYS * 86_400_000;
   return {
     slug: rows.business.slug,
@@ -154,30 +192,58 @@ export function toPublicBusinessProfile(rows: PublicProfileRows, input: { now: D
     personRequests: personRequestsFor(rows.receptionist?.transferMode, rows.receptionist?.transferNumber),
     widgetKey: rows.widgetKey?.status === "active" && rows.widgetKey.keyValue ? rows.widgetKey.keyValue : null,
     nextOpening: input.nextOpening ?? null,
+    receptionist: answering ? named(answering) : null,
+    receptionists: [...choices.filter((row) => row.isDefault), ...choices.filter((row) => !row.isDefault)].map(named),
   };
 }
 
-async function loadPublicProfileRows(tx: DatabaseTransaction, businessId: string): Promise<PublicProfileRows | null> {
-  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale, websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+/**
+ * The number a page shows: the newest of the business's active voice numbers
+ * that rings its receptionist, else the newest one, which the business page
+ * always showed. A number rings the receptionist it names while that one is
+ * active, else the default one (app.effective_receptionist).
+ */
+export function pageNumber(numbers: Array<{ e164: string; receptionistId: string | null }>, receptionists: Array<Pick<PublicProfileReceptionistRow, "id" | "isDefault" | "status">>, pageReceptionistId: string | null): string | null {
+  const fallback = receptionists.find((row) => row.isDefault)?.id ?? null;
+  const answering = pageReceptionistId ?? fallback;
+  const rings = (number: { receptionistId: string | null }) => (receptionists.some((row) => row.id === number.receptionistId && row.status === "active") ? number.receptionistId : fallback);
+  return (numbers.find((number) => answering !== null && rings(number) === answering) ?? numbers[0])?.e164 ?? null;
+}
+
+async function loadPublicProfileRows(tx: DatabaseTransaction, businessId: string, pageReceptionistId: string | null = null): Promise<PublicProfileRows | null> {
+  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale, websiteUrl: businesses.websiteUrl, summary: businesses.summary, summarySource: businesses.summarySource }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) return null;
   const [profile] = await tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, businessId)).limit(1);
-  // The business page belongs to the default receptionist; the summary is the business's.
-  const receptionist = (await tx.select({ bookingMode: receptionistProfiles.bookingMode, transferMode: receptionistProfiles.transferMode, transferNumber: receptionistProfiles.transferNumber, summary: businesses.summary, summarySource: businesses.summarySource })
-    .from(receptionistProfiles)
-    .innerJoin(businesses, eq(businesses.id, receptionistProfiles.businessId))
-    .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)))
-    .limit(1))[0] ?? null;
+  const receptionists = await tx.select({
+    id: receptionistProfiles.id,
+    name: receptionistProfiles.name,
+    description: receptionistProfiles.description,
+    handle: receptionistProfiles.handle,
+    isDefault: receptionistProfiles.isDefault,
+    status: receptionistProfiles.status,
+    listed: receptionistProfiles.listed,
+    bookingMode: receptionistProfiles.bookingMode,
+    transferMode: receptionistProfiles.transferMode,
+    transferNumber: receptionistProfiles.transferNumber,
+  }).from(receptionistProfiles)
+    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)))
+    .orderBy(desc(receptionistProfiles.isDefault), asc(receptionistProfiles.sortOrder), sql`lower(${receptionistProfiles.name})`, asc(receptionistProfiles.id));
+  // The business page belongs to the default receptionist, a receptionist's page to it; the summary is the business's.
+  const answering = receptionists.find((row) => (pageReceptionistId ? row.id === pageReceptionistId : row.isDefault));
+  const receptionist = answering ? { bookingMode: answering.bookingMode, transferMode: answering.transferMode, transferNumber: answering.transferNumber } : null;
   const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
   const closureRows = await tx.select({ startsAt: closures.startsAt, endsAt: closures.endsAt, reason: closures.reason }).from(closures).where(and(eq(closures.businessId, businessId), gt(closures.endsAt, sql`now()`), lt(closures.startsAt, sql`now() + make_interval(days => ${CLOSURE_LOOKAHEAD_DAYS})`))).orderBy(asc(closures.startsAt)).limit(MAX_CLOSURES);
   const serviceRows = await tx.select({ id: services.id, name: services.name, localizedNames: services.localizedNames, description: services.description, durationMinutes: services.durationMinutes }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true), isNull(services.deletedAt))).orderBy(asc(services.name), asc(services.id)).limit(MAX_SERVICES);
-  // The receptionist's own number, chosen as the business snapshot chooses it.
-  const phone = (await tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.voiceEnabled, true))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id)).limit(1))[0]?.e164 ?? null;
+  // The receptionist's own number, newest first as the business snapshot chooses it.
+  const numbers = await tx.select({ e164: phoneNumbers.e164, receptionistId: phoneNumbers.receptionistId }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active"), eq(phoneNumbers.voiceEnabled, true))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id));
+  const phone = pageNumber(numbers, receptionists, pageReceptionistId);
   // A page that was never saved previews with the defaults its settings tab offers.
-  const profileRow = profile ?? { ...defaultProfileRow(businessId), description: summaryDescription(receptionist), widgetKeyId: (await profileWidgetKeyOptions(tx, businessId))[0]?.id ?? null };
+  const profileRow = profile ?? { ...defaultProfileRow(businessId), description: summaryDescription(business), widgetKeyId: (await profileWidgetKeyOptions(tx, businessId))[0]?.id ?? null };
   const widgetKey = profileRow.widgetKeyId
     ? (await tx.select({ keyValue: widgetKeys.keyValue, status: widgetKeys.status }).from(widgetKeys).where(and(eq(widgetKeys.id, profileRow.widgetKeyId), eq(widgetKeys.businessId, businessId))).limit(1))[0] ?? null
     : null;
-  return { business, profile: profileRow, receptionist, hours, closures: closureRows, services: serviceRows, phone, widgetKey };
+  const { summary: _summary, summarySource: _summarySource, ...businessRow } = business;
+  return { business: businessRow, profile: profileRow, receptionist, receptionists, pageReceptionistId, hours, closures: closureRows, services: serviceRows, phone, widgetKey };
 }
 
 /** The business behind a published page's slug, or null for every other slug. */
@@ -186,14 +252,38 @@ export async function resolvePublicProfileBusiness(context: DomainContext, slug:
   return result.rows[0]?.business_id ?? null;
 }
 
+/** What the page needs to sign its chat's receptionist token: never shown on the page. */
+export type PublicProfileAccess = {
+  businessId: string;
+  /** The page's widget key, when it shows a chat. */
+  widgetKeyId: string | null;
+  /** The receptionist that answers the page; null for a business without a default receptionist yet. */
+  receptionistId: string | null;
+  /** Whether visitors can pick it, so search engines may list its page. Always true on the business page. */
+  listed: boolean;
+};
+
 /**
- * Everything /profile/<slug> shows, or null for a page that doesn't exist:
- * an unknown slug, an unpublished page or an inactive business. With
- * previewUserId, a member of the business also sees a page that isn't
- * published yet. Runs as the worker; context.db must be the worker database.
+ * A page lookup's result: the page, or the business page's address when the
+ * handle names a receptionist that is paused, archived or the default one,
+ * which the business page answers for.
  */
-export async function getPublicBusinessProfile(context: DomainContext, input: { slug: string; previewUserId?: string | null; now?: Date }): Promise<PublicBusinessProfile | null> {
+export type PublicProfileLookup =
+  | { kind: "page"; profile: PublicBusinessProfile; access: PublicProfileAccess }
+  | { kind: "businessPage"; slug: string };
+
+/**
+ * Everything /profile/<slug> shows, or with handle /profile/<slug>/<handle>,
+ * or null for a page that doesn't exist: an unknown slug or handle, an
+ * unpublished page or an inactive business. A receptionist's page uses the
+ * business page's published switch and widget. With previewUserId, a member
+ * of the business also sees a page that isn't published yet. Runs as the
+ * worker; context.db must be the worker database.
+ */
+export async function getPublicProfilePage(context: DomainContext, input: { slug: string; handle?: string | null; previewUserId?: string | null; now?: Date }): Promise<PublicProfileLookup | null> {
   const now = input.now ?? new Date();
+  const handle = input.handle?.trim().toLowerCase() || null;
+  if (handle !== null && !isReceptionistHandle(handle)) return null;
   let businessId = await resolvePublicProfileBusiness(context, input.slug);
   let preview = false;
   if (!businessId && input.previewUserId) {
@@ -203,15 +293,31 @@ export async function getPublicBusinessProfile(context: DomainContext, input: { 
   }
   if (!businessId) return null;
   const id = businessId;
-  const rows = await withBusinessTransaction(context.db, { businessId: id, actorType: "worker" }, async (tx) => {
+  const found = await withBusinessTransaction(context.db, { businessId: id, actorType: "worker" }, async (tx) => {
     if (preview) {
       const member = (await tx.select({ id: businessMemberships.id }).from(businessMemberships).where(and(eq(businessMemberships.businessId, id), eq(businessMemberships.userId, input.previewUserId!), eq(businessMemberships.status, "active"))).limit(1))[0];
       if (!member) return null;
     }
-    return await loadPublicProfileRows(tx, id);
+    let pageReceptionistId: string | null = null;
+    if (handle) {
+      // A live receptionist keeps its handle to itself; archived ones may share an old one, and still send visitors to the business page.
+      const [owner] = await tx.select({ id: receptionistProfiles.id, isDefault: receptionistProfiles.isDefault, status: receptionistProfiles.status, archivedAt: receptionistProfiles.archivedAt })
+        .from(receptionistProfiles)
+        .where(and(eq(receptionistProfiles.businessId, id), eq(receptionistProfiles.handle, handle)))
+        .orderBy(sql`${receptionistProfiles.archivedAt} desc nulls first`)
+        .limit(1);
+      if (!owner) return null;
+      if (owner.isDefault || owner.archivedAt || owner.status !== "active") return { kind: "businessPage" as const };
+      pageReceptionistId = owner.id;
+    }
+    const rows = await loadPublicProfileRows(tx, id, pageReceptionistId);
+    return rows ? { kind: "rows" as const, rows } : null;
   });
+  if (!found) return null;
+  if (found.kind === "businessPage") return { kind: "businessPage", slug: input.slug };
+  const { rows } = found;
   // The page may have been unpublished between the lookup and the read.
-  if (!rows || (!preview && !rows.profile.published)) return null;
+  if (!preview && !rows.profile.published) return null;
   const firstService = rows.services[0];
   const nextOpening = normalizeBookingMode(rows.receptionist?.bookingMode) === "instant" && firstService && rows.hours.length
     ? await cachedNextOpening(context, { businessId: id, serviceId: firstService.id, durationMinutes: firstService.durationMinutes, timezone: rows.business.timezone, hours: rows.hours, now })
@@ -221,7 +327,24 @@ export async function getPublicBusinessProfile(context: DomainContext, input: { 
         return { startsAt, serviceName: firstService.name, ...(serviceLocalizedNames ? { serviceLocalizedNames } : {}) };
       })
     : null;
-  return toPublicBusinessProfile(rows, { now, nextOpening });
+  const profile = toPublicBusinessProfile(rows, { now, nextOpening });
+  const answering = rows.receptionists.find((row) => (rows.pageReceptionistId ? row.id === rows.pageReceptionistId : row.isDefault));
+  return {
+    kind: "page",
+    profile,
+    access: {
+      businessId: id,
+      widgetKeyId: profile.widgetKey ? rows.profile.widgetKeyId : null,
+      receptionistId: answering?.id ?? null,
+      listed: !rows.pageReceptionistId || Boolean(answering?.listed),
+    },
+  };
+}
+
+/** Everything /profile/<slug> shows, or null for a page that doesn't exist (getPublicProfilePage). */
+export async function getPublicBusinessProfile(context: DomainContext, input: { slug: string; previewUserId?: string | null; now?: Date }): Promise<PublicBusinessProfile | null> {
+  const found = await getPublicProfilePage(context, input);
+  return found?.kind === "page" ? found.profile : null;
 }
 
 const NEXT_OPENING_DAYS = 14;

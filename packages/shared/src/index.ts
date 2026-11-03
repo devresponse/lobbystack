@@ -393,6 +393,8 @@ export const widgetConfigSchema = z.object({
 export const widgetSessionRequestSchema = z.object({
   widgetKey: z.string().min(1),
   visitorId: z.guid(),
+  /** The signed token a business or receptionist page gives its chat, naming the receptionist that answers. */
+  receptionistToken: z.string().min(1).max(2048).optional(),
 });
 export type WidgetSessionRequest = z.infer<typeof widgetSessionRequestSchema>;
 

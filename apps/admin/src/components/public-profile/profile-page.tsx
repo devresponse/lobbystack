@@ -8,16 +8,20 @@ import { formatPublicProfileAddress, hasMappableAddress } from "@lobbystack/shar
 
 import type { SupportedLocale } from "@/lib/locale";
 import { localeTag } from "@/lib/locale";
-import { addressLines, bookingHint, closureLines, hoursRows, localBusinessJsonLd, mapLinks, nextOpeningLabel, phoneDisplay, profileLanguages, serviceName, statusLine, timeZoneLabel } from "@/lib/public-profile-page";
+import { addressLines, bookingHint, closureLines, hoursRows, localBusinessJsonLd, mapLinks, nextOpeningLabel, phoneDisplay, profileLanguages, serviceName, statusLine, timeZoneLabel, type ReceptionistPickerChoices } from "@/lib/public-profile-page";
 import type { Translate } from "@/lib/server-translation";
 
 import { CopyButton, ShareButton } from "./profile-buttons";
+import { ReceptionistPicker } from "./receptionist-picker";
 
 // A business's public page at /profile/<slug>, in the "Front desk" layout:
 // the business on the left and its receptionist's chat on the right, framed on
 // the deployment's accent, then its hours, services and location. On a phone
-// the chat comes right after the business's name. The words, the business's
-// details and the brand are worked out by the page and passed in.
+// the chat comes right after the business's name. A receptionist's page,
+// /profile/<slug>/<handle>, is the same page answered by that receptionist.
+// With more than one receptionist to choose from, a dropdown under the
+// business's name says who answers and links to the others' pages. The words,
+// the business's details and the brand are worked out by the page and passed in.
 
 /** The element the widget loader puts the chat in. */
 export const PROFILE_CHAT_ID = "profile-chat";
@@ -36,6 +40,12 @@ export type ProfilePageProps = {
   /** A Google Maps Embed API key; without one, the map links out. */
   mapsEmbedKey: string | null;
   languageNames: Record<SupportedLocale, string>;
+  /** The token the page signed for its chat, naming the receptionist that answers it. */
+  receptionistToken?: string | null;
+  /** Who answers the page and who else the visitor can pick; null when there's nobody else to choose. */
+  picker?: ReceptionistPickerChoices | null;
+  /** Whether this is a receptionist's own page rather than the business page. */
+  receptionistPage?: boolean;
 };
 
 const HAIRLINE = "border-[#D6D6D2]";
@@ -64,7 +74,7 @@ function ContactRow({ icon, children }: { icon: ReactNode; children: ReactNode }
   return <div className={`flex min-h-[52px] items-center gap-4 border-b ${HAIRLINE} py-1.5`}>{icon}{children}</div>;
 }
 
-export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent, brand, mapsEmbedKey, languageNames }: ProfilePageProps) {
+export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent, brand, mapsEmbedKey, languageNames, receptionistToken = null, picker = null, receptionistPage = false }: ProfilePageProps) {
   const clock = { locale, timezone: profile.timezone, now, t };
   const status = statusLine(profile, clock);
   const phone = profile.phone ? { href: `tel:${profile.phone}`, display: phoneDisplay(profile.phone, profile.address?.countryCode) } : null;
@@ -82,10 +92,12 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
   const person = profile.personRequests === "any_time" ? t("footer.personAnyTime") : profile.personRequests === "business_hours" ? t("footer.personDuringHours") : null;
   const hasContact = Boolean(profile.address || phone || profile.email || website);
   const style = { "--accent": accent, "--on-accent": onAccent } as CSSProperties;
+  // A receptionist's page names the receptionist the visitor chats with or calls; the business page names the business.
+  const answeredBy = receptionistPage && profile.receptionist ? profile.receptionist.name : profile.name;
 
   return (
     <div style={style} className="flex min-h-svh flex-col bg-[#fff] font-sans text-[17px] leading-[1.55] text-[#000] antialiased [color-scheme:light]">
-      {profile.published ? <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: localBusinessJsonLd(profile, pageUrl) }} /> : (
+      {profile.published ? (receptionistPage ? null : <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: localBusinessJsonLd(profile, pageUrl) }} />) : (
         <div className="bg-[#000] text-[#fff]">
           <p className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-1 px-5 py-3 text-[15px] leading-[22px] sm:px-8 lg:px-12">
             {t("preview.banner")}
@@ -115,20 +127,29 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
               </p>
             ) : null}
             {profile.description ? <p className={`${MUTED} whitespace-pre-line lg:max-w-[40ch] lg:text-[19px] lg:leading-normal`}>{profile.description}</p> : null}
+            {picker ? (
+              <div className="pt-2">
+                <ReceptionistPicker
+                  current={picker.current}
+                  choices={picker.choices}
+                  labels={{ label: t("receptionists.label"), choose: t("receptionists.choose"), search: t("receptionists.search"), noMatches: t("receptionists.noMatches"), current: t("receptionists.current") }}
+                />
+              </div>
+            ) : null}
           </div>
 
           {stage ? (
             <div className="-mx-5 bg-[var(--accent)] px-7 py-10 sm:-mx-8 sm:px-10 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:mx-0 lg:rounded-[28px] lg:px-12 lg:py-14">
               <Brackets>
                 {stage === "chat" ? (
-                  <section id={PROFILE_CHAT_ID} aria-label={t("stage.chat", { name: profile.name })} className="relative flex h-[520px] flex-col items-center justify-center overflow-hidden rounded-[20px] bg-[#fff] text-sm text-[#71717a] lg:h-[600px]">
+                  <section id={PROFILE_CHAT_ID} aria-label={t("stage.chat", { name: answeredBy })} className="relative flex h-[520px] flex-col items-center justify-center overflow-hidden rounded-[20px] bg-[#fff] text-sm text-[#71717a] lg:h-[600px]">
                     {t("stage.chatLoading")}
                   </section>
                 ) : stage === "chatPreview" ? (
                   <div className="relative flex h-[520px] items-center justify-center rounded-[20px] bg-[#fff] p-8 text-center text-[15px] leading-[22px] text-[#3D3D3D] lg:h-[600px]">{t("preview.chat")}</div>
                 ) : (
                   <div className="relative flex min-h-[320px] flex-col justify-center gap-4 rounded-[20px] bg-[#fff] p-8 lg:min-h-[420px] lg:p-12">
-                    <h2 className={SECTION_TITLE}>{t("stage.call", { name: profile.name })}</h2>
+                    <h2 className={SECTION_TITLE}>{t("stage.call", { name: answeredBy })}</h2>
                     <p className="text-[34px] leading-[1.1] font-[780] tracking-[-0.02em] tabular-nums lg:text-[44px]">{phone!.display}</p>
                     <p className={`${MUTED} text-[15px] leading-[22px]`}>{t("stage.callNote")}</p>
                     <a href={phone!.href} className={`${PILL} self-start bg-[#000] text-[#fff]`}><Phone aria-hidden="true" className="size-5 flex-none" />{t("actions.callNow")}</a>
@@ -138,7 +159,7 @@ export function ProfilePage({ profile, locale, t, now, pageUrl, accent, onAccent
               {/* The loader swaps the chat element's placeholder for the chat, so it runs once React has
                   hydrated the page: before that, React would find the element changed and render it
                   again, without the chat. */}
-              {stage === "chat" ? <Script src={`/embed.js?key=${encodeURIComponent(profile.widgetKey!)}`} data-inline-target={`#${PROFILE_CHAT_ID}`} strategy="afterInteractive" /> : null}
+              {stage === "chat" ? <Script src={`/embed.js?key=${encodeURIComponent(profile.widgetKey!)}`} data-inline-target={`#${PROFILE_CHAT_ID}`} {...(receptionistToken ? { "data-receptionist-token": receptionistToken } : {})} strategy="afterInteractive" /> : null}
             </div>
           ) : null}
 

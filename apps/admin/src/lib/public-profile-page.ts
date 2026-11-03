@@ -1,22 +1,29 @@
 import { getCountryCallingCode, isSupportedCountry, parsePhoneNumberFromString } from "libphonenumber-js/min";
 import { DateTime } from "luxon";
 
-import type { PublicBusinessProfile, PublicProfileService } from "@lobbystack/domain";
-import { formatPublicProfileAddress, intlLocale, openStatus, publicProfilePath, type HoursWindow, type PublicProfileAddress } from "@lobbystack/shared";
+import type { PublicBusinessProfile, PublicProfileReceptionist, PublicProfileService } from "@lobbystack/domain";
+import { formatPublicProfileAddress, intlLocale, openStatus, receptionistPagePath, type HoursWindow, type PublicProfileAddress } from "@lobbystack/shared";
 
 import { SUPPORTED_LOCALES, type SupportedLocale } from "./locale";
 import type { Translate } from "./server-translation";
 
 // What a business's profile page at /profile/<slug> shows, worked out from its
 // public profile: the open-now line, the week's hours, closures, the next
-// opening, the phone number, map links and the search engines' summary. Times
-// are the business's own, in its time zone.
+// opening, the phone number, map links, the visitor's receptionist dropdown and
+// the search engines' summary. A receptionist's page, /profile/<slug>/<handle>,
+// is the same page with that receptionist's title and dropdown. Times are the
+// business's own, in its time zone.
 
 type Clock = { locale: SupportedLocale; timezone: string; now: Date; t: Translate };
 
+/** A receptionist's page on this deployment: the business page for the default receptionist (handle null). */
+export function receptionistPageUrl(slug: string, handle: string | null, environment: Readonly<Record<string, string | undefined>> = process.env): string {
+  return new URL(receptionistPagePath(slug, handle), environment.APP_BASE_URL || "http://localhost:3000").toString();
+}
+
 /** The page's address on this deployment. */
 export function publicProfileUrl(slug: string, environment: Readonly<Record<string, string | undefined>> = process.env): string {
-  return new URL(publicProfilePath(slug), environment.APP_BASE_URL || "http://localhost:3000").toString();
+  return receptionistPageUrl(slug, null, environment);
 }
 
 /**
@@ -42,6 +49,18 @@ export function profileTitle(profile: Pick<PublicBusinessProfile, "name" | "cate
   return name;
 }
 
+/** The receptionist whose own page this is; null on the business page, which the default receptionist answers. */
+function pageReceptionist(profile: Pick<PublicBusinessProfile, "receptionist">): PublicProfileReceptionist | null {
+  return profile.receptionist && !profile.receptionist.isDefault ? profile.receptionist : null;
+}
+
+/** A receptionist page's title, its name before the business page's title; the business page's own title otherwise. */
+export function receptionistPageTitle(profile: Pick<PublicBusinessProfile, "name" | "category" | "address" | "receptionist">, t: Translate): string {
+  const title = profileTitle(profile, t);
+  const receptionist = pageReceptionist(profile);
+  return receptionist ? t("meta.receptionistTitle", { receptionist: receptionist.name, title }) : title;
+}
+
 const DESCRIPTION_LENGTH = 160;
 
 /** The summary search results show: the business's description, cut at a word near 160 characters, or a line naming the business. */
@@ -52,6 +71,37 @@ export function profileDescription(profile: Pick<PublicBusinessProfile, "name" |
   const cut = text.slice(0, DESCRIPTION_LENGTH - 1);
   const space = cut.lastIndexOf(" ");
   return `${(space > DESCRIPTION_LENGTH / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:–-]+$/, "")}…`;
+}
+
+/** A receptionist page's summary: what the receptionist helps with, else the business's summary. */
+export function receptionistPageDescription(profile: Pick<PublicBusinessProfile, "name" | "description" | "receptionist">, t: Translate): string {
+  const helpsWith = pageReceptionist(profile)?.description.trim();
+  return profileDescription(helpsWith ? { name: profile.name, description: helpsWith } : profile, t);
+}
+
+/** A receptionist in the visitor's dropdown, with the page it answers. */
+export type PickerReceptionist = { name: string; description: string; href: string };
+
+/** The visitor's dropdown: who answers this page, and every receptionist the visitor can switch to. */
+export type ReceptionistPickerChoices = { current: PickerReceptionist; choices: PickerReceptionist[] };
+
+/**
+ * The dropdown a page shows: the receptionist that answers it and the ones a
+ * visitor can choose, the default first, each linking to its page. An unlisted
+ * receptionist's own page lists it after the default, so the visitor sees who
+ * they are talking to. Null when there is nobody else to choose.
+ */
+export function receptionistPicker(profile: Pick<PublicBusinessProfile, "slug" | "receptionist" | "receptionists">): ReceptionistPickerChoices | null {
+  if (!profile.receptionist) return null;
+  const choice = (receptionist: PublicProfileReceptionist): PickerReceptionist => ({
+    name: receptionist.name,
+    description: receptionist.description.trim(),
+    href: receptionistPagePath(profile.slug, receptionist.isDefault ? null : receptionist.handle),
+  });
+  const current = choice(profile.receptionist);
+  const listed = profile.receptionists.map(choice);
+  const choices = listed.some((item) => item.href === current.href) ? listed : [...listed.slice(0, 1), current, ...listed.slice(1)];
+  return choices.some((item) => item.href !== current.href) ? { current, choices } : null;
 }
 
 const formats = new Map<string, Intl.DateTimeFormat>();

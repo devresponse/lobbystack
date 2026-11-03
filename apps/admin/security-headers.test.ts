@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 
-import { publicProfilePath } from "@lobbystack/shared";
+import { publicProfilePath, receptionistPagePath } from "@lobbystack/shared";
 
 import { EMBED_PATH_PREFIXES, embeddableSecurityHeaders, isEmbeddablePath, isPublicProfilePath, publicProfileSecurityHeaders, securityHeaders, toNextHeaderList } from "./security-headers";
 
@@ -44,6 +44,8 @@ it("lets a business's public page frame its chat and a Google map, and nothing e
   expect(headers["X-Frame-Options"]).toBe("DENY");
   expect(csp).toContain("frame-ancestors 'none'");
   expect(isPublicProfilePath(publicProfilePath("acme-dental"))).toBe(true);
+  // A receptionist's page frames the same chat and map.
+  expect(isPublicProfilePath(receptionistPagePath("acme-dental", "kitsilano"))).toBe(true);
   expect(isPublicProfilePath("/profile")).toBe(false);
   expect(isPublicProfilePath("/settings/profile")).toBe(false);
 });

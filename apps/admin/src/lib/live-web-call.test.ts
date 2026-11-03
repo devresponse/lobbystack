@@ -128,6 +128,14 @@ describe("resolveLiveWebCallAccess", () => {
       mocks.widgetKey = { status: "active", allowedOrigins: ["https://client.example"], receptionistId: null };
       expect(await resolveLiveWebCallAccess(request(headers), { sdp: "v=0", widgetId: "lobbystack-widget", receptionistId: kitsilanoId })).not.toHaveProperty("receptionistId");
     });
+
+    it("answers a call from a receptionist's page as the receptionist the page's signed token named", async () => {
+      const frontDeskId = "00000000-0000-4000-8000-0000000000a1";
+      // The session carries the receptionist the page signed for; the key on the page names another.
+      mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: app, receptionistId: kitsilanoId });
+      mocks.widgetKey = { status: "active", allowedOrigins: [], receptionistId: frontDeskId, profilePublished: true, profileWidgetKeyId: "key_1" };
+      await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": app }), { sdp: "v=0", widgetId: "lobbystack-widget" })).resolves.toMatchObject({ businessId: "biz_2", receptionistId: kitsilanoId });
+    });
   });
 
   it("runs prospect demos under their demo", async () => {

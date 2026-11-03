@@ -6,6 +6,7 @@ import {
   auditLogs,
   billingAccounts,
   createDatabaseClient,
+  outboxMessages,
   phoneNumbers,
   receptionistProfiles,
   rlsContextStatement,
@@ -118,6 +119,10 @@ describe.skipIf(!testUrl)("who answers each number and widget, against PostgreSQ
       expect(await audits(tx, clinic.businessId, "phone_number.receptionist_changed")).toEqual([
         { actorUserId: clinic.userId, entityType: "phone_number", entityId: clinic.number.id, payload: { from: clinic.frontDeskId, to: clinic.kitsilanoId } },
       ]);
+      // One snapshot refresh, after which the worker records the new receptionist's opening for the number's calls.
+      const refreshes = await tx.select({ aggregateId: outboxMessages.aggregateId, payload: outboxMessages.payload }).from(outboxMessages)
+        .where(and(eq(outboxMessages.businessId, clinic.businessId), eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateType, "phone_number")));
+      expect(refreshes).toEqual([{ aggregateId: clinic.number.id, payload: { businessId: clinic.businessId, reason: "phone_number_receptionist_changed" } }]);
     });
   });
 

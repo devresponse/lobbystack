@@ -1,6 +1,6 @@
 import { and, eq, ne } from "drizzle-orm";
 
-import { auditLogs, phoneNumbers, receptionistProfiles, widgetKeys, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, enqueueOutbox, phoneNumbers, receptionistProfiles, widgetKeys, type DatabaseTransaction } from "@lobbystack/db";
 import { isUuid, type ReceptionistStatus } from "@lobbystack/shared";
 
 // Who answers each phone number and website widget. Every number and widget
@@ -64,6 +64,17 @@ export async function setPhoneNumberReceptionistInTransaction(
       entityType: "phone_number",
       entityId: number.id,
       payload: { from: number.receptionistId, to: receptionist.id },
+    });
+    // The worker records each answering receptionist's opening after a
+    // snapshot refresh, so the number's next call opens with the recording
+    // instead of waiting for the daily sweep.
+    await enqueueOutbox(tx, {
+      topic: "snapshot.refresh",
+      businessId,
+      aggregateType: "phone_number",
+      aggregateId: number.id,
+      dedupeKey: `phone-number:${number.id}:snapshot:receptionist:${receptionist.id}:${Date.now()}`,
+      payload: { businessId, reason: "phone_number_receptionist_changed" },
     });
   }
   return { id: number.id, e164: number.e164, receptionistId: receptionist.id };

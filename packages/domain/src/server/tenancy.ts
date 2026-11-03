@@ -4,7 +4,7 @@ import { and, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 
 import { enqueueOutbox, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { apiKeys, auditLogs, businessInvitations, businessMemberships, businesses, calendarConnections, receptionistProfiles, staff, users, webhookEndpoints } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
+import { DEFAULT_RECEPTIONIST_NAMES, defaultAppointmentChangePolicy, defaultReceptionistName, isRuntimeLocale, normalizeAuthEmail, parseDeploymentMode, runtimeLocales, type InterfaceLocale, type RuntimeLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import { disconnectCalendarInTransaction } from "./calendar";
@@ -119,6 +119,11 @@ export async function insertBusinessInTransaction(
       // every mode but cloud skips billing and the paid-plan check on numbers.
       deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
       onboardingStage: "website",
+      // Settings every receptionist shares. The summary starts as the business
+      // name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
+      summary: name,
+      summarySource: "placeholder",
+      appointmentChangePolicy: defaultAppointmentChangePolicy,
       ...(defaultLocale !== undefined ? { defaultLocale } : {}),
       ...(input.websiteUrl !== undefined ? { websiteUrl: input.websiteUrl } : {}),
     });
@@ -142,11 +147,15 @@ export async function insertBusinessInTransaction(
   // Booking assigns every appointment to a staff member. Businesses that don't
   // manage a team get one hidden member that stands for the business itself.
   await tx.insert(staff).values({ businessId, name, timezone });
+  // The business's first receptionist is its default one, "Front desk" in its language.
   await tx.insert(receptionistProfiles).values({
     businessId,
+    name: defaultReceptionistName(defaultLocale ?? "en"),
+    isDefault: true,
     greeting: `Thanks for calling ${name}.`,
     tone: "warm and direct",
-    // The business name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
+    // A copy of the business's shared settings, which the code of the release
+    // before reads, until the clean-up deploy.
     summary: name,
     bookingPolicy: "Only confirm a booking after availability is checked.",
     voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
@@ -204,6 +213,12 @@ export async function updateBusinessInTransaction(
   if (!business) throw new Error("Business not found.");
   // shortcut: every staff row today is the default member that stands for the business; once staff set their own zones, update only that member.
   if (timezone !== undefined) await tx.update(staff).set({ timezone, updatedAt: new Date() }).where(eq(staff.businessId, input.businessId));
+  // The default receptionist keeps a name someone wrote, and takes the new
+  // language's "Front desk" while it still has a name the code gave it.
+  if (defaultLocale !== undefined) {
+    await tx.update(receptionistProfiles).set({ name: defaultReceptionistName(defaultLocale), updatedAt: new Date() })
+      .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.isDefault, true), inArray(receptionistProfiles.name, Object.values(DEFAULT_RECEPTIONIST_NAMES)), ne(receptionistProfiles.name, defaultReceptionistName(defaultLocale))));
+  }
   await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "business", aggregateId: input.businessId, dedupeKey: `business:${input.businessId}:snapshot:${Date.now()}`, payload: { businessId: input.businessId, reason: "business_updated" } });
 }
 

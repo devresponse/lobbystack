@@ -1,0 +1,163 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+import { interfaceLocales, runtimeLocales } from "./locales";
+import {
+  DEFAULT_MAX_RECEPTIONISTS_PER_BUSINESS,
+  DEFAULT_RECEPTIONIST_NAMES,
+  ENTRY_LINK_CODE_ALPHABET,
+  ENTRY_LINK_CODE_LENGTH,
+  RECEPTIONIST_HANDLE_MAX_LENGTH,
+  availableReceptionistHandle,
+  defaultReceptionistName,
+  entryLinkCode,
+  isReceptionistHandle,
+  normalizeEntryLinkCode,
+  maxReceptionistsPerBusiness,
+  receptionistAllowance,
+  receptionistHandleFrom,
+  receptionistInitials,
+  receptionistLocale,
+} from "./receptionists";
+
+describe("default receptionist names", () => {
+  it("names the default receptionist in every language calls or the dashboard use", () => {
+    for (const locale of [...runtimeLocales, ...interfaceLocales]) {
+      expect(DEFAULT_RECEPTIONIST_NAMES[locale].trim()).not.toBe("");
+    }
+  });
+
+  it("reads a business's language from a full tag and falls back to English", () => {
+    expect(defaultReceptionistName("fr")).toBe("Accueil");
+    expect(defaultReceptionistName("pt-BR")).toBe("Recepção");
+    expect(defaultReceptionistName("zh_Hans")).toBe("前台");
+    expect(defaultReceptionistName(" ES ")).toBe("Recepción");
+    expect(defaultReceptionistName("sr")).toBe("Recepcija");
+    expect(defaultReceptionistName("nl")).toBe("Front desk");
+    expect(defaultReceptionistName("")).toBe("Front desk");
+    expect(defaultReceptionistName(null)).toBe("Front desk");
+    expect(defaultReceptionistName("constructor")).toBe("Front desk");
+  });
+
+  it("matches the names migration 0133 gives existing receptionists", () => {
+    const migration = readFileSync(new URL("../../db/migrations/0133_receptionists.sql", import.meta.url), "utf8");
+    const names = Object.fromEntries([...migration.matchAll(/WHEN '([a-z]{2})' THEN '([^']+)'/g)].map((match) => [match[1], match[2]]));
+    expect(names).toEqual(DEFAULT_RECEPTIONIST_NAMES);
+    expect(migration).toContain(`ELSE '${DEFAULT_RECEPTIONIST_NAMES.en}'`);
+  });
+});
+
+describe("receptionist handles", () => {
+  it("accepts lower-case letters and digits joined by single dashes", () => {
+    expect(isReceptionistHandle("kitsilano")).toBe(true);
+    expect(isReceptionistHandle("store-21")).toBe(true);
+    expect(isReceptionistHandle("a")).toBe(true);
+    expect(isReceptionistHandle("Kitsilano")).toBe(false);
+    expect(isReceptionistHandle("-store")).toBe(false);
+    expect(isReceptionistHandle("store-")).toBe(false);
+    expect(isReceptionistHandle("store--21")).toBe(false);
+    expect(isReceptionistHandle("store_21")).toBe(false);
+    expect(isReceptionistHandle("")).toBe(false);
+    expect(isReceptionistHandle("a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH))).toBe(true);
+    expect(isReceptionistHandle("a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH + 1))).toBe(false);
+  });
+
+  it("makes a handle from a name", () => {
+    expect(receptionistHandleFrom("Kitsilano store")).toBe("kitsilano-store");
+    expect(receptionistHandleFrom("  Service & Repairs!  ")).toBe("service-repairs");
+    expect(receptionistHandleFrom("Café Crème")).toBe("cafe-creme");
+    expect(receptionistHandleFrom("Straße Øst Łódź")).toBe("strasse-ost-lodz");
+    expect(receptionistHandleFrom("Recepción")).toBe("recepcion");
+    expect(receptionistHandleFrom("受付")).toBe("receptionist");
+    expect(receptionistHandleFrom("---")).toBe("receptionist");
+    for (const name of ["Kitsilano store", "受付", "Café Crème", "x".repeat(200)]) {
+      expect(isReceptionistHandle(receptionistHandleFrom(name))).toBe(true);
+    }
+  });
+
+  it("cuts a long name at a dash so the handle fits", () => {
+    const handle = receptionistHandleFrom(`${"word ".repeat(20)}end`);
+    expect(handle.length).toBeLessThanOrEqual(RECEPTIONIST_HANDLE_MAX_LENGTH);
+    expect(handle.endsWith("word")).toBe(true);
+    expect(receptionistHandleFrom("a".repeat(90))).toBe("a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH));
+  });
+
+  it("numbers a handle that is taken with the lowest free number", () => {
+    expect(availableReceptionistHandle("kitsilano", [])).toBe("kitsilano");
+    expect(availableReceptionistHandle("kitsilano", ["kitsilano"])).toBe("kitsilano-2");
+    expect(availableReceptionistHandle("kitsilano", ["kitsilano", "kitsilano-2", "kitsilano-3"])).toBe("kitsilano-4");
+    expect(availableReceptionistHandle("kitsilano", ["kitsilano", "kitsilano-3"])).toBe("kitsilano-2");
+    const long = "a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH);
+    const numbered = availableReceptionistHandle(long, [long]);
+    expect(numbered).toBe(`${"a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH - 2)}-2`);
+    expect(isReceptionistHandle(numbered)).toBe(true);
+    const dashed = `${"a".repeat(RECEPTIONIST_HANDLE_MAX_LENGTH - 3)}-bb`;
+    expect(isReceptionistHandle(availableReceptionistHandle(dashed, [dashed]))).toBe(true);
+  });
+});
+
+describe("receptionist badges", () => {
+  it("shows the first letters of the first two words", () => {
+    expect(receptionistInitials("Front desk")).toBe("FD");
+    expect(receptionistInitials("kitsilano")).toBe("K");
+    expect(receptionistInitials("  Service   and repairs ")).toBe("SA");
+    expect(receptionistInitials("受付")).toBe("受");
+    expect(receptionistInitials("")).toBe("?");
+  });
+});
+
+describe("receptionist limits", () => {
+  it("reads the deployment cap, 50 unless a whole number from 1 to 500 is set", () => {
+    expect(maxReceptionistsPerBusiness({})).toBe(DEFAULT_MAX_RECEPTIONISTS_PER_BUSINESS);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: "12" })).toBe(12);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: " 200 " })).toBe(200);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: "0" })).toBe(50);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: "501" })).toBe(50);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: "2.5" })).toBe(50);
+    expect(maxReceptionistsPerBusiness({ MAX_RECEPTIONISTS_PER_BUSINESS: "ten" })).toBe(50);
+  });
+
+  it("allows the plan's number, the cap for a plan without one, never more than the cap", () => {
+    expect(receptionistAllowance(1, 50)).toBe(1);
+    expect(receptionistAllowance(5, 50)).toBe(5);
+    expect(receptionistAllowance(null, 50)).toBe(50);
+    expect(receptionistAllowance(undefined, 20)).toBe(20);
+    expect(receptionistAllowance(5, 3)).toBe(3);
+    expect(receptionistAllowance(0, 50)).toBe(1);
+  });
+});
+
+describe("receptionist languages", () => {
+  it("opens calls in the receptionist's language when it has one calls support", () => {
+    expect(receptionistLocale("fr", "en")).toBe("fr");
+    expect(receptionistLocale(null, "es")).toBe("es");
+    expect(receptionistLocale("sr", "en")).toBe("en");
+  });
+});
+
+describe("QR link codes", () => {
+  it("draws six characters from an alphabet without look-alike letters and digits", () => {
+    expect(ENTRY_LINK_CODE_ALPHABET).not.toMatch(/[ilo01]/);
+    expect(new Set(ENTRY_LINK_CODE_ALPHABET).size).toBe(ENTRY_LINK_CODE_ALPHABET.length);
+    const draws = [0, 30, 5, 12, 29, 1];
+    let next = 0;
+    const code = entryLinkCode((size) => {
+      expect(size).toBe(ENTRY_LINK_CODE_ALPHABET.length);
+      return draws[next++]!;
+    });
+    expect(code).toHaveLength(ENTRY_LINK_CODE_LENGTH);
+    expect(code).toBe("a9fp8b");
+    expect(normalizeEntryLinkCode(code)).toBe(code);
+  });
+
+  it("reads a scanned code trimmed and lower-cased, and refuses what no code can be", () => {
+    expect(normalizeEntryLinkCode("  A9FP8B ")).toBe("a9fp8b");
+    expect(normalizeEntryLinkCode("abc")).toBeNull();
+    expect(normalizeEntryLinkCode("abcdefghjkmnp")).toBeNull();
+    expect(normalizeEntryLinkCode("ab-cd")).toBeNull();
+    expect(normalizeEntryLinkCode("")).toBeNull();
+    expect(normalizeEntryLinkCode(null)).toBeNull();
+    expect(normalizeEntryLinkCode(undefined)).toBeNull();
+  });
+});

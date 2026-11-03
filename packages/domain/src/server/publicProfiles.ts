@@ -161,7 +161,12 @@ async function loadPublicProfileRows(tx: DatabaseTransaction, businessId: string
   const [business] = await tx.select({ slug: businesses.slug, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale, websiteUrl: businesses.websiteUrl }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) return null;
   const [profile] = await tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, businessId)).limit(1);
-  const receptionist = (await tx.select({ bookingMode: receptionistProfiles.bookingMode, transferMode: receptionistProfiles.transferMode, transferNumber: receptionistProfiles.transferNumber, summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1))[0] ?? null;
+  // The business page belongs to the default receptionist; the summary is the business's.
+  const receptionist = (await tx.select({ bookingMode: receptionistProfiles.bookingMode, transferMode: receptionistProfiles.transferMode, transferNumber: receptionistProfiles.transferNumber, summary: businesses.summary, summarySource: businesses.summarySource })
+    .from(receptionistProfiles)
+    .innerJoin(businesses, eq(businesses.id, receptionistProfiles.businessId))
+    .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)))
+    .limit(1))[0] ?? null;
   const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
   const closureRows = await tx.select({ startsAt: closures.startsAt, endsAt: closures.endsAt, reason: closures.reason }).from(closures).where(and(eq(closures.businessId, businessId), gt(closures.endsAt, sql`now()`), lt(closures.startsAt, sql`now() + make_interval(days => ${CLOSURE_LOOKAHEAD_DAYS})`))).orderBy(asc(closures.startsAt)).limit(MAX_CLOSURES);
   const serviceRows = await tx.select({ id: services.id, name: services.name, localizedNames: services.localizedNames, description: services.description, durationMinutes: services.durationMinutes }).from(services).where(and(eq(services.businessId, businessId), eq(services.active, true), isNull(services.deletedAt))).orderBy(asc(services.name), asc(services.id)).limit(MAX_SERVICES);
@@ -314,10 +319,10 @@ export async function getBusinessPublicProfileSettings(tx: DatabaseTransaction, 
   // The save lock comes before the row's, in the order a save takes them.
   if (input.lock) await lockPublicProfileSaves(tx, input.businessId);
   const profileQuery = tx.select().from(businessPublicProfiles).where(eq(businessPublicProfiles.businessId, input.businessId)).limit(1);
-  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
+  const [business] = await tx.select({ slug: businesses.slug, name: businesses.name, summary: businesses.summary, summarySource: businesses.summarySource }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
   if (!business) throw Object.assign(new Error("Business not found."), { status: 404 });
   const [profile] = await (input.lock ? profileQuery.for("update") : profileQuery);
-  const [receptionist] = await tx.select({ summary: receptionistProfiles.summary, summarySource: receptionistProfiles.summarySource }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
+  const receptionist = { summary: business.summary, summarySource: business.summarySource };
   const keys = await profileWidgetKeyOptions(tx, input.businessId);
   const row = profile ?? defaultProfileRow(input.businessId);
   return {

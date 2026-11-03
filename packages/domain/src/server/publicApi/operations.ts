@@ -120,7 +120,7 @@ import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, sa
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
-import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
+import { defaultReceptionistProfile, loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
@@ -677,7 +677,7 @@ const onboardingHints: Record<ApiOnboardingItem, string> = {
 async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Promise<ApiOnboarding> {
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
@@ -1286,13 +1286,16 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
   recordingNotice: "recording_notice",
 };
 
-/** The business's receptionist row, or the defaults it would be saved with when it has none yet. */
+/**
+ * The business's default receptionist, which the v1 receptionist resource is,
+ * with the settings every receptionist shares, or the defaults it would be
+ * saved with when the business has none yet.
+ */
 async function loadReceptionistState(tx: DatabaseTransaction, businessId: string, lock: boolean) {
   const [business] = await tx.select({ name: businesses.name, updatedAt: businesses.updatedAt }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const query = tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [profile] = lock ? await query.for("update") : await query;
-  return { business, profile: profile ?? null, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
+  const profile = await loadReceptionistView(tx, { businessId, lock });
+  return { business, profile, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
 }
 
 export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
@@ -1742,7 +1745,8 @@ export async function getAppointmentForApi(context: DomainContext, caller: ApiCa
 async function bookingContext(tx: DatabaseTransaction, businessId: string) {
   const [business] = await tx.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  // The API books as the default receptionist does.
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   return { timezone: business.timezone, bookingMode: normalizeBookingMode(profile?.bookingMode) };
 }
 

@@ -1,7 +1,7 @@
 import { and, asc, eq, gte, ilike, lt, ne, or } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { appointments, calls, contacts, conversationSessions, receptionistProfiles, services, withBusinessTransaction } from "@lobbystack/db";
+import { appointments, businesses, calls, contacts, conversationSessions, services, withBusinessTransaction } from "@lobbystack/db";
 import { normalizeAppointmentChangePolicy, type HoursWindow } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
@@ -229,8 +229,8 @@ export async function bookForCaller(
 export async function lookupCallerAppointments(context: DomainContext, input: { businessId: string; callerPhone: string }) {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const rows = await tx.select({ id: appointments.id }).from(appointments).innerJoin(contacts, eq(appointments.contactId, contacts.id)).where(and(eq(appointments.businessId, input.businessId), eq(contacts.phone, input.callerPhone), eq(appointments.status, "confirmed"))).orderBy(asc(appointments.startsAt));
-    const profile = await tx.select({ appointmentChangePolicy: receptionistProfiles.appointmentChangePolicy }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
-    const policy = normalizeAppointmentChangePolicy(profile[0]?.appointmentChangePolicy);
+    const business = await tx.select({ appointmentChangePolicy: businesses.appointmentChangePolicy }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
+    const policy = normalizeAppointmentChangePolicy(business[0]?.appointmentChangePolicy);
     // Only say whether the phone matched; never read appointment details out
     // before the caller is verified.
     return { ok: true as const, policy: { ...policy, enabled: policy.enabled && rows.length > 0 }, phoneMatched: rows.length > 0, appointmentCount: rows.length };

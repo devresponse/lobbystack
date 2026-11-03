@@ -1,18 +1,26 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { readReceptionistSettingsChange, saveReceptionistProfileInTransaction, updateBusinessInTransaction } from "@lobbystack/domain";
-import { businesses, receptionistProfiles } from "@lobbystack/db";
+import { listReceptionistChoicesInTransaction, loadReceptionistView, readReceptionistSettingsChange, saveReceptionistProfileInTransaction, updateBusinessInTransaction } from "@lobbystack/domain";
+import { businesses } from "@lobbystack/db";
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
+import { receptionistIdFromRequest } from "@/lib/receptionist-filter";
 
 export const dynamic = "force-dynamic";
 
+// AI settings. ?receptionist=<id> picks which receptionist's own settings the
+// page shows and saves, the default one without it; the shared settings (the
+// summary, the AI notice and the appointment change rules) are the business's.
+
 export async function GET(request: Request) {
   try {
+    const receptionistId = receptionistIdFromRequest(request);
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       const business = await tx.select({ id: businesses.id, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-      const profile = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-      return { business: business[0] ?? null, profile: profile[0] ?? null };
+      const profile = await loadReceptionistView(tx, { businessId, receptionistId });
+      if (receptionistId && !profile) throw jsonError("Receptionist not found.", 404);
+      const receptionists = await listReceptionistChoicesInTransaction(tx, { businessId });
+      return { business: business[0] ?? null, profile, receptionists };
     }));
   } catch (error) {
     return asApiResponse(error);
@@ -21,6 +29,7 @@ export async function GET(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    const receptionistId = receptionistIdFromRequest(request);
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       // The field rules live in the domain, which the v1 API shares.
       const { patch, locale, timezone, regenerateSummary } = readReceptionistSettingsChange(await readJson(request));
@@ -33,7 +42,7 @@ export async function PATCH(request: Request) {
         await updateBusinessInTransaction(tx, { businessId, ...(locale !== undefined ? { defaultLocale: locale } : {}), ...(timezone !== undefined ? { timezone } : {}) });
       }
 
-      const profile = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: business.name, patch, regenerateSummary });
+      const profile = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: business.name, receptionistId, patch, regenerateSummary });
       if (!profile) throw jsonError("Receptionist profile could not be saved.", 500);
       return { profile };
     }, { minimumRole: "business_admin" }));

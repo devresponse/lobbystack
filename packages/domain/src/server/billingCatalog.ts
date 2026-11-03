@@ -89,9 +89,10 @@ export type BillingCatalogWrite = {
 
 export type BillingCatalogDiff = { writes: BillingCatalogWrite[]; refusals: ApiBillingCatalogRefusal[] };
 
-// The plan columns an apply sets from the file. terms_hash covers those in billingPlanTermColumns: all but overage and the last five.
-const planValueColumns = ["tier", "sold", "custom", "overage", "voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "voice_rate", "sms_rate", "call_rate", "months", "ends", "discount", "terms_hash", "names", "access", "offer_end", "sort"] as const;
-const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers"] as const;
+// The plan columns an apply sets from the file. terms_hash covers those in
+// billingPlanTermColumns: all but overage, receptionists and the last five.
+const planValueColumns = ["tier", "sold", "custom", "overage", "voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists", "voice_rate", "sms_rate", "call_rate", "months", "ends", "discount", "terms_hash", "names", "access", "offer_end", "sort"] as const;
+const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists"] as const;
 const rateColumns = ["voice_rate", "sms_rate", "call_rate"] as const;
 const actionOrder: Record<ApiBillingCatalogChange["action"], number> = { retire: 0, update: 1, restore: 2, insert: 3 };
 
@@ -266,6 +267,7 @@ function storedPlan(row: Row): StoredBillingPlan {
     // bigint arrives as text.
     kb_bytes: numberOrNull(row.kb_bytes),
     numbers: numberOrNull(row.numbers),
+    receptionists: numberOrNull(row.receptionists),
     voice_rate: numberOrNull(row.voice_rate),
     sms_rate: numberOrNull(row.sms_rate),
     call_rate: numberOrNull(row.call_rate),

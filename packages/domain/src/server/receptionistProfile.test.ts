@@ -1,16 +1,7 @@
 import { defaultAppointmentChangePolicy, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "@lobbystack/shared";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-const mocks = vi.hoisted(() => ({ enqueueOutbox: vi.fn() }));
-
-vi.mock("@lobbystack/db", async (original) => ({
-  ...(await original<typeof import("@lobbystack/db")>()),
-  enqueueOutbox: mocks.enqueueOutbox,
-}));
-
-import { defaultReceptionistProfile, readReceptionistSettingsChange, saveReceptionistProfileInTransaction } from "./receptionistProfile";
-
-beforeEach(() => mocks.enqueueOutbox.mockReset());
+import { defaultReceptionistProfile, readReceptionistSettingsChange, sharedReceptionistFields, splitReceptionistPatch } from "./receptionistProfile";
 
 // The dashboard answers with these messages, so moving the rules here must not reword them.
 describe("readReceptionistSettingsChange", () => {
@@ -87,58 +78,27 @@ describe("defaultReceptionistProfile", () => {
   });
 });
 
-describe("saveReceptionistProfileInTransaction", () => {
-  const savedAt = new Date("2026-10-11T12:00:00.000Z");
-
-  /** Records what the upsert would write, and returns `saved` as the stored row. */
-  function upsert(saved: Record<string, unknown> | null) {
-    const recorded: { values?: Record<string, unknown>; set?: Record<string, unknown> } = {};
-    const tx = {
-      insert: () => ({
-        values: (values: Record<string, unknown>) => {
-          recorded.values = values;
-          return { onConflictDoUpdate: (config: { set: Record<string, unknown> }) => { recorded.set = config.set; return { returning: async () => (saved ? [saved] : []) }; } };
-        },
-      }),
-    };
-    return { tx: tx as never, recorded };
-  }
-
-  it("creates a missing profile from the defaults, changes only the fields sent, and refreshes the snapshot", async () => {
-    const { tx, recorded } = upsert({ id: "profile_1", updatedAt: savedAt });
-    expect(await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: { tone: "warm" } })).toMatchObject({ id: "profile_1" });
-    expect(recorded.values).toMatchObject({ businessId: "biz_1", greeting: "Thank you for calling Maple.", tone: "warm", summary: "Maple", summarySource: "placeholder", transferMode: "on_request", appointmentChangePolicy: defaultAppointmentChangePolicy });
-    expect(recorded.set).toEqual({ tone: "warm", updatedAt: expect.any(Date) });
-    expect(mocks.enqueueOutbox).toHaveBeenCalledTimes(1);
-    expect(mocks.enqueueOutbox).toHaveBeenCalledWith(tx, expect.objectContaining({ topic: "snapshot.refresh", businessId: "biz_1", aggregateType: "receptionist_profile", aggregateId: "profile_1", dedupeKey: `snapshot:biz_1:profile:${savedAt.toISOString()}` }));
+// Saving itself is covered against PostgreSQL in receptionists.integration.test.ts.
+describe("splitReceptionistPatch", () => {
+  it("gives the business the summary, the AI and recording notice and the appointment change rules, and the receptionist the rest", () => {
+    const policy = { ...defaultAppointmentChangePolicy, allowCancel: false };
+    expect(splitReceptionistPatch({ greeting: "Hi.", tone: "warm", summary: "We cut hair.", recordingNotice: false, appointmentChangePolicy: policy, transferMode: "never", transferNumber: null, bookingMode: "request" })).toEqual({
+      shared: { summary: "We cut hair.", recordingNotice: false, appointmentChangePolicy: policy },
+      own: { greeting: "Hi.", tone: "warm", transferMode: "never", transferNumber: null, bookingMode: "request" },
+    });
   });
 
-  // The snapshot refresh carries it to the next call.
-  it("saves the notice switch and refreshes the snapshot", async () => {
-    const { tx, recorded } = upsert({ id: "profile_1", updatedAt: savedAt });
-    await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: { recordingNotice: false } });
-    expect(recorded.values).toMatchObject({ businessId: "biz_1", recordingNotice: false });
-    expect(recorded.set).toEqual({ recordingNotice: false, updatedAt: expect.any(Date) });
-    expect(mocks.enqueueOutbox).toHaveBeenCalledWith(tx, expect.objectContaining({ topic: "snapshot.refresh", businessId: "biz_1" }));
+  it("keeps a null that clears a field and leaves out a field that wasn't sent", () => {
+    // A body read without exactOptionalPropertyTypes can still carry an undefined field.
+    const patch = { voiceInstructions: null, smsInstructions: undefined, summary: undefined } as unknown as Parameters<typeof splitReceptionistPatch>[0];
+    expect(splitReceptionistPatch(patch)).toEqual({ shared: {}, own: { voiceInstructions: null } });
   });
 
-  it("marks a written summary as the business's own", async () => {
-    const { tx, recorded } = upsert({ id: "profile_1", updatedAt: savedAt });
-    await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: { summary: "Maple cuts hair." } });
-    expect(recorded.values).toMatchObject({ summary: "Maple cuts hair.", summarySource: "operator" });
-    expect(recorded.set).toMatchObject({ summary: "Maple cuts hair.", summarySource: "operator" });
+  it("splits an empty change into two empty ones", () => {
+    expect(splitReceptionistPatch({})).toEqual({ shared: {}, own: {} });
   });
 
-  it("hands the summary back to AI and queues the rewrite", async () => {
-    const { tx, recorded } = upsert({ id: "profile_1", updatedAt: savedAt });
-    await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: {}, regenerateSummary: true });
-    expect(recorded.set).toMatchObject({ summarySource: "generated" });
-    expect(mocks.enqueueOutbox).toHaveBeenLastCalledWith(tx, expect.objectContaining({ topic: "business.generateSummary", businessId: "biz_1", payload: { businessId: "biz_1", reason: "operator_regenerate", force: true } }));
-  });
-
-  it("returns null and queues nothing when nothing was saved", async () => {
-    const { tx } = upsert(null);
-    expect(await saveReceptionistProfileInTransaction(tx, { businessId: "biz_1", businessName: "Maple", patch: { tone: "warm" } })).toBeNull();
-    expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
+  it("shares only what the design moves to the business", () => {
+    expect(sharedReceptionistFields).toEqual(["summary", "recordingNotice", "appointmentChangePolicy"]);
   });
 });

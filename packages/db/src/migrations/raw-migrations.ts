@@ -136,6 +136,14 @@ export const SCHEMA_MIGRATIONS = [
   "0130_business_cancellation.sql",
   "0131_unanswered_questions.sql",
   "0132_conversation_archiving.sql",
+  "0133_receptionists.sql",
+  "0134_billing_receptionists.sql",
+  "0135_knowledge_documents_business_key.sql",
+  "0136_knowledge_audience.sql",
+  "0137_receptionist_entry_points.sql",
+  "0138_calls_receptionist_index.sql",
+  "0139_conversations_receptionist_index.sql",
+  "0140_entry_links.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

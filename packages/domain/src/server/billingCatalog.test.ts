@@ -173,6 +173,31 @@ describe("billing catalog diff", () => {
     expect(summary(removed.writes)).toEqual(["retire billing_plans pro-launch", "retire billing_prices pro-launch/monthly/cad"]);
   });
 
+  it("changes a plan's receptionists without touching its terms, flagging fewer, even on a plan with subscribers", () => {
+    const before = profile();
+    const current = stored(desiredBillingPlans(before), () => "active");
+    current.plans.find((plan) => plan.code === "pro")!.frozen_at = earlier;
+    const fewer = diff(profile((file) => { file.plans.pro.limits.receptionists = 3; }), current);
+    expect(fewer.refusals).toEqual([]);
+    expect(summary(fewer.writes)).toEqual(["update billing_plans pro"]);
+    expect(fewer.writes[0]!.change).toMatchObject({ lowers_allowance: true, raises_price: false, fields: { receptionists: { from: 5, to: 3 } } });
+    // Polar never sees the number: the plan stays active and its terms hash stays.
+    expect(Object.keys(fewer.writes[0]!.change.fields)).toEqual(["receptionists"]);
+    expect(fewer.writes[0]!.set).toEqual({ receptionists: 3 });
+    const more = diff(profile((file) => { file.plans.starter.limits.receptionists = 2; }), current);
+    expect(more.writes[0]!.change).toMatchObject({ key: "starter", lowers_allowance: false, fields: { receptionists: { from: 1, to: 2 } } });
+  });
+
+  it("fills receptionists on rows applied before the column, from the file or the tier", () => {
+    const file = profile();
+    const current = stored(desiredBillingPlans(file), () => "active");
+    for (const plan of current.plans) plan.receptionists = null;
+    const { writes, refusals } = diff(file, current);
+    expect(refusals).toEqual([]);
+    expect(writes.map((write) => [write.change.key, write.set])).toEqual([["free_cloud", { receptionists: 1 }], ["pro", { receptionists: 5 }], ["starter", { receptionists: 1 }]]);
+    expect(writes.every((write) => !write.change.lowers_allowance)).toBe(true);
+  });
+
   it("never matches, changes or retires a plan made through the API, and refuses a file plan with its code", () => {
     const current = stored(desiredBillingPlans(profile((file) => { file.plans["pro-launch"] = proLaunch; })));
     current.plans.find((plan) => plan.code === "pro-launch")!.src = "api";

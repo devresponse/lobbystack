@@ -12,6 +12,7 @@ import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimBillingSub
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationFailed, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { CALL_TRANSCRIPT_EVENT, loadCallTranscriptEmail } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
+import { enforceReceptionistAllowance } from "@lobbystack/domain";
 import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
@@ -423,6 +424,12 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       // A changed opening is recorded before the business's next phone call.
       await keepOpeningAhead(dependencies, businessId);
       return { status: "completed", entityId: version };
+    }
+    case "receptionists.enforceAllowance": {
+      // A plan change paused the newest receptionists past the plan's number.
+      const businessId = businessIdOrThrow(job);
+      const paused = await enforceReceptionistAllowance(dependencies.domain, { businessId });
+      return { status: paused.length ? "completed" : "skipped", entityId: String(paused.length) };
     }
     case "business.generateSummary":
       return await generateBusinessSummary(dependencies, { businessId: businessIdOrThrow(job), force: job.payload.force === true });

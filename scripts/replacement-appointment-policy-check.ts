@@ -10,7 +10,9 @@ const policy = { enabled: true, allowCancel: true, allowReschedule: true, verifi
 const scoped = <T>(run: Parameters<typeof withBusinessTransaction<T>>[2]) => withBusinessTransaction(worker.db, { businessId, actorType: "worker" }, run);
 try {
   await scoped(async (tx) => {
-    await tx.insert(businesses).values({ id: businessId, slug: `policy-${businessId}`, name: "Policy certification", timezone: "UTC", businessType: "clinic" });
+    // The business keeps the appointment change rules every receptionist shares; the
+    // default receptionist's row keeps a copy for the release before receptionists.
+    await tx.insert(businesses).values({ id: businessId, slug: `policy-${businessId}`, name: "Policy certification", timezone: "UTC", businessType: "clinic", appointmentChangePolicy: policy });
     await tx.insert(contacts).values({ id: contactId, businessId, phone: callerPhone, name: "Alex Morgan" });
     await tx.insert(services).values({ id: serviceId, businessId, name: "Dental exam", slug: "dental-exam", durationMinutes: 30, localizedNames: { fr: "Examen dentaire" } });
     await tx.insert(staff).values({ id: staffId, businessId, name: "Provider", timezone: "UTC" });
@@ -24,12 +26,12 @@ try {
   assert(await createAppointmentChangeVerification({ db: worker.db }, { ...input, serviceName: "Haircut" }) === null, "Wrong appointment fact was accepted.");
   const verified = await createAppointmentChangeVerification({ db: worker.db }, input);
   assert(verified?.status === "facts_verified", "Facts were not distinguished from OTP verification.");
-  await scoped(async (tx) => tx.update(receptionistProfiles).set({ appointmentChangePolicy: { ...policy, verificationMode: "otp_required" } }).where(eq(receptionistProfiles.businessId, businessId)));
+  await scoped(async (tx) => tx.update(businesses).set({ appointmentChangePolicy: { ...policy, verificationMode: "otp_required" } }).where(eq(businesses.id, businessId)));
   assert(await cancelAppointmentForCaller({ db: worker.db }, { ...input, verificationId: verified.verificationId }) === null, "A stricter OTP policy accepted earlier facts verification.");
-  await scoped(async (tx) => tx.update(receptionistProfiles).set({ appointmentChangePolicy: { ...policy, allowCancel: false } }).where(eq(receptionistProfiles.businessId, businessId)));
+  await scoped(async (tx) => tx.update(businesses).set({ appointmentChangePolicy: { ...policy, allowCancel: false } }).where(eq(businesses.id, businessId)));
   assert(await createAppointmentChangeVerification({ db: worker.db }, input) === null, "Disabled cancellation issued a verification.");
   assert(await cancelAppointmentForCaller({ db: worker.db }, { ...input, verificationId: verified.verificationId }) === null, "Disabled cancellation accepted an earlier verification.");
-  await scoped(async (tx) => tx.update(receptionistProfiles).set({ appointmentChangePolicy: policy }).where(eq(receptionistProfiles.businessId, businessId)));
+  await scoped(async (tx) => tx.update(businesses).set({ appointmentChangePolicy: policy }).where(eq(businesses.id, businessId)));
   const { appointmentId: _id, ...withoutId } = input;
   const resolved = await createAppointmentChangeVerification({ db: worker.db }, withoutId);
   assert(resolved?.appointmentId === appointmentId, "Caller facts could not resolve the appointment without an internal ID.");

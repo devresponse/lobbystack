@@ -902,7 +902,7 @@ describe("worker handlers", () => {
     });
 
     it("sells through the catalog's linked products once a link made the plan active, and reads Polar's product through them", async () => {
-      const linked = (code: "starter" | "pro") => ({ code, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 0 });
+      const linked = (code: "starter" | "pro") => ({ code, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, receptionists: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 0 });
       const price = (plan: "starter" | "pro", period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier: plan, status: "active", period, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired });
       const catalog = { plans: [linked("starter"), linked("pro")], prices: [price("starter", "monthly", "catalog-starter-monthly"), price("starter", "annual", "catalog-starter-annual"), price("pro", "annual", "catalog-pro-annual"), price("pro", "annual", "old-pro-annual", true)] };
       const links = async () => polarProductLinks(catalog, process.env);

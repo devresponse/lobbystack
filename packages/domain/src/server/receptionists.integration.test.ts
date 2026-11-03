@@ -1,0 +1,463 @@
+import { randomUUID } from "node:crypto";
+
+import { and, asc, eq, sql } from "drizzle-orm";
+import { afterAll, describe, expect, it } from "vitest";
+import {
+  auditLogs,
+  billingAccounts,
+  businesses,
+  calls,
+  conversations,
+  createDatabaseClient,
+  entryLinks,
+  inboxItems,
+  outboxMessages,
+  phoneNumbers,
+  receptionistProfiles,
+  rlsContextStatement,
+  users,
+  widgetKeys,
+  type Database,
+  type DatabaseTransaction,
+} from "@lobbystack/db";
+import { defaultAppointmentChangePolicy } from "@lobbystack/shared";
+
+import { endManagedPlanInTransaction, setManagedPlanInTransaction } from "./billing";
+import { loadReceptionistView, saveReceptionistProfileInTransaction } from "./receptionistProfile";
+import {
+  archiveReceptionistInTransaction,
+  createReceptionistInTransaction,
+  enforceReceptionistAllowance,
+  listReceptionistChoicesInTransaction,
+  listReceptionistsInTransaction,
+  makeDefaultReceptionistInTransaction,
+  receptionistAllowanceInTransaction,
+  reorderReceptionistsInTransaction,
+  restoreReceptionistInTransaction,
+  setReceptionistStatusInTransaction,
+  updateReceptionistInTransaction,
+} from "./receptionists";
+import { createBusiness, updateBusinessInTransaction } from "./tenancy";
+
+// Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
+const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
+if (testUrl) {
+  const url = new URL(testUrl);
+  if (process.env.NODE_ENV === "production" || !["localhost", "127.0.0.1", "::1", "[::1]"].includes(url.hostname) || !/test/i.test(url.pathname)) {
+    throw new Error("Receptionist integration tests require a dedicated local test database.");
+  }
+}
+const client = testUrl ? createDatabaseClient("lobbystack_migrator", { DATABASE_URL: testUrl }) : undefined;
+afterAll(async () => { await client?.pool.end(); });
+
+// A cap of 4 keeps the cap's own refusal within reach of a test.
+const env = { MAX_RECEPTIONISTS_PER_BUSINESS: "4" };
+
+async function rollbackTest(run: (tx: DatabaseTransaction) => Promise<void>) {
+  const rollback = new Error("rollback test fixture");
+  await expect(client!.db.transaction(async (tx) => {
+    await run(tx);
+    throw rollback;
+  })).rejects.toBe(rollback);
+}
+
+async function as(tx: DatabaseTransaction, role: "lobbystack_app" | "lobbystack_worker" | null) {
+  await tx.execute(sql`reset role`);
+  if (role) await tx.execute(sql.raw(`set local role ${role}`));
+}
+
+/** Acts as the business's owner in the dashboard: the app role under the business's row level security. */
+async function asOwner(tx: DatabaseTransaction, input: { userId: string; businessId: string }) {
+  await as(tx, "lobbystack_app");
+  await tx.execute(rlsContextStatement({ userId: input.userId, businessId: input.businessId, actorType: "operator" }));
+}
+
+/** Runs a step that should fail in a savepoint, so the transaction goes on after it. */
+async function failure(tx: DatabaseTransaction, run: (inner: DatabaseTransaction) => Promise<unknown>): Promise<unknown> {
+  return await tx.transaction(async (inner) => { await run(inner); }).then(() => null, (error: unknown) => error);
+}
+
+async function seedBusiness(tx: DatabaseTransaction, input: { name?: string; locale?: string } = {}) {
+  const userId = randomUUID();
+  await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: "Riley Owner" });
+  await as(tx, "lobbystack_app");
+  const context = { db: tx as unknown as Database };
+  const { businessId } = await createBusiness(context, { userId, name: input.name ?? "Kitsilano Coffee", timezone: "America/Vancouver", businessType: "restaurant", deploymentMode: "cloud" });
+  await as(tx, null);
+  if (input.locale) await tx.update(businesses).set({ defaultLocale: input.locale }).where(eq(businesses.id, businessId));
+  return { context, userId, businessId };
+}
+
+/** Puts the business on a live plan, as Polar's webhook leaves the account. */
+async function putOnPlan(tx: DatabaseTransaction, businessId: string, plan: "starter" | "pro") {
+  await as(tx, null);
+  await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, plan, subscriptionState: "active", source: "polar" })
+    .onConflictDoUpdate({ target: billingAccounts.businessId, set: { plan, subscriptionState: "active" } });
+}
+
+async function defaultRow(tx: DatabaseTransaction, businessId: string) {
+  const [row] = await tx.select().from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)));
+  return row!;
+}
+
+describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
+  it("gives a new business one default receptionist named in its language, with the shared settings on the business", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await as(tx, null);
+      const rows = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+      expect(rows).toHaveLength(1);
+      expect(rows[0]).toMatchObject({ name: "Front desk", isDefault: true, status: "active", archivedAt: null, handle: null, knowledgeScope: "all", listed: true });
+      const [business] = await tx.select().from(businesses).where(eq(businesses.id, businessId));
+      expect(business).toMatchObject({ summary: "Kitsilano Coffee", summarySource: "placeholder", recordingNotice: true, appointmentChangePolicy: defaultAppointmentChangePolicy });
+
+      // An untouched default name follows the business's language; a name someone chose stays.
+      await asOwner(tx, { userId, businessId });
+      await updateBusinessInTransaction(tx, { businessId, defaultLocale: "fr" });
+      await as(tx, null);
+      expect((await defaultRow(tx, businessId)).name).toBe("Accueil");
+      await tx.update(receptionistProfiles).set({ name: "Main counter" }).where(eq(receptionistProfiles.businessId, businessId));
+      await asOwner(tx, { userId, businessId });
+      await updateBusinessInTransaction(tx, { businessId, defaultLocale: "es" });
+      await as(tx, null);
+      expect((await defaultRow(tx, businessId)).name).toBe("Main counter");
+    });
+  });
+
+  it("saves shared settings on the business and the default's copy, and each receptionist's own settings on its row", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Gastown store", description: "Orders and hours at Gastown" } });
+      expect(store).toMatchObject({ isDefault: false, handle: "gastown-store", knowledgeScope: "audience", status: "active" });
+
+      // The default receptionist's own greeting and the business's summary.
+      const saved = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { greeting: "Hi, Kitsilano Coffee.", summary: "Coffee and pastries.", recordingNotice: false } });
+      expect(saved).toMatchObject({ isDefault: true, greeting: "Hi, Kitsilano Coffee.", summary: "Coffee and pastries.", summarySource: "operator", recordingNotice: false });
+      // The store's own greeting, which leaves the default's alone; the store reads the shared summary.
+      const storeSaved = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", receptionistId: store.id, patch: { greeting: "Gastown store, hello!", transferMode: "never" } });
+      expect(storeSaved).toMatchObject({ id: store.id, greeting: "Gastown store, hello!", transferMode: "never", summary: "Coffee and pastries.", recordingNotice: false });
+
+      await as(tx, null);
+      const [business] = await tx.select().from(businesses).where(eq(businesses.id, businessId));
+      expect(business).toMatchObject({ summary: "Coffee and pastries.", summarySource: "operator", recordingNotice: false });
+      const main = await defaultRow(tx, businessId);
+      expect(main).toMatchObject({ greeting: "Hi, Kitsilano Coffee.", summary: "Coffee and pastries.", summarySource: "operator", recordingNotice: false, transferMode: "on_request" });
+
+      // A shared setting saved while editing the store still reaches the business and the default's copy.
+      await asOwner(tx, { userId, businessId });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", receptionistId: store.id, patch: { appointmentChangePolicy: { ...defaultAppointmentChangePolicy, allowCancel: false } } });
+      await as(tx, null);
+      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]?.appointmentChangePolicy).toMatchObject({ allowCancel: false });
+      expect((await defaultRow(tx, businessId)).appointmentChangePolicy).toMatchObject({ allowCancel: false });
+      expect((await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.id, store.id)))[0]?.greeting).toBe("Gastown store, hello!");
+
+      // Regenerating hands the summary back to AI and queues the rewrite.
+      await asOwner(tx, { userId, businessId });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: {}, regenerateSummary: true });
+      await as(tx, null);
+      expect((await tx.select({ source: businesses.summarySource }).from(businesses).where(eq(businesses.id, businessId)))[0]?.source).toBe("generated");
+      const topics = (await tx.select({ topic: outboxMessages.topic }).from(outboxMessages).where(eq(outboxMessages.businessId, businessId))).map((row) => row.topic);
+      expect(topics).toContain("business.generateSummary");
+      expect(topics).toContain("snapshot.refresh");
+
+      // An archived receptionist can't be edited.
+      await asOwner(tx, { userId, businessId });
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id });
+      expect(await failure(tx, (inner) => saveReceptionistProfileInTransaction(inner, { businessId, businessName: "Kitsilano Coffee", receptionistId: store.id, patch: { tone: "warm" } }))).toMatchObject({ status: 404 });
+    });
+  });
+
+  it("mirrors the default row's shared settings to the business when the previous release writes them there", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId } = await seedBusiness(tx);
+      // The code before receptionists updates the one profile row by business.
+      await as(tx, "lobbystack_app");
+      await tx.execute(rlsContextStatement({ businessId, actorType: "system" }));
+      await tx.update(receptionistProfiles).set({ summary: "Written by the old release.", summarySource: "operator", recordingNotice: false }).where(eq(receptionistProfiles.businessId, businessId));
+      await as(tx, null);
+      expect((await tx.select().from(businesses).where(eq(businesses.id, businessId)))[0]).toMatchObject({ summary: "Written by the old release.", summarySource: "operator", recordingNotice: false });
+    });
+  });
+
+  it("creates the default receptionist from the defaults for a business without one, and saves nothing for a business it can't see", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx, { locale: "es" });
+      await as(tx, null);
+      await tx.delete(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+      await tx.update(businesses).set({ summary: "", summarySource: "placeholder" }).where(eq(businesses.id, businessId));
+      await asOwner(tx, { userId, businessId });
+      const created = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { tone: "warm" } });
+      expect(created).toMatchObject({ isDefault: true, name: "Recepción", tone: "warm", greeting: "Thank you for calling Kitsilano Coffee.", summary: "Kitsilano Coffee", summarySource: "placeholder", transferMode: "on_request", bookingMode: "instant", appointmentChangePolicy: defaultAppointmentChangePolicy });
+      // The copy trigger gives the business the placeholder summary too.
+      await as(tx, null);
+      expect((await tx.select({ summary: businesses.summary }).from(businesses).where(eq(businesses.id, businessId)))[0]?.summary).toBe("Kitsilano Coffee");
+      const refreshes = await tx.select({ aggregateId: outboxMessages.aggregateId }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateType, "receptionist_profile")));
+      expect(refreshes.map((row) => row.aggregateId)).toEqual([created!.id]);
+
+      // Under another business's context the business is out of sight: nothing is saved or queued.
+      const other = await seedBusiness(tx, { name: "Other Shop" });
+      await asOwner(tx, other);
+      expect(await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { tone: "curt" } })).toBeNull();
+      await as(tx, null);
+      expect((await defaultRow(tx, businessId)).tone).toBe("warm");
+      expect(await tx.select().from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "snapshot.refresh"), eq(outboxMessages.aggregateType, "receptionist_profile")))).toHaveLength(1);
+    });
+  });
+
+  it("holds Free and Starter to one receptionist and Pro to five, counting active ones only", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await asOwner(tx, { userId, businessId });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env })).toMatchObject({ plan: "free_cloud", limit: 1, active: 1, current: 1, canAdd: false });
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Second" }, env }))).toMatchObject({ status: 409, code: "receptionist_limit" });
+
+      await putOnPlan(tx, businessId, "starter");
+      await asOwner(tx, { userId, businessId });
+      expect((await receptionistAllowanceInTransaction(tx, { businessId, env })).limit).toBe(1);
+
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const proEnv = { MAX_RECEPTIONISTS_PER_BUSINESS: "50" };
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: proEnv })).toMatchObject({ plan: "pro", limit: 5, canAdd: true });
+      const added: Array<Awaited<ReturnType<typeof createReceptionistInTransaction>>> = [];
+      for (const name of ["Kitsilano", "Gastown", "Yaletown", "Main Street"]) added.push(await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env: proEnv }));
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Sixth" }, env: proEnv }))).toMatchObject({ status: 409, code: "receptionist_limit" });
+      // A paused receptionist frees its place, and resuming it needs one.
+      await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: added[0]!.id, status: "paused", env: proEnv });
+      const sixth = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Sixth" }, env: proEnv });
+      expect(await failure(tx, (inner) => setReceptionistStatusInTransaction(inner, { businessId, actorUserId: userId, receptionistId: added[0]!.id, status: "active", env: proEnv }))).toMatchObject({ status: 409, code: "receptionist_limit" });
+      expect(sixth.status).toBe("active");
+
+      // The deployment's cap bounds receptionists that aren't archived, paused ones included.
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Seventh" }, env }))).toMatchObject({ status: 409, code: "receptionist_cap" });
+    });
+  });
+
+  it("gives each new receptionist a free page address, copies settings, and refuses a taken address", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { greeting: "Welcome to Kitsilano Coffee.", bookingMode: "request" } });
+      const first = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Café Gastown" } });
+      const second = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Cafe Gastown", locale: "fr", listed: false, knowledgeScope: "all" } });
+      expect(first).toMatchObject({ handle: "cafe-gastown", greeting: "Welcome to Kitsilano Coffee.", bookingMode: "request", sortOrder: 1 });
+      expect(second).toMatchObject({ handle: "cafe-gastown-2", locale: "fr", listed: false, knowledgeScope: "all", sortOrder: 2 });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", receptionistId: first.id, patch: { greeting: "Gastown here." } });
+      const copy = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Gastown evenings", handle: "evenings", copyFromId: first.id } });
+      expect(copy).toMatchObject({ handle: "evenings", greeting: "Gastown here." });
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Clash", handle: "evenings" } }))).toMatchObject({ status: 409, code: "handle_taken" });
+      expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: second.id, patch: { handle: "cafe-gastown" } }))).toMatchObject({ status: 409, code: "handle_taken" });
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Ghost", copyFromId: randomUUID() } }))).toMatchObject({ status: 404 });
+
+      const renamed = await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: second.id, patch: { name: "Gastown (French)", handle: "gastown-fr", description: "En français", listed: true } });
+      expect(renamed).toMatchObject({ name: "Gastown (French)", handle: "gastown-fr", description: "En français", listed: true });
+      const main = await loadReceptionistView(tx, { businessId });
+      expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main!.id, patch: { listed: false } }))).toMatchObject({ status: 409, code: "default_receptionist" });
+
+      await as(tx, null);
+      const events = await tx.select({ eventType: auditLogs.eventType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.entityType, "receptionist"))).orderBy(asc(auditLogs.createdAt));
+      expect(events.map((event) => event.eventType)).toEqual(["receptionist.created", "receptionist.created", "receptionist.created", "receptionist.updated"]);
+      expect(events[3]?.payload).toEqual({ fields: ["description", "handle", "listed", "name"] });
+    });
+  });
+
+  it("pauses, archives and restores receptionists, never the default, and lists them in order", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const main = (await loadReceptionistView(tx, { businessId }))!;
+      const a = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Bakery counter", description: "Cakes and custom orders" } });
+      const b = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Catering" } });
+      const c = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Après-ski bar" } });
+
+      expect(await failure(tx, (inner) => setReceptionistStatusInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main.id, status: "paused" }))).toMatchObject({ status: 409, code: "default_receptionist" });
+      expect(await failure(tx, (inner) => archiveReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main.id }))).toMatchObject({ status: 409, code: "default_receptionist" });
+
+      await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: b.id, status: "paused" });
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: c.id });
+      expect((await listReceptionistChoicesInTransaction(tx, { businessId })).map((choice) => [choice.name, choice.status])).toEqual([["Front desk", "active"], ["Bakery counter", "active"], ["Catering", "paused"]]);
+
+      // The order: every receptionist that isn't archived, once each; the default stays first in lists.
+      await reorderReceptionistsInTransaction(tx, { businessId, receptionistIds: [b.id, a.id, main.id] });
+      expect((await listReceptionistChoicesInTransaction(tx, { businessId })).map((choice) => choice.name)).toEqual(["Front desk", "Catering", "Bakery counter"]);
+      expect(await failure(tx, (inner) => reorderReceptionistsInTransaction(inner, { businessId, receptionistIds: [a.id, main.id] }))).toMatchObject({ status: 400, code: "invalid_order" });
+      expect(await failure(tx, (inner) => reorderReceptionistsInTransaction(inner, { businessId, receptionistIds: [a.id, b.id, c.id] }))).toMatchObject({ status: 400, code: "invalid_order" });
+
+      // The page: search, status and the archived view, with counts whatever the filters.
+      const page = await listReceptionistsInTransaction(tx, { businessId, search: "custom" });
+      expect(page.receptionists.map((row) => row.name)).toEqual(["Bakery counter"]);
+      expect(page.counts).toEqual({ active: 2, paused: 1, archived: 1 });
+      expect((await listReceptionistsInTransaction(tx, { businessId, status: "paused" })).receptionists.map((row) => row.name)).toEqual(["Catering"]);
+      expect((await listReceptionistsInTransaction(tx, { businessId, view: "archived" })).receptionists.map((row) => row.name)).toEqual(["Après-ski bar"]);
+      expect((await listReceptionistsInTransaction(tx, { businessId, search: "100%_" })).total).toBe(0);
+      const paged = await listReceptionistsInTransaction(tx, { businessId, pageSize: 2, page: 2 });
+      expect(paged).toMatchObject({ total: 3, page: 2, pageSize: 2 });
+      expect(paged.receptionists.map((row) => row.name)).toEqual(["Bakery counter"]);
+
+      // Another receptionist takes the archived one's address; it comes back with a numbered one.
+      await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: a.id, patch: { handle: "apres-ski-bar" } });
+      const restored = await restoreReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: c.id });
+      expect(restored).toMatchObject({ archivedAt: null, status: "active", handle: "apres-ski-bar-2", sortOrder: 4 });
+      expect(await failure(tx, (inner) => restoreReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: c.id }))).toMatchObject({ status: 404 });
+    });
+  });
+
+  it("restores a receptionist paused when the plan has no room for it", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const extra = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Patio" } });
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: extra.id });
+      await putOnPlan(tx, businessId, "starter");
+      await asOwner(tx, { userId, businessId });
+      expect(await restoreReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: extra.id })).toMatchObject({ status: "paused", archivedAt: null });
+    });
+  });
+
+  it("makes another receptionist the default, which keeps the shared settings mirrored", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { summary: "Coffee since 1999." } });
+      const before = (await loadReceptionistView(tx, { businessId }))!;
+      const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Flagship", listed: false } });
+      await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "paused" });
+      expect(await failure(tx, (inner) => makeDefaultReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: store.id }))).toMatchObject({ status: 409, code: "receptionist_paused" });
+      await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "active" });
+
+      const made = await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id });
+      expect(made).toMatchObject({ id: store.id, isDefault: true, listed: true, summary: "Coffee since 1999." });
+      await as(tx, null);
+      const previous = (await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.id, before.id)))[0];
+      expect(previous).toMatchObject({ isDefault: false, handle: "front-desk" });
+      // The new default's row holds the shared settings, and later saves keep both sides equal.
+      expect((await defaultRow(tx, businessId))).toMatchObject({ id: store.id, summary: "Coffee since 1999.", summarySource: "operator" });
+      await asOwner(tx, { userId, businessId });
+      await saveReceptionistProfileInTransaction(tx, { businessId, businessName: "Kitsilano Coffee", patch: { recordingNotice: false } });
+      await as(tx, null);
+      const mismatched = await tx.execute(sql`
+        select b.id from businesses b join receptionist_profiles r on r.business_id = b.id and r.is_default
+        where b.id = ${businessId}::uuid and (b.summary is distinct from r.summary or b.recording_notice is distinct from r.recording_notice or b.appointment_change_policy is distinct from r.appointment_change_policy)`);
+      expect(mismatched.rows).toEqual([]);
+      const [event] = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.default_changed")));
+      expect(event?.payload).toEqual({ from: before.id, to: store.id });
+      // Making the default the default changes nothing.
+      await asOwner(tx, { userId, businessId });
+      expect(await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id })).toMatchObject({ id: store.id, isDefault: true });
+    });
+  });
+
+  it("pauses the newest receptionists past a lower plan's number, the default never", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, userId } = await seedBusiness(tx);
+      await asOwner(tx, { userId, businessId });
+      await as(tx, null);
+      await tx.execute(rlsContextStatement({ businessId, actorType: "system" }));
+      expect(await setManagedPlanInTransaction(tx, { businessId })).toBe("set");
+      await asOwner(tx, { userId, businessId });
+      const first = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Older" }, env });
+      const second = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Newer" }, env });
+      await tx.update(receptionistProfiles).set({ createdAt: new Date(Date.now() - 60_000) }).where(eq(receptionistProfiles.id, first.id));
+
+      await as(tx, null);
+      await tx.execute(rlsContextStatement({ businessId, actorType: "system" }));
+      expect(await endManagedPlanInTransaction(tx, { businessId })).toBe(true);
+      // Ending the plan queues the check; the worker runs it.
+      expect((await tx.select({ topic: outboxMessages.topic }).from(outboxMessages).where(eq(outboxMessages.businessId, businessId))).map((row) => row.topic)).toContain("receptionists.enforceAllowance");
+      await as(tx, "lobbystack_worker");
+      const paused = await enforceReceptionistAllowance(context, { businessId, env });
+      expect(paused.sort()).toEqual([first.id, second.id].sort());
+      await as(tx, null);
+      const rows = await tx.select({ name: receptionistProfiles.name, status: receptionistProfiles.status }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).orderBy(asc(receptionistProfiles.sortOrder));
+      expect(rows).toEqual([{ name: "Front desk", status: "active" }, { name: "Older", status: "paused" }, { name: "Newer", status: "paused" }]);
+      const reasons = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.paused")));
+      expect(reasons.map((row) => row.payload)).toEqual([{ reason: "plan_limit", plan: "free_cloud", limit: 1 }, { reason: "plan_limit", plan: "free_cloud", limit: 1 }]);
+      // Running it again finds nothing to pause.
+      await as(tx, "lobbystack_worker");
+      expect(await enforceReceptionistAllowance(context, { businessId, env })).toEqual([]);
+    });
+  });
+
+  it("names the default receptionist on rows the previous release writes, and counts entry points per receptionist", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const main = (await loadReceptionistView(tx, { businessId }))!;
+      const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Second store" } });
+
+      // Writers that name no receptionist get the default one.
+      await as(tx, "lobbystack_worker");
+      await tx.execute(rlsContextStatement({ businessId, actorType: "worker" }));
+      const [call] = await tx.insert(calls).values({ businessId, providerCallId: `call-${randomUUID()}`, transport: "sip", startedAt: new Date() }).returning({ receptionistId: calls.receptionistId });
+      const [conversation] = await tx.insert(conversations).values({ businessId, channel: "web_chat" }).returning({ receptionistId: conversations.receptionistId });
+      const [item] = await tx.insert(inboxItems).values({ businessId, kind: "callback", title: "Call back", body: "Asked for a call back." }).returning({ receptionistId: inboxItems.receptionistId });
+      expect([call?.receptionistId, conversation?.receptionistId, item?.receptionistId]).toEqual([main.id, main.id, main.id]);
+      // A writer that names one keeps it.
+      const [named] = await tx.insert(conversations).values({ businessId, channel: "web_chat", receptionistId: store.id }).returning({ receptionistId: conversations.receptionistId });
+      expect(named?.receptionistId).toBe(store.id);
+
+      await as(tx, null);
+      const [number] = await tx.insert(phoneNumbers).values({ businessId, e164: `+1555${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}` }).returning({ receptionistId: phoneNumbers.receptionistId });
+      expect(number?.receptionistId).toBe(main.id);
+      // A number from before receptionists names none, which counts for the default one.
+      await tx.insert(phoneNumbers).values({ businessId, e164: `+1556${Math.floor(Math.random() * 1e7).toString().padStart(7, "0")}`, status: "active" });
+      await tx.execute(sql`update phone_numbers set receptionist_id = null where business_id = ${businessId}::uuid and e164 like '+1556%'`);
+      await tx.insert(widgetKeys).values({ businessId, keyHash: `hash-${randomUUID()}`, receptionistId: store.id });
+      await tx.insert(entryLinks).values({ businessId, receptionistId: store.id, code: randomUUID().replace(/-/g, "").slice(0, 8) });
+
+      // A row can only name a receptionist of its own business.
+      const other = await seedBusiness(tx, { name: "Other Shop" });
+      const otherMain = await defaultRow(tx, other.businessId);
+      const crossed = await failure(tx, (inner) => inner.insert(conversations).values({ businessId, channel: "web_chat", receptionistId: otherMain.id }));
+      expect(crossed).toMatchObject({ cause: expect.objectContaining({ code: "23503" }) });
+
+      await asOwner(tx, { userId, businessId });
+      const page = await listReceptionistsInTransaction(tx, { businessId });
+      expect(page.receptionists.map((row) => [row.name, row.phoneNumbers, row.widgetKeys, row.entryLinks])).toEqual([["Front desk", 2, 0, 0], ["Second store", 0, 1, 1]]);
+    });
+  });
+
+  it("keeps each business's receptionists to its own team", async () => {
+    await rollbackTest(async (tx) => {
+      const first = await seedBusiness(tx, { name: "First Bakery" });
+      const second = await seedBusiness(tx, { name: "Second Bakery" });
+      const secondMain = await defaultRow(tx, second.businessId);
+      await asOwner(tx, first);
+      expect(await listReceptionistChoicesInTransaction(tx, { businessId: second.businessId })).toEqual([]);
+      expect(await loadReceptionistView(tx, { businessId: first.businessId, receptionistId: secondMain.id })).toBeNull();
+      expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId: first.businessId, actorUserId: first.userId, receptionistId: secondMain.id, patch: { name: "Taken over" } }))).toMatchObject({ status: 404 });
+      // Under the second business's context the first owner, who isn't on its team, reads nothing.
+      await as(tx, "lobbystack_app");
+      await tx.execute(rlsContextStatement({ userId: first.userId, businessId: second.businessId, actorType: "operator" }));
+      expect(await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, second.businessId))).toEqual([]);
+    });
+  });
+
+  it("deletes a business with several receptionists and everything that names them", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const a = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "A" } });
+      const b = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "B" } });
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: b.id });
+      await as(tx, null);
+      await tx.insert(calls).values({ businessId, providerCallId: `call-${randomUUID()}`, transport: "sip", startedAt: new Date(), receptionistId: a.id });
+      await tx.insert(conversations).values({ businessId, channel: "web_chat", receptionistId: b.id });
+      await tx.insert(widgetKeys).values({ businessId, keyHash: `hash-${randomUUID()}`, receptionistId: a.id });
+      await tx.insert(entryLinks).values({ businessId, receptionistId: b.id, code: randomUUID().replace(/-/g, "").slice(0, 8) });
+      // A receptionist that something names can't be deleted on its own: receptionists are archived.
+      expect(await failure(tx, (inner) => inner.delete(receptionistProfiles).where(eq(receptionistProfiles.id, a.id)))).toMatchObject({ cause: expect.objectContaining({ code: "23503" }) });
+      await tx.delete(businesses).where(eq(businesses.id, businessId));
+      expect(await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId))).toEqual([]);
+      expect(await tx.select().from(entryLinks).where(eq(entryLinks.businessId, businessId))).toEqual([]);
+    });
+  });
+});

@@ -2,7 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 
 import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
 
-import { appointmentChangeVerifications, appointments, auditLogs, businesses, contacts, enqueueOutbox, receptionistProfiles, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { appointmentChangeVerifications, appointments, auditLogs, businesses, contacts, enqueueOutbox, services, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { canTextNumber, normalizeAppointmentChangePolicy, type AppointmentChangeVerificationMode } from "@lobbystack/shared";
 
 import { appointmentTimesMatch, serviceNamesMatch, substantiveServiceNameFactMatches } from "./appointmentFacts";
@@ -43,8 +43,9 @@ export async function createAppointmentChangeVerification(
   input: { businessId: string; appointmentId?: string; callerPhone: string; action: "cancel" | "reschedule"; appointmentStartsAt?: string; serviceName?: string; callId?: string },
 ): Promise<{ verificationId: string; appointmentId: string; contactId: string; status: string; expiresAt: string; smsConsent: SmsConsentOnFile } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const profile = (await tx.select({ policy: receptionistProfiles.appointmentChangePolicy }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1))[0];
-    const policy = normalizeAppointmentChangePolicy(profile?.policy);
+    // The rules are the business's, shared by every receptionist.
+    const business = (await tx.select({ policy: businesses.appointmentChangePolicy }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1))[0];
+    const policy = normalizeAppointmentChangePolicy(business?.policy);
     if (!policy.enabled || policy.verificationMode === "operator_only" || (input.action === "cancel" ? !policy.allowCancel : !policy.allowReschedule)) return null;
     if (!input.appointmentStartsAt?.trim() && !input.serviceName?.trim()) return null;
     // The caller's number and the appointment's time or service identify the
@@ -267,8 +268,9 @@ export async function consumeAppointmentChangeVerificationInTransaction(
   tx: DatabaseTransaction,
   input: { businessId: string; verificationId: string; appointmentId: string; callerPhone: string; action: "cancel" | "reschedule" },
 ): Promise<boolean> {
-  const profile = (await tx.select({ policy: receptionistProfiles.appointmentChangePolicy }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1).for("share"))[0];
-  const policy = normalizeAppointmentChangePolicy(profile?.policy);
+  // A change to the rules waits for this transaction, which holds them.
+  const business = (await tx.select({ policy: businesses.appointmentChangePolicy }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1).for("share"))[0];
+  const policy = normalizeAppointmentChangePolicy(business?.policy);
   if (!policy.enabled || policy.verificationMode === "operator_only" || (input.action === "cancel" ? !policy.allowCancel : !policy.allowReschedule)) return false;
   const rows = await tx.update(appointmentChangeVerifications).set({ status: "used", updatedAt: new Date() }).where(and(eq(appointmentChangeVerifications.id, input.verificationId), eq(appointmentChangeVerifications.businessId, input.businessId), eq(appointmentChangeVerifications.appointmentId, input.appointmentId), eq(appointmentChangeVerifications.callerPhone, input.callerPhone), eq(appointmentChangeVerifications.action, input.action), inArray(appointmentChangeVerifications.status, VERIFIED_STATUSES[policy.verificationMode]), gt(appointmentChangeVerifications.expiresAt, new Date()))).returning({ id: appointmentChangeVerifications.id });
   if (rows.length > 0) await auditAppointmentChange(tx, { businessId: input.businessId, appointmentId: input.appointmentId, verificationId: input.verificationId, eventType: "appointment_change.verification_consumed", payload: { action: input.action } });

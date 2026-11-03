@@ -3,12 +3,15 @@ import { createHash } from "node:crypto";
 import { and, asc, desc, eq, inArray, lt, ne, sql } from "drizzle-orm";
 
 import { countKnowledgeTokens } from "../knowledgeRanking";
-import { businesses, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { businesses, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import type { DomainContext } from "./context";
+import { copySharedSettingsToDefaultReceptionist } from "./receptionistProfile";
 
 // The worker writes the business summary with AI from the business's knowledge
-// sources: its text entries, uploaded documents and website pages. Knowledge
+// sources: its text entries, uploaded documents and website pages. The
+// summary is the business's, shared by every receptionist, so it is written
+// from the articles for everyone only. Knowledge
 // often changes in bursts (a website import indexes up to 50 pages), so a
 // change schedules one regeneration a few minutes later instead of one per
 // page. All changes inside the same five-minute window share one job.
@@ -51,9 +54,8 @@ export type BusinessSummaryInput = {
 /** The knowledge to summarize: text entries first, then the start of each indexed document, within a token budget. */
 export async function loadBusinessSummaryInput(context: DomainContext, input: { businessId: string }): Promise<BusinessSummaryInput | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const [business] = await tx.select({ name: businesses.name, defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
-    const [profile] = await tx.select({ summarySource: receptionistProfiles.summarySource, summaryFingerprint: receptionistProfiles.summaryFingerprint }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, input.businessId)).limit(1);
-    if (!business || !profile) return null;
+    const [business] = await tx.select({ name: businesses.name, defaultLocale: businesses.defaultLocale, summarySource: businesses.summarySource, summaryFingerprint: businesses.summaryFingerprint }).from(businesses).where(eq(businesses.id, input.businessId)).limit(1);
+    if (!business) return null;
     const snippets = await tx.select({ title: knowledgeSnippets.title, content: knowledgeSnippets.content }).from(knowledgeSnippets)
       .where(and(eq(knowledgeSnippets.businessId, input.businessId), eq(knowledgeSnippets.active, true)))
       .orderBy(desc(knowledgeSnippets.priority), asc(knowledgeSnippets.createdAt)).limit(SUMMARY_MAX_SNIPPETS);
@@ -83,9 +85,9 @@ export async function loadBusinessSummaryInput(context: DomainContext, input: { 
     return {
       businessName: business.name,
       locale: business.defaultLocale,
-      summarySource: profile.summarySource,
+      summarySource: business.summarySource,
       fingerprint,
-      currentFingerprint: profile.summaryFingerprint,
+      currentFingerprint: business.summaryFingerprint,
       sources,
     };
   });
@@ -97,16 +99,18 @@ export async function loadBusinessSummaryInput(context: DomainContext, input: { 
  */
 export async function resetGeneratedBusinessSummary(context: DomainContext, input: { businessId: string; businessName: string }): Promise<boolean> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const updated = await tx.update(receptionistProfiles)
-      .set({ summary: input.businessName.trim(), summarySource: "placeholder", summaryFingerprint: null, summaryGeneratedAt: null, updatedAt: new Date() })
-      .where(and(eq(receptionistProfiles.businessId, input.businessId), eq(receptionistProfiles.summarySource, "generated")))
-      .returning({ id: receptionistProfiles.id });
+    const values = { summary: input.businessName.trim(), summarySource: "placeholder" as const, summaryFingerprint: null, summaryGeneratedAt: null };
+    const updated = await tx.update(businesses)
+      .set({ ...values, updatedAt: new Date() })
+      .where(and(eq(businesses.id, input.businessId), eq(businesses.summarySource, "generated")))
+      .returning({ id: businesses.id });
     if (!updated[0]) return false;
+    await copySharedSettingsToDefaultReceptionist(tx, input.businessId, values);
     await enqueueOutbox(tx, {
       topic: "snapshot.refresh",
       businessId: input.businessId,
-      aggregateType: "receptionist_profile",
-      aggregateId: updated[0].id,
+      aggregateType: "business",
+      aggregateId: input.businessId,
       dedupeKey: `business-summary:${input.businessId}:snapshot:reset:${Date.now()}`,
       payload: { businessId: input.businessId, reason: "summary_reset" },
     });
@@ -117,16 +121,18 @@ export async function resetGeneratedBusinessSummary(context: DomainContext, inpu
 /** Saves a generated summary unless an operator wrote one meanwhile, and refreshes the snapshot. */
 export async function saveGeneratedBusinessSummary(context: DomainContext, input: { businessId: string; summary: string; fingerprint: string }): Promise<boolean> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const updated = await tx.update(receptionistProfiles)
-      .set({ summary: input.summary, summarySource: "generated", summaryFingerprint: input.fingerprint, summaryGeneratedAt: new Date(), updatedAt: new Date() })
-      .where(and(eq(receptionistProfiles.businessId, input.businessId), ne(receptionistProfiles.summarySource, "operator")))
-      .returning({ id: receptionistProfiles.id });
+    const values = { summary: input.summary, summarySource: "generated" as const, summaryFingerprint: input.fingerprint, summaryGeneratedAt: new Date() };
+    const updated = await tx.update(businesses)
+      .set({ ...values, updatedAt: new Date() })
+      .where(and(eq(businesses.id, input.businessId), ne(businesses.summarySource, "operator")))
+      .returning({ id: businesses.id });
     if (!updated[0]) return false;
+    await copySharedSettingsToDefaultReceptionist(tx, input.businessId, values);
     await enqueueOutbox(tx, {
       topic: "snapshot.refresh",
       businessId: input.businessId,
-      aggregateType: "receptionist_profile",
-      aggregateId: updated[0].id,
+      aggregateType: "business",
+      aggregateId: input.businessId,
       dedupeKey: `business-summary:${input.businessId}:snapshot:${input.fingerprint}:${Date.now()}`,
       payload: { businessId: input.businessId, reason: "summary_generated" },
     });

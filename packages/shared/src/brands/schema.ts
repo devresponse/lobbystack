@@ -97,6 +97,7 @@ function standardBillingPlans(profile: BillingProfile): BrandBillingPlan[] {
     chat_units: plan.chat_units,
     kb_bytes: plan.kb_bytes,
     numbers: plan.numbers,
+    receptionists: plan.receptionists,
     voice_rate: plan.voice_rate,
     sms_rate: plan.sms_rate,
     call_rate: plan.call_rate,

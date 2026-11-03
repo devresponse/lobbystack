@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { BillingInterval } from "./billing";
+import { billingPlanCatalog, type BillingInterval } from "./billing";
 import type { InterfaceLocale } from "./locales";
 
 // brands/<brand>/billing.json: every plan a brand sells, standard or not, and
@@ -31,6 +31,15 @@ export const PLAN_CODE_PATTERN = /^[a-z0-9][a-z0-9_-]{1,46}[a-z0-9]$/;
 export const MAX_ADDITIONAL_PLANS = 50;
 
 const BYTES_PER_MB = 1_048_576;
+
+/** The most receptionists a plan in billing.json may include; a custom plan gets the deployment's cap instead. */
+export const MAX_PLAN_RECEPTIONISTS = 50;
+/** Receptionists a standard plan includes when its billing.json leaves limits.receptionists out: the built-in plans' own. */
+export const DEFAULT_PLAN_RECEPTIONISTS = {
+  free_cloud: billingPlanCatalog.free_cloud.includedReceptionists,
+  starter: billingPlanCatalog.starter.includedReceptionists,
+  pro: billingPlanCatalog.pro.includedReceptionists,
+} as const satisfies Record<Exclude<BillingPlanTier, "enterprise">, number>;
 const STANDARD_SORT: Record<BillingPlanTier, number> = { free_cloud: 10, starter: 20, pro: 30, enterprise: 40 };
 const ADDITIONAL_SORT = 100;
 
@@ -42,7 +51,9 @@ const proration = z.enum(["invoice", "prorate", "next_period", "reset"]);
 const prices = z.strictObject({ monthlyCents: cents(10_000_000).optional(), annualCents: cents(120_000_000).optional() });
 const included = z.strictObject({ voiceMinutes: count(100_000), alertSmsSegments: count(100_000), outboundCallAttempts: count(100_000), chatAiUnits: count(1_000_000) });
 // A business holds one number at most, so a plan includes none or one.
-const limits = z.strictObject({ knowledgeStorageMb: count(1_024), businessNumbers: count(1) });
+// Receptionists active at once; a file that leaves it out gets its tier's
+// default (DEFAULT_PLAN_RECEPTIONISTS), so files written before receptionists still apply.
+const limits = z.strictObject({ knowledgeStorageMb: count(1_024), businessNumbers: count(1), receptionists: z.number().int().min(1).max(MAX_PLAN_RECEPTIONISTS).optional() });
 const overageCents = z.strictObject({ voiceMinute: count(1_000), alertSmsSegment: count(1_000), outboundCallAttempt: count(1_000) });
 
 const freePlan = z.strictObject({ sold: z.literal(false), included, limits });
@@ -196,6 +207,8 @@ export type ResolvedBillingPlan = {
   chat_units: number | null;
   kb_bytes: number | null;
   numbers: number | null;
+  /** Receptionists active at once; null on a custom plan, which gets the deployment's cap. Outside the terms hash. */
+  receptionists: number | null;
   voice_rate: number | null;
   sms_rate: number | null;
   call_rate: number | null;
@@ -208,12 +221,12 @@ export type ResolvedBillingPlan = {
   prices: ResolvedBillingPrice[];
 };
 
-type Allowances = Pick<ResolvedBillingPlan, "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "voice_rate" | "sms_rate" | "call_rate">;
+type Allowances = Pick<ResolvedBillingPlan, "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "receptionists" | "voice_rate" | "sms_rate" | "call_rate">;
 
-const noAllowances: Allowances = { voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null };
+const noAllowances: Allowances = { voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, receptionists: null, voice_rate: null, sms_rate: null, call_rate: null };
 
-function standardAllowances(plan: StandardPlans[BillingPlanTier]): Allowances {
-  if ("custom" in plan) return noAllowances;
+function standardAllowances(tier: BillingPlanTier, plan: StandardPlans[BillingPlanTier]): Allowances {
+  if ("custom" in plan || tier === "enterprise") return noAllowances;
   const rates = "overageCents" in plan ? plan.overageCents : undefined;
   return {
     voice_sec: plan.included.voiceMinutes * 60,
@@ -222,6 +235,7 @@ function standardAllowances(plan: StandardPlans[BillingPlanTier]): Allowances {
     chat_units: plan.included.chatAiUnits,
     kb_bytes: plan.limits.knowledgeStorageMb * BYTES_PER_MB,
     numbers: plan.limits.businessNumbers,
+    receptionists: plan.limits.receptionists ?? DEFAULT_PLAN_RECEPTIONISTS[tier],
     voice_rate: rates?.voiceMinute ?? null,
     sms_rate: rates?.alertSmsSegment ?? null,
     call_rate: rates?.outboundCallAttempt ?? null,
@@ -259,7 +273,7 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
       custom: "custom" in plan,
       overage: tier !== "free_cloud",
       names: null,
-      ...standardAllowances(plan),
+      ...standardAllowances(tier, plan),
       months: null,
       ends: null,
       offer_end: null,
@@ -269,7 +283,7 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
     };
   });
   for (const [code, plan] of additionalPlans(profile)) {
-    const base = standardAllowances(profile.plans[plan.tier]);
+    const base = standardAllowances(plan.tier, profile.plans[plan.tier]);
     const minutes = plan.included?.voiceMinutes;
     const storage = plan.limits?.knowledgeStorageMb;
     resolved.push({
@@ -286,6 +300,7 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
       chat_units: plan.included?.chatAiUnits ?? base.chat_units,
       kb_bytes: storage === undefined ? base.kb_bytes : storage * BYTES_PER_MB,
       numbers: plan.limits?.businessNumbers ?? base.numbers,
+      receptionists: plan.limits?.receptionists ?? base.receptionists,
       voice_rate: plan.overageCents?.voiceMinute ?? base.voice_rate,
       sms_rate: plan.overageCents?.alertSmsSegment ?? base.sms_rate,
       call_rate: plan.overageCents?.outboundCallAttempt ?? base.call_rate,
@@ -300,7 +315,12 @@ export function resolveBillingPlans(profile: Pick<BillingProfile, "currency" | "
   return resolved.sort((a, b) => a.sort - b.sort || (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
 }
 
-/** The plan columns its terms hash covers, besides prices and currency. */
+/**
+ * The plan columns its terms hash covers, besides prices and currency.
+ * receptionists stays out: Polar never sees it, and adding it would change
+ * the hash of every plan applied before receptionists, which a plan with
+ * subscribers refuses.
+ */
 export const billingPlanTermColumns = ["tier", "sold", "custom", "voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "voice_rate", "sms_rate", "call_rate", "months", "ends", "discount"] as const satisfies ReadonlyArray<keyof ResolvedBillingPlan>;
 
 /**

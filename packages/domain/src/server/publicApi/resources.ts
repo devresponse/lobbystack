@@ -120,7 +120,7 @@ export function clockToMinutes(value: string): number {
 export async function loadBusinessResource(tx: DatabaseTransaction, businessId: string): Promise<ApiBusiness | null> {
   const [business] = await tx.select().from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) return null;
-  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
   return {
     id: business.id,

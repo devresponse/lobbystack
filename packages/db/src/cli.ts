@@ -285,6 +285,10 @@ async function main(): Promise<void> {
         if (widgetResolverGrantFailures.rows.length > 0) {
           throw new Error(`Widget resolver grant verification failed for: ${widgetResolverGrantFailures.rows.map((row) => `${row.role_name}:${row.function_name}`).join(", ")}`);
         }
+        const receptionistFailures = await verifyReceptionistGrants(migrator);
+        if (receptionistFailures.length > 0) {
+          throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
+        }
         if (process.env.VERIFY_RLS_BEHAVIOR === "true") {
           await verifyRlsBehavior(migrator);
         }
@@ -417,6 +421,42 @@ async function readConcurrentIndexValidity(
     where i.indexrelid = to_regclass(${`public.${indexName}`})
   `);
   return result.rows[0]?.valid;
+}
+
+/** The receptionist tables' grants, and the resolvers that run before a request knows its business. */
+async function verifyReceptionistGrants(client: ReturnType<typeof createDatabaseClient>): Promise<string[]> {
+  const result = await client.db.execute<{ failure: string }>(sql`
+    select role_name || ':' || table_name || ':' || privilege_type as failure
+    from unnest(array[
+      'knowledge_website_rules', 'knowledge_document_receptionists', 'knowledge_snippet_receptionists',
+      'unanswered_question_receptionists', 'entry_links', 'entry_link_daily_scans'
+    ]) as table_name
+    cross join (values
+      ('lobbystack_app', 'SELECT'), ('lobbystack_app', 'INSERT'), ('lobbystack_app', 'UPDATE'), ('lobbystack_app', 'DELETE'),
+      ('lobbystack_worker', 'SELECT'), ('lobbystack_worker', 'INSERT'), ('lobbystack_worker', 'UPDATE'), ('lobbystack_worker', 'DELETE'),
+      ('lobbystack_readonly', 'SELECT')
+    ) as expected(role_name, privilege_type)
+    where exists (select 1 from pg_roles where rolname = expected.role_name)
+      and not has_table_privilege(expected.role_name, 'public.' || table_name, expected.privilege_type)
+    union all
+    select role_name || ':' || function_name || ':EXECUTE'
+    from unnest(array['lobbystack_app', 'lobbystack_worker']) as role_name
+    cross join unnest(array[
+      'app.effective_receptionist(uuid, uuid)', 'app.resolve_receptionist_by_phone(text)', 'app.resolve_entry_link(text)'
+    ]) as function_name
+    where not has_function_privilege(role_name, function_name, 'EXECUTE')
+    union all
+    select 'PUBLIC:' || function_name || ':EXECUTE'
+    from unnest(array[
+      'app.effective_receptionist(uuid, uuid)', 'app.resolve_receptionist_by_phone(text)', 'app.resolve_entry_link(text)',
+      'app.copy_shared_receptionist_settings()', 'app.fill_default_receptionist()'
+    ]) as function_name
+    where exists (
+      select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl
+      where p.oid = to_regprocedure(function_name) and acl.grantee = 0 and acl.privilege_type = 'EXECUTE'
+    )
+  `);
+  return result.rows.map((row) => row.failure);
 }
 
 async function verifyRlsBehavior(client: ReturnType<typeof createDatabaseClient>): Promise<void> {

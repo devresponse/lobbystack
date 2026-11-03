@@ -108,8 +108,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
 
 /** The SHA-256 of each brand's normalized billing.json, which a catalog apply compares with the file it is sent. */
 export const BILLING_PROFILE_HASHES: Record<string, string> = {
-  "alloplace": "d12ba70a16c72e59d5894b6071ef657803b9ec77f2dad2aa567363105ff6e72b",
-  "realinfobot": "d12ba70a16c72e59d5894b6071ef657803b9ec77f2dad2aa567363105ff6e72b"
+  "alloplace": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
+  "realinfobot": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199"
 };
 
 /** The four standard plans of each brand's billing.json, which a deployment shows and enforces until its first catalog apply. */
@@ -126,6 +126,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 5,
       "kb_bytes": 1048576,
       "numbers": 0,
+      "receptionists": 1,
       "voice_rate": null,
       "sms_rate": null,
       "call_rate": null,
@@ -143,6 +144,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 50,
       "kb_bytes": 5242880,
       "numbers": 1,
+      "receptionists": 1,
       "voice_rate": 20,
       "sms_rate": 2,
       "call_rate": 2,
@@ -171,6 +173,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 200,
       "kb_bytes": 20971520,
       "numbers": 1,
+      "receptionists": 5,
       "voice_rate": 18,
       "sms_rate": 2,
       "call_rate": 2,
@@ -199,6 +202,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": null,
       "kb_bytes": null,
       "numbers": null,
+      "receptionists": null,
       "voice_rate": null,
       "sms_rate": null,
       "call_rate": null,
@@ -218,6 +222,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 5,
       "kb_bytes": 1048576,
       "numbers": 0,
+      "receptionists": 1,
       "voice_rate": null,
       "sms_rate": null,
       "call_rate": null,
@@ -235,6 +240,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 50,
       "kb_bytes": 5242880,
       "numbers": 1,
+      "receptionists": 1,
       "voice_rate": 20,
       "sms_rate": 2,
       "call_rate": 2,
@@ -263,6 +269,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": 200,
       "kb_bytes": 20971520,
       "numbers": 1,
+      "receptionists": 5,
       "voice_rate": 18,
       "sms_rate": 2,
       "call_rate": 2,
@@ -291,6 +298,7 @@ export const BRAND_BILLING_PLANS: Record<string, BrandBillingPlan[]> = {
       "chat_units": null,
       "kb_bytes": null,
       "numbers": null,
+      "receptionists": null,
       "voice_rate": null,
       "sms_rate": null,
       "call_rate": null,

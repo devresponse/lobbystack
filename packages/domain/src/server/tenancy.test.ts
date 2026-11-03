@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { businesses, staff } from "@lobbystack/db";
+import { businesses, receptionistProfiles, staff } from "@lobbystack/db";
 
 const mocks = vi.hoisted(() => ({ enqueueOutbox: vi.fn(), tx: undefined as unknown }));
 vi.mock("@lobbystack/db", async (original) => ({ ...(await original<typeof import("@lobbystack/db")>()), enqueueOutbox: mocks.enqueueOutbox, withBusinessTransaction: async (_db: unknown, _context: unknown, callback: (tx: unknown) => unknown) => await callback(mocks.tx) }));
@@ -61,7 +61,11 @@ describe("business timezone", () => {
   it("saves any language calls can open in, and refuses one they can't without saving anything", async () => {
     const saved = useTransaction();
     await updateBusinessInTransaction(saved.tx, { businessId: "biz-1", defaultLocale: " ko " });
-    expect(saved.updates).toEqual([{ table: businesses, values: expect.objectContaining({ defaultLocale: "ko" }) }]);
+    // The default receptionist takes the language's "Front desk" while its name is one the code gave it.
+    expect(saved.updates).toEqual([
+      { table: businesses, values: expect.objectContaining({ defaultLocale: "ko" }) },
+      { table: receptionistProfiles, values: { name: "안내 데스크", updatedAt: expect.any(Date) } },
+    ]);
 
     for (const locale of ["sr", "english", 5]) {
       vi.clearAllMocks();

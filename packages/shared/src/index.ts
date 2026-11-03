@@ -7,6 +7,7 @@ import { interfaceLocales, type InterfaceLocale, type RuntimeLocale } from "./lo
 import { appointmentChangeVerificationModes, bookingModes, transferModes } from "./receptionist";
 import { widgetPositions, type WidgetPosition } from "./widget";
 export * from "./receptionist";
+export * from "./receptionists";
 export * from "./branding";
 export * from "./brandLinks";
 export * from "./brands/resolve";

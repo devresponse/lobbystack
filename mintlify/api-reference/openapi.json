@@ -15704,7 +15704,7 @@
                         },
                         "lowers_allowance": {
                           "type": "boolean",
-                          "description": "An included amount, the storage limit or the number count goes down."
+                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                         },
                         "raises_price": {
                           "type": "boolean",
@@ -16087,6 +16087,19 @@
                   ],
                   "description": "Business phone numbers included."
                 },
+                "receptionists": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Receptionists active at once, the default included. Null on a custom plan, which gets the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."
+                },
                 "voice_rate": {
                   "anyOf": [
                     {
@@ -16325,6 +16338,7 @@
                 "chat_units",
                 "kb_bytes",
                 "numbers",
+                "receptionists",
                 "voice_rate",
                 "sms_rate",
                 "call_rate",
@@ -16514,7 +16528,7 @@
                             },
                             "lowers_allowance": {
                               "type": "boolean",
-                              "description": "An included amount, the storage limit or the number count goes down."
+                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                             },
                             "raises_price": {
                               "type": "boolean",
@@ -17869,7 +17883,7 @@
                 },
                 "lowers_allowance": {
                   "type": "boolean",
-                  "description": "An included amount, the storage limit or the number count goes down."
+                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                 },
                 "raises_price": {
                   "type": "boolean",
@@ -18368,6 +18382,19 @@
                         }
                       ],
                       "description": "Business phone numbers included."
+                    },
+                    "receptionists": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Receptionists active at once, the default included. Null means custom: the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."
                     }
                   },
                   "required": [
@@ -18376,7 +18403,8 @@
                     "outbound_call_attempts",
                     "chat_ai_units",
                     "knowledge_storage_bytes",
-                    "business_numbers"
+                    "business_numbers",
+                    "receptionists"
                   ],
                   "additionalProperties": false,
                   "description": "What the plan includes. Null means custom."

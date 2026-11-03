@@ -378,6 +378,7 @@ export async function listBillingPlansForApi(context: DomainContext, env: Record
         chat_ai_units: plan.included.chatAiUnits,
         knowledge_storage_bytes: plan.included.knowledgeStorageBytes,
         business_numbers: plan.included.businessNumbers,
+        receptionists: plan.included.receptionists,
       },
       overage_rates: {
         voice_minute_cents: plan.overageRates.voiceMinuteCents,

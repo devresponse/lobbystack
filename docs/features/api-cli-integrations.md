@@ -59,6 +59,40 @@ The command prints the passages the search handed over in full, the candidates i
 - **Comparing runs.** Reading a source again replaces its chunks, so chunk IDs change: compare titles, text and ranks.
 - **Telemetry.** `duration_ms` is the search's own time; the score reads come after it. Each search counts in the `rag.search.*` metrics and the `knowledge.search_executed` event with `source: "api"`, so dashboards can leave these out. It never logs or sends passage text.
 
+### Save each answer in a folder
+
+`--log-dir <folder>` also saves the answer as a JSON file in that folder, so a run can be read again later or compared with the next one. The CLI makes the folder when it's missing, and stops before searching when it can't. `LOBBYSTACK_KNOWLEDGE_LOG_DIR` saves every search the same way without the flag. The flag wins, and `--log-dir ""` saves nothing.
+
+```bash
+pnpm lobbystack knowledge search "parking fees" --log-dir .lobbystack/knowledge-searches/before
+```
+
+Each search gets a file of its own, named by when it was asked and then the question's words, such as `2026-11-03T18-45-12-345Z-parking-fees.json`. So a folder lists the searches in the order they ran, and one question's files end the same way in every run. A file is never written over: a second search of one question in the same millisecond gets `_2`. The text output ends with the file's path, and `--json` still prints only the answer.
+
+| Field | What it holds |
+| --- | --- |
+| `requested_at` | When the search was sent, in UTC. |
+| `cli_version` | The CLI's version. |
+| `request` | The method, the full URL, the business ID and the body. The business ID is `null` when the command named none, so the key's own business was searched. The API key is never saved. |
+| `response` | The API's answer as it came, with its `data` envelope: `response.data` is what `--json` prints. |
+| `error` | In place of `response` when the search failed: the message and exit code, and the HTTP status, code and details when the API answered, as `--json` reports an error. |
+
+`.lobbystack/` is in `.gitignore`, so searches saved there from the repository's root stay out of commits. The files hold passages from the business's documents, so keep them where those documents may be kept.
+
+To ask a list of questions, one per line in `questions.txt`, before a change, and again into an `after` folder once it's deployed:
+
+```bash
+while IFS= read -r question; do
+  pnpm lobbystack knowledge search "$question" --log-dir .lobbystack/knowledge-searches/before > /dev/null
+done < questions.txt
+```
+
+```powershell
+Get-Content questions.txt | ForEach-Object { pnpm lobbystack knowledge search $_ --log-dir .lobbystack/knowledge-searches/before | Out-Null }
+```
+
+Then compare the two folders file by file, pairing the files by the part of the name after the time, or by `request.body.query`.
+
 ## Know what the fork added
 
 | Pull request | Change |
@@ -75,7 +109,8 @@ The command prints the passages the search handed over in full, the candidates i
 | #94 | The Zapier integration under each brand's own name and account: `npm run push` for a brand, a Zapier card on the **Integrations** page, **Set up for Zapier** in the Create dialog, and the contact and service fields its samples were missing. |
 | #95 | The Make app under each brand's own name and account: `npm run build` for a brand, a Make card on the **Integrations** page and **Set up for Make** in the Create dialog. |
 | #129 | With several receptionists, `GET` and `PATCH /receptionist` stay the business's default receptionist, with the settings every receptionist shares; knowledge added through the API is for every receptionist; and the plans and the catalog say how many receptionists each plan includes (`receptionists`). Listing and managing the others, and saying which receptionist a call, number or widget key belongs to, aren't in the API, the MCP server or the CLI yet ([API gaps](../reference/api-gaps.md#know-whats-still-missing), [receptionists](receptionists.md)). |
-| #130 | `POST /knowledge/search` and `lobbystack knowledge search`: the receptionist's knowledge search with every stage shown (see below). |
+| #130 | `POST /knowledge/search` and `lobbystack knowledge search`: the receptionist's knowledge search with every stage shown ([above](#test-the-receptionists-knowledge-search)). |
+| #131 | `lobbystack knowledge search --log-dir <folder>` and `LOBBYSTACK_KNOWLEDGE_LOG_DIR`: each answer saved as a JSON file ([above](#save-each-answer-in-a-folder)). |
 
 ## Connect Zapier
 

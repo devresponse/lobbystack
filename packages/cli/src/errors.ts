@@ -31,3 +31,13 @@ export class ApiError extends CliError {
     this.name = "ApiError";
   }
 }
+
+/** A failure as --json reports it: the message and exit code, and what the API answered when it did. */
+export function errorJson(error: CliError) {
+  return {
+    message: error.message,
+    exit_code: error.exitCode,
+    ...(error instanceof ApiError ? { status: error.status, code: error.code, details: error.details } : {}),
+    ...(error.idempotencyKey ? { idempotency_key: error.idempotencyKey } : {}),
+  };
+}

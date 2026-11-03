@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 
 import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
-import { auditLogs, businesses, entryLinkDailyScans, entryLinks, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businesses, businessPublicProfiles, entryLinkDailyScans, entryLinks, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   entryLinkCode,
   entryLinkStatuses,
@@ -309,7 +309,10 @@ export type EntryLinkDestination = {
  * Follows a scan of /q/<code>: finds the link without a business context
  * (app.resolve_entry_link, which leaves out inactive businesses), counts the
  * scan when asked, and gives the page to open. Null for a code that isn't a
- * link. Runs as the worker; context.db must be the worker database.
+ * link, and for a business whose page isn't published: every page a link
+ * opens answers 404 then (app.resolve_public_profile), so the scan opens
+ * nothing and counts nothing. Runs as the worker; context.db must be the
+ * worker database.
  */
 export async function followEntryLink(context: DomainContext, input: { code: string; count?: boolean; now?: Date }): Promise<EntryLinkDestination | null> {
   const code = normalizeEntryLinkCode(input.code);
@@ -320,16 +323,18 @@ export async function followEntryLink(context: DomainContext, input: { code: str
   const { business_id: businessId, entry_link_id: entryLinkId, receptionist_id: receptionistId } = match;
   const day = todayUtc(input.now ?? new Date());
   const target = await withBusinessTransaction(context.db, { businessId, actorType: "worker" }, async (tx) => {
+    const [row] = await tx.select({ slug: businesses.slug, handle: receptionistProfiles.handle, isDefault: receptionistProfiles.isDefault })
+      .from(businesses)
+      .innerJoin(receptionistProfiles, and(eq(receptionistProfiles.businessId, businesses.id), eq(receptionistProfiles.id, receptionistId)))
+      .innerJoin(businessPublicProfiles, and(eq(businessPublicProfiles.businessId, businesses.id), eq(businessPublicProfiles.published, true)))
+      .where(eq(businesses.id, businessId))
+      .limit(1);
+    if (!row) return null;
     if (input.count !== false) {
       await tx.insert(entryLinkDailyScans).values({ businessId, entryLinkId, day, scans: 1 })
         .onConflictDoUpdate({ target: [entryLinkDailyScans.entryLinkId, entryLinkDailyScans.day], set: { scans: sql`${entryLinkDailyScans.scans} + 1` } });
     }
-    const [row] = await tx.select({ slug: businesses.slug, handle: receptionistProfiles.handle, isDefault: receptionistProfiles.isDefault })
-      .from(businesses)
-      .innerJoin(receptionistProfiles, and(eq(receptionistProfiles.businessId, businesses.id), eq(receptionistProfiles.id, receptionistId)))
-      .where(eq(businesses.id, businessId))
-      .limit(1);
-    return row ?? null;
+    return row;
   });
   if (!target) return null;
   return { businessId, entryLinkId, receptionistId, path: receptionistPagePath(target.slug, target.isDefault ? null : target.handle) };

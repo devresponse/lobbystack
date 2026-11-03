@@ -6,7 +6,7 @@ import { businessId, commandHelp, globalOptions, stringValue, type Command, type
 import { groups } from "./commands";
 import { configPath, readConfig, resolveConnection } from "./config";
 import { onboard } from "./onboard";
-import { ApiError, CliError, exitCodes, type ExitCode } from "./errors";
+import { ApiError, CliError, errorJson, exitCodes, type ExitCode } from "./errors";
 import type { Output } from "./output";
 import { userAgent, version } from "./version";
 
@@ -49,11 +49,11 @@ function groupHelp(name: string, group: Group): string {
 }
 
 function reportError(io: Io, json: boolean, error: CliError): void {
-  const details = error instanceof ApiError ? error.details : [];
   if (json) {
-    io.err(JSON.stringify({ error: { message: error.message, exit_code: error.exitCode, ...(error instanceof ApiError ? { status: error.status, code: error.code, details } : {}), ...(error.idempotencyKey ? { idempotency_key: error.idempotencyKey } : {}) } }, null, 2));
+    io.err(JSON.stringify({ error: errorJson(error) }, null, 2));
     return;
   }
+  const details = error instanceof ApiError ? error.details : [];
   io.err([error.message, ...details.map((detail) => `  ${detail.path}: ${detail.message}`)].join("\n"));
 }
 

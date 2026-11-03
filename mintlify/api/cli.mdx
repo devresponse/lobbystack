@@ -200,3 +200,5 @@ Without a state file, a platform key won't create a business when you already on
 `lobbystack` has a command for every API endpoint, grouped like the API: `lobbystack services list`, `lobbystack knowledge upload`, `lobbystack public-profile publish`, `lobbystack numbers search`, and so on. `lobbystack --help` lists the groups, and `--help` after any command lists its options.
 
 To see what the AI receptionist finds in your knowledge for a question, run `lobbystack knowledge search "<question>"`. It runs the same search a call or a chat runs and changes nothing. It shows the passages it found, the ones it left out and why, and what the receptionist gets. `--json` adds each passage's scores. The key needs `knowledge:read`.
+
+Add `--log-dir <folder>` to also save each answer as a JSON file in that folder, named by when the question was asked and its words, such as `2026-11-03T18-45-12-345Z-parking-fees.json`. Ask the same questions before and after you change a document, each time into a folder of its own, and compare the two. `LOBBYSTACK_KNOWLEDGE_LOG_DIR` saves every search the same way. The files never hold the API key.

@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-11-03
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#130](https://github.com/devresponse/lobbystack/pull/130) | Search knowledge as the receptionist does through `POST /api/v1/knowledge/search` and `lobbystack knowledge search`, with every stage shown: the passages after ranking, the tool's result, what a call hears, and each search's scores |  | `bede2bc` | [docs](../features/api-cli-integrations.md#test-the-receptionists-knowledge-search) |
+
 ### 2026-11-02
 
 | PR | What changed | Migrations | Merge | More |

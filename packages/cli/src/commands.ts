@@ -1,13 +1,14 @@
-import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, apiKnowledgeSearchSchema, apiOperations, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
 import { readConfig, resolveConnection, writeConfig } from "./config";
-import { CliError, exitCodes } from "./errors";
+import { CliError, errorJson, exitCodes } from "./errors";
 import { defaultSleep, operationCommand, showRecord, waitUntilDone, type Column, type OperationSpec, type Row } from "./operations";
 import { formatTable, print } from "./output";
+import { LOG_DIR_VARIABLE, logFolder, saveLog } from "./searchLog";
 import { readUploadFile, uploadKnowledgeFile } from "./upload";
-import { userAgent } from "./version";
+import { userAgent, version } from "./version";
 import { checkoutWait, claimWait, sourceWait } from "./waits";
 
 // The command groups. Most commands are specs for operationCommand; the few
@@ -246,6 +247,40 @@ function knowledgeSearchText(data: Row): string {
   return lines.join("\n");
 }
 
+const knowledgeSearch = (path: string): Command => {
+  const operation = apiOperations.searchKnowledge;
+  const usage = `lobbystack ${path} <query> [--log-dir <folder>]`;
+  return {
+    summary: operation.summary,
+    usage,
+    arguments: [{ name: "query", description: apiKnowledgeSearchSchema.shape.query.description ?? "" }],
+    options: {
+      "log-dir": { type: "string", placeholder: "<folder>", description: `Also save the API's answer in this folder, one JSON file per search, named by when it was asked and what. Made when it's missing. Defaults to ${LOG_DIR_VARIABLE}; an empty value saves nothing.` },
+    },
+    notes: "A saved file holds when the search was asked, the CLI's version, the request without the API key, and the API's answer as it came, or the error it gave.",
+    operations: ["searchKnowledge"],
+    async run({ io, output, values, positionals, connect }) {
+      const [query, ...extra] = positionals;
+      if (!query?.trim() || extra.length) throw new CliError(`Usage: ${usage}`);
+      const folder = await logFolder(stringValue(values, "log-dir"), io.env);
+      const { client, connection } = await connect();
+      const at = new Date();
+      const asked = { requested_at: at.toISOString(), cli_version: version, request: { method: operation.method, url: `${connection.url}/api/v1${operation.path}`, business_id: connection.business ?? null, body: { query } } };
+      const answer = await client.call("searchKnowledge", { body: { query } }).catch(async (error: unknown) => {
+        // A failed search is saved too, so a run's folder shows every question it asked.
+        if (folder && error instanceof CliError) {
+          await saveLog(folder, query, at, { ...asked, error: errorJson(error) }).catch((failure: unknown) => {
+            error.message = `${error.message}\n${failure instanceof Error ? failure.message : String(failure)}`;
+          });
+        }
+        throw error;
+      });
+      const saved = folder ? await saveLog(folder, query, at, { ...asked, response: answer }) : undefined;
+      print(output, answer.data, () => `${knowledgeSearchText(answer.data)}${saved ? `\n\nSaved to ${saved}` : ""}`);
+    },
+  };
+};
+
 /** Every plan the deployment holds with its live prices and how many Polar sells, whether the applied file is the deployed one, and the Polar organization it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
@@ -375,7 +410,7 @@ export const groups: Record<string, Group> = Object.fromEntries([
     expand: { operation: "expandKnowledgeSource", wait: sourceWait },
     retry: { operation: "retryKnowledgeSource", wait: sourceWait },
     cancel: { operation: "cancelKnowledgeSource" },
-    search: { operation: "searchKnowledge", args: ["query"], show: knowledgeSearchText },
+    search: knowledgeSearch,
   }),
   group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
     status: { operation: "getBilling" },

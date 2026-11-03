@@ -53,8 +53,10 @@ export async function runPrivacyRetentionSweep(
     if (contentRetentionEnabled) {
       await tx.delete(aiTraceContexts).where(and(eq(aiTraceContexts.businessId, input.businessId), lt(aiTraceContexts.expiresAt, now)));
     }
-    // QR link scan counts carry nothing about the visitor, and go once the 13 months the chart shows have passed.
-    const deletedEntryLinkScanDays = !contentRetentionEnabled ? 0 : await deleteExpiredEntryLinkScansInTransaction(tx, { businessId: input.businessId, now });
+    // QR link scan counts carry nothing about the visitor, so they don't wait
+    // on content retention: days older than ENTRY_LINK_SCAN_RETENTION_MONTHS
+    // (13) go on every sweep, as the feature page says.
+    const deletedEntryLinkScanDays = await deleteExpiredEntryLinkScansInTransaction(tx, { businessId: input.businessId, now });
     const scrubbedOperatorDeliveries = await tx.update(operatorNotificationDeliveries)
       .set({ subject: "[content expired]", body: "[content expired]", destination: "[expired]", sender: null, contentExpiresAt: new Date("9999-12-31T00:00:00.000Z"), updatedAt: now })
       .where(and(eq(operatorNotificationDeliveries.businessId, input.businessId), lt(operatorNotificationDeliveries.contentExpiresAt, now)))

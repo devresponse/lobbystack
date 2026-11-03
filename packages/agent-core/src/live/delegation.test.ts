@@ -27,8 +27,8 @@ vi.mock("openai/resources/live/sideband/ws", () => ({
 }));
 vi.mock("@lobbystack/domain", async () => ({
   countKnowledgeTokens: (await import("../../../domain/src/knowledgeRanking")).countKnowledgeTokens,
-  KNOWLEDGE_SEARCH_TOKEN_BUDGET: 3000,
-  knowledgeQueryTerms: (await import("../../../domain/src/knowledgeRanking")).knowledgeQueryTerms,
+  knowledgeToolResult: (await import("../../../domain/src/receptionistKnowledge")).knowledgeToolResult,
+  matchKnowledgeSnippets: (await import("../../../domain/src/receptionistKnowledge")).matchKnowledgeSnippets,
   searchKnowledgeEvidence: domain.searchKnowledgeEvidence,
   takeMessageForStaff: domain.takeMessageForStaff,
 }));

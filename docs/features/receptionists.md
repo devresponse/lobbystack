@@ -1,0 +1,131 @@
+# Give a business several receptionists
+
+Since fork PR #RCPR, a business can have more than one receptionist: one for each location, team or language, each with its own name, greeting, language, transfer number, booking, knowledge and page, answering the phone numbers, website widgets and QR signs the owner gives it. Every business keeps one **default** receptionist, the one it had before, named **Front desk** in the business's language. It answers anything that names no receptionist and stands in for one that is paused or archived, so a number, a widget or a printed sign always reaches someone. A business with one receptionist sees the dashboard as before: the dropdowns, filters and columns below only show once it has a second. The maintainer's nine answers to the design's questions are under [decisions](../project/decisions.md#choose-what-to-build), and what is left for later is on the [roadmap](../roadmap/receptionists-next.md). Checked against the code of fork PR #RCPR.
+
+## Know what each receptionist has
+
+Each receptionist has its own:
+
+- **name** (up to 80 characters) and **What it helps with**, one line of up to 160 characters, such as "Bookings at our West 4th clinic", which visitors see when they choose who to talk to and the other receptionists use to send people there;
+- **page address**, `/profile/<slug>/<handle>`, made from its name unless the owner types one; the default receptionist answers the business page, `/profile/<slug>`, itself;
+- **language** its calls open in, or the business's language when it has none; the default receptionist always speaks the business's language;
+- **greeting, transfer number and booking**, on **AI settings**, and the instructions for calls, texts and chats that a new receptionist copies from another;
+- **knowledge**: **Every article**, as the default receptionist has, or **Articles for everyone, and the ones chosen for it** ([give each receptionist its knowledge](#give-each-receptionist-its-knowledge));
+- **place on the business page**: listed or not, and its place in the order;
+- **status**: active, paused or archived.
+
+The business keeps one copy of everything else, which every receptionist shares: the business summary that every receptionist's prompts start from, **Tell callers about AI and recording**, the business's language and time zone, opening hours, services, rules, the appointment change rules, contacts, the knowledge library, the plan and its usage. Opening hours stay the business's: hours for each receptionist are on the [roadmap](../roadmap/receptionists-next.md).
+
+## Add and manage receptionists
+
+**Agent > Receptionists** (`/agent/receptionists`), between **AI settings** and **Knowledge** in the sidebar, lists the receptionists that aren't archived, 10 to a page: the default first with a **Default** badge, then the others in the business's order. Each row shows the receptionist's page address (with **Not listed on the business page** under it when it isn't), its status, what it **Answers on** (its phone numbers, website widgets and QR links, or **Its page only**) and its language. From two receptionists on, a search box finds them by name or what they help with, and **Status** filters **All**, **Active**, **Paused** or **Archived**, each with its count. Everyone on the team reads the page; owners and admins change it.
+
+- **Add receptionist** opens **Add a receptionist**: its name (required), what it helps with, its page address, its language, its knowledge, **Listed on the business page**, and **Copy settings from**, which gives it another receptionist's greeting, booking, transfer and instructions (the default one's unless another is picked). It starts active. The **Add receptionist** item at the bottom of every receptionist dropdown opens this page with `?add=1`, which opens the form.
+- **Edit details** in a row's menu changes the same fields, and saves only what changed. **AI settings** opens `/agent?receptionist=<id>`.
+- **Pause** keeps a receptionist and its settings while its numbers, widgets and QR links answer as the default receptionist; **Resume** brings it back. A paused receptionist doesn't count against the plan.
+- **Archive** asks first. The receptionist leaves every list and dropdown, its entry points answer as the default receptionist, and its calls, chats and questions stay, under its name (the **Questions** page adds "(archived)"). **Archived** in the status filter lists archived receptionists with the day each was archived, and **Restore** brings one back, paused if the plan's active receptionists are all in use.
+- **Make default** asks first. The receptionist must be active. It takes over the business page and whatever names no receptionist, and the old default keeps its phone numbers, widgets and QR links and gets a page of its own. The business's shared settings don't move.
+- **Order:** with three or more receptionists and no search or filter, each row has **Move up** and **Move down** buttons; the default is always first. **Sort A–Z** asks, then lists them by name from then on: while the order is alphabetical, a receptionist that's added, restored or renamed takes its place by name, and once someone moves one, the order is theirs and new ones go last. Names are compared as people read them in the business's language, accents and case aside and "Store 2" before "Store 10". The same order is used by every dropdown, the business page and the agent's list of the others.
+
+The default receptionist can't be paused, archived or moved, and stays listed: make another one the default first.
+
+### Edit one receptionist's AI settings
+
+With one receptionist, **AI settings** is as it was. With several, it has two parts. **Shared by every receptionist** holds the business summary, the AI and recording notice, the business's language and time zone, opening hours and the appointment change rules. **Each receptionist's own** starts with a **Receptionist** dropdown, which keeps its choice in the address (`?receptionist=<id>`), and holds that receptionist's greeting, language, transfer and booking. **Test Call** has a **Receptionist for test calls** dropdown, so an owner can hear each one.
+
+## Know how many a plan includes
+
+| Plan | Active receptionists, the default included |
+| --- | --- |
+| Free | 1 |
+| Starter | 1 |
+| Pro | 5 |
+| Enterprise and any custom plan | Up to the deployment's cap, 50 unless set |
+
+- **The plan counts active receptionists.** Paused and archived ones don't count, so an owner over the limit pauses one to add another. The numbers come from `limits.receptionists` in each brand's `billing.json`, which `pnpm billing apply` writes to `billing_plans.receptionists` ([billing](../billing/README.md#know-the-plans)). `GET /api/billing` and `GET /api/v1/billing/plans` return it as `included.receptionists`, `GET /api/v1/billing/catalog` as each plan's `receptionists`, and `pnpm lobbystack billing plans` shows it in a **receptionists** column; the plan cards don't show it yet.
+- **The deployment caps receptionists that aren't archived**, whatever the plan, at `MAX_RECEPTIONISTS_PER_BUSINESS` on the admin and the worker: a whole number from 1 to 500, 50 when it's unset or anything else ([variables](../deployment/guide/appendix-a-variables.md)). A plan without a number, such as Enterprise or a self-hosted deployment's, gets the cap.
+- **The page says where the business stands:** "2 of 5 active receptionists on your plan", and when they're all in use, that a receptionist must be paused or the plan upgraded. On a plan with one receptionist, a card, **A receptionist for each location, team or language**, offers **See plans** to owners and admins and tells others to ask one; **Add receptionist** opens the plans too.
+- **A downgrade pauses the newest extra receptionists,** never the default. Polar's reconcile of a plan or state change, and the end of a managed plan, queue the worker's `receptionists.enforceAllowance` job, which pauses the active receptionists past the new plan's number, newest first, and writes a `receptionist.paused` audit entry with the reason `plan_limit` for each. Nothing is deleted; their numbers, widgets and links answer as the default receptionist, and the owner chooses which to resume. The job runs on its own so nothing about receptionists can hold up a payment.
+
+## Choose who answers each number, widget and sign
+
+A phone number, a widget key and a QR link each name the receptionist that answers it. When that receptionist is paused or archived, the default one answers instead, and the screens say so ("Sales is paused, so Front desk answers for now"). Numbers and widget keys from before receptionists name the default receptionist.
+
+- **Settings > Phone number:** **Answered by** under the business's number, and with several numbers, **Other numbers**, each with its own dropdown. A choice saves at once: "Calls and texts to +1 604 555 0188 go to Sales now." The receptionist then takes that number's calls and texts from the next one on.
+- **Settings > Website widget:** **Receptionist** on each key: "Chats and calls from this widget go to the receptionist you pick." A new key names the default receptionist unless the form picks another.
+- **Settings > QR code:** **Answered by** on each QR link ([use QR links](#use-qr-links)).
+
+A paused receptionist can be chosen; an archived one can't. Each change writes an audit entry (`phone_number.receptionist_changed`, `widget_key.receptionist_changed`, `entry_link.updated`). The v1 API's number and widget key fields are unchanged; receptionists aren't in the API yet ([API gaps](../reference/api-gaps.md)).
+
+## Give each receptionist its knowledge
+
+The business keeps one knowledge library. Each article (a file, a website page or a text entry) is **Available to** **Everyone**, as every article from before is, or to **Chosen receptionists**.
+
+- **A receptionist with Every article** uses them all, as the default receptionist does unless the owner limits it. **Articles for everyone, and the ones chosen for it** is the choice for the others, and the one a new receptionist gets.
+- **An article chosen only for receptionists that are all archived, or for none,** is left to the default receptionist, never to everyone, so a store's private notes don't leak to the others.
+- **On the Knowledge page,** with several receptionists, an **Available to** column shows **Everyone** or the names it's for ("Kitsilano, Gastown +3"). A receptionist filter shows exactly what that receptionist can use. Selecting rows, up to 500 at once, offers **Available to** to change them together: **Add** receptionists, **Remove** them or **Replace** who they're for, or make them available to everyone. Adding a file, a website or a text entry has the same **Available to** field.
+- **Website rules** give a website's pages under a path, such as `/stores/kitsilano/`, to one receptionist, on this crawl and every later one. **Website rules** on the Knowledge page lists them with how many pages each gave, adds and deletes them, and importing a website can add rules as it starts (**Page rules**). Deleting a rule gives its pages back to everyone, unless someone also chose receptionists for them. A page a rule chose says **by rule**, and a choice made by hand stays when the rule goes.
+- **The business summary is written from articles for everyone,** so a receptionist's private articles never reach the other receptionists' prompts.
+
+Calls and chats search only the articles the answering receptionist may use (`searchKnowledgeEvidence` filters by the receptionist; `receptionistMayUse` in `packages/shared/src/receptionists.ts` is the same rule in code). The business's snapshot keeps up to 50 text entries and a digest of 40 documents for each receptionist, chosen from what it may use.
+
+## Know what visitors see
+
+- **The business page, `/profile/<slug>`,** is answered by the default receptionist. When the business lists more than one, a **You're talking to** dropdown under the business's name shows who answers and lists the others, the default first and then the business's order, each with what it helps with and a link to its own page. From 8 receptionists the list has a search box.
+- **A receptionist's page, `/profile/<slug>/<handle>`,** is the business page answered by that receptionist, with its name in the page's title. It works whether or not the receptionist is listed; an unlisted one's page stays out of search results. A paused or archived receptionist's page, and the default one's handle, send visitors to the business page.
+- **The chat and the browser call on a page** go to the page's receptionist. The page signs a token naming it, for the business and the page's widget key, which the widget sends when its session starts (`receptionistToken`), so a visitor can't reach another receptionist by editing a request. On any other website, the widget key's receptionist answers. A visitor's chat belongs to the receptionist it started with: on another receptionist's page, the next message starts a chat with that one, unless the team has taken the chat over, which then stays the visitor's.
+- **Settings > Public profile** has a **Receptionists on your page** card with several receptionists: which are **Listed**, and the **Order**, **Alphabetical** or **Custom** with move buttons. A paused receptionist stays off the page until it resumes. Changes save as they're made.
+
+## Use QR links
+
+A QR link is a short address, `/q/<code>`, that a printed sign carries. It opens one receptionist's page, or the business page for the default receptionist, and counts the sign's scans. **Settings > QR code** starts with **Your QR codes**:
+
+- **The table** lists the business page's own address first, then each link, newest first, 10 to a page: its label, who answers (with a note when a paused or archived receptionist's link answers as the default), its address and its **Scans, 30 days** with a small line of the days. A search box appears once a business has more than 10 links, and with several receptionists a receptionist filter.
+- **New link** asks for a label, such as "Front window", which only the team sees, and with several receptionists who answers it, starting with the receptionist the table is filtered to. The code is made when the link is created: 6 lowercase letters and digits, without the ones people mix up (i, l, o, 0 and 1), unique across the deployment. It never changes, so a printed sign keeps working whatever the link is pointed at later.
+- **Each row's menu** edits the label and who answers, copies the address, and pauses or resumes the link. A paused link opens the business page. Links are never deleted; a business keeps up to 1,000.
+- **The sign** below the table is for the business page or the link picked in its **Link** dropdown. It carries the link's address, opens with the receptionist's name ("Questions? Ask Sales."), and with a chat, "Scan to chat with Sales". **Open** shows the page the link opens. A download is named for the business, the link's label and its code.
+- **Scans per day** under a link's sign charts its last 30 days, with the total and the busiest day, and a table of the days for screen readers. The business page's own sign isn't counted: a link is needed to count scans.
+
+`GET /q/<code>` counts the scan and redirects (307, never cached) to the page; `HEAD` redirects without counting, so a link preview isn't a scan. Scans are counted per link and UTC day, with nothing about the visitor, and days older than 13 months are deleted by the privacy sweep. A code that opens nothing answers 404 with "This QR code doesn't open a page" in the visitor's language. Everyone on the team sees the links and copies addresses; owners and admins make and change them.
+
+## Know who answered
+
+- **Calls, conversations and follow-ups** name the receptionist that answered them. With several receptionists, **Calls**, **Messages** and **Questions** have a receptionist filter, kept in the address as `?receptionist=<id>`; the **Calls** table and a call's page show the call's **Receptionist**, and a conversation in **Messages** says "Receptionist: Sales". Records from before receptionists show the default receptionist.
+- **Questions** shows who heard each question ("Heard by Kitsilano, Gastown"). Answering one asks **Who uses this answer**: **Every receptionist**, or **Only the receptionist that heard it** (or the ones that did), which saves the text entry for chosen receptionists.
+- **What the receptionist says about the others:** when a business has several, each receptionist's prompt says who it is and lists the others that are listed and active, with what each helps with, up to 12 in the business's order, and how many more the business page lists. Nobody is handed over: in a chat the receptionist names the right one and gives its page's link, and on a call it names it and offers to take a message. Handing a call or chat to another receptionist is on the [roadmap](../roadmap/receptionists-next.md).
+- **Recorded greetings:** each receptionist that answers a phone number gets its own recorded opening, in its own language.
+
+## Know how it's built
+
+- **Tables.** `receptionist_profiles` keeps one row per receptionist (migration `0133`): today's row became its business's default (`is_default`, one per business), with `name`, `description`, `handle`, `knowledge_scope`, `listed`, `sort_order`, `locale`, `status` and `archived_at`. The summary, the recording notice and the appointment change rules moved to `businesses`. `billing_plans.receptionists` (`0134`). `knowledge_document_receptionists`, `knowledge_snippet_receptionists` and `knowledge_website_rules` (`0136`, with `0135`'s key for their composite foreign keys). `receptionist_id` on `phone_numbers`, `widget_keys`, `calls`, `conversations` and `inbox_items`, and `unanswered_question_receptionists` (`0137`). `entry_links` and `entry_link_daily_scans` (`0140`). Every new table has forced row-level security, and links name their business with composite foreign keys, so the database refuses a link between two businesses.
+- **Who answers, in the database.** `app.effective_receptionist` gives the receptionist an entry point names when it may answer, else the default; `app.resolve_receptionist_by_phone` and `app.resolve_entry_link` find them for a call and a scan before a request knows its business. A trigger gives every new call, conversation, follow-up, number and widget key the default receptionist when its writer names none.
+- **The snapshot.** The business's snapshot carries every receptionist that isn't archived, and `snapshotForReceptionist` (`packages/domain/src/snapshot.ts`) cuts one receptionist's view from it: its own settings, the articles it may use, and the others for its prompt. Any change to receptionists refreshes the snapshot.
+- **Domain:** `packages/domain/src/server/receptionists.ts` (the page, the plan allowance, adding, pausing, archiving, the default and the order), `receptionistProfile.ts` (AI settings for one receptionist), `receptionistEntryPoints.ts` (numbers and widget keys), `receptionistRecords.ts` (records, filters and the backfill), `knowledgeAudience.ts` (audiences and website rules), `entryLinks.ts` (QR links and scans) and `publicProfiles.ts` (the pages); the shared rules are in `packages/shared/src/receptionists.ts`.
+- **Agent:** `receptionistGuidance` in `packages/agent-core/src/instructions.ts` writes the lines about the others; the tools search and save as the answering receptionist (`packages/agent-core/src/tools.ts`).
+- **Routes:** `/api/receptionists` and the routes under it, `/api/entry-links`, `/api/knowledge/audience`, `/api/knowledge/website-rules`, `PATCH /api/phone-numbers/{phoneNumberId}`, `/q/{code}` and `/profile/{slug}/{handle}`, and changes to AI settings, the widget keys, the widget's session and the lists ([route catalog](../reference/routes.md)).
+- **Dashboard:** the page renders `LiveReceptionistsSurface` (`apps/admin/src/components/live-receptionists-surface.tsx`); the shared dropdown, multiselect box and filter are in `apps/admin/src/components/receptionists/`, and the QR links in `apps/admin/src/components/qr-code/`. Words are in the `receptionists` namespace and the `agent`, `settings`, `knowledge` and `profile` ones, in English, French, Spanish and Serbian.
+- **Tests:** the shared rules (`packages/shared/src/receptionists.test.ts`), integration tests against PostgreSQL for receptionists, entry points, records and the backfill, audiences and website rules, and QR links (`packages/domain/src/server/*.integration.test.ts`), the snapshot views, the agent's lines and tools, every new route, and rendering tests for each screen, among them `live-receptionists-table.test.tsx` and `live-qr-code-links.test.tsx`.
+- **Browser journeys:** `apps/admin/e2e/receptionists.e2e.ts`, in CI's list in `scripts/e2e-local.sh`. In the first, an owner on the free plan sees the upgrade card and the plans behind **Add receptionist**, then on Pro adds two receptionists, gives one its own greeting on **AI settings**, archives one only after confirming, and restores it. In the second, a visitor on the business page picks a listed receptionist under **You're talking to**, whose chat answers as it through the page's signed token; an unlisted receptionist's page opens too; and a QR link made on **Settings > QR code** opens its receptionist's page, counts a scan but not a link preview's `HEAD`, passes no referrer on, and opens the business page while its receptionist is paused.
+
+## Deploy it
+
+Migrations `0133` to `0140` only add, so the code of the release before keeps working while a deploy finishes, and `0135`, `0138` and `0139` build their indexes concurrently, so large tables aren't locked. Nothing needs to be set: `MAX_RECEPTIONISTS_PER_BUSINESS` is optional. Two things to know:
+
+- **One short window.** `0140` drops the one-receptionist-per-business index that the previous release's AI settings save names, so between migrate finishing and the new admin serving, a save on **AI settings** in the old admin fails. Deploying `0133` to `0140` together, as this pull request does, accepts that window.
+- **The backfill.** Old calls, conversations and follow-ups name no receptionist; every reader takes that as the default receptionist, so they show correctly at once. The worker's `receptionists.backfillRecords` job fills them in batches of 5,000, skipping rows another transaction holds; it runs once a day per business on the maintenance queue, and a new worker runs it right away. Migrate's last step logs how many are left: `Records naming no receptionist yet, which the worker's backfill fills: calls 0, conversations 0, inbox_items 0.` It fails the deploy if a business's shared settings differ from its default receptionist's copy, which the code keeps the same until the clean-up deploy.
+
+**Rolling back** to the release before is safe only while no business has a second receptionist. That release reads a business's receptionist rows as if there were one, so with several it could answer as any of them, and its **AI settings** save fails without the index `0140` drops. Once businesses have added receptionists, fix forward instead.
+
+**The clean-up deploy** removes what the release before needed: the default receptionist's copies of the shared settings and the trigger that copies them, and the backfill job, and it makes `receptionist_id` required on calls, conversations and follow-ups. It can't be undone by a redeploy, so it waits for three things: this release has run for a week, every count in migrate's line above is 0, and a fresh nightly copy of the database exists. The design splits it over three migrations so no step holds a heavy lock while it reads a large table: drop the copies and add `CHECK (receptionist_id IS NOT NULL) NOT VALID`, validate the checks and `0137`'s three foreign keys, then `SET NOT NULL` and drop the checks ([open items](../project/open-items.md#build-these-when-theyre-needed)).
+
+## Know what was decided while building it
+
+The maintainer's nine answers are on the [decisions](../project/decisions.md#choose-what-to-build) page. These smaller choices were made while building it:
+
+- **An entry point that names no receptionist means the default one**, and a widget key or number names one only when the owner picks it, so making another receptionist the default moves them along.
+- **Phone numbers' Answered by and the business page's card save as soon as they change**, like the toggles beside them; the forms with several fields save with a button.
+- **The order is kept as positions, and "alphabetical" is worked out** from the names rather than stored as a setting: while the positions are in name order, a receptionist added, restored or renamed takes its place by name. **Sort A–Z** writes name order. Moving a receptionist uses buttons, not dragging, which works with a keyboard and a screen reader.
+- **The business page lists receptionists through one setting**, `PUT /api/receptionists/listed`, so the card saves the whole choice in one step.
+- **QR links:** **Open** goes straight to the receptionist's page, so the owner's check isn't counted as a scan. The sign's words name the link's receptionist, and the default receptionist's link keeps the general words. The message typed for a sign resets when another link is picked. Downloads are named for the business, the link's label and its code. The list carries each link's last 30 days, so the table's lines and the chart need no second request. A label is required on the dashboard, though `POST /api/entry-links` accepts a link without one, which the table calls "Link <code>". Viewers can copy addresses.
+- **The dropdowns are the dashboard's own**, not a library's, with a search box from 8 receptionists and the **Add receptionist** and **Manage receptionists** items at the bottom.
+- **French and Spanish** call a receptionist *la réceptionniste* and *la recepcionista*, and the default receptionist's name is translated in 14 languages (`DEFAULT_RECEPTIONIST_NAMES`). Changing the business's language renames the default receptionist only while it still has one of those names.

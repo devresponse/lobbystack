@@ -37,6 +37,7 @@ This folder is the project's source of truth: what the fork is and how it got he
 
 | Page | What it covers |
 | --- | --- |
+| [Several receptionists](features/receptionists.md) | A receptionist for each location, team or language: the Receptionists page, plan limits, who answers each number, widget and QR link, knowledge for chosen receptionists, receptionist pages and QR links with scan counts |
 | [Phone and browser calls](features/calls.md) | GPT-Live, the recorded greeting, the time limit, AI traces, archiving a call |
 | [Caller authentication](features/caller-authentication.md) | The four ways to verify a caller before an appointment change, including keypad PINs |
 | [Phone numbers](features/phone-numbers.md) | Picking or claiming a business's Twilio number, and debugging a failed pick |

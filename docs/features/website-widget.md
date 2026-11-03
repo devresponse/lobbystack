@@ -26,6 +26,16 @@ Then, in the dashboard, open **Widget** in the menu, create a key, list the webs
 
 The call button shows only when the business has an active voice number, the business's saved context snapshot names that number, `LIVE_PROTOTYPE_ENABLED=true` and `OPENAI_API_KEY` are set, and the plan has minutes left. Since fork PR #30, claiming or releasing a number refreshes the snapshot. Before it, the button stayed hidden until something else refreshed it.
 
+## Choose the widget's receptionist
+
+Since fork PR #RCPR a business can have several receptionists. Each widget key names the one that answers its chats and calls: **Receptionist** on the key in **Settings > Website widget**, which a new key sets to the default receptionist unless the form picks another. While that receptionist is paused or archived, the default one answers.
+
+- **On the business's own pages,** the page decides instead. `/profile/<slug>` and `/profile/<slug>/<handle>` sign a token naming their receptionist (`createReceptionistPageToken` in `apps/admin/src/lib/widget-keys.ts`, with a key derived from `WIDGET_SESSION_SECRET`), the page's script tag carries it as `data-receptionist-token`, the loader sends it with the session request as `receptionistToken`, and `/api/widget/session` checks it was signed for this business and this key before it puts the receptionist in the session token. A token that doesn't check out is logged as `widget.receptionist_token_rejected` and the key's receptionist answers.
+- **The chat and the call** answer with that receptionist's view of the business's snapshot, and `/api/widget/config` returns its name (`receptionist`), never what it helps with.
+- **A visitor's chat belongs to its receptionist.** On another receptionist's page, `/api/widget/history` shows no earlier chat and the next message starts one with this receptionist, unless the team has taken the earlier chat over, which stays the visitor's.
+
+The v1 API's widget key fields don't include the receptionist yet ([receptionists](receptionists.md#know-what-visitors-see)).
+
 ## Know what the receptionist says on the website
 
 - On `web_chat` and `web_voice`, the receptionist never says it is transferring or connecting anyone (fork PR #18). If a phone call to the business could reach a person, it gives the business's own number, never the transfer number. Otherwise it says it can't connect them. It always offers to take a message.

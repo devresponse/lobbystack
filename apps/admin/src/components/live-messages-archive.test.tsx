@@ -7,17 +7,19 @@ import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "../../public/locales/en/messages.json";
 import { LiveMessagesSurface } from "./live-messages-surface";
+import { testNavigation } from "@/lib/navigation-testing";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => createRecordedBrowserTelemetry().telemetry }));
 vi.mock("@/lib/realtime-query", () => ({ subscribeRealtimeQuery: () => () => {} }));
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 
 const copy = en.page.archive;
 const clients: QueryClient[] = [];
 beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => "en", setItem: vi.fn() }); });
-afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); testNavigation.reset(); });
 
 const ARCHIVED_AT = "2026-10-30T18:30:00Z";
 

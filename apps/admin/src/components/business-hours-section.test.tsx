@@ -7,13 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BusinessHoursSection, HOURS_EDITOR_HREF, windowsForSave } from "./business-hours-section";
 import { AgentBasicSettingsPage } from "./live-agent-basic-settings-surface";
 import { LiveSetupGuideSurface } from "./live-setup-guide-surface";
+import { testNavigation } from "@/lib/navigation-testing";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => telemetryRef.current!.telemetry }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, options?: { day?: string }) => (options?.day ? `${key}:${options.day}` : key) }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }) }));
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 vi.mock("@/lib/test-call-launcher", () => ({ startTestCall: vi.fn(), subscribeTestCallEnded: () => () => undefined }));
 vi.mock("./upgrade-plan-dialog-context", () => ({ useOpenUpgradePlanDialog: () => vi.fn() }));
 
@@ -24,7 +25,7 @@ beforeEach(() => {
   telemetryRef.current = createRecordedBrowserTelemetry();
   vi.stubGlobal("matchMedia", vi.fn((query: string) => ({ matches: false, media: query, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 });
-afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); testNavigation.reset(); });
 
 function client() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });

@@ -29,6 +29,11 @@
     "more": "+{{count}}",
     "defaultOnly": "Default receptionist only"
   },
+  "record": {
+    "receptionist": "Receptionist",
+    "line": "Receptionist: {{name}}",
+    "archived": "{{name}} (archived)"
+  },
   "page": {
     "unavailable": "Receptionists couldn't be loaded. Try again in a moment."
   },

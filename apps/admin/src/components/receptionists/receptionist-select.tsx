@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 
 import { RECEPTIONIST_PICKER_SEARCH_FROM } from "@lobbystack/shared";
 
+import { intlLocale } from "@/lib/locale";
 import { cn } from "@/lib/utils";
 import { ReceptionistAvatar } from "./receptionist-avatar";
 import { foldForSearch, receptionistMatches, type ReceptionistOption } from "./receptionist-choices";
@@ -45,12 +46,22 @@ export type ReceptionistSelectProps = {
   /** Which edge of the button the open list lines up with; end for a dropdown near the right of the screen. */
   align?: "start" | "end";
   /** sm matches the small buttons of a toolbar. */
-  size?: "default" | "sm";
+  size?: "default" | "sm" | undefined;
+  /** A number at the end of each line, such as the open questions each receptionist heard. */
+  counts?: ReceptionistCounts | undefined;
   className?: string | undefined;
 };
 
-export function ReceptionistSelect({ label, hideLabel = false, receptionists, value, onChange, allLabel, showManage = false, disabled = false, alwaysShow = false, align = "start", size = "default", className }: ReceptionistSelectProps) {
-  const { t } = useTranslation("receptionists");
+export type ReceptionistCounts = {
+  byReceptionist: Readonly<Record<string, number>>;
+  /** The number for "All receptionists". */
+  all?: number | undefined;
+  /** Words a number for screen readers, such as "3 open questions". */
+  label: (count: number) => string;
+};
+
+export function ReceptionistSelect({ label, hideLabel = false, receptionists, value, onChange, allLabel, showManage = false, disabled = false, alwaysShow = false, align = "start", size = "default", counts, className }: ReceptionistSelectProps) {
+  const { i18n, t } = useTranslation("receptionists");
   const router = useRouter();
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -204,6 +215,8 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
 
   if (receptionists.length <= 1 && !alwaysShow) return null;
   const activeId = open && choices[active] ? optionId(active) : undefined;
+  const countOf = (choice: Choice): number | undefined => !counts ? undefined : choice.kind === "all" ? counts.all : choice.kind === "receptionist" ? counts.byReceptionist[choice.value] ?? 0 : undefined;
+  const locale = intlLocale(i18n.language);
 
   return (
     // Tabbing out of the button or the search box closes the list.
@@ -277,6 +290,9 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
                 active={index === active}
                 selected={isChosen(choice)}
                 separated={(choice.kind === "add") && index > 0}
+                count={countOf(choice)}
+                countLabel={counts?.label}
+                locale={locale}
                 onHover={() => setActive(index)}
                 onPick={() => pick(choice)}
               >
@@ -294,7 +310,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
   );
 }
 
-function Option({ id, active, selected, separated, onHover, onPick, children }: { id: string; active: boolean; selected: boolean; separated: boolean; onHover: () => void; onPick: () => void; children: ReactNode }) {
+function Option({ id, active, selected, separated, count, countLabel, locale, onHover, onPick, children }: { id: string; active: boolean; selected: boolean; separated: boolean; count: number | undefined; countLabel: ((count: number) => string) | undefined; locale: string; onHover: () => void; onPick: () => void; children: ReactNode }) {
   return (
     <li
       id={id}
@@ -310,6 +326,12 @@ function Option({ id, active, selected, separated, onHover, onPick, children }: 
       className={cn("flex cursor-pointer items-center gap-2 px-2.5 py-2 text-sm outline-none data-[active]:bg-muted", separated && "mt-1 border-t border-border pt-2.5")}
     >
       {children}
+      {count !== undefined ? (
+        <span className="flex-none text-xs tabular-nums text-muted-foreground">
+          <span aria-hidden="true">{count.toLocaleString(locale)}</span>
+          {countLabel ? <span className="sr-only">{countLabel(count)}</span> : null}
+        </span>
+      ) : null}
       {selected ? <Check aria-hidden="true" className="size-4 flex-none" /> : <span aria-hidden="true" className="size-4 flex-none" />}
     </li>
   );

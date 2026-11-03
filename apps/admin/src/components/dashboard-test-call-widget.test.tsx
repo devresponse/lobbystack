@@ -47,6 +47,7 @@ vi.mock("@/components/web-voice/AuraVoiceDemo", () => ({
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
+    i18n: { language: "en" },
     t: (key: string) => {
       const translations: Record<string, string> = {
         "testCall.trigger": "Test Call",

@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AgentBasicSettingsPage,
@@ -10,6 +10,7 @@ import {
   buildAppointmentChangePolicyForSave,
   resolveTransferNumberForSave,
 } from "./live-agent-basic-settings-surface";
+import { testNavigation } from "@/lib/navigation-testing";
 
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => ({ track: vi.fn() }) }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en" }, t: (key: string, options?: Record<string, unknown>) => options?.language ? `${key} (${String(options.language)})` : key }) }));
@@ -20,39 +21,10 @@ vi.mock("@/components/business-hours-section", () => ({
   needsHoursForBooking: () => false,
   useBusinessHours: () => ({ data: undefined }),
 }));
-// The address the page reads ?receptionist= from, and the router that changes it.
-const navigation = vi.hoisted(() => {
-  const listeners = new Set<() => void>();
-  const state = {
-    search: "",
-    set(search: string) {
-      state.search = search;
-      listeners.forEach((listener) => listener());
-    },
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => { listeners.delete(listener); };
-    },
-    router: {
-      push: vi.fn(),
-      replace: vi.fn((url: string) => state.set(url.split("?")[1] ?? "")),
-    },
-  };
-  return state;
-});
-vi.mock("next/navigation", async () => {
-  const { useMemo, useSyncExternalStore } = await import("react");
-  return {
-    usePathname: () => "/agent",
-    useRouter: () => navigation.router,
-    useSearchParams: () => {
-      const search = useSyncExternalStore(navigation.subscribe, () => navigation.search);
-      return useMemo(() => new URLSearchParams(search), [search]);
-    },
-  };
-});
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); navigation.search = ""; vi.clearAllMocks(); });
+beforeEach(() => { testNavigation.reset("/agent"); });
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe("resolveTransferNumberForSave", () => {
   it("rejects partial visible input instead of silently keeping the old value", () => {
@@ -404,7 +376,7 @@ describe("AgentBasicSettingsPage with several receptionists", () => {
   type Request = { url: string; body?: unknown };
 
   function renderPage({ receptionists = RECEPTIONISTS, address = "", canManageTenant = true }: { receptionists?: unknown[]; address?: string; canManageTenant?: boolean } = {}) {
-    navigation.search = address;
+    testNavigation.search = address;
     const reads: Request[] = [];
     const patches: Request[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string, init?: RequestInit) => {
@@ -479,7 +451,7 @@ describe("AgentBasicSettingsPage with several receptionists", () => {
     const user = userEvent.setup();
     await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550123"));
     await choose(user, "Kitsilano clinic");
-    expect(navigation.router.replace).toHaveBeenLastCalledWith(`/agent?receptionist=${KITSILANO_ID}`, { scroll: false });
+    expect(testNavigation.router.replace).toHaveBeenLastCalledWith(`/agent?receptionist=${KITSILANO_ID}`, { scroll: false });
 
     await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("6045550100"));
     expect(picker().textContent).toContain("Kitsilano clinic");
@@ -532,7 +504,7 @@ describe("AgentBasicSettingsPage with several receptionists", () => {
     // Billing has no transfer number.
     expect(transferInput()!.value).toBe("");
     await choose(user, "Front desk");
-    expect(navigation.router.replace).toHaveBeenLastCalledWith("/agent", { scroll: false });
+    expect(testNavigation.router.replace).toHaveBeenLastCalledWith("/agent", { scroll: false });
     await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550123"));
   });
 
@@ -541,7 +513,7 @@ describe("AgentBasicSettingsPage with several receptionists", () => {
     ["a receptionist the business doesn't list", "00000000-0000-4000-8000-0000000000ff"],
   ])("drops %s from the address and shows the default receptionist", async (_, receptionistId) => {
     const { reads } = renderPage({ address: `receptionist=${receptionistId}` });
-    await waitFor(() => expect(navigation.router.replace).toHaveBeenCalledWith("/agent", { scroll: false }));
+    await waitFor(() => expect(testNavigation.router.replace).toHaveBeenCalledWith("/agent", { scroll: false }));
     await waitFor(() => expect(transferInput()?.value.replace(/\D/g, "")).toBe("5145550123"));
     expect(picker().textContent).toContain("Front desk");
     expect(reads.at(-1)).toEqual({ url: "/api/agent?businessId=business" });

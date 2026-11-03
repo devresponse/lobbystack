@@ -30,6 +30,11 @@
     "more": "+{{count}}",
     "defaultOnly": "Samo podrazumevani recepcioner"
   },
+  "record": {
+    "receptionist": "Recepcioner",
+    "line": "Recepcioner: {{name}}",
+    "archived": "{{name}} (arhiviran)"
+  },
   "page": {
     "unavailable": "Recepcioneri trenutno ne mogu da se učitaju. Pokušajte ponovo za trenutak."
   },

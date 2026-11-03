@@ -562,10 +562,14 @@ export async function getCallDetail(
       contactPhone: contacts.phone,
       contactEmail: contacts.email,
       contactBlockedAt: contacts.operatorBlockedAt,
+      // The receptionist that answered; a call from before receptionists shows the default one.
+      receptionistId: receptionistProfiles.id,
+      receptionistName: receptionistProfiles.name,
     }).from(calls)
       .leftJoin(contacts, eq(calls.contactId, contacts.id))
       .leftJoin(conversations, eq(calls.conversationId, conversations.id))
       .leftJoin(storageObjects, eq(calls.recordingObjectId, storageObjects.id))
+      .leftJoin(receptionistProfiles, recordReceptionistJoin(calls.businessId, calls.receptionistId))
       .where(and(eq(calls.id, input.callId), eq(calls.businessId, input.businessId)))
       .limit(1))[0];
     if (!row) return null;
@@ -597,6 +601,7 @@ export async function getCallDetail(
         // A Twilio call's own ID is its SID.
         twilioCallSid: row.twilioCallSid ?? (row.provider === "twilio" ? row.providerCallId : null),
         archivedAt: row.archivedAt,
+        receptionist: row.receptionistId ? { id: row.receptionistId, name: row.receptionistName } : null,
       },
       contact: row.contactId ? { id: row.contactId, name: row.contactName, phone: row.contactPhone, email: row.contactEmail, blockedAt: row.contactBlockedAt } : null,
       outcome: row.reason === row.disposition ? null : row.reason,

@@ -30,6 +30,11 @@
     "more": "+{{count}}",
     "defaultOnly": "Réceptionniste par défaut seulement"
   },
+  "record": {
+    "receptionist": "Réceptionniste",
+    "line": "Réceptionniste : {{name}}",
+    "archived": "{{name}} (archivée)"
+  },
   "page": {
     "unavailable": "Impossible de charger les réceptionnistes. Réessayez dans un instant."
   },

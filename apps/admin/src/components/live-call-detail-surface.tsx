@@ -19,6 +19,7 @@ import { toast } from "sonner";
 
 import { CallRecordingPlayer } from "@/components/audio/call-recording-player";
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
+import { useReceptionistChoices } from "@/components/receptionists/receptionist-choices";
 import { BackLink, DetailSection, MetadataField, truncateId, useCopiedField } from "@/components/detail-fields";
 import { SectionBlock } from "@/components/section-block";
 import { Badge } from "@/components/ui/badge";
@@ -55,6 +56,8 @@ type Detail = {
     twilioCallSid?: string | null;
     /** When an owner or admin archived the call, which hides it from the Calls list. */
     archivedAt?: string | null;
+    /** The receptionist that answered; a call from before receptionists shows the default one. */
+    receptionist?: { id: string; name: string | null } | null;
   };
   contact: { id: string; name: string | null; phone: string | null; email: string | null; blockedAt: string | null } | null;
   outcome: string | null;
@@ -98,7 +101,7 @@ function CallEventTimeline({ events, locale }: { events: Detail["timeline"]; loc
 }
 
 export function LiveCallDetailSurface({ callId }: { callId: string }) {
-  const { i18n, t } = useTranslation("calls");
+  const { i18n, t } = useTranslation(["calls", "receptionists"]);
   const router = useRouter();
   const telemetry = useTelemetry();
   const queryClient = useQueryClient();
@@ -107,6 +110,8 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
   const { businesses, business } = useActiveBusiness();
   // Archiving hides the call from the whole team, so the server lets only owners and admins do it.
   const canArchive = business ? ["business_owner", "business_admin"].includes(business.role) : false;
+  // With several receptionists the call says which one answered.
+  const several = useReceptionistChoices(business?.businessId).receptionists.length > 1;
   const detail = useQuery({
     queryKey: ["call", business?.businessId, callId],
     queryFn: () => requestJson<Detail>(`/api/calls/${encodeURIComponent(callId)}?businessId=${encodeURIComponent(business!.businessId)}`),
@@ -189,8 +194,9 @@ export function LiveCallDetailSurface({ callId }: { callId: string }) {
           : null}
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className={cn("grid grid-cols-2 gap-4", several && call.receptionist?.name ? "sm:grid-cols-3 lg:grid-cols-5" : "sm:grid-cols-4")}>
         <MetadataField copied={copiedField === "from"} copyLabel={t("actions.copy")} label={t("detail.metadata.from")} maskValue {...(hasPhone ? { onCopy: () => copy(callerPhone, "from") } : {})} value={callerPhone} />
+        {several && call.receptionist?.name ? <MetadataField label={t("receptionists:record.receptionist")} value={call.receptionist.name} /> : null}
         <MetadataField label={t("detail.metadata.duration")} value={formatDuration(call.providerDurationSeconds)} />
         <MetadataField label={t("detail.metadata.started")} value={formatDate(call.startedAt, i18n.language)} />
         <MetadataField copied={copiedField === "id"} copyLabel={t("actions.copy")} label={t("detail.metadata.id")} onCopy={() => copy(call.legacyConvexId ?? call.id, "id")} value={truncateId(call.legacyConvexId ?? call.id)} />

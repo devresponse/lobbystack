@@ -30,6 +30,11 @@
     "more": "+{{count}}",
     "defaultOnly": "Solo la recepcionista predeterminada"
   },
+  "record": {
+    "receptionist": "Recepcionista",
+    "line": "Recepcionista: {{name}}",
+    "archived": "{{name}} (archivada)"
+  },
   "page": {
     "unavailable": "No se pudieron cargar las recepcionistas. Inténtelo de nuevo en un momento."
   },

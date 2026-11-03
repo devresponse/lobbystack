@@ -28,7 +28,7 @@ import { archiveReceptionistInTransaction, createReceptionistInTransaction, setR
 import { receiveInboundSms } from "./sms";
 import { createBusiness } from "./tenancy";
 import { answerUnansweredQuestion, listOpenUnansweredQuestions, recordUnansweredQuestion } from "./unansweredQuestions";
-import { createVoiceFollowUpTask, listCalls } from "./voice";
+import { createVoiceFollowUpTask, getCallDetail, listCalls } from "./voice";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
 const testUrl = process.env.LOBBYSTACK_RELIABILITY_TEST_DATABASE_URL;
@@ -247,6 +247,9 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
       // Another business's receptionist answered none of them.
       expect((await listCalls(context, { userId, businessId, receptionistId: randomUUID() })).calls).toEqual([]);
       await expect(listCalls(context, { userId, businessId, receptionistId: "gastown" })).rejects.toMatchObject({ status: 400, code: "invalid_receptionist" });
+      // A call's page names it too.
+      expect((await getCallDetail(context, { userId, businessId, callId: store!.id }))?.call.receptionist).toEqual({ id: storeId, name: "Gastown store" });
+      expect((await getCallDetail(context, { userId, businessId, callId: old!.id }))?.call.receptionist).toEqual({ id: mainId, name: "Front desk" });
     });
   });
 

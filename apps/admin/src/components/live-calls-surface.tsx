@@ -16,6 +16,8 @@ import { useTranslation } from "react-i18next";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { CallRecordingPlayer } from "@/components/audio/call-recording-player";
+import { receptionistQuery, useReceptionistChoices, useReceptionistFilter } from "@/components/receptionists/receptionist-choices";
+import { ReceptionistFilter } from "@/components/receptionists/receptionist-filter";
 import { DataTablePagination, paginationFeatures } from "@/components/data-table/pagination";
 import { TableCardSkeleton } from "@/components/loading-skeletons";
 import { PageHeader } from "@/components/page-header";
@@ -52,6 +54,8 @@ type Call = {
   contactEmail?: string | null;
   recordingState: "available" | "pending" | "expired" | "missing";
   transcriptPreview: string | null;
+  /** The receptionist that answered; a call from before receptionists shows the default one. */
+  receptionist?: { id: string; name: string | null } | null;
 };
 
 function callerName(call: Call, locale: string, t: (key: string) => string): string {
@@ -71,7 +75,7 @@ async function getJson<T>(url: string): Promise<T> {
 }
 
 export function LiveCallsSurface() {
-  const { i18n, t } = useTranslation("calls");
+  const { i18n, t } = useTranslation(["calls", "receptionists"]);
   const router = useRouter();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
@@ -89,9 +93,19 @@ export function LiveCallsSurface() {
   const [activeRecordingId, setActiveRecordingId] = useState<string | null>(null);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
   const { businesses, business } = useActiveBusiness();
+  // With several receptionists the list says who answered each call and filters by it.
+  const { receptionists } = useReceptionistChoices(business?.businessId);
+  const several = receptionists.length > 1;
+  const [receptionistId] = useReceptionistFilter();
+  // Another receptionist's calls start on their first page.
+  const [paginationReceptionist, setPaginationReceptionist] = useState(receptionistId);
+  if (paginationReceptionist !== receptionistId) {
+    setPaginationReceptionist(receptionistId);
+    setPagination((current) => ({ ...current, pageIndex: 0 }));
+  }
   const calls = useQuery({
-    queryKey: ["calls", business?.businessId, searchQuery, pagination.pageIndex, pagination.pageSize],
-    queryFn: () => getJson<{ calls: Call[]; pagination: { total: number } }>(`/api/calls?limit=${pagination.pageSize}&offset=${pagination.pageIndex * pagination.pageSize}&search=${encodeURIComponent(searchQuery)}`),
+    queryKey: ["calls", business?.businessId, searchQuery, pagination.pageIndex, pagination.pageSize, receptionistId],
+    queryFn: () => getJson<{ calls: Call[]; pagination: { total: number } }>(`/api/calls?limit=${pagination.pageSize}&offset=${pagination.pageIndex * pagination.pageSize}&search=${encodeURIComponent(searchQuery)}${receptionistQuery(receptionistId)}`),
     enabled: Boolean(business),
     // Keep the current rows on screen while the next page or search loads.
     placeholderData: keepPreviousData,
@@ -150,6 +164,12 @@ export function LiveCallsSurface() {
       header: () => t("table.purpose"),
       cell: ({ row }) => <span className="type-body-muted">{row.original.outcome?.kind !== "none" ? formatCallOutcomeSummary(row.original.outcome, i18n.language, t) : row.original.transcriptPreview?.trim() || t("outcome.none")}</span>,
     },
+    ...(several ? [{
+      id: "receptionist",
+      accessorFn: (call: Call) => call.receptionist?.name ?? "",
+      header: () => t("receptionists:record.receptionist"),
+      cell: ({ row }: { row: { original: Call } }) => <span className="type-body-muted">{row.original.receptionist?.name ?? ""}</span>,
+    } satisfies ColumnDef<typeof paginationFeatures, Call>] : []),
     {
       id: "time",
       accessorFn: (call) => call.startedAt,
@@ -181,7 +201,7 @@ export function LiveCallsSurface() {
         );
       },
     },
-  ], [activeRecordingId, i18n.language, t]);
+  ], [activeRecordingId, i18n.language, several, t]);
 
   const table = useTable({
     features: paginationFeatures,
@@ -210,17 +230,20 @@ export function LiveCallsSurface() {
         }
         title={t("page.title")}
       />
-      <div className="relative max-w-sm">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          className="pl-10"
-          onChange={(event) => {
-            setSearch(event.target.value);
-            setPagination((current) => ({ ...current, pageIndex: 0 }));
-          }}
-          placeholder={t("filters.searchPlaceholder")}
-          value={search}
-        />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <div className="relative w-full max-w-sm">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            className="pl-10"
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPagination((current) => ({ ...current, pageIndex: 0 }));
+            }}
+            placeholder={t("filters.searchPlaceholder")}
+            value={search}
+          />
+        </div>
+        <ReceptionistFilter businessId={business?.businessId} className="w-full sm:w-64" />
       </div>
       <CallRecordingPlayer
         autoPlay
@@ -232,10 +255,10 @@ export function LiveCallsSurface() {
         src={recording.data?.url ?? null}
         variant="hidden"
       />
-      {businesses.isLoading || calls.isLoading ? <TableCardSkeleton columns={5} /> : (
+      {businesses.isLoading || calls.isLoading ? <TableCardSkeleton columns={columns.length} /> : (
         <>
           <TableCard>
-            <Table className="min-w-[56rem]">
+            <Table className={several ? "min-w-[64rem]" : "min-w-[56rem]"}>
               <TableHeader>
                 {table.getHeaderGroups().map((group) => (
                   <TableRow key={group.id}>
@@ -262,7 +285,7 @@ export function LiveCallsSurface() {
                     ))}
                   </TableRow>
                 ))}
-                {table.getRowModel().rows.length === 0 ? <TableRow><TableCell className="h-24 text-center text-muted-foreground" colSpan={5}>{t("table.empty")}</TableCell></TableRow> : null}
+                {table.getRowModel().rows.length === 0 ? <TableRow><TableCell className="h-24 text-center text-muted-foreground" colSpan={columns.length}>{t("table.empty")}</TableCell></TableRow> : null}
               </TableBody>
             </Table>
           </TableCard>

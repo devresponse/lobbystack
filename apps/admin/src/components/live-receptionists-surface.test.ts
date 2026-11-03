@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import en from "../../public/locales/en/receptionists.json";
-import { alphabeticalReceptionistOrder, movedReceptionistOrder, receptionistIdentityPatch, receptionistListUrl } from "./live-receptionists-surface";
+import { movedReceptionistOrder, receptionistIdentityPatch, receptionistListUrl } from "./live-receptionists-surface";
 import type { ReceptionistOption } from "./receptionists/receptionist-choices";
 import type { ReceptionistEditorValues } from "./receptionists/receptionist-editor";
 import { receptionistErrorMessage } from "./receptionists/receptionist-errors";
@@ -14,7 +14,6 @@ const FRONT_DESK = receptionist("front", "Front desk", { isDefault: true, knowle
 const KITSILANO = receptionist("kits", "Kitsilano clinic", { handle: "kitsilano", description: "West 4th", locale: "fr" });
 const ECLAIR = receptionist("eclair", "Éclair counter", { handle: "eclair" });
 const STORE_2 = receptionist("store-2", "Store 2", { handle: "store-2" });
-const STORE_10 = receptionist("store-10", "store 10", { handle: "store-10" });
 const values = (overrides: Partial<ReceptionistEditorValues> = {}): ReceptionistEditorValues => ({ name: "Kitsilano clinic", description: "West 4th", handle: "kitsilano", locale: "fr", knowledgeScope: "audience", listed: true, copyFromId: null, ...overrides });
 
 describe("the table's API address", () => {
@@ -57,10 +56,6 @@ describe("the order", () => {
     expect(movedReceptionistOrder(all, STORE_2.id, 1)).toBeNull();
     expect(movedReceptionistOrder(all, FRONT_DESK.id, 1)).toBeNull();
     expect(movedReceptionistOrder(all, "gone", 1)).toBeNull();
-  });
-
-  it("sorts by name as people read it: accents and case aside, numbers by value", () => {
-    expect(alphabeticalReceptionistOrder([STORE_10, FRONT_DESK, KITSILANO, STORE_2, ECLAIR], "fr")).toEqual([FRONT_DESK.id, ECLAIR.id, KITSILANO.id, STORE_2.id, STORE_10.id]);
   });
 });
 

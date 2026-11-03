@@ -11,7 +11,9 @@ import {
   RECEPTIONIST_HANDLE_MAX_LENGTH,
   availableReceptionistHandle,
   defaultReceptionistName,
+  alphabeticalReceptionistOrder,
   entryLinkCode,
+  isAlphabeticalReceptionistOrder,
   entryLinkPath,
   isReceptionistHandle,
   normalizeEntryLinkCode,
@@ -248,5 +250,41 @@ describe("website rule paths", () => {
     expect(websitePageUnderRule("https://othercoffee.ca/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
     expect(websitePageUnderRule("https://kitsilanocoffee.ca:8443/stores/kitsilano", site, "/stores/kitsilano/")).toBe(false);
     expect(websitePageUnderRule("not a url", site, "/")).toBe(false);
+  });
+});
+
+describe("the alphabetical order", () => {
+  const receptionist = (id: string, name: string, isDefault = false) => ({ id, name, isDefault });
+  const front = receptionist("a0", "Front desk", true);
+  const store10 = receptionist("b1", "Store 10");
+  const store2 = receptionist("b2", "Store 2");
+  const eclair = receptionist("b3", "Éclair bakery");
+  const kitsilano = receptionist("b4", "kitsilano");
+
+  it("puts the default first, then names as people read them: accents and case aside, numbers by value", () => {
+    expect(alphabeticalReceptionistOrder([store10, kitsilano, front, store2, eclair], "fr")).toEqual(["a0", "b3", "b4", "b2", "b1"]);
+    expect(alphabeticalReceptionistOrder([store10, store2], "en")).toEqual(["b2", "b1"]);
+  });
+
+  it("keeps names alike in the order the list has them", () => {
+    expect(alphabeticalReceptionistOrder([receptionist("c2", "Cafe"), receptionist("c1", "café")], "fr")).toEqual(["c2", "c1"]);
+    expect(alphabeticalReceptionistOrder([receptionist("c1", "café"), receptionist("c2", "Cafe")], "fr")).toEqual(["c1", "c2"]);
+    expect(isAlphabeticalReceptionistOrder([front, receptionist("c2", "Cafe"), receptionist("c1", "café")], "fr")).toBe(true);
+  });
+
+  it("reads a language it doesn't know, or none, without failing", () => {
+    expect(alphabeticalReceptionistOrder([store10, store2], "not a language")).toEqual(["b2", "b1"]);
+    expect(alphabeticalReceptionistOrder([store10, store2], null)).toEqual(["b2", "b1"]);
+    expect(alphabeticalReceptionistOrder([store10, store2], "pt_BR")).toEqual(["b2", "b1"]);
+  });
+
+  it("knows whether a list goes by name", () => {
+    expect(isAlphabeticalReceptionistOrder([front, eclair, kitsilano, store2, store10], "en")).toBe(true);
+    expect(isAlphabeticalReceptionistOrder([front, kitsilano, eclair], "en")).toBe(false);
+    // The default stays first whatever its name.
+    expect(isAlphabeticalReceptionistOrder([eclair, front], "en")).toBe(false);
+    // With one receptionist besides the default, or none, there is nothing to order.
+    expect(isAlphabeticalReceptionistOrder([front, store10], "en")).toBe(true);
+    expect(isAlphabeticalReceptionistOrder([front], "en")).toBe(true);
   });
 });

@@ -20,7 +20,7 @@ import {
   type Database,
   type DatabaseTransaction,
 } from "@lobbystack/db";
-import { defaultAppointmentChangePolicy } from "@lobbystack/shared";
+import { defaultAppointmentChangePolicy, isAlphabeticalReceptionistOrder } from "@lobbystack/shared";
 
 import { endManagedPlanInTransaction, setManagedPlanInTransaction } from "./billing";
 import { loadReceptionistView, saveReceptionistProfileInTransaction } from "./receptionistProfile";
@@ -34,6 +34,7 @@ import {
   receptionistAllowanceInTransaction,
   reorderReceptionistsInTransaction,
   restoreReceptionistInTransaction,
+  sortReceptionistsByNameInTransaction,
   setReceptionistStatusInTransaction,
   updateReceptionistInTransaction,
 } from "./receptionists";
@@ -286,6 +287,7 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       expect((await listReceptionistChoicesInTransaction(tx, { businessId })).map((choice) => choice.name)).toEqual(["Front desk", "Catering", "Bakery counter"]);
       expect(await failure(tx, (inner) => reorderReceptionistsInTransaction(inner, { businessId, receptionistIds: [a.id, main.id] }))).toMatchObject({ status: 400, code: "invalid_order" });
       expect(await failure(tx, (inner) => reorderReceptionistsInTransaction(inner, { businessId, receptionistIds: [a.id, b.id, c.id] }))).toMatchObject({ status: 400, code: "invalid_order" });
+      expect(isAlphabeticalReceptionistOrder(await listReceptionistChoicesInTransaction(tx, { businessId }), "en")).toBe(false);
 
       // The page: search, status and the archived view, with counts whatever the filters.
       const page = await listReceptionistsInTransaction(tx, { businessId, search: "custom" });
@@ -303,6 +305,49 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       const restored = await restoreReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: c.id });
       expect(restored).toMatchObject({ archivedAt: null, status: "active", handle: "apres-ski-bar-2", sortOrder: 4 });
       expect(await failure(tx, (inner) => restoreReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: c.id }))).toMatchObject({ status: 404 });
+    });
+  });
+
+  it("keeps receptionists by name while they go by name, and in the owner's order once one is moved", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx, { locale: "fr" });
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const main = (await loadReceptionistView(tx, { businessId }))!;
+      const add = async (name: string) => await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name } });
+      const names = async () => (await listReceptionistChoicesInTransaction(tx, { businessId })).map((choice) => choice.name);
+      const alphabetical = async () => isAlphabeticalReceptionistOrder(await listReceptionistChoicesInTransaction(tx, { businessId }), "fr");
+
+      // A business's new receptionists take their place by name, as people read it in its language: accents aside, numbers by value.
+      const store10 = await add("Store 10");
+      const store2 = await add("Store 2");
+      const eclair = await add("Éclair bakery");
+      expect(await names()).toEqual(["Front desk", "Éclair bakery", "Store 2", "Store 10"]);
+      expect(await alphabetical()).toBe(true);
+
+      // A rename moves it; so does a restore.
+      await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: eclair.id, patch: { name: "Zoo gift shop" } });
+      expect(await names()).toEqual(["Front desk", "Store 2", "Store 10", "Zoo gift shop"]);
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store2.id });
+      await restoreReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store2.id });
+      expect(await names()).toEqual(["Front desk", "Store 2", "Store 10", "Zoo gift shop"]);
+
+      // Once the owner moves one, the order is theirs: new ones go last, and a rename moves nothing.
+      await reorderReceptionistsInTransaction(tx, { businessId, receptionistIds: [main.id, eclair.id, store10.id, store2.id] });
+      expect(await names()).toEqual(["Front desk", "Zoo gift shop", "Store 10", "Store 2"]);
+      expect(await alphabetical()).toBe(false);
+      await add("Art cart");
+      await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store10.id, patch: { name: "Annex" } });
+      expect(await names()).toEqual(["Front desk", "Zoo gift shop", "Annex", "Store 2", "Art cart"]);
+
+      // Sort A–Z puts them back by name, and then sorting again touches no receptionist.
+      await sortReceptionistsByNameInTransaction(tx, { businessId });
+      expect(await names()).toEqual(["Front desk", "Annex", "Art cart", "Store 2", "Zoo gift shop"]);
+      expect(await alphabetical()).toBe(true);
+      const stamps = async () => (await tx.select({ id: receptionistProfiles.id, updatedAt: receptionistProfiles.updatedAt }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).orderBy(asc(receptionistProfiles.id))).map((row) => `${row.id}:${row.updatedAt.toISOString()}`);
+      const before = await stamps();
+      await sortReceptionistsByNameInTransaction(tx, { businessId });
+      expect(await stamps()).toEqual(before);
     });
   });
 
@@ -375,7 +420,8 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       expect(paused.sort()).toEqual([first.id, second.id].sort());
       await as(tx, null);
       const rows = await tx.select({ name: receptionistProfiles.name, status: receptionistProfiles.status }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).orderBy(asc(receptionistProfiles.sortOrder));
-      expect(rows).toEqual([{ name: "Front desk", status: "active" }, { name: "Older", status: "paused" }, { name: "Newer", status: "paused" }]);
+      // The receptionists went by name, so each new one took its place by name.
+      expect(rows).toEqual([{ name: "Front desk", status: "active" }, { name: "Newer", status: "paused" }, { name: "Older", status: "paused" }]);
       const reasons = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.paused")));
       expect(reasons.map((row) => row.payload)).toEqual([{ reason: "plan_limit", plan: "free_cloud", limit: 1 }, { reason: "plan_limit", plan: "free_cloud", limit: 1 }]);
       // Running it again finds nothing to pause.

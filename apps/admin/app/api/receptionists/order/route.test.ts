@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ options: vi.fn(), reorder: vi.fn(), choices: vi.fn() }));
+const fixture = vi.hoisted(() => ({ options: vi.fn(), reorder: vi.fn(), sortByName: vi.fn(), choices: vi.fn() }));
 const tx = vi.hoisted(() => ({ name: "tx" }));
 vi.mock("@/lib/api-helpers", async (original) => ({
   ...await original<typeof import("@/lib/api-helpers")>(),
@@ -12,6 +12,7 @@ vi.mock("@/lib/api-helpers", async (original) => ({
 vi.mock("@lobbystack/domain", async (original) => ({
   ...await original<typeof import("@lobbystack/domain")>(),
   reorderReceptionistsInTransaction: fixture.reorder,
+  sortReceptionistsByNameInTransaction: fixture.sortByName,
   listReceptionistChoicesInTransaction: fixture.choices,
 }));
 import { PUT } from "./route";
@@ -34,7 +35,16 @@ describe("the receptionists' order", () => {
     expect(fixture.options).toHaveBeenCalledWith({ minimumRole: "business_admin" });
   });
 
-  it.each([null, [GASTOWN], {}, { receptionistIds: [] }, { receptionistIds: ["gastown"] }, { receptionistIds: [GASTOWN, GASTOWN] }])("refuses %j before opening a transaction", async (body) => {
+  it("lists them by name from now on, for Sort A–Z and Alphabetical", async () => {
+    const response = await order({ order: "alphabetical" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ receptionists: [{ id: FRONT_DESK }, { id: GASTOWN }] });
+    expect(fixture.sortByName).toHaveBeenCalledWith(tx, { businessId: "business" });
+    expect(fixture.reorder).not.toHaveBeenCalled();
+    expect(fixture.options).toHaveBeenCalledWith({ minimumRole: "business_admin" });
+  });
+
+  it.each([null, [GASTOWN], {}, { receptionistIds: [] }, { receptionistIds: ["gastown"] }, { receptionistIds: [GASTOWN, GASTOWN] }, { order: "custom" }, { order: "alphabetical", receptionistIds: [GASTOWN, FRONT_DESK] }])("refuses %j before opening a transaction", async (body) => {
     const response = await order(body);
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({ code: "invalid_order" });

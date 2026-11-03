@@ -5,6 +5,8 @@ import {
   availableReceptionistHandle,
   isReceptionistHandle,
   isRuntimeLocale,
+  alphabeticalReceptionistOrder,
+  isAlphabeticalReceptionistOrder,
   isUuid,
   maxReceptionistsPerBusiness,
   receptionistAllowance,
@@ -236,6 +238,52 @@ const choiceColumns = {
 /** The order every list uses: the default receptionist first, then the order the Receptionists page sets, then by name. */
 const listOrder = [desc(receptionistProfiles.isDefault), asc(receptionistProfiles.sortOrder), sql`lower(${receptionistProfiles.name})`, asc(receptionistProfiles.id)] as const;
 
+/** The receptionists that aren't archived, in list order, for ordering. */
+async function liveOrder(tx: DatabaseTransaction, businessId: string): Promise<Array<{ id: string; name: string; isDefault: boolean; sortOrder: number }>> {
+  return await tx.select({ id: receptionistProfiles.id, name: receptionistProfiles.name, isDefault: receptionistProfiles.isDefault, sortOrder: receptionistProfiles.sortOrder }).from(receptionistProfiles)
+    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)))
+    .orderBy(...listOrder);
+}
+
+/** The business's language, which names are sorted in. */
+async function businessLocale(tx: DatabaseTransaction, businessId: string): Promise<string> {
+  const [row] = await tx.select({ locale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
+  return row?.locale ?? "en";
+}
+
+/** Numbers the receptionists 1, 2, 3… in the order given, writing only those whose place changes. Whether any moved. */
+async function writeOrder(tx: DatabaseTransaction, businessId: string, receptionistIds: readonly string[], current: ReadonlyMap<string, number>): Promise<boolean> {
+  const now = new Date();
+  let moved = false;
+  for (const [index, id] of receptionistIds.entries()) {
+    const sortOrder = index + 1;
+    if (current.get(id) === sortOrder) continue;
+    moved = true;
+    await tx.update(receptionistProfiles).set({ sortOrder, updatedAt: now })
+      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, id)));
+  }
+  return moved;
+}
+
+/** Whether the receptionists go by name now, so one about to be added, restored or renamed should take its place by name. Callers hold the lock. */
+async function listedByName(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
+  return isAlphabeticalReceptionistOrder(await liveOrder(tx, businessId), await businessLocale(tx, businessId));
+}
+
+/** Puts the receptionists after the default in name order, numbered from 1; the default is first whatever its number. Whether any moved. Callers hold the lock. */
+async function orderByName(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
+  const live = await liveOrder(tx, businessId);
+  const defaults = new Set(live.filter((row) => row.isDefault).map((row) => row.id));
+  const others = alphabeticalReceptionistOrder(live, await businessLocale(tx, businessId)).filter((id) => !defaults.has(id));
+  return await writeOrder(tx, businessId, others, new Map(live.map((row) => [row.id, row.sortOrder])));
+}
+
+/** The place after the last receptionist that isn't archived. */
+async function lastPlace(tx: DatabaseTransaction, businessId: string): Promise<number> {
+  const live = await liveOrder(tx, businessId);
+  return live.reduce((highest, row) => Math.max(highest, row.sortOrder), 0) + 1;
+}
+
 /** The business's receptionists for dropdowns and pickers, archived ones left out unless asked for. */
 export async function listReceptionistChoicesInTransaction(tx: DatabaseTransaction, input: { businessId: string; includeArchived?: boolean }): Promise<ReceptionistChoice[]> {
   return await tx.select(choiceColumns).from(receptionistProfiles)
@@ -359,7 +407,8 @@ export async function refreshSnapshotForReceptionists(tx: DatabaseTransaction, b
 
 /**
  * Adds a receptionist with the settings of copyFromId's receptionist, or of
- * the default one, its own name and page address, last in the list. A 409
+ * the default one, its own name and page address: by name while the
+ * receptionists go by name, else last in the list. A 409
  * error when the plan's active receptionists are all in use, or the business
  * keeps the deployment's cap already.
  */
@@ -384,9 +433,8 @@ export async function createReceptionistInTransaction(
   } else {
     handle = availableReceptionistHandle(receptionistHandleFrom(input.receptionist.name), taken);
   }
-  const [last] = await tx.select({ sortOrder: receptionistProfiles.sortOrder }).from(receptionistProfiles)
-    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)))
-    .orderBy(desc(receptionistProfiles.sortOrder)).limit(1);
+  const byName = await listedByName(tx, businessId);
+  const sortOrder = await lastPlace(tx, businessId);
 
   let created: { id: string } | undefined;
   try {
@@ -399,7 +447,7 @@ export async function createReceptionistInTransaction(
       isDefault: false,
       knowledgeScope: input.receptionist.knowledgeScope ?? "audience",
       listed: input.receptionist.listed ?? true,
-      sortOrder: (last?.sortOrder ?? 0) + 1,
+      sortOrder,
       locale: input.receptionist.locale ?? null,
       status: "active",
       greeting: source.greeting,
@@ -420,6 +468,8 @@ export async function createReceptionistInTransaction(
     throw error;
   }
   if (!created) throw new Error("Receptionist could not be created.");
+  // While the receptionists go by name, the new one takes its place by name; else it goes last.
+  if (byName) await orderByName(tx, businessId);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.created", receptionistId: created.id, payload: { name: input.receptionist.name, handle, copiedFrom: source.id } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_created", created.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: created.id });
@@ -455,9 +505,12 @@ export async function updateReceptionistInTransaction(
   input: { businessId: string; actorUserId: string | null; receptionistId: string; patch: ReceptionistIdentityPatch },
 ): Promise<ReceptionistView> {
   const { businessId, patch } = input;
-  if (patch.handle !== undefined) await lockReceptionistsInTransaction(tx, businessId);
+  // A new name can move it in a list that goes by name, and a new page address must be free: both need every receptionist held.
+  if (patch.handle !== undefined || patch.name !== undefined) await lockReceptionistsInTransaction(tx, businessId);
   const current = await lockReceptionist(tx, input);
   if (current.isDefault && patch.listed === false) throw failure("The default receptionist answers the business page, so it stays listed.", 409, "default_receptionist");
+  const renamed = patch.name !== undefined && patch.name !== current.name;
+  const byName = renamed && await listedByName(tx, businessId);
   if (patch.handle !== undefined && patch.handle !== current.handle && (await liveHandles(tx, businessId, current.id)).includes(patch.handle)) throw handleTaken();
   const values = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
   try {
@@ -467,6 +520,7 @@ export async function updateReceptionistInTransaction(
     if (isUniqueViolation(error, "receptionist_profiles_business_handle_unique")) throw handleTaken();
     throw error;
   }
+  if (byName) await orderByName(tx, businessId);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.updated", receptionistId: current.id, payload: { fields: Object.keys(values).sort() } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_updated", current.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: current.id });
@@ -537,11 +591,10 @@ export async function restoreReceptionistInTransaction(
   if (allowance.current >= allowance.cap) throw capReached(allowance.cap);
   const status: ReceptionistStatus = current.status === "active" && allowance.active < allowance.limit ? "active" : "paused";
   const handle = availableReceptionistHandle(current.handle ?? receptionistHandleFrom(current.name), await liveHandles(tx, businessId, current.id));
-  const [last] = await tx.select({ sortOrder: receptionistProfiles.sortOrder }).from(receptionistProfiles)
-    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)))
-    .orderBy(desc(receptionistProfiles.sortOrder)).limit(1);
-  await tx.update(receptionistProfiles).set({ archivedAt: null, status, handle, sortOrder: (last?.sortOrder ?? 0) + 1, updatedAt: new Date() })
+  const byName = await listedByName(tx, businessId);
+  await tx.update(receptionistProfiles).set({ archivedAt: null, status, handle, sortOrder: await lastPlace(tx, businessId), updatedAt: new Date() })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, current.id)));
+  if (byName) await orderByName(tx, businessId);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.restored", receptionistId: current.id, payload: { status, ...(handle !== current.handle ? { handle } : {}) } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_restored", current.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: current.id });
@@ -563,14 +616,19 @@ export async function reorderReceptionistsInTransaction(tx: DatabaseTransaction,
   if (rows.length !== input.receptionistIds.length || input.receptionistIds.some((id) => !known.has(id))) {
     throw failure("The order must list every receptionist that isn't archived, once each.", 400, "invalid_order");
   }
-  const now = new Date();
-  for (const [index, id] of input.receptionistIds.entries()) {
-    const sortOrder = index + 1;
-    if (known.get(id) === sortOrder) continue;
-    await tx.update(receptionistProfiles).set({ sortOrder, updatedAt: now })
-      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, id)));
-  }
+  await writeOrder(tx, businessId, input.receptionistIds, known);
   await refreshSnapshotForReceptionists(tx, businessId, "receptionists_reordered");
+}
+
+/**
+ * Lists the receptionists by name after the default ("Sort A–Z", and
+ * "Alphabetical" on the business page). From then on one added, restored or
+ * renamed takes its place by name, until the owner moves one.
+ */
+export async function sortReceptionistsByNameInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<void> {
+  const { businessId } = input;
+  await lockReceptionistsInTransaction(tx, businessId);
+  if (await orderByName(tx, businessId)) await refreshSnapshotForReceptionists(tx, businessId, "receptionists_reordered");
 }
 
 /**

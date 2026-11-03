@@ -494,11 +494,12 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
       expect(snapshot).toMatchObject({ summary: "Coffee and pastries in Vancouver.", recordingNotice: false, publicPageUrl: businessPage, defaultLocale: "en" });
       expect(snapshot.knowledgeSnippets?.map((entry) => entry.id)).toEqual([hours, gastownParking]);
       expect(snapshot.knowledgeDigest.split("\n").map((line) => JSON.parse(line).title)).toEqual(["Kitsilano store", "Gastown store", "Menu"]);
+      // In the list's order: the default, then by name while the owner hasn't moved any.
       expect(snapshot.receptionists?.map((entry) => [entry.name, entry.status, entry.listed, entry.pageUrl ?? null])).toEqual([
         [front.name, "active", true, businessPage],
+        ["Catering", "active", false, `${businessPage}/catering`],
         ["Gastown store", "active", true, `${businessPage}/gastown-store`],
         ["Kitsilano store", "paused", true, `${businessPage}/kitsilano-store`],
-        ["Catering", "active", false, `${businessPage}/catering`],
       ]);
       expect(snapshot.receptionists?.find((entry) => entry.id === gastown.id)).toMatchObject({ snippetIds: [hours, gastownParking], greeting: "Bonjour, Gastown!", bookingMode: "request", locale: "fr", chatInstructions: "Answer as the Gastown store." });
       expect(snapshot.receptionists?.find((entry) => entry.id === catering.id)?.snippetIds).toEqual([hours]);

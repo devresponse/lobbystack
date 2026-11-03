@@ -235,6 +235,41 @@ export function receptionistAllowance(planIncluded: number | null | undefined, c
 }
 
 /** The language a receptionist's calls open in: its own when set and supported, else the business's. */
+/**
+ * Compares receptionists' names as people read them in the business's
+ * language: accents and case aside, numbers by value ("Store 2" before
+ * "Store 10"). Names alike compare equal, so a stable sort keeps their order.
+ */
+export function compareReceptionistNames(locale: string | null | undefined): (a: { name: string }, b: { name: string }) => number {
+  const options: Intl.CollatorOptions = { sensitivity: "base", numeric: true };
+  let collator: Intl.Collator;
+  try {
+    collator = new Intl.Collator(locale?.replace("_", "-") || undefined, options);
+  } catch {
+    collator = new Intl.Collator(undefined, options);
+  }
+  return (a, b) => collator.compare(a.name, b.name);
+}
+
+/**
+ * Receptionists' ids by name after the default: Sort A–Z, and "Alphabetical"
+ * on the business page. Names alike keep the order they come in, the list's.
+ */
+export function alphabeticalReceptionistOrder(receptionists: readonly { id: string; name: string; isDefault: boolean }[], locale: string | null | undefined): string[] {
+  const others = receptionists.filter((receptionist) => !receptionist.isDefault).sort(compareReceptionistNames(locale));
+  return [...receptionists.filter((receptionist) => receptionist.isDefault), ...others].map((receptionist) => receptionist.id);
+}
+
+/**
+ * Whether receptionists, in the order the business lists them (the default
+ * first), go by name. While they do, one added, restored or renamed takes its
+ * place by name; once the owner moves one, the order is theirs and new ones
+ * go last.
+ */
+export function isAlphabeticalReceptionistOrder(receptionists: readonly { id: string; name: string; isDefault: boolean }[], locale: string | null | undefined): boolean {
+  return alphabeticalReceptionistOrder(receptionists, locale).every((id, index) => receptionists[index]?.id === id);
+}
+
 export function receptionistLocale(receptionistLocaleValue: string | null | undefined, businessLocale: RuntimeLocale): RuntimeLocale {
   return normalizeRuntimeLocale(receptionistLocaleValue) ?? businessLocale;
 }
@@ -257,8 +292,8 @@ export const ENTRY_LINK_SCAN_RETENTION_MONTHS = 13;
 /** Most QR links a business keeps: a sign per door, desk and window of a chain's stores. Links are paused, never deleted. */
 export const MAX_ENTRY_LINKS_PER_BUSINESS = 1_000;
 
-/** The days a QR link's scan chart covers. */
-export const ENTRY_LINK_CHART_DAYS = 90;
+/** The days a QR link's scan chart covers, as its "Scans, 30 days" count. */
+export const ENTRY_LINK_CHART_DAYS = 30;
 
 /** The address a QR link's sign carries. */
 export function entryLinkPath(code: string): string {

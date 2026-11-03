@@ -102,14 +102,6 @@ export function movedReceptionistOrder(receptionists: ReceptionistOption[], id: 
   return [...defaults, ...others];
 }
 
-/** The order by name, the default first, in the dashboard's language. */
-export function alphabeticalReceptionistOrder(receptionists: ReceptionistOption[], locale: string): string[] {
-  const collator = new Intl.Collator(locale, { sensitivity: "base", numeric: true });
-  const defaults = receptionists.filter((receptionist) => receptionist.isDefault);
-  const others = receptionists.filter((receptionist) => !receptionist.isDefault).sort((a, b) => collator.compare(a.name, b.name) || a.id.localeCompare(b.id));
-  return [...defaults, ...others].map((receptionist) => receptionist.id);
-}
-
 type RowAction = Exclude<ReceptionistAction, "add" | "edit" | "order">;
 
 const statusFilters: ReceptionistStatusFilter[] = ["all", "active", "paused", "archived"];
@@ -197,8 +189,9 @@ export function LiveReceptionistsSurface() {
     onError: (error, { action }) => { toast.error(receptionistErrorMessage(error, t, action, allowance?.limit)); },
   });
 
+  // A custom order, or "alphabetical": by name from now on, new receptionists included.
   const reorder = useMutation({
-    mutationFn: async (receptionistIds: string[]) => await requestJson(`/api/receptionists/order?businessId=${encodeURIComponent(businessId!)}`, { method: "PUT", body: JSON.stringify({ receptionistIds }) }),
+    mutationFn: async (order: string[] | "alphabetical") => await requestJson(`/api/receptionists/order?businessId=${encodeURIComponent(businessId!)}`, { method: "PUT", body: JSON.stringify(order === "alphabetical" ? { order } : { receptionistIds: order }) }),
     onSuccess: invalidate,
     onError: (error) => { toast.error(receptionistErrorMessage(error, t, "order")); },
   });
@@ -445,7 +438,7 @@ export function LiveReceptionistsSurface() {
           cancelLabel={t("actions.cancel")}
           confirmLabel={t("sort.confirm")}
           description={t("sort.description")}
-          onConfirm={async () => { await reorder.mutateAsync(alphabeticalReceptionistOrder(choices.receptionists, locale)); toast.success(t("toast.sorted")); }}
+          onConfirm={async () => { await reorder.mutateAsync("alphabetical"); toast.success(t("toast.sorted")); }}
           onOpenChange={setSortOpen}
           open={sortOpen}
           pending={reorder.isPending}

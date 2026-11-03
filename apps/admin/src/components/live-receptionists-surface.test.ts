@@ -67,9 +67,14 @@ describe("a refused change, in the dashboard's language", () => {
   };
   const refusal = (code: string) => Object.assign(new Error("English words from the server."), { code });
 
-  it("explains the plan's limit, as the plan words it", () => {
-    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "add", 1)).toBe(en.errors.limitOne);
-    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "resume", 5)).toBe(en.errors.limit);
+  it("explains the plan's limit, and what would raise it: a plan to buy, Enterprise through sales, or nothing", () => {
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "add", { limit: 1, upgrade: "plan" })).toBe(en.errors.limitOne);
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "resume", { limit: 3, upgrade: "plan" })).toBe(en.errors.limit);
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "add", { limit: 1, upgrade: "sales" })).toBe(en.errors.limitOneSales);
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "resume", { limit: 5, upgrade: "sales" })).toBe(en.errors.limitSales);
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "resume", { limit: 50, upgrade: null })).toBe(en.errors.limitNone);
+    // Before the page has the allowance, the plan's words.
+    expect(receptionistErrorMessage(refusal("receptionist_limit"), t, "resume")).toBe(en.errors.limit);
   });
 
   it("says why the default receptionist can't do what was asked", () => {

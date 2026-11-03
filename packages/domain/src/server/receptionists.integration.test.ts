@@ -240,20 +240,24 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
     await rollbackTest(async (tx) => {
       const { businessId, userId } = await seedBusiness(tx);
       await asOwner(tx, { userId, businessId });
-      expect(await receptionistAllowanceInTransaction(tx, { businessId, env })).toMatchObject({ plan: "free_cloud", limit: 1, active: 1, current: 1, canAdd: false });
-      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Second" }, env }))).toMatchObject({ status: 409, code: "receptionist_limit" });
+      // Pro includes more, so Free and Starter upgrade, unless the deployment keeps one receptionist a business.
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env })).toMatchObject({ plan: "free_cloud", limit: 1, active: 1, current: 1, canAdd: false, upgrade: "plan" });
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Second" }, env }))).toMatchObject({ status: 409, code: "receptionist_limit", message: "Your plan includes one receptionist. Upgrade to add more." });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: { MAX_RECEPTIONISTS_PER_BUSINESS: "1" } })).toMatchObject({ plan: "free_cloud", limit: 1, cap: 1, upgrade: null });
 
       await putOnPlan(tx, businessId, "starter");
       await asOwner(tx, { userId, businessId });
-      expect((await receptionistAllowanceInTransaction(tx, { businessId, env })).limit).toBe(1);
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env })).toMatchObject({ limit: 1, upgrade: "plan" });
 
+      // Pro's next step is Enterprise, through sales; at the deployment's cap there's none.
       await putOnPlan(tx, businessId, "pro");
       await asOwner(tx, { userId, businessId });
       const proEnv = { MAX_RECEPTIONISTS_PER_BUSINESS: "50" };
-      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: proEnv })).toMatchObject({ plan: "pro", limit: 5, canAdd: true });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: proEnv })).toMatchObject({ plan: "pro", limit: 5, canAdd: true, upgrade: "sales" });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env })).toMatchObject({ plan: "pro", limit: 4, cap: 4, upgrade: null });
       const added: Array<Awaited<ReturnType<typeof createReceptionistInTransaction>>> = [];
       for (const name of ["Kitsilano", "Gastown", "Yaletown", "Main Street"]) added.push(await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env: proEnv }));
-      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Sixth" }, env: proEnv }))).toMatchObject({ status: 409, code: "receptionist_limit" });
+      expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Sixth" }, env: proEnv }))).toMatchObject({ status: 409, code: "receptionist_limit", message: "Your plan includes 5 active receptionists. Pause one or contact sales about Enterprise to add another." });
       // A paused receptionist frees its place, and resuming it needs one.
       await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: added[0]!.id, status: "paused", env: proEnv });
       const sixth = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Sixth" }, env: proEnv });
@@ -262,6 +266,12 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
 
       // The deployment's cap bounds receptionists that aren't archived, paused ones included.
       expect(await failure(tx, (inner) => createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name: "Seventh" }, env }))).toMatchObject({ status: 409, code: "receptionist_cap" });
+
+      // Self-hosting has nothing to buy: its limit is the deployment's cap.
+      await as(tx, null);
+      await tx.update(businesses).set({ deploymentMode: "self_hosted_standard" }).where(eq(businesses.id, businessId));
+      await asOwner(tx, { userId, businessId });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: proEnv })).toMatchObject({ plan: "self_host", limit: 50, cap: 50, upgrade: null });
     });
   });
 

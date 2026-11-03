@@ -6,6 +6,8 @@ import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { ReceptionistUpgrade } from "@lobbystack/shared";
+
 const toasts = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const navigation = vi.hoisted(() => ({ params: new URLSearchParams(), replace: vi.fn(), push: vi.fn() }));
 const openUpgradePlanDialog = vi.hoisted(() => vi.fn());
@@ -48,7 +50,8 @@ const SALES = row(2, "Sales", { description: "New bikes and test rides", entryLi
 const REPAIRS = row(3, "Repairs", { status: "paused", listed: false, locale: "fr" });
 const SHOP = [FRONT_DESK, SALES, REPAIRS];
 
-type Plan = { limit: number; cap?: number; plan?: string };
+// upgrade is "plan" unless the test says otherwise.
+type Plan = { limit: number; cap?: number; plan?: string; upgrade?: ReceptionistUpgrade };
 type Refusal = { status: number; body: Record<string, unknown> };
 const clients: QueryClient[] = [];
 
@@ -62,7 +65,7 @@ async function setup({ rows = SHOP, role = "business_owner", plan = { limit: 5 }
   const allowance = (): ReceptionistAllowance => {
     const active = server.filter((entry) => !entry.archivedAt && entry.status === "active").length;
     const cap = plan.cap ?? 50;
-    return { plan: plan.plan ?? "pro", limit: plan.limit, cap, active, current: current().length, canAdd: active < plan.limit && current().length < cap };
+    return { plan: plan.plan ?? "pro", limit: plan.limit, cap, active, current: current().length, canAdd: active < plan.limit && current().length < cap, upgrade: plan.upgrade === undefined ? "plan" : plan.upgrade };
   };
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     const { pathname, searchParams } = new URL(url, "https://app.example.com");
@@ -238,7 +241,7 @@ describe("the plan's receptionists", () => {
   });
 
   it("says when the business keeps as many as the deployment allows", async () => {
-    await setup({ plan: { limit: 50, cap: 3 } });
+    await setup({ plan: { limit: 50, cap: 3, upgrade: null } });
     expect(screen.getByText(/A business can keep up to 3 receptionists\. Archive one to add another\.$/)).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
     expect(toasts.error).toHaveBeenCalledWith("This business keeps as many receptionists as it can. Archive one to add another.");

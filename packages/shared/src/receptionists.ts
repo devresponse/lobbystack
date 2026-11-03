@@ -3,6 +3,7 @@
 // default receptionist, the row it had before receptionists existed; it
 // answers whatever names no receptionist, or one that is paused or archived.
 
+import type { BillingPlanLimits, BillingPlanSlug } from "./billing";
 import { normalizeRuntimeLocale, type InterfaceLocale, type RuntimeLocale } from "./locales";
 import { publicProfilePath } from "./publicProfile";
 import { trimEndWhere } from "./text";
@@ -284,6 +285,24 @@ export function maxReceptionistsPerBusiness(env: Record<string, string | undefin
 export function receptionistAllowance(planIncluded: number | null | undefined, cap: number): number {
   const included = planIncluded === null || planIncluded === undefined ? cap : planIncluded;
   return Math.max(1, Math.min(included, cap));
+}
+
+/**
+ * How a business gets more active receptionists than its limit: "plan", a
+ * plan it can buy includes more; "sales", only Enterprise does, which is a
+ * conversation with sales; null, nothing does, on self-hosting, on
+ * Enterprise, or at the deployment's cap.
+ */
+export type ReceptionistUpgrade = "plan" | "sales" | null;
+
+/** The plans a business buys itself, cheapest first. Enterprise is agreed with sales. */
+const SELF_SERVE_TIERS: readonly BillingPlanSlug[] = ["free_cloud", "starter", "pro"];
+
+/** What raises a business's limit, from its plan and the receptionists each tier includes. */
+export function receptionistUpgrade(plan: BillingPlanSlug, limit: number, cap: number, tiers: Readonly<Record<BillingPlanSlug, Pick<BillingPlanLimits, "includedReceptionists">>>): ReceptionistUpgrade {
+  if (plan === "self_host" || plan === "enterprise" || limit >= cap) return null;
+  const higher = SELF_SERVE_TIERS.slice(SELF_SERVE_TIERS.indexOf(plan) + 1);
+  return higher.some((tier) => receptionistAllowance(tiers[tier].includedReceptionists, cap) > limit) ? "plan" : "sales";
 }
 
 /**

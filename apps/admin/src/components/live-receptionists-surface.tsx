@@ -8,21 +8,23 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
-import { receptionistPagePath, runtimeLocaleEndonyms } from "@lobbystack/shared";
+import { receptionistPagePath, runtimeLocaleEndonyms, type ReceptionistUpgrade } from "@lobbystack/shared";
 
 import { ConfirmActionDialog } from "@/components/confirm-action-dialog";
 import { useActiveBusiness } from "@/hooks/use-active-business";
+import { enterpriseSalesHref } from "@/lib/billing-plans";
 import { formatDateTime } from "@/lib/locale";
 import { requestJson } from "@/lib/request-json";
+import { cn } from "@/lib/utils";
 import { DataTablePagination, paginationFeatures } from "./data-table/pagination";
 import { TableCardSkeleton } from "./loading-skeletons";
 import { PageSurface } from "./page-surface";
 import { ReceptionistAvatar } from "./receptionists/receptionist-avatar";
 import { receptionistsQueryKey, useReceptionistChoices, type ReceptionistOption } from "./receptionists/receptionist-choices";
 import { ReceptionistEditor, type ReceptionistEditorValues } from "./receptionists/receptionist-editor";
-import { receptionistErrorMessage, type ReceptionistAction } from "./receptionists/receptionist-errors";
+import { receptionistErrorMessage, receptionistLimitMessage, type ReceptionistAction } from "./receptionists/receptionist-errors";
 import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
+import { Button, buttonVariants } from "./ui/button";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "./ui/dropdown-menu";
 import { Input } from "./ui/input";
 import { Item, ItemActions, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "./ui/item";
@@ -35,7 +37,9 @@ import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 // and admins add receptionists, edit what each is called and where its page
 // is, order them, pause, resume, archive and restore them, and pick the
 // default one; AI settings changes how each answers. Free and Starter include
-// one receptionist, so they see its row and an upgrade card.
+// one receptionist, so they see its row and an upgrade card; Pro's next step
+// is Enterprise, through sales; self-hosting and the deployment's cap offer
+// nothing to buy.
 
 /** A row of the table, as GET /api/receptionists gives it. */
 export type ReceptionistRow = ReceptionistOption & {
@@ -47,8 +51,8 @@ export type ReceptionistRow = ReceptionistOption & {
   entryLinks: number;
 };
 
-/** How many receptionists the plan allows active, the deployment's cap, and how many the business has. */
-export type ReceptionistAllowance = { plan: string; limit: number; cap: number; active: number; current: number; canAdd: boolean };
+/** How many receptionists the plan allows active, the deployment's cap, how many the business has, and what raises the limit. */
+export type ReceptionistAllowance = { plan: string; limit: number; cap: number; active: number; current: number; canAdd: boolean; upgrade: ReceptionistUpgrade };
 
 export type ReceptionistListPage = {
   receptionists: ReceptionistRow[];
@@ -107,7 +111,7 @@ type RowAction = Exclude<ReceptionistAction, "add" | "edit" | "order">;
 const statusFilters: ReceptionistStatusFilter[] = ["all", "active", "paused", "archived"];
 
 export function LiveReceptionistsSurface() {
-  const { i18n, t } = useTranslation(["receptionists", "agent"]);
+  const { i18n, t } = useTranslation(["receptionists", "agent", "settings"]);
   const queryClient = useQueryClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -186,7 +190,7 @@ export function LiveReceptionistsSurface() {
       else toast.success(t({ pause: "toast.paused", resume: "toast.resumed", archive: "toast.archived", make_default: "toast.madeDefault" }[action], { name }));
       await invalidate();
     },
-    onError: (error, { action }) => { toast.error(receptionistErrorMessage(error, t, action, allowance?.limit)); },
+    onError: (error, { action }) => { toast.error(receptionistErrorMessage(error, t, action, allowance)); },
   });
 
   // A custom order, or "alphabetical": by name from now on, new receptionists included.
@@ -204,10 +208,10 @@ export function LiveReceptionistsSurface() {
       setEditorOpen(true);
     } else if (allowance.current >= allowance.cap) {
       toast.error(t("errors.cap"));
-    } else if (allowance.limit <= 1) {
+    } else if (allowance.limit <= 1 && allowance.upgrade === "plan") {
       openUpgradePlanDialog();
     } else {
-      toast.error(t("errors.limit"));
+      toast.error(receptionistLimitMessage(allowance, t));
     }
   }, [allowance, openUpgradePlanDialog, save, t]);
 
@@ -243,7 +247,7 @@ export function LiveReceptionistsSurface() {
   return (
     <PageSurface title={t("agent:sections.receptionists.title")}>
       <div className="flex w-full flex-col gap-6">
-        {allowance ? <AllowanceNotice allowance={allowance} canManage={canManage} onUpgrade={openUpgradePlanDialog} /> : null}
+        {allowance ? <AllowanceNotice allowance={allowance} canManage={canManage} onUpgrade={openUpgradePlanDialog} salesHref={enterpriseSalesHref(t("settings:billing.upgradeDialog.enterpriseSubject"))} /> : null}
 
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {showFilters ? (
@@ -410,7 +414,7 @@ export function LiveReceptionistsSurface() {
           businessSlug={business.slug}
           businessLocale={business.defaultLocale}
           pending={save.isPending}
-          error={save.error ? receptionistErrorMessage(save.error, t, editing ? "edit" : "add", allowance?.limit) : null}
+          error={save.error ? receptionistErrorMessage(save.error, t, editing ? "edit" : "add", allowance) : null}
           save={(values) => save.mutate({ receptionist: editing, values })}
         />
         <ConfirmActionDialog
@@ -462,18 +466,29 @@ function EntryPointCounts({ row }: { row: ReceptionistRow }) {
   return <div className="flex min-w-0 flex-col text-sm">{lines.map((line) => <span key={line} className="truncate">{line}</span>)}</div>;
 }
 
-/** The plan's receptionists: an upgrade card on a plan with one, else how many are active and what stops another. */
-function AllowanceNotice({ allowance, canManage, onUpgrade }: { allowance: ReceptionistAllowance; canManage: boolean; onUpgrade: () => void }) {
+/**
+ * The plan's receptionists: an upgrade card on a plan with one that can have
+ * more, else how many are active and what stops another. More come from a
+ * plan the business can buy (See plans), or from Enterprise, which is agreed
+ * with sales (Contact sales); self-hosting and the deployment's cap have
+ * nothing to buy.
+ */
+function AllowanceNotice({ allowance, canManage, onUpgrade, salesHref }: { allowance: ReceptionistAllowance; canManage: boolean; onUpgrade: () => void; salesHref: string }) {
   const { t } = useTranslation("receptionists");
-  if (allowance.limit <= 1) {
+  const action = allowance.upgrade === "plan"
+    ? <Button onClick={onUpgrade} size="sm" variant="outline">{t("allowance.upgrade")}</Button>
+    : allowance.upgrade === "sales"
+      ? <a className={cn(buttonVariants({ size: "sm", variant: "outline" }))} href={salesHref}>{t("allowance.contactSales")}</a>
+      : null;
+  if (allowance.limit <= 1 && action) {
     return (
       <Item variant="outline">
         <ItemMedia variant="icon"><Sparkles aria-hidden="true" /></ItemMedia>
         <ItemContent>
           <ItemTitle>{t("allowance.upgradeTitle")}</ItemTitle>
-          <ItemDescription>{t("allowance.upgradeDescription")}{canManage ? null : ` ${t("allowance.upgradeAsk")}`}</ItemDescription>
+          <ItemDescription>{t(allowance.upgrade === "sales" ? "allowance.salesDescription" : "allowance.upgradeDescription")}{canManage ? null : ` ${t("allowance.upgradeAsk")}`}</ItemDescription>
         </ItemContent>
-        {canManage ? <ItemActions><Button onClick={onUpgrade} size="sm" variant="outline">{t("allowance.upgrade")}</Button></ItemActions> : null}
+        {canManage ? <ItemActions>{action}</ItemActions> : null}
       </Item>
     );
   }
@@ -483,9 +498,9 @@ function AllowanceNotice({ allowance, canManage, onUpgrade }: { allowance: Recep
     <div className="flex flex-col gap-2 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
       <p>
         {t("allowance.used", { active: allowance.active, count: allowance.limit })}
-        {capped ? ` ${t("allowance.cap", { count: allowance.cap })}` : full ? ` ${t("allowance.full")}` : ""}
+        {capped ? ` ${t("allowance.cap", { count: allowance.cap })}` : full ? ` ${receptionistLimitMessage(allowance, t)}` : ""}
       </p>
-      {full && canManage ? <Button className="self-start sm:self-auto" onClick={onUpgrade} size="sm" variant="outline">{t("allowance.upgrade")}</Button> : null}
+      {full && canManage && action ? <div className="self-start sm:self-auto">{action}</div> : null}
     </div>
   );
 }

@@ -337,7 +337,8 @@ describe.skipIf(!testUrl)("a website chat after a day without messages, against 
       await chat.teamReplies("Hi, this is Yuri.");
       const lastMessage = Date.now();
 
-      expect(await chat.openChat(new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+      // A business without receptionists names none on its chats.
+      expect(await chat.openChat(new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS - 60_000))).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff", receptionistId: null });
 
       const nextDay = new Date(lastMessage + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000);
       const next = await chat.openChat(nextDay);
@@ -367,7 +368,7 @@ describe.skipIf(!testUrl)("a website chat after a day without messages, against 
 
       await chat.teamSets("human_handoff");
       expect(await chat.shownChat(chat.visitorId)).toEqual({ conversationId: chat.conversationId, idle: false });
-      expect(await chat.openChat(new Date())).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff" });
+      expect(await chat.openChat(new Date())).toEqual({ conversationId: chat.conversationId, automationState: "human_handoff", receptionistId: null });
 
       // A day after the take-over without a word, the visitor's next message starts a new chat.
       const next = await chat.openChat(new Date(Date.now() + WIDGET_CHAT_IDLE_CLOSE_MS + 60_000));

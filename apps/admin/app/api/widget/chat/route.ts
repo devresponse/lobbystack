@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { createReceptionistAgent, receptionistInstructions, toAiTraceSteps, type ReceptionistStreamOptions } from "@lobbystack/agent-core/agent";
 import { describeAgentFailure, EmptyReplyError } from "@lobbystack/agent-core/failure";
 import { createAgentModel, describeAgentUsage } from "@lobbystack/agent-core/model";
-import { announceLateWidgetReply, appendMessage, getCachedBusinessSnapshot, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, recordAiTrace, reserveWidgetChatUsageInTransaction, returnQuietTeamChat, type AiTraceInput } from "@lobbystack/domain";
+import { announceLateWidgetReply, appendMessage, getOrCreateWidgetConversation, loadWidgetChatHistory, recordAiGenerationEvent, recordAiTrace, reserveWidgetChatUsageInTransaction, returnQuietTeamChat, snapshotForReceptionist, type AiTraceInput } from "@lobbystack/domain";
 import { withBusinessTransaction } from "@lobbystack/db";
 import { normalizeInterfaceLocale, widgetChatRequestSchema, type BusinessContextSnapshot, type InterfaceLocale } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
@@ -18,6 +18,7 @@ import { reportServerError } from "@/lib/error-reporting";
 import { resolveWidgetSessionAccess, type WidgetSession } from "@/lib/widget-access";
 import { requestIpHash } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
+import { loadWidgetReceptionist } from "@/lib/widget-receptionist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -108,7 +109,12 @@ async function answerChat(request: Request) {
     if (!rate.allowed) return refused(rate.status, rate.code, "Chat rate limit reached.", { reason: rate.reason });
 
     const context = createWorkerDomainContext();
-    const conversation = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: body.visitorId });
+    // One snapshot per business, cut for whoever answers. The page's
+    // receptionist (the default one for a paused or archived one) picks the
+    // visitor's chat, and the chat's receptionist answers in it, which a chat
+    // the team had keeps when the visitor moved to another receptionist's page.
+    const { snapshot: storedSnapshot, receptionistId: pageReceptionistId } = await loadWidgetReceptionist(context, session);
+    const conversation = await getOrCreateWidgetConversation(context, { businessId: session.businessId, widgetVisitorId: body.visitorId, ...(pageReceptionistId ? { receptionistId: pageReceptionistId } : {}) });
     const { conversationId } = conversation;
     // A chat the team has, but went quiet in, goes back to the receptionist.
     const automationState = conversation.automationState === "human_handoff" ? await returnQuietTeamChat(context, { businessId: session.businessId, conversationId }) : conversation.automationState;
@@ -151,8 +157,7 @@ async function answerChat(request: Request) {
             return;
           }
 
-          const snapshot = await getCachedBusinessSnapshot(context, { businessId: session.businessId });
-          const activeSnapshot = snapshot ?? fallbackSnapshot(session);
+          const activeSnapshot = storedSnapshot ? snapshotForReceptionist(storedSnapshot, conversation.receptionistId ?? pageReceptionistId) : fallbackSnapshot(session);
           const history = await loadWidgetChatHistory(context, { businessId: session.businessId, conversationId });
           // The widget's language, which the visitor reads the chat in. A widget
           // from before it sent one shows its settings' language, or else the

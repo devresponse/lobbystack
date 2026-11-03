@@ -117,7 +117,7 @@ describe.skipIf(!testUrl)("unanswered questions against PostgreSQL under RLS", (
       await dismissUnansweredQuestion(context, { userId, businessId, questionId: dog!.id });
       await expect(dismissUnansweredQuestion(context, { userId, businessId, questionId: dog!.id })).rejects.toMatchObject({ status: 409 });
       await answerUnansweredQuestion(context, { userId, businessId, questionId: parking!.id, answer: "Two hours free." });
-      expect(await listOpenUnansweredQuestions(context, { userId, businessId })).toEqual({ questions: [], openCount: 0 });
+      expect(await listOpenUnansweredQuestions(context, { userId, businessId })).toEqual({ questions: [], openCount: 0, openByReceptionist: {} });
 
       await as(tx, "lobbystack_worker");
       expect(await recordUnansweredQuestion(context, { businessId, question: "can i bring my dog", channel: "voice" })).toEqual({ id: dog!.id, timesAsked: 2, status: "dismissed" });

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   recordGreeting: vi.fn(async (..._args: unknown[]) => ({ audio: "UklGRg==", tries: 1 })),
   getCachedBusinessSnapshot: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown> | null> => null),
+  listPhoneReceptionists: vi.fn(async (..._args: unknown[]): Promise<string[]> => []),
 }));
 
 vi.mock("@lobbystack/agent-core", () => ({
@@ -13,7 +14,11 @@ vi.mock("@lobbystack/agent-core", () => ({
   recordGreeting: mocks.recordGreeting,
 }));
 
-vi.mock("@lobbystack/domain", () => ({ getCachedBusinessSnapshot: mocks.getCachedBusinessSnapshot }));
+vi.mock("@lobbystack/domain", async () => ({
+  getCachedBusinessSnapshot: mocks.getCachedBusinessSnapshot,
+  listPhoneReceptionists: mocks.listPhoneReceptionists,
+  snapshotForReceptionist: (await import("../../../packages/domain/src/snapshot")).snapshotForReceptionist,
+}));
 
 import { createGreetingRecordings, keepOpeningRecorded } from "./greetingRecordings";
 
@@ -39,6 +44,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   mocks.recordGreeting.mockClear();
   mocks.getCachedBusinessSnapshot.mockReset();
+  mocks.listPhoneReceptionists.mockReset();
 });
 
 describe("greeting recordings", () => {
@@ -127,5 +133,59 @@ describe("greeting recordings", () => {
     mocks.getCachedBusinessSnapshot.mockResolvedValueOnce(null);
     await expect(keepOpeningRecorded(recordings, domain, "business_4")).resolves.toBe(false);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
+    // A snapshot from before receptionists needs no lookup.
+    expect(mocks.listPhoneReceptionists).not.toHaveBeenCalled();
+  });
+
+  describe("with several receptionists", () => {
+    const frontDesk = "00000000-0000-4000-8000-0000000000b1";
+    const kitsilano = "00000000-0000-4000-8000-0000000000b2";
+    const downtown = "00000000-0000-4000-8000-0000000000b3";
+    const receptionist = (id: string, greeting: string, overrides: Record<string, unknown> = {}) => ({
+      id, name: id, description: "", isDefault: false, status: "active", listed: true, order: 1, knowledgeScope: "all", greeting,
+      voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [],
+      ...overrides,
+    });
+    const chain = {
+      ...(business as object),
+      receptionists: [
+        receptionist(frontDesk, "Thanks for calling.", { isDefault: true, order: 0 }),
+        receptionist(kitsilano, "Thanks for calling Kitsilano.", { locale: "fr" }),
+        receptionist(downtown, "Thanks for calling Downtown.", { order: 2 }),
+      ],
+    };
+
+    it("records the opening of each receptionist that answers a number, the default's first, and none for the website only", async () => {
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const redis = store();
+      const recordings = createGreetingRecordings({ store: redis, client: {} as never });
+      const domain = { db: {} as never };
+      mocks.getCachedBusinessSnapshot.mockResolvedValueOnce(chain);
+      mocks.listPhoneReceptionists.mockResolvedValueOnce([kitsilano, frontDesk]);
+      await expect(keepOpeningRecorded(recordings, domain, "business_1")).resolves.toBe(true);
+      expect(mocks.listPhoneReceptionists).toHaveBeenCalledWith(domain, { businessId: "business_1" });
+      expect(mocks.recordGreeting.mock.calls.map(([, input]) => (input as { greeting: string }).greeting)).toEqual(["Thanks for calling.", "Thanks for calling Kitsilano."]);
+      // Each in its receptionist's own view: Kitsilano's calls open in French.
+      expect((mocks.recordGreeting.mock.calls[1]![1] as { snapshot: { defaultLocale: string; receptionist: { id: string } } }).snapshot).toMatchObject({ defaultLocale: "fr", receptionist: { id: kitsilano } });
+      expect([...redis.keys.keys()]).toEqual(["recording:marin:Thanks for calling.", "recording:marin:Thanks for calling Kitsilano."]);
+    });
+
+    it("records an opening two receptionists share once", async () => {
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const recordings = createGreetingRecordings({ store: store(), client: {} as never });
+      mocks.getCachedBusinessSnapshot.mockResolvedValueOnce({ ...chain, receptionists: chain.receptionists.map((entry) => ({ ...entry, greeting: "Thanks for calling.", locale: undefined })) });
+      mocks.listPhoneReceptionists.mockResolvedValueOnce([frontDesk, kitsilano, downtown]);
+      await expect(keepOpeningRecorded(recordings, { db: {} as never }, "business_1")).resolves.toBe(true);
+      expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps the default's opening when no number names a receptionist that answers", async () => {
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      const recordings = createGreetingRecordings({ store: store(), client: {} as never });
+      mocks.getCachedBusinessSnapshot.mockResolvedValueOnce(chain);
+      mocks.listPhoneReceptionists.mockResolvedValueOnce([]);
+      await expect(keepOpeningRecorded(recordings, { db: {} as never }, "business_1")).resolves.toBe(true);
+      expect(mocks.recordGreeting.mock.calls.map(([, input]) => (input as { greeting: string }).greeting)).toEqual(["Thanks for calling."]);
+    });
   });
 });

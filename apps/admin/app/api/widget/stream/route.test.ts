@@ -24,6 +24,7 @@ vi.mock("@/lib/widget-policy", () => ({
 vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash" }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@lobbystack/domain", () => ({ findWidgetConversationId: async () => mocks.conversationId }));
+vi.mock("@/lib/widget-receptionist", () => ({ loadWidgetReceptionist: async () => ({ snapshot: null, receptionistId: undefined }) }));
 vi.mock("@/lib/realtime-hub", () => ({
   realtimeConfigured: () => mocks.configured,
   listenToBusinessRealtime: async (_businessId: string, listener: RealtimeListener) => {

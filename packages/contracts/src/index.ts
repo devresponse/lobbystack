@@ -268,6 +268,7 @@ export const queueForJobType = {
   "business.extractHours": "bulk",
   "snapshot.refresh": "default",
   "receptionists.enforceAllowance": "default",
+  "receptionists.backfillRecords": "maintenance",
   "notification.dispatch": "default",
   "notification.dailySummary": "maintenance",
   "conversation.finalizeSession": "default",

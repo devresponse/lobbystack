@@ -1,5 +1,5 @@
 import { GREETING_RECORDING_TTL_SECONDS, greetingRecordingKey, LIVE_VOICE, recordGreeting, recordingMs } from "@lobbystack/agent-core";
-import { getCachedBusinessSnapshot, type DomainContext } from "@lobbystack/domain";
+import { getCachedBusinessSnapshot, listPhoneReceptionists, snapshotForReceptionist, type DomainContext } from "@lobbystack/domain";
 import { callOpening, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import type OpenAI from "openai";
@@ -94,14 +94,30 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
 /**
  * Keeps the opening of a business with a phone number recorded ahead of its
  * calls, so its first call after the opening changes, or after a week
- * without calls, still opens with the recording. False when the business
- * has no phone number or its calls open with nothing to say. Throws only
- * when the business can't be loaded.
+ * without calls, still opens with the recording. Each receptionist that
+ * answers one of its numbers opens with its own greeting, in its own
+ * language: the default one's first, then the others' in the Receptionists
+ * page's order, each opening once. A receptionist only on the website has
+ * browser calls, which record their opening as they end. False when the
+ * business has no phone number or its calls open with nothing to say.
+ * Throws only when the business can't be loaded.
  */
 export async function keepOpeningRecorded(recordings: GreetingRecordings, domain: DomainContext, businessId: string): Promise<boolean> {
   const snapshot = await getCachedBusinessSnapshot(domain, { businessId });
-  const opening = snapshot?.contactChannels.phoneNumber ? callOpening(snapshot) : "";
-  if (!snapshot || !opening) return false;
-  await recordings.keep(opening, snapshot);
-  return true;
+  if (!snapshot?.contactChannels.phoneNumber) return false;
+  const order = snapshot.receptionists?.map((receptionist) => receptionist.id) ?? [];
+  const position = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
+  const numbered = order.length ? (await listPhoneReceptionists(domain, { businessId })).sort((left, right) => position(left) - position(right)) : [];
+  // A snapshot from before receptionists is the default's view.
+  const answering: Array<string | undefined> = numbered.length ? numbered : [undefined];
+  const kept = new Set<string>();
+  // One at a time, like the businesses of the daily sweep.
+  for (const receptionistId of answering) {
+    const view = snapshotForReceptionist(snapshot, receptionistId);
+    const opening = callOpening(view);
+    if (!opening || kept.has(opening)) continue;
+    kept.add(opening);
+    await recordings.keep(opening, view);
+  }
+  return kept.size > 0;
 }

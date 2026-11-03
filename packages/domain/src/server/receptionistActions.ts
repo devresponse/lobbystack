@@ -323,14 +323,27 @@ export async function rescheduleForCaller(
 
 export async function takeMessageForStaff(
   context: DomainContext,
-  input: { businessId: string; message: string; channel: ReceptionistChannel; callerName?: string; callbackPhone?: string; urgency?: string; callbackWindow?: string; callId?: string; conversationId?: string; request?: FollowUpRequest },
+  input: {
+    businessId: string;
+    message: string;
+    channel: ReceptionistChannel;
+    callerName?: string;
+    callbackPhone?: string;
+    urgency?: string;
+    callbackWindow?: string;
+    callId?: string;
+    conversationId?: string;
+    request?: FollowUpRequest;
+    /** The receptionist taking the message, which its follow-up records. Left out, the default. */
+    receptionistId?: string | undefined;
+  },
 ) {
   const alert = { eventKind: "voiceMessage" as const, subject: "New voice message", body: "A caller left a voice message. Open the inbox to review it." };
   // A website chat's conversation is the visitor's own thread: a staff note
   // there would show up to them, and to the agent, as if they had written it.
   const inVisitorThread = input.channel === "web_chat" && input.conversationId !== undefined;
   if (!inVisitorThread) {
-    const conversationId = input.conversationId ?? (await getOrCreateConversation(context, { businessId: input.businessId, contactPhone: input.callbackPhone ?? "unknown", channel: input.channel === "web_chat" ? "web_chat" : "voice" })).conversationId;
+    const conversationId = input.conversationId ?? (await getOrCreateConversation(context, { businessId: input.businessId, contactPhone: input.callbackPhone ?? "unknown", channel: input.channel === "web_chat" ? "web_chat" : "voice", ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}) })).conversationId;
     await appendMessage(context, {
       businessId: input.businessId,
       conversationId,
@@ -350,6 +363,7 @@ export async function takeMessageForStaff(
     ...(input.urgency ? { urgency: input.urgency } : {}),
     ...(input.callbackWindow ? { callbackWindow: input.callbackWindow } : {}),
     ...(input.request ? { request: input.request } : {}),
+    ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
   });
   if (inVisitorThread) await queueOperatorAlert(context, { businessId: input.businessId, eventKey: `${alert.eventKind}:${task.inboxItemId}`, ...alert });
   return { ok: true as const, inboxItemId: task.inboxItemId };
@@ -366,7 +380,7 @@ export async function takeMessageForStaff(
  */
 export async function requestCancellationForCaller(
   context: DomainContext,
-  input: { businessId: string; channel: ReceptionistChannel; timezone: string; callerName: string; appointmentStartsAt?: string; serviceName?: string; callbackPhone?: string; notes?: string; callId?: string; conversationId?: string },
+  input: { businessId: string; channel: ReceptionistChannel; timezone: string; callerName: string; appointmentStartsAt?: string; serviceName?: string; callbackPhone?: string; notes?: string; callId?: string; conversationId?: string; receptionistId?: string | undefined },
 ) {
   const callerName = input.callerName.trim();
   const serviceName = input.serviceName?.trim();
@@ -404,6 +418,7 @@ export async function requestCancellationForCaller(
     ...(input.callbackPhone ? { callbackPhone: input.callbackPhone } : {}),
     ...(input.callId ? { callId: input.callId } : {}),
     ...(input.conversationId ? { conversationId: input.conversationId } : {}),
+    ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}),
     request: { request: CANCELLATION_REQUEST, ...(appointmentId ? { appointmentId } : {}) },
   });
 }

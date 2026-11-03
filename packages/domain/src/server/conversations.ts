@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 
 import { auditLogs, businesses, calls, contacts, conversations, conversationSessions, enqueueOutbox, messages, transcripts, widgetVisitors, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
+import { isUuid, PROSPECT_DEMO_WIDGET_ID } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
@@ -129,7 +129,7 @@ export async function finalizeConversationSession(
 
 export async function getOrCreateConversation(
   context: DomainContext,
-  input: { businessId: string; contactPhone: string; channel: string; userId?: string },
+  input: { businessId: string; contactPhone: string; channel: string; userId?: string; receptionistId?: string },
 ): Promise<{ conversationId: string; contactId: string }> {
   return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" : "worker" }, async (tx) => {
     if (input.userId) {
@@ -138,7 +138,9 @@ export async function getOrCreateConversation(
     const { contact, created } = await findOrCreateContactByPhone(tx, { businessId: input.businessId, phone: input.contactPhone });
     if (created) await emitWebhookEventInTransaction(tx, { businessId: input.businessId, type: "contact.created", resourceId: contact.id });
     const current = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.contactId, contact.id), eq(conversations.channel, input.channel), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
-    const conversationId = current[0]?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, contactId: contact.id, channel: input.channel, status: "open", automationState: "ai_active" }).returning({ id: conversations.id }))[0]?.id;
+    // A new conversation records the receptionist it starts with; an open one keeps its own.
+    const receptionist = input.receptionistId && isUuid(input.receptionistId) ? { receptionistId: input.receptionistId } : {};
+    const conversationId = current[0]?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, contactId: contact.id, channel: input.channel, status: "open", automationState: "ai_active", ...receptionist }).returning({ id: conversations.id }))[0]?.id;
     if (!conversationId) {
       throw new Error("Conversation could not be created.");
     }
@@ -453,20 +455,38 @@ export const WIDGET_CHAT_IDLE_CLOSE_MS = 24 * 60 * 60_000;
  * one that comes after sees whether the chat closed.
  */
 async function openWidgetChat(tx: DatabaseTransaction, input: { businessId: string; widgetVisitorId: string; now: Date; lock?: boolean }) {
-  const query = tx.select({ id: conversations.id, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+  const query = tx.select({ id: conversations.id, automationState: conversations.automationState, automationPausedAt: conversations.automationPausedAt, receptionistId: conversations.receptionistId }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
   const [chat] = input.lock ? await query.for("update") : await query;
   if (!chat) return undefined;
   const [lastMessage] = await tx.select({ createdAt: messages.createdAt }).from(messages).where(and(eq(messages.businessId, input.businessId), eq(messages.conversationId, chat.id))).orderBy(desc(messages.createdAt)).limit(1);
   // A team member who joins a quiet chat is in it, as if they had written.
   const lastActiveAt = Math.max(lastMessage?.createdAt.getTime() ?? 0, chat.automationState === "human_handoff" ? chat.automationPausedAt?.getTime() ?? 0 : 0);
-  return { id: chat.id, automationState: chat.automationState, wentIdle: lastMessage !== undefined && input.now.getTime() - lastActiveAt >= WIDGET_CHAT_IDLE_CLOSE_MS };
+  return { id: chat.id, automationState: chat.automationState, receptionistId: chat.receptionistId, wentIdle: lastMessage !== undefined && input.now.getTime() - lastActiveAt >= WIDGET_CHAT_IDLE_CLOSE_MS };
 }
 
+/**
+ * Whether the visitor's open chat is another receptionist's: a visitor who
+ * picks someone else on the business page starts a chat with them. A chat
+ * the team has stays the visitor's, whoever they picked, and a chat from
+ * before receptionists (none recorded) carries on with the one named now.
+ */
+function chatIsAnotherReceptionists(chat: { automationState: string; receptionistId: string | null }, receptionistId: string | null | undefined): boolean {
+  return Boolean(receptionistId) && chat.receptionistId !== null && chat.receptionistId !== receptionistId && chat.automationState !== "human_handoff";
+}
+
+/**
+ * The visitor's website chat for their next message: their open chat, or a
+ * new one when they have none, it went idle, or it is another receptionist's
+ * (receptionistId, the one the page answers with; left out, the chat's own
+ * carries on). Returns the chat's receptionist, which answers in it: a chat
+ * the team has keeps its own when the visitor moves to another page.
+ */
 export async function getOrCreateWidgetConversation(
   context: DomainContext,
-  input: { businessId: string; widgetVisitorId: string; now?: Date },
-): Promise<{ conversationId: string; automationState: "ai_active" | "human_handoff" }> {
+  input: { businessId: string; widgetVisitorId: string; receptionistId?: string | null | undefined; now?: Date },
+): Promise<{ conversationId: string; automationState: "ai_active" | "human_handoff"; receptionistId: string | null }> {
   const now = input.now ?? new Date();
+  const receptionistId = input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null;
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     // Locking the visitor makes a concurrent link wait, so a new chat either sees the contact or is claimed by the link.
     // It also makes the visitor's concurrent requests agree on one chat when an idle one is replaced.
@@ -480,18 +500,24 @@ export async function getOrCreateWidgetConversation(
     }
     if (!visitor) throw new Error("Widget visitor not found.");
     let current = await openWidgetChat(tx, { ...input, now, lock: true });
-    if (current?.wentIdle) {
+    // A chat from before receptionists (none recorded) carries on with the one answering now.
+    if (current && !current.wentIdle && current.receptionistId === null && receptionistId) {
+      await tx.update(conversations).set({ receptionistId }).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
+      current = { ...current, receptionistId };
+    }
+    if (current && (current.wentIdle || chatIsAnotherReceptionists(current, receptionistId))) {
       await tx.update(conversationSessions).set({ status: "closed", closedAt: now, updatedAt: now }).where(and(eq(conversationSessions.businessId, input.businessId), eq(conversationSessions.conversationId, current.id), eq(conversationSessions.status, "open")));
       await tx.update(conversations).set(closedConversation(now)).where(and(eq(conversations.id, current.id), eq(conversations.businessId, input.businessId)));
       await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "conversation", aggregateId: current.id, dedupeKey: `conversation:${current.id}:closed`, payload: { type: "conversation.updated", entityId: current.id } });
       current = undefined;
     }
-    const conversationId = current?.id ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id }))[0]?.id;
-    if (!conversationId) {
+    // A new chat names the receptionist; the database names the default one when it is left out.
+    const chat = current ?? (await tx.insert(conversations).values({ businessId: input.businessId, widgetVisitorId: input.widgetVisitorId, ...(visitor.contactId ? { contactId: visitor.contactId } : {}), ...(receptionistId ? { receptionistId } : {}), channel: "web_chat", status: "open", automationState: "ai_active" }).onConflictDoNothing().returning({ id: conversations.id, receptionistId: conversations.receptionistId }))[0];
+    if (!chat) {
       const existing = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"))).orderBy(desc(conversations.updatedAt)).limit(1);
       throw new Error(existing[0] ? "Widget conversation already exists and is closed." : "Conversation could not be created.");
     }
-    return { conversationId, automationState: current?.automationState === "human_handoff" ? "human_handoff" : "ai_active" };
+    return { conversationId: chat.id, automationState: current?.automationState === "human_handoff" ? "human_handoff" : "ai_active", receptionistId: chat.receptionistId ?? null };
   });
 }
 
@@ -505,11 +531,12 @@ export async function getOrCreateWidgetConversation(
  */
 export async function findCurrentWidgetChat(
   context: DomainContext,
-  input: { businessId: string; widgetVisitorId: string; now?: Date },
+  input: { businessId: string; widgetVisitorId: string; receptionistId?: string | null | undefined; now?: Date },
 ): Promise<{ conversationId: string; idle: boolean } | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
     const chat = await openWidgetChat(tx, { ...input, now: input.now ?? new Date() });
-    return chat ? { conversationId: chat.id, idle: chat.wentIdle } : null;
+    // Another receptionist's chat isn't shown: the visitor's next message starts one with this receptionist.
+    return chat && !chatIsAnotherReceptionists(chat, input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null) ? { conversationId: chat.id, idle: chat.wentIdle } : null;
   });
 }
 
@@ -520,11 +547,12 @@ export async function findCurrentWidgetChat(
  */
 export async function findWidgetConversationId(
   context: DomainContext,
-  input: { businessId: string; widgetVisitorId: string },
+  input: { businessId: string; widgetVisitorId: string; receptionistId?: string | null | undefined },
 ): Promise<string | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
-    const [row] = await tx.select({ id: conversations.id }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
-    return row?.id ?? null;
+    const [row] = await tx.select({ id: conversations.id, automationState: conversations.automationState, receptionistId: conversations.receptionistId }).from(conversations).where(and(eq(conversations.businessId, input.businessId), eq(conversations.widgetVisitorId, input.widgetVisitorId), eq(conversations.channel, "web_chat"), eq(conversations.status, "open"))).orderBy(desc(conversations.updatedAt)).limit(1);
+    // Like findCurrentWidgetChat: another receptionist's chat isn't this page's.
+    return row && !chatIsAnotherReceptionists(row, input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null) ? row.id : null;
   });
 }
 

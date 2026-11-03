@@ -64,7 +64,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => ({
   lastLiveCallSequence: mocks.lastLiveCallSequence,
   extendLiveCallReservation: mocks.extendLiveCallReservation,
   blockLiveCaller: vi.fn(async () => undefined),
-  getCachedBusinessSnapshot: mocks.snapshot,
+  getCachedReceptionistSnapshot: mocks.snapshot,
   finishLiveCall: mocks.finishLiveCall,
   prepareLiveCallTransfer: mocks.prepareLiveCallTransfer,
   recordLiveCallTransferResult: mocks.recordLiveCallTransferResult,
@@ -164,6 +164,25 @@ describe("createLiveCallHandler", () => {
     await handler.handle(attachRequest({ sessionId: "live_stalled", businessId: "biz_1", callId: "call_1", channel: "voice" }), reply);
     expect(mocks.controllers - before).toBe(1);
     expect(reply.writeHead).toHaveBeenCalledWith(202, expect.anything());
+  });
+
+  // The admin names the receptionist that answers the number or the widget;
+  // the agent works from that receptionist's view of the business.
+  it("works from the view of the receptionist the attach names", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    const view = { businessId: "biz_1", greeting: "Hi", receptionist: { id: kitsilano, name: "Kitsilano", description: "", isDefault: false } };
+    mocks.snapshot.mockResolvedValue(view);
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId: "live_kits", businessId: "biz_1", callId: "call_1", channel: "voice", receptionistId: kitsilano }), response());
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
+    await (mocks.controllers_.at(-1)!.options.setup as Promise<unknown>);
+    expect((mocks.createReceptionistAgent.mock.lastCall![0] as { context: { snapshot: unknown } }).context.snapshot).toBe(view);
+    // An attach from before receptionists answers as the default receptionist.
+    await handler.handle(attachRequest({ sessionId: "live_default", businessId: "biz_1", callId: "call_2", channel: "voice" }), response());
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: undefined });
   });
 
   it("ends a browser session over the sideband it holds, or over a new one", async () => {
@@ -889,6 +908,15 @@ describe("recovering a call whose worker died", () => {
     expect(mocks.hangup).not.toHaveBeenCalled();
   });
 
+  it("re-attaches an orphan as the receptionist that answered it", async () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    await expect(recoveringWorker().recover(orphan("live_orphan_kits", { receptionistId: kitsilano }))).resolves.toBe("attached");
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
+    // A call from before receptionists answers as the default.
+    await expect(recoveringWorker().recover(orphan("live_orphan_default", { receptionistId: null }))).resolves.toBe("attached");
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: undefined });
+  });
+
   it("finishes an orphan whose session is gone with its best known length", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     await recoveringWorker().recover(orphan("live_gone"));
@@ -1231,6 +1259,14 @@ describe("parseAttachRequest", () => {
   it("keeps only the fields the worker trusts", () => {
     expect(parseAttachRequest(JSON.stringify({ sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "web_voice", intakeOnly: "yes", maxDurationMs: -1, resume: "yes" })))
       .toEqual({ sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "web_voice" });
+  });
+
+  it("keeps the receptionist answering only when it is an id", () => {
+    const call = { sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "voice" };
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: kitsilano }))).toEqual({ ...call, receptionistId: kitsilano });
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: "kitsilano" }))).toEqual(call);
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: 7 }))).toEqual(call);
   });
 
   it("marks a retried delivery's attach as a resume", () => {

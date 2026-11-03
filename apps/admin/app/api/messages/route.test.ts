@@ -51,7 +51,10 @@ vi.mock("@/lib/api-helpers", async (original) => ({
   withOperatorTransaction: async (_request: Request, callback: (input: { session: unknown; businessId: string; tx: unknown }) => Promise<unknown>) => await callback({ session: { user: { id: "user_1" } }, businessId, tx: (mocks.transaction ?? threadTransaction)() }),
 }));
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app" }) }));
-vi.mock("@lobbystack/domain", () => ({ appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction }));
+vi.mock("@lobbystack/domain", async (importOriginal) => {
+  const domain = await importOriginal<typeof import("@lobbystack/domain")>();
+  return { answeredByReceptionist: domain.answeredByReceptionist, recordReceptionistJoin: domain.recordReceptionistJoin, appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction };
+});
 
 import { GET, PATCH, POST } from "./route";
 
@@ -170,6 +173,28 @@ describe("GET /api/messages, the conversation list", () => {
     await GET(new Request("http://localhost/api/messages?limit=50&offset=0&channel=sms&search=ada&archived=true"));
     expect(listCondition()).toContain('"conversations"."archived_at" is not null');
     expect(listCondition()).toContain('"conversations"."channel" <> ');
+  });
+
+  it("keeps the conversations one receptionist answered, those from before receptionists counting for the default", async () => {
+    mocks.transaction = listTransaction;
+    const gastown = "00000000-0000-4000-8000-0000000000a1";
+
+    await GET(new Request(`http://localhost/api/messages?limit=50&offset=0&channel=all&receptionist=${gastown}`));
+    const condition = new PgDialect().sqlToQuery(mocks.conditions.at(-1)!);
+    expect(condition.sql).toContain('"conversations"."receptionist_id" = ');
+    expect(condition.sql).toContain('"conversations"."receptionist_id" is null and exists');
+    expect(condition.params).toContain(gastown);
+
+    await GET(new Request("http://localhost/api/messages?limit=50&offset=0&channel=all"));
+    expect(listCondition()).not.toContain("receptionist_id");
+  });
+
+  it("refuses a receptionist filter that can't be one", async () => {
+    mocks.transaction = listTransaction;
+    const response = await GET(new Request("http://localhost/api/messages?receptionist=gastown"));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "invalid_receptionist" });
+    expect(mocks.conditions).toEqual([]);
   });
 });
 

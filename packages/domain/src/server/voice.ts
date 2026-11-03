@@ -1,7 +1,7 @@
 import { and, count, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 
-import { appointments, auditLogs, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
-import { billableVoiceSeconds, isNonBillableCallDisposition } from "@lobbystack/shared";
+import { appointments, auditLogs, billingUsageEvents, calls, contacts, conversations, conversationSessions, enqueueOutbox, inboxItems, receptionistProfiles, services, staff, storageObjects, transcripts, withBusinessTransaction, type DatabaseTransaction, type NewOutboxMessage } from "@lobbystack/db";
+import { billableVoiceSeconds, isNonBillableCallDisposition, isUuid } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem, type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
@@ -18,6 +18,7 @@ import { buildCallEvents } from "./callEvents";
 import { recordingListState, recordingState, type RecordingState } from "./recordingState";
 import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
+import { answeredByReceptionist, recordReceptionistJoin } from "./receptionistRecords";
 
 /** Live calls run over either the phone carrier or the browser; only the transport is durable. */
 function voiceChannelForTransport(transport: string): "voice" | "web_voice" {
@@ -91,6 +92,8 @@ export async function startCall(
     prospectDemoId?: string;
     maxDurationMs?: number;
     billable?: boolean;
+    /** The receptionist answering; the default one when left out (the database fills it). */
+    receptionistId?: string | null | undefined;
   },
 ): Promise<{ callId: string; conversationId: string; contactId: string; duplicate: boolean; blocked: boolean; webCallMaxDurationMs?: number; reservedSeconds?: number }> {
   const result = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
@@ -110,7 +113,8 @@ export async function startCall(
     }
     if (caller?.created) await emitWebhookEventInTransaction(tx, { businessId: input.businessId, type: "contact.created", resourceId: contactId });
     const blocked = Boolean(caller?.contact.operatorBlockedAt);
-    const conversationId = existing[0]?.conversationId ?? (await tx.insert(conversations).values({ businessId: input.businessId, contactId, channel: "voice", status: "open", automationState: "ai_active" }).returning({ id: conversations.id }))[0]?.id;
+    const receptionist = input.receptionistId && isUuid(input.receptionistId) ? { receptionistId: input.receptionistId } : {};
+    const conversationId = existing[0]?.conversationId ?? (await tx.insert(conversations).values({ businessId: input.businessId, contactId, channel: "voice", status: "open", automationState: "ai_active", ...receptionist }).returning({ id: conversations.id }))[0]?.id;
     if (!conversationId) {
       throw new Error("Call conversation could not be created.");
     }
@@ -131,6 +135,7 @@ export async function startCall(
       ...(blocked ? { status: "blocked", disposition: "blocked_contact" } : {}),
       gatewaySessionId: input.gatewaySessionId,
       ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}),
+      ...receptionist,
       startedAt: new Date(input.startedAt ?? Date.now()),
     }).returning({ id: calls.id }))[0]?.id;
     if (!callId) {
@@ -437,18 +442,29 @@ export async function recordCallProviderPricing(
   return true;
 }
 
+/**
+ * The business's calls, newest first. `receptionistId` keeps the calls that
+ * receptionist answered (a call from before receptionists counts for the
+ * default one), and each call says who answered it.
+ */
 export async function listCalls(
   context: DomainContext,
-  input: { userId: string; businessId: string; search?: string; limit?: number; offset?: number },
+  input: { userId: string; businessId: string; search?: string; limit?: number; offset?: number; receptionistId?: string | null | undefined },
 ): Promise<{ calls: Array<Record<string, unknown>>; pagination: { limit: number; offset: number; total: number; hasNext: boolean } }> {
-  return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
+  if (input.receptionistId && !isUuid(input.receptionistId)) throw Object.assign(new Error("receptionist must be a receptionist id."), { status: 400, code: "invalid_receptionist" });
+  return await withBusinessTransaction(context.db, { userId: input.userId, businessId: input.businessId, actorType: "operator" }, async (tx) => {
     await requireBusinessMembership(tx, input);
     const limit = Math.min(Math.max(Math.trunc(input.limit ?? 50), 1), 100);
     const offset = Math.max(Math.trunc(input.offset ?? 0), 0);
     const search = input.search?.trim();
     const transcriptPreview = sql<string | null>`(select ${transcripts.text} from ${transcripts} where ${transcripts.callId} = ${calls.id} order by ${transcripts.sequence} desc limit 1)`;
     // Archived calls leave the list and its count.
-    const filter = and(eq(calls.businessId, input.businessId), isNull(calls.archivedAt), ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []));
+    const filter = and(
+      eq(calls.businessId, input.businessId),
+      isNull(calls.archivedAt),
+      input.receptionistId ? answeredByReceptionist(calls.receptionistId, input.businessId, input.receptionistId) : undefined,
+      ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []),
+    );
     const rows = await tx.select({
        id: calls.id,
       providerCallId: calls.providerCallId,
@@ -468,11 +484,14 @@ export async function listCalls(
       recordingStatus: storageObjects.status,
        recordingRetentionUntil: storageObjects.retentionUntil,
        transcriptPreview,
+      receptionistId: receptionistProfiles.id,
+      receptionistName: receptionistProfiles.name,
     }).from(calls)
       .leftJoin(contacts, eq(calls.contactId, contacts.id))
       .leftJoin(conversations, eq(calls.conversationId, conversations.id))
       .leftJoin(conversationSessions, and(eq(conversationSessions.callId, calls.id), eq(conversationSessions.businessId, calls.businessId)))
       .leftJoin(storageObjects, eq(calls.recordingObjectId, storageObjects.id))
+      .leftJoin(receptionistProfiles, recordReceptionistJoin(calls.businessId, calls.receptionistId))
       .where(filter)
       .orderBy(desc(calls.startedAt))
       .limit(limit + 1)
@@ -496,6 +515,7 @@ export async function listCalls(
         contactEmail: row.contactEmail,
          recordingState: recordingListState({ ...row, retentionUntil: row.recordingRetentionUntil }),
          transcriptPreview: row.transcriptPreview,
+        receptionist: row.receptionistId ? { id: row.receptionistId, name: row.receptionistName } : null,
       })),
       pagination: { limit, offset, total: Number(total?.count ?? 0), hasNext },
     };
@@ -632,14 +652,29 @@ const followUpGroup = sql`case when ${followUpRequest} is null then coalesce(${i
 
 export async function createVoiceFollowUpTask(
   context: DomainContext,
-  input: { businessId: string; callId?: string; callerName?: string; callbackPhone?: string; urgency?: string; callbackWindow?: string; message: string; channel?: string; request?: FollowUpRequest },
+  input: {
+    businessId: string;
+    callId?: string;
+    callerName?: string;
+    callbackPhone?: string;
+    urgency?: string;
+    callbackWindow?: string;
+    message: string;
+    channel?: string;
+    request?: FollowUpRequest;
+    /** The receptionist that took it, for a chat's; a call's follow-up takes the call's. Left out, the default. */
+    receptionistId?: string | null | undefined;
+  },
 ): Promise<{ inboxItemId: string }> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    let receptionistId = input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null;
     if (input.callId) {
       // Serialize retries on the call row, including the first task creation.
       // A lookup followed by insert alone can create concurrent duplicates.
-      const [call] = await tx.select({ id: calls.id }).from(calls).where(and(eq(calls.id, input.callId), eq(calls.businessId, input.businessId))).limit(1).for("update");
+      const [call] = await tx.select({ id: calls.id, receptionistId: calls.receptionistId }).from(calls).where(and(eq(calls.id, input.callId), eq(calls.businessId, input.businessId))).limit(1).for("update");
       if (!call) throw new Error("Call not found in this business.");
+      // The call says who answered it, even for a follow-up saved after the call.
+      receptionistId = call.receptionistId ?? receptionistId;
     }
     const title = `Voice message from ${input.callerName?.trim() || input.callbackPhone?.trim() || "unknown caller"}`;
     const body = [
@@ -651,7 +686,7 @@ export async function createVoiceFollowUpTask(
     ].filter((line): line is string => line !== null).join("\n");
     const retentionPlan = isContentRetentionEnabled() ? await resolveBusinessBillingPlan(tx, input.businessId) : null;
     const metadata = Object.fromEntries(Object.entries({ callerName: input.callerName?.trim(), callbackPhone: input.callbackPhone?.trim(), urgency: input.urgency?.trim(), callbackWindow: input.callbackWindow?.trim(), channel: input.channel, ...input.request }).filter(([, value]) => value));
-    const values = { businessId: input.businessId, kind: "voice_message", title, body, metadata, contentExpiresAt: retentionPlan ? contentExpiryForPlan(retentionPlan, "follow_ups") : null, ...(input.callId ? { relatedCallId: input.callId } : {}) };
+    const values = { businessId: input.businessId, kind: "voice_message", title, body, metadata, contentExpiresAt: retentionPlan ? contentExpiryForPlan(retentionPlan, "follow_ups") : null, ...(input.callId ? { relatedCallId: input.callId } : {}), ...(receptionistId ? { receptionistId } : {}) };
     // A retry replaces the open follow-up it repeats: the call's message, or
     // its request of the same kind for the same appointment. An unlinked
     // request repeats only with the same details. Anything else is a new item,

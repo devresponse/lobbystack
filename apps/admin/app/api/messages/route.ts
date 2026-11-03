@@ -1,19 +1,23 @@
 import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { contacts, conversations, messages, widgetVisitors } from "@lobbystack/db";
-import { appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, setAutomationState, setConversationArchived } from "@lobbystack/domain";
+import { contacts, conversations, messages, receptionistProfiles, widgetVisitors } from "@lobbystack/db";
+import { answeredByReceptionist, appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, recordReceptionistJoin, setAutomationState, setConversationArchived } from "@lobbystack/domain";
 import { isUuid, smsFailureReason } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
+import { receptionistIdFromRequest } from "@/lib/receptionist-filter";
 
 export const dynamic = "force-dynamic";
 
-const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, conversationStatus: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt, archivedAt: conversations.archivedAt };
+// The receptionist that answered each conversation; one from before receptionists shows the default.
+const conversationFields = { conversationId: conversations.id, contactName: contacts.name, contactPhone: contacts.phone, visitorName: widgetVisitors.name, visitorEmail: widgetVisitors.email, channel: conversations.channel, conversationStatus: conversations.status, automationState: conversations.automationState, teamRequestedAt: conversations.teamRequestedAt, archivedAt: conversations.archivedAt, receptionistId: receptionistProfiles.id, receptionistName: receptionistProfiles.name };
+const answeredBy = recordReceptionistJoin(conversations.businessId, conversations.receptionistId);
 
 /**
  * Without conversationId: one row per conversation (its latest message), newest first, paged, leaving out archived
- * conversations, or only those with archived=true. With it: that thread, archived or not,
+ * conversations, or only those with archived=true, and with receptionist=<id> only the ones that receptionist
+ * answered. With it: that thread, archived or not,
  * each text with why it failed when it never went out, and where a reply goes: for a website chat that closed, the
  * visitor's newer chat; for any other conversation, which takes replies by text, why a text can't reach the contact.
  */
@@ -22,10 +26,11 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const conversationId = url.searchParams.get("conversationId");
     if (conversationId !== null && !isUuid(conversationId)) return jsonError("conversationId must be a UUID.", 400);
+    const receptionistId = receptionistIdFromRequest(request);
     return NextResponse.json(await withOperatorTransaction(request, async ({ businessId, tx }) => {
       if (conversationId) {
         // shortcut: returns the newest 500 messages of a thread; add "load older" paging if threads grow past that.
-        const thread = await tx.select({ id: messages.id, ...conversationFields, messageChannel: messages.channel, body: messages.body, direction: messages.direction, status: messages.status, providerStatus: messages.providerStatus, createdAt: messages.createdAt }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id)).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId))).orderBy(desc(messages.createdAt)).limit(500);
+        const thread = await tx.select({ id: messages.id, ...conversationFields, messageChannel: messages.channel, body: messages.body, direction: messages.direction, status: messages.status, providerStatus: messages.providerStatus, createdAt: messages.createdAt }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id)).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).leftJoin(receptionistProfiles, answeredBy).where(and(eq(messages.businessId, businessId), eq(messages.conversationId, conversationId))).orderBy(desc(messages.createdAt)).limit(500);
         const conversation = thread[0];
         const closedChat = conversation?.channel === "web_chat" && conversation.conversationStatus !== "open";
         const smsReach = conversation && conversation.channel !== "web_chat" ? await loadSmsReachInTransaction(tx, { businessId, conversationId }) : null;
@@ -41,9 +46,10 @@ export async function GET(request: Request) {
       const channel = url.searchParams.get("channel");
       const archived = url.searchParams.get("archived") === "true";
       const latest = tx.select({ id: messages.id, body: messages.body, direction: messages.direction, status: messages.status, createdAt: messages.createdAt }).from(messages).where(eq(messages.conversationId, conversations.id)).orderBy(desc(messages.createdAt)).limit(1).as("latest");
-      const rows = await tx.select({ id: latest.id, ...conversationFields, body: latest.body, direction: latest.direction, status: latest.status, createdAt: latest.createdAt }).from(conversations).innerJoinLateral(latest, sql`true`).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).where(and(
+      const rows = await tx.select({ id: latest.id, ...conversationFields, body: latest.body, direction: latest.direction, status: latest.status, createdAt: latest.createdAt }).from(conversations).innerJoinLateral(latest, sql`true`).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).leftJoin(receptionistProfiles, answeredBy).where(and(
         eq(conversations.businessId, businessId),
         archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt),
+        receptionistId ? answeredByReceptionist(conversations.receptionistId, businessId, receptionistId) : undefined,
         channel === "web_chat" ? eq(conversations.channel, "web_chat") : channel === "sms" ? ne(conversations.channel, "web_chat") : undefined,
         search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, `%${search}%`))) : undefined,
       )).orderBy(desc(latest.createdAt), desc(conversations.id)).limit(limit + 1).offset(offset);

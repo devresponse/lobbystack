@@ -7,7 +7,7 @@ import {
   blockLiveCaller,
   extendLiveCallReservation,
   finishLiveCall,
-  getCachedBusinessSnapshot,
+  getCachedReceptionistSnapshot,
   lastLiveCallSequence,
   markLiveCallMediaStarted,
   orphanedLiveCallSeconds,
@@ -20,7 +20,7 @@ import {
   type OpenLiveCall,
 } from "@lobbystack/domain";
 import { renewVoicePresenceGateway, updateVoicePresence } from "@lobbystack/jobs";
-import { callOpening, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
+import { callOpening, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolicy, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
@@ -65,6 +65,12 @@ type AttachRequest = {
    * and the worker records it for the next one.
    */
   recordedGreeting?: { text: string; play: boolean };
+  /**
+   * The receptionist answering, whose view of the business's snapshot the
+   * agent uses (snapshotForReceptionist): the default one when it is absent,
+   * paused or archived.
+   */
+  receptionistId?: string;
   /** Set when this worker took the call over after its owner died. Never parsed from HTTP. */
   recovery?: OpenLiveCall;
 };
@@ -204,6 +210,7 @@ export function parseAttachRequest(raw: string): AttachRequest | undefined {
     ...(body.intakeOnly === true ? { intakeOnly: true } : {}),
     ...(body.resume === true ? { resume: true } : {}),
     ...(typeof body.recordedGreeting?.text === "string" && body.recordedGreeting.text.trim() ? { recordedGreeting: { text: body.recordedGreeting.text.trim(), play: body.recordedGreeting.play === true } } : {}),
+    ...(typeof body.receptionistId === "string" && isUuid(body.receptionistId) ? { receptionistId: body.receptionistId } : {}),
   };
 }
 
@@ -399,6 +406,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         ...(orphan.callerPhone ? { callerPhone: orphan.callerPhone } : {}),
         maxDurationMs: remainingMs,
         ...(orphan.intakeOnly ? { intakeOnly: true } : {}),
+        // The call record says who answered, so the new owner answers as it.
+        ...(orphan.receptionistId ? { receptionistId: orphan.receptionistId } : {}),
         recovery: orphan,
       }, client, model);
       return "attached";
@@ -464,7 +473,8 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
     const inCall = AsyncLocalStorage.snapshot();
     // OpenAI replays only the last 3 seconds to a new sideband, so it connects
     // first and the business loads alongside.
-    const snapshotLoad = getCachedBusinessSnapshot(input.domain, { businessId: request.businessId });
+    // The receptionist answering gets its own view: its settings and the articles it may use.
+    const snapshotLoad = getCachedReceptionistSnapshot(input.domain, { businessId: request.businessId, receptionistId: request.receptionistId });
     const phone = request.channel === "voice";
     const call = { businessId: request.businessId, callId: request.callId };
     const telemetryCall = { ...call, channel: request.channel, ...(request.conversationId ? { conversationId: request.conversationId } : {}) };

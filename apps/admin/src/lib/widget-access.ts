@@ -20,6 +20,12 @@ export type WidgetSession = {
   defaultLocale: RuntimeLocale;
   config: WidgetConfig;
   visitorId?: string;
+  /**
+   * The receptionist the widget names, which answers its chats and calls
+   * unless it is paused or archived (then the default one does). Null means
+   * the default receptionist.
+   */
+  receptionistId: string | null;
 };
 
 export type WidgetAccessSuccess = { ok: true; session: WidgetSession };
@@ -45,6 +51,7 @@ async function loadWidgetSession(businessId: string, widgetKeyId: string) {
         businessName: business?.name ?? "",
         businessSlug: business?.slug ?? "",
         defaultLocale: normalizeRuntimeLocale(business?.defaultLocale) ?? "en",
+        receptionistId: keyRow.key.receptionistId ?? null,
       },
       profile: { published: keyRow.profilePublished, widgetKeyId: keyRow.profileWidgetKeyId },
     };

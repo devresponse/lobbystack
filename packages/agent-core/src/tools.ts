@@ -210,6 +210,11 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   const { domain, snapshot } = context;
   const businessId = snapshot.businessId;
   const timezone = snapshot.timezone;
+  // The receptionist answering (the snapshot is cut to its view): searches
+  // read its articles, and what it saves names it. None on a snapshot from
+  // before receptionists, which the default receptionist answers.
+  const receptionistId = snapshot.receptionist?.id;
+  const answeredBy = receptionistId ? { receptionistId } : {};
   const bookingMode = context.intakeOnly ? "off" : normalizeBookingMode(snapshot.bookingMode);
   const channel = context.channel;
   // Texts about the caller's appointments are offered only on phone calls the
@@ -232,7 +237,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
   async function searchKnowledge(query: string): Promise<{ outcome: string; matches: KnowledgeMatch[] }> {
     const fallback = snapshotKnowledgeMatches(snapshot, query);
     try {
-      const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}) });
+      const evidence = await searchKnowledgeEvidence(domain, { businessId, query, limit: 6, ...(context.callId ? { callId: context.callId } : {}), ...answeredBy });
       // Evidence first. Snippets only fill the slots and tokens it leaves.
       const matches = withSnippetsInBudget(evidence.matches.map((match) => ({ title: match.title, text: match.content, ...(match.focusStart !== undefined && match.focusEnd !== undefined ? { focusStart: match.focusStart, focusEnd: match.focusEnd } : {}) })), fallback);
       return { outcome: matches.length ? "found" : evidence.outcome, matches };
@@ -254,6 +259,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
         channel,
         ...(context.callId ? { callId: context.callId } : {}),
         ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+        ...answeredBy,
       }))
       .catch((error: unknown) => logEvent("warn", "knowledge.unanswered_question_failed", { businessId, error }));
   }
@@ -314,6 +320,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           ...(input.callbackWindow ? { callbackWindow: input.callbackWindow } : {}),
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
       },
     }),
@@ -434,6 +441,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           callerName: input.callerName,
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
       },
     });
@@ -550,6 +558,7 @@ export function createReceptionistTools(context: AgentToolContext): ToolSet {
           ...(callbackPhone ? { callbackPhone } : {}),
           ...(context.callId ? { callId: context.callId } : {}),
           ...(context.conversationId ? { conversationId: context.conversationId } : {}),
+          ...answeredBy,
         });
         return { ...saved, cancelled: false, status: "The request is saved for the team. The appointment is still booked until the team cancels it." };
       },

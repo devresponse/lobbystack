@@ -7,7 +7,7 @@
 -- conversations and inbox items are large: they get the empty column, and
 -- their foreign keys are added NOT VALID, which checks new rows without
 -- scanning old ones. The worker fills their old rows in small batches
--- (receptionist.backfill), and the clean-up deploy validates the keys and
+-- (receptionists.backfillRecords), and the clean-up deploy validates the keys and
 -- requires the column.
 --
 -- A trigger gives every new row the default receptionist when its writer

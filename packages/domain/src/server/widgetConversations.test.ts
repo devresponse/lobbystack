@@ -173,7 +173,7 @@ describe("getOrCreateWidgetConversation", () => {
 
     const result = await getOrCreateWidgetConversation(context, { businessId, widgetVisitorId: visitorId });
 
-    expect(result).toEqual({ conversationId, automationState: "ai_active" });
+    expect(result).toEqual({ conversationId, automationState: "ai_active", receptionistId: null });
     expect(state.insertedConversation).toBeNull();
   });
 
@@ -183,7 +183,7 @@ describe("getOrCreateWidgetConversation", () => {
 
     const result = await getOrCreateWidgetConversation(context, { businessId, widgetVisitorId: visitorId });
 
-    expect(result).toEqual({ conversationId, automationState: "human_handoff" });
+    expect(result).toEqual({ conversationId, automationState: "human_handoff", receptionistId: null });
   });
 
   it("creates a new open web_chat conversation when none exists", async () => {
@@ -204,7 +204,7 @@ describe("getOrCreateWidgetConversation", () => {
     const result = await getOrCreateWidgetConversation(context, { businessId, widgetVisitorId: visitorId });
 
     expect(state.insertedVisitor).toEqual({ id: visitorId, businessId });
-    expect(result).toEqual({ conversationId, automationState: "ai_active" });
+    expect(result).toEqual({ conversationId, automationState: "ai_active", receptionistId: null });
     expect(state.insertedConversation).toMatchObject({ businessId, widgetVisitorId: visitorId, channel: "web_chat" });
   });
 

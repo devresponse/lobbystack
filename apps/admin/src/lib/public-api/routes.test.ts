@@ -587,7 +587,7 @@ describe("billing", () => {
       expect((await v1.getCheckout(call("/billing/checkout/x"), { params: Promise.resolve({ checkout_id: "x" }) })).status).toBe(400);
 
       // Once a link makes Pro active, its linked products decide, whatever the variables say.
-      const pro = { code: "pro" as const, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 20 };
+      const pro = { code: "pro" as const, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, receptionists: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 20 };
       domain.readPolarProductLinks.mockImplementation(async () => polarProductLinks({ plans: [pro], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, polar_id: "prod_pro_annual", retired: false }] }, process.env));
       await v1.createCheckout(call("/billing/checkout", { method: "POST", body: JSON.stringify({ plan: "pro", interval: "annual" }) }));
       expect(domain.createCheckoutForApi).toHaveBeenLastCalledWith(expect.anything(), expect.anything(), { plan: "pro", interval: "annual" }, { available: true, checkLimit: expect.any(Function) });

@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({
   withOperatorTransaction: vi.fn(),
   resolveWebVoiceAccess: vi.fn(),
   verifyWidgetSessionToken: vi.fn(),
-  widgetKey: { status: "active", allowedOrigins: ["https://client.example"] } as { status: string; allowedOrigins: string[]; profilePublished?: boolean | null; profileWidgetKeyId?: string | null } | undefined,
+  widgetKey: { status: "active", allowedOrigins: ["https://client.example"] } as { status: string; allowedOrigins: string[]; receptionistId?: string | null; profilePublished?: boolean | null; profileWidgetKeyId?: string | null } | undefined,
 }));
 
 vi.mock("./api-helpers", () => ({
@@ -103,6 +103,31 @@ describe("resolveLiveWebCallAccess", () => {
     mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: app });
     mocks.widgetKey = { status: "disabled", allowedOrigins: [], profilePublished: true, profileWidgetKeyId: "key_1" };
     await expect(resolveLiveWebCallAccess(request({ authorization: "Bearer token", "x-widget-parent-origin": app }), { sdp: "v=0", widgetId: "lobbystack-widget" })).resolves.toEqual({ status: 403, code: "widget_origin_denied" });
+  });
+
+  describe("the receptionist a call is for", () => {
+    const kitsilanoId = "00000000-0000-4000-8000-0000000000a2";
+
+    it("tests the receptionist the dashboard picks, and refuses an id that isn't one", async () => {
+      mocks.withOperatorTransaction.mockResolvedValue("biz_1");
+      await expect(resolveLiveWebCallAccess(request({ origin: app }), { sdp: "v=0", widgetId: "lobbystack-dashboard-test-call", receptionistId: kitsilanoId.toUpperCase() })).resolves.toMatchObject({ businessId: "biz_1", dashboardTestCall: true, receptionistId: kitsilanoId });
+      await expect(resolveLiveWebCallAccess(request({ origin: app }), { sdp: "v=0", widgetId: "lobbystack-dashboard-test-call", receptionistId: "kitsilano" })).resolves.toEqual({ status: 400, code: "invalid_receptionist" });
+    });
+
+    it("tests the default receptionist when the dashboard picks none", async () => {
+      mocks.withOperatorTransaction.mockResolvedValue("biz_1");
+      expect(await resolveLiveWebCallAccess(request({ origin: app }), { sdp: "v=0", widgetId: "lobbystack-dashboard-test-call" })).not.toHaveProperty("receptionistId");
+    });
+
+    it("answers a widget call as the receptionist its key names, never one the request names", async () => {
+      mocks.verifyWidgetSessionToken.mockReturnValue({ businessId: "biz_2", widgetKeyId: "key_1", visitorId: "visitor_1", origin: "https://client.example" });
+      mocks.widgetKey = { status: "active", allowedOrigins: ["https://client.example"], receptionistId: kitsilanoId };
+      const headers = { authorization: "Bearer token", "x-widget-parent-origin": "https://client.example" };
+      await expect(resolveLiveWebCallAccess(request(headers), { sdp: "v=0", widgetId: "lobbystack-widget", receptionistId: "00000000-0000-4000-8000-0000000000a9" })).resolves.toMatchObject({ businessId: "biz_2", dashboardTestCall: false, receptionistId: kitsilanoId });
+      // A key from before receptionists names none, and the default one answers.
+      mocks.widgetKey = { status: "active", allowedOrigins: ["https://client.example"], receptionistId: null };
+      expect(await resolveLiveWebCallAccess(request(headers), { sdp: "v=0", widgetId: "lobbystack-widget", receptionistId: kitsilanoId })).not.toHaveProperty("receptionistId");
+    });
   });
 
   it("runs prospect demos under their demo", async () => {

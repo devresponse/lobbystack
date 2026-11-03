@@ -11,6 +11,7 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
+import { checkReceptionistData, describeReceptionistData } from "./receptionist-checks";
 import {
   concurrentIndexName,
   MIGRATION_JOURNAL_TABLE,
@@ -288,6 +289,14 @@ async function main(): Promise<void> {
         const receptionistFailures = await verifyReceptionistGrants(migrator);
         if (receptionistFailures.length > 0) {
           throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
+        }
+        // Until the clean-up deploy: the default receptionist's copy of the
+        // shared settings, and the records the backfill hasn't reached yet.
+        const receptionistData = describeReceptionistData(await checkReceptionistData(migrator.db));
+        for (const warning of receptionistData.warnings) console.warn(warning);
+        console.log(receptionistData.info);
+        if (receptionistData.failures.length > 0) {
+          throw new Error(`Receptionist data verification failed: ${receptionistData.failures.join("; ")}`);
         }
         if (process.env.VERIFY_RLS_BEHAVIOR === "true") {
           await verifyRlsBehavior(migrator);

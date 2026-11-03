@@ -1,6 +1,7 @@
 import { snapshotSchema } from "@lobbystack/contracts";
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
 
+import { snapshotForReceptionist } from "../snapshot";
 import type { DomainContext } from "./context";
 import { loadLatestBusinessSnapshot } from "./knowledge";
 
@@ -61,4 +62,19 @@ export async function getCachedBusinessSnapshot(
     await cache.set(input.businessId, snapshot).catch(() => undefined);
   }
   return snapshot;
+}
+
+/**
+ * One receptionist's view of the business's snapshot, from the cache like
+ * getCachedBusinessSnapshot: its own settings and the articles it may use
+ * (snapshotForReceptionist). Null, or a receptionist that is paused, archived
+ * or unknown, gets the default receptionist's view; the view's `receptionist`
+ * says which one answers, for the call or chat's record.
+ */
+export async function getCachedReceptionistSnapshot(
+  context: DomainContext,
+  input: { businessId: string; receptionistId?: string | null | undefined },
+): Promise<BusinessContextSnapshot | null> {
+  const snapshot = await getCachedBusinessSnapshot(context, { businessId: input.businessId });
+  return snapshot ? snapshotForReceptionist(snapshot, input.receptionistId) : null;
 }

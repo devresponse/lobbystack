@@ -458,7 +458,7 @@ export async function upsertWebsiteDocument(
 
 export async function searchKnowledge(
   context: DomainContext,
-  input: { userId?: string; businessId: string; query: string; limit?: number; receptionistId?: string | null },
+  input: { userId?: string; businessId: string; query: string; limit?: number; receptionistId?: string | null | undefined },
 ): Promise<Array<{ chunkId: string; title: string; content: string }>> {
   return (await searchKnowledgeEvidence(context, input)).matches;
 }
@@ -472,7 +472,7 @@ export async function searchKnowledge(
  */
 export async function searchKnowledgeEvidence(
   context: DomainContext,
-  input: { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string; receptionistId?: string | null },
+  input: { userId?: string; businessId: string; query: string; limit?: number; callId?: string; turnId?: string; receptionistId?: string | null | undefined },
 ): Promise<{ matches: KnowledgePassage[]; mode: "hybrid" | "keyword"; outcome: "found" | "empty" | "unavailable"; failure?: "embedding_unavailable" | "search_unavailable"; durationMs: number }> {
   const startedAt = performance.now();
   const actor = { userId: input.userId, businessId: input.businessId, actorType: input.userId ? "operator" as const : "worker" as const };

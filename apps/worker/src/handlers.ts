@@ -12,7 +12,7 @@ import { claimAppointmentChangeOtp, claimBillingCheckoutRequest, claimBillingSub
 import { claimOperatorNotificationDelivery, notificationLeaseEndsAt, operatorNotificationLeaseEndsAt, smsDeliveryLeaseEndsAt, correctAlertSmsUsage, estimateSmsSegments, loadOperatorNotificationDelivery, markFeedbackEmailFailed, markFeedbackEmailSent, markOperatorNotificationFailed, markOperatorNotificationSent, markOperatorNotificationSkipped, queueDailyOperatorSummaries, refreshUnitEconomicsMonth, releaseOperatorNotificationDelivery, reserveAlertSmsUsage } from "@lobbystack/domain";
 import { CALL_TRANSCRIPT_EVENT, loadCallTranscriptEmail } from "@lobbystack/domain";
 import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisioning, numberProvisioningLeaseEndsAt } from "@lobbystack/domain";
-import { enforceReceptionistAllowance } from "@lobbystack/domain";
+import { backfillReceptionistRecords, enforceReceptionistAllowance } from "@lobbystack/domain";
 import { deploymentAppName, issueOperatorPhoneVerificationCode, markOperatorPhoneVerificationCodeSent, releaseOperatorPhoneVerificationCodeSend, verificationCodeSmsBody } from "@lobbystack/domain";
 import { createWebhookSender, processWebhookDelivery, pruneApiHistory, type WebhookSender } from "@lobbystack/domain";
 import { LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
@@ -430,6 +430,15 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
       const businessId = businessIdOrThrow(job);
       const paused = await enforceReceptionistAllowance(dependencies.domain, { businessId });
       return { status: paused.length ? "completed" : "skipped", entityId: String(paused.length) };
+    }
+    case "receptionists.backfillRecords": {
+      // Calls, chats and follow-ups from before receptionists get the default
+      // receptionist, a batch at a time; once none is left, a run changes nothing.
+      const businessId = businessIdOrThrow(job);
+      const result = await backfillReceptionistRecords(dependencies.domain, { businessId });
+      const filled = Object.values(result.filled).reduce((sum, count) => sum + count, 0);
+      if (filled > 0) logEvent("info", "receptionists.backfill", { businessId, ...result.filled, passes: result.passes, finished: result.finished });
+      return { status: filled > 0 ? "completed" : "skipped", entityId: String(filled) };
     }
     case "business.generateSummary":
       return await generateBusinessSummary(dependencies, { businessId: businessIdOrThrow(job), force: job.payload.force === true });

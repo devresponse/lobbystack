@@ -21,7 +21,7 @@ const view: BillingCodeView = {
   currency: "cad",
   current: false,
   prices: [{ interval: "monthly", cents: 2900, discountedCents: 1450, checkoutAvailable: true }, { interval: "annual", cents: 29000, discountedCents: 14500, checkoutAvailable: false }],
-  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1 },
+  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 },
   moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"],
 };
 let store: Record<string, string> = {};

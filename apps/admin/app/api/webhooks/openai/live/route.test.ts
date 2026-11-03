@@ -5,7 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } fr
 const mocks = vi.hoisted(() => ({ unwrap: vi.fn(), reject: vi.fn(), accept: vi.fn(), hangup: vi.fn(), execute: vi.fn(), snapshot: vi.fn(), startLivePhoneCall: vi.fn(), finishLiveCall: vi.fn(), attach: vi.fn(), sessionConfig: vi.fn((..._args: unknown[]) => ({ model: "gpt-live-1", instructions: "Answer calls." })), recordedGreeting: vi.fn() }));
 
 vi.mock("@lobbystack/agent-core/live/session", () => ({ buildPhoneSessionConfig: mocks.sessionConfig }));
-vi.mock("@lobbystack/domain", () => ({ finishLiveCall: mocks.finishLiveCall, getCachedBusinessSnapshot: mocks.snapshot, recordAiTrace: vi.fn(async () => null), startLivePhoneCall: mocks.startLivePhoneCall }));
+// The cut of the business's snapshot for one receptionist is the domain's own.
+vi.mock("@lobbystack/domain", async () => ({
+  finishLiveCall: mocks.finishLiveCall,
+  getCachedBusinessSnapshot: mocks.snapshot,
+  recordAiTrace: vi.fn(async () => null),
+  snapshotForReceptionist: (await import("../../../../../../../packages/domain/src/snapshot")).snapshotForReceptionist,
+  startLivePhoneCall: mocks.startLivePhoneCall,
+}));
 vi.mock("@/lib/api-helpers", () => ({ getAppDatabase: () => ({ db: { execute: mocks.execute } }) }));
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/live-greeting", () => ({ recordedGreetingFor: mocks.recordedGreeting }));
@@ -434,6 +441,84 @@ describe("POST /api/webhooks/openai/live", () => {
     const response = await POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
     expect(response.status).toBe(503);
     expect(mocks.reject).not.toHaveBeenCalled();
+  });
+
+  describe("a number a receptionist answers", () => {
+    const frontDeskId = "00000000-0000-4000-8000-0000000000a1";
+    const kitsilanoId = "00000000-0000-4000-8000-0000000000a2";
+    const receptionist = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id, name: id === frontDeskId ? "Front desk" : "Kitsilano", description: id === frontDeskId ? "Everything about the shop." : "The Kitsilano store.",
+      isDefault: id === frontDeskId, status: "active", listed: true, order: id === frontDeskId ? 0 : 1, knowledgeScope: "all",
+      greeting: id === frontDeskId ? "Hi, the shop." : "Hi, Kitsilano store.", voiceInstructions: "", smsInstructions: "", chatInstructions: "",
+      bookingPolicy: "", bookingMode: "direct", transferPolicy: { mode: "never" }, snippetIds: [], ...overrides,
+    });
+    const stored = (kitsilano: Record<string, unknown> = {}) => ({ businessId: "biz_1", greeting: "Hi, the shop.", knowledgeSnippets: [], receptionists: [receptionist(frontDeskId), receptionist(kitsilanoId, kitsilano)] });
+    const ring = () => POST(new Request("https://admin.lobbystack.test/api/webhooks/openai/live", { method: "POST", body: "{}" }));
+
+    beforeEach(() => {
+      vi.spyOn(console, "info").mockImplementation(() => undefined);
+      mocks.startLivePhoneCall.mockResolvedValue({ callId: "call_1", conversationId: "conv_1", duplicate: false, blocked: false });
+      mocks.accept.mockResolvedValue(undefined);
+      mocks.attach.mockResolvedValue(undefined);
+      mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }] } });
+    });
+
+    it("looks up the receptionist with the business, in the same query", async () => {
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: null, position: 1 }] });
+      await ring();
+      expect(mocks.execute).toHaveBeenCalledTimes(1);
+      expect(new PgDialect().sqlToQuery(mocks.execute.mock.calls[0]![0] as SQL).sql).toContain("app.resolve_receptionist_by_phone(phone) as receptionist_id");
+    });
+
+    it("answers as the number's receptionist, and the call's record and the worker name it", async () => {
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", receptionist_id: kitsilanoId, position: 1 }] });
+      mocks.snapshot.mockResolvedValue(stored());
+      await ring();
+      expect(mocks.startLivePhoneCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ businessId: "biz_1", receptionistId: kitsilanoId }));
+      expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, Kitsilano store.", receptionist: { id: kitsilanoId, name: "Kitsilano", description: "The Kitsilano store.", isDefault: false } }), expect.anything());
+      // The session gets the receptionist's view, never the list of every receptionist's settings.
+      expect(mocks.sessionConfig.mock.calls[0]![0]).not.toHaveProperty("receptionists");
+      expect(mocks.recordedGreeting).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, Kitsilano store." }), { phone: true });
+      await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ callId: "call_1", receptionistId: kitsilanoId })));
+    });
+
+    it("answers as the default receptionist when the snapshot has the number's one paused", async () => {
+      // The lookup already gives the default for a paused receptionist; a snapshot a moment older may not know yet.
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", receptionist_id: kitsilanoId, position: 1 }] });
+      mocks.snapshot.mockResolvedValue(stored({ status: "paused" }));
+      await ring();
+      expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, the shop.", receptionist: expect.objectContaining({ id: frontDeskId, isDefault: true }) }), expect.anything());
+      // The worker answers as the receptionist the caller hears.
+      await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: frontDeskId })));
+    });
+
+    it("answers a number from before receptionists as the default one", async () => {
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", receptionist_id: null, position: 1 }] });
+      mocks.snapshot.mockResolvedValue(stored());
+      await ring();
+      expect(mocks.startLivePhoneCall.mock.calls[0]![1]).not.toHaveProperty("receptionistId");
+      expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, the shop.", receptionist: expect.objectContaining({ id: frontDeskId }) }), expect.anything());
+      await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: frontDeskId })));
+    });
+
+    it("answers with the business's snapshot as it is when it has no receptionists yet", async () => {
+      // A snapshot published by the release before.
+      const legacy = { businessId: "biz_1", greeting: "Hi" };
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", receptionist_id: kitsilanoId, position: 1 }] });
+      mocks.snapshot.mockResolvedValue(legacy);
+      await ring();
+      expect(mocks.sessionConfig).toHaveBeenCalledWith(legacy, expect.anything());
+      // The worker still learns which receptionist the number has, for the call's record.
+      await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: kitsilanoId })));
+    });
+
+    it("leaves the receptionist of a canceled business's earlier number out", async () => {
+      mocks.execute.mockResolvedValue({ rows: [{ business_id: null, receptionist_id: null, closed: true, position: 1 }, { business_id: "biz_1", receptionist_id: kitsilanoId, closed: false, position: 2 }] });
+      mocks.snapshot.mockResolvedValue(stored());
+      mocks.unwrap.mockResolvedValue({ type: "live.transport.incoming", data: { session_id: "live_1", sip_headers: [{ name: "Diversion", value: "<sip:+15815550100@example.com>" }, { name: "Diversion", value: "<sip:+15815550122@example.com>" }] } });
+      await ring();
+      expect(mocks.startLivePhoneCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ to: "+15815550122", receptionistId: kitsilanoId }));
+    });
   });
 
   it("rejects a call with no dialled number", async () => {

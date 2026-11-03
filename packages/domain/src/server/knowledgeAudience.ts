@@ -494,6 +494,16 @@ export async function deleteWebsiteRuleInTransaction(tx: DatabaseTransaction, in
   // The links go with the rule (ON DELETE CASCADE).
   await tx.delete(knowledgeWebsiteRules).where(and(eq(knowledgeWebsiteRules.businessId, businessId), eq(knowledgeWebsiteRules.id, rule.id)));
   if (pages.length) {
+    // A page keeps one link per receptionist, naming the rule that made it
+    // first, so another rule for the same receptionist can cover these pages
+    // with no link of its own. Those rules, of any of the business's websites,
+    // link them again before a page left with no link goes back to everyone.
+    const others = await tx.select({ id: knowledgeWebsiteRules.id, rootDocumentId: knowledgeWebsiteRules.rootDocumentId }).from(knowledgeWebsiteRules)
+      .where(and(eq(knowledgeWebsiteRules.businessId, businessId), eq(knowledgeWebsiteRules.receptionistId, rule.receptionistId)))
+      .orderBy(asc(knowledgeWebsiteRules.createdAt), asc(knowledgeWebsiteRules.id));
+    const byRoot = new Map<string, string[]>();
+    for (const other of others) byRoot.set(other.rootDocumentId, [...(byRoot.get(other.rootDocumentId) ?? []), other.id]);
+    for (const [rootDocumentId, ruleIds] of byRoot) await applyWebsiteRulesInTransaction(tx, { businessId, rootDocumentId, documentIds: pages, ruleIds });
     await tx.update(knowledgeDocuments).set({ audience: "everyone" }).where(and(
       eq(knowledgeDocuments.businessId, businessId),
       inArray(knowledgeDocuments.id, pages),

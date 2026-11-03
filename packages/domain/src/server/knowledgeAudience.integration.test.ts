@@ -425,6 +425,55 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
     });
   });
 
+  it("keeps the pages another rule gives the same receptionist when one rule goes", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId, gastown } = await seedStores(tx);
+      const site = await addWebsite(tx, businessId);
+      // The same site's stores section, added as a website of its own.
+      const storesSite = await addWebsite(tx, businessId, "https://kitsilanocoffee.ca/stores/");
+      const page = (path: string) => addDocument(tx, businessId, { title: path, sourceType: "website", sourceUrl: `https://kitsilanocoffee.ca${path}` });
+      const store = await page("/stores/gastown");
+      const menu = await page("/stores/gastown/menu");
+      const other = await page("/stores/kitsilano");
+      const rule = async (rootDocumentId: string, pathPrefix: string) => {
+        await asOwner(tx, { userId, businessId });
+        return await createWebsiteRuleInTransaction(tx, { businessId, actorUserId: userId, rule: { rootDocumentId, pathPrefix, receptionistId: gastown.id } });
+      };
+      const links = async (documentId: string) => {
+        await asOwner(tx, { userId, businessId });
+        return (await knowledgeAudienceLinksInTransaction(tx, { businessId })).documents[documentId] ?? [];
+      };
+      const remove = async (ruleId: string) => {
+        await asOwner(tx, { userId, businessId });
+        expect(await deleteWebsiteRuleInTransaction(tx, { businessId, actorUserId: userId, ruleId })).toBe(true);
+      };
+      // Three rules give the Gastown pages to Gastown. The widest came first, so the links name it.
+      const wide = await rule(site, "/stores/");
+      const narrow = await rule(site, "/stores/gastown/");
+      const menuRule = await rule(storesSite, "/stores/gastown/menu/");
+      expect(await links(store)).toEqual([{ receptionistId: gastown.id, websiteRuleId: wide.id }]);
+      expect(await links(menu)).toEqual([{ receptionistId: gastown.id, websiteRuleId: wide.id }]);
+
+      // Without the widest rule, the pages the other two cover stay Gastown's, linked by those rules.
+      await remove(wide.id);
+      expect(await audienceOf(tx, "document", store)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
+      expect(await audienceOf(tx, "document", menu)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
+      expect(await audienceOf(tx, "document", other)).toEqual({ audience: "everyone", receptionistIds: [] });
+      expect(await links(store)).toEqual([{ receptionistId: gastown.id, websiteRuleId: narrow.id }]);
+      // Both remaining rules cover the menu; the one made first links it (here, made in the same transaction, either).
+      const [menuLink] = await links(menu);
+      expect(menuLink?.receptionistId).toBe(gastown.id);
+      expect([narrow.id, menuRule.id]).toContain(menuLink?.websiteRuleId);
+
+      // Without the narrow one, the menu stays Gastown's through the stores site's rule.
+      await remove(narrow.id);
+      expect(await audienceOf(tx, "document", store)).toEqual({ audience: "everyone", receptionistIds: [] });
+      expect(await links(menu)).toEqual([{ receptionistId: gastown.id, websiteRuleId: menuRule.id }]);
+      await remove(menuRule.id);
+      expect(await audienceOf(tx, "document", menu)).toEqual({ audience: "everyone", receptionistIds: [] });
+    });
+  });
+
   it("ranks each receptionist's articles, stopping at the limit, links to archived receptionists left to the default", async () => {
     await rollbackTest(async (tx) => {
       const { businessId, userId, front, gastown, kitsilano } = await seedStores(tx);

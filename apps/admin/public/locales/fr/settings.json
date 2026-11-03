@@ -183,9 +183,88 @@
     "title": "Code QR",
     "loading": "Chargement de votre code QR…",
     "unavailable": "Votre code QR ne peut pas être chargé pour le moment.",
-    "card": {
-      "title": "Votre code QR",
-      "description": "Placez-le sur votre porte, votre comptoir ou vos tables. Toute personne qui le scanne arrive sur votre profil public."
+    "links": {
+      "title": "Vos codes QR",
+      "description": "Placez-les sur votre porte, votre comptoir ou vos tables. Chaque code ouvre votre page avec la réceptionniste de votre choix.",
+      "descriptionOne": "Placez-les sur votre porte, votre comptoir ou vos tables. Chaque code ouvre votre page et compte ses propres scans.",
+      "new": "Nouveau lien",
+      "searchLabel": "Rechercher des liens",
+      "search_one": "Rechercher parmi {{total}} lien",
+      "search_many": "Rechercher parmi {{total}} liens",
+      "search_other": "Rechercher parmi {{total}} liens",
+      "columns": {
+        "link": "Lien",
+        "answeredBy": "Réceptionniste qui répond",
+        "opens": "Ouvre",
+        "scans": "Scans, 30 jours",
+        "actions": "Actions"
+      },
+      "businessPage": "Page de l'entreprise",
+      "notCounted": "Non comptés",
+      "untitled": "Lien {{code}}",
+      "paused": "En pause",
+      "answersNow": "{{name}} répond pour le moment",
+      "archivedReceptionist": "Réceptionniste archivée",
+      "loading": "Chargement de vos liens QR…",
+      "unavailable": "Vos liens QR ne peuvent pas être chargés pour le moment.",
+      "retry": "Réessayer",
+      "empty": "Aucun lien pour l'instant. Créez-en un pour chaque affiche afin de voir laquelle est scannée.",
+      "emptyViewer": "Aucun lien pour l'instant. Un propriétaire ou un administrateur peut en créer un pour chaque affiche.",
+      "noMatches": "Aucun lien ne correspond.",
+      "range": "{{from}}–{{to}} sur {{total}}",
+      "previous": "Page précédente",
+      "next": "Page suivante",
+      "menuNote": "Le menu de chaque ligne change sa réceptionniste, le met en pause ou copie son adresse.",
+      "menuNoteOne": "Le menu de chaque ligne le renomme, le met en pause ou copie son adresse.",
+      "menuNoteViewer": "Le menu de chaque ligne copie son adresse.",
+      "routingNote": "Un lien en pause ouvre la page de votre entreprise, et un lien dont la réceptionniste est en pause ou archivée est pris en charge par {{name}}.",
+      "routingNoteOne": "Un lien en pause ouvre la page de votre entreprise.",
+      "menu": {
+        "label": "Plus d'options pour {{name}}",
+        "edit": "Modifier",
+        "copy": "Copier l'adresse",
+        "pause": "Mettre en pause",
+        "resume": "Reprendre"
+      },
+      "toast": {
+        "created": "Le lien « {{name}} » est prêt. Son affiche est plus bas.",
+        "saved": "Le lien « {{name}} » est enregistré.",
+        "paused": "Le lien « {{name}} » est en pause. Son affiche ouvre la page de votre entreprise jusqu'à ce que vous le repreniez.",
+        "resumed": "Le lien « {{name}} » est de nouveau actif.",
+        "copied": "Adresse copiée.",
+        "copyFailed": "L'adresse n'a pas pu être copiée. La voici : {{url}}"
+      },
+      "dialog": {
+        "newTitle": "Nouveau lien",
+        "editTitle": "Modifier le lien",
+        "newDescription": "Créez un code QR qui ouvre votre page, où une réceptionniste répond.",
+        "newDescriptionOne": "Créez un code QR qui ouvre votre page.",
+        "editDescription": "Son code reste le même, donc les affiches déjà imprimées continuent de fonctionner.",
+        "label": "Libellé",
+        "labelPlaceholder": "Vitrine",
+        "labelHint": "Seule votre équipe le voit, ici et dans le nombre de scans.",
+        "labelMissing": "Donnez un libellé au lien, par exemple l'endroit où son affiche est posée.",
+        "answeredBy": "Réceptionniste qui répond",
+        "answeredByHint": "Les scans ouvrent la page de la réceptionniste choisie. Pendant qu'elle est en pause, {{name}} répond.",
+        "address": "Adresse",
+        "addressNewHint": "Créée pour vous à la création du lien.",
+        "addressHint": "Le code ne change jamais.",
+        "cancel": "Annuler",
+        "create": "Créer le lien",
+        "save": "Enregistrer"
+      },
+      "errors": {
+        "limit": "Votre entreprise a {{max}} liens QR, le maximum permis. Modifiez plutôt un lien en pause.",
+        "codeUnavailable": "Un nouveau code n'a pas pu être créé pour le moment. Réessayez.",
+        "invalidLabel": "Les libellés peuvent compter jusqu'à {{max}} caractères."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Affiche de la page de l'entreprise",
+      "linkTitle": "Affiche « {{name}} »",
+      "description": "Imprimez-la, ou téléchargez le code pour votre propre mise en page.",
+      "link": "Lien",
+      "linkPaused": "Ce lien est en pause : son affiche ouvre la page de votre entreprise jusqu'à ce que vous le repreniez."
     },
     "opens": "Ouvre",
     "open": "Ouvrir la page",
@@ -240,9 +319,28 @@
     "noCode": "Cette adresse ne peut pas devenir un code QR.",
     "sign": {
       "defaultMessage": "Des questions?\nNous répondons en tout temps.",
+      "defaultMessageFor": "Des questions?\nDemandez à {{name}}.",
       "scanChat": "Scannez pour discuter avec nous",
+      "scanChatWith": "Scannez pour discuter avec {{name}}",
       "scanPage": "Scannez pour voir notre page",
       "answeredBy": "Accueil assuré par <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Scans par jour",
+      "summary_one": "{{total}} scan, {{range}}.",
+      "summary_many": "{{total}} scans, {{range}}.",
+      "summary_other": "{{total}} scans, {{range}}.",
+      "busiest_one": "Journée la plus achalandée : {{day}}, {{scans}} scan.",
+      "busiest_many": "Journée la plus achalandée : {{day}}, {{scans}} scans.",
+      "busiest_other": "Journée la plus achalandée : {{day}}, {{scans}} scans.",
+      "none": "Aucun scan, {{range}}.",
+      "day_one": "{{day}} : {{scans}} scan",
+      "day_many": "{{day}} : {{scans}} scans",
+      "day_other": "{{day}} : {{scans}} scans",
+      "tableCaption": "Scans par jour, {{range}}",
+      "dayColumn": "Jour",
+      "scansColumn": "Scans",
+      "notCounted": "Les scans de l'affiche de la page de l'entreprise ne sont pas comptés. Créez un lien pour une affiche afin de compter ses scans."
     }
   },
   "billing": {

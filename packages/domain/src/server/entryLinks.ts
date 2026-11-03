@@ -1,6 +1,6 @@
 import { randomInt } from "node:crypto";
 
-import { and, asc, desc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, type SQL } from "drizzle-orm";
 
 import { auditLogs, businesses, entryLinkDailyScans, entryLinks, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
@@ -45,7 +45,14 @@ export type EntryLink = {
   scansKept: number;
   /** The last UTC day it was scanned, as YYYY-MM-DD. */
   lastScannedOn: string | null;
+  /** Its scans on each of those 30 days, for the dashboard's chart: from is the first day (YYYY-MM-DD), and today is the last count. */
+  recentScans: EntryLinkRecentScans;
 };
+
+/** A link's scans per UTC day, a count for every day from `from` to today, days without scans as 0. */
+export type EntryLinkRecentScans = { from: string; counts: number[] };
+
+type EntryLinkRow = Omit<EntryLink, "recentScans">;
 
 export type EntryLinkPage = { links: EntryLink[]; total: number; page: number; pageSize: number };
 
@@ -124,6 +131,29 @@ async function requireLinkableReceptionist(tx: DatabaseTransaction, businessId: 
 
 const todayUtc = (now: Date) => now.toISOString().slice(0, 10);
 
+const DAY_MS = 86_400_000;
+
+/** A YYYY-MM-DD day moved by whole days. */
+function shiftDay(day: string, days: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + days * DAY_MS).toISOString().slice(0, 10);
+}
+
+/** Each link's scans per day over the chart's days, today last, read in one query for all of them. */
+async function withRecentScans(tx: DatabaseTransaction, businessId: string, rows: EntryLinkRow[], today: string): Promise<EntryLink[]> {
+  const from = shiftDay(today, 1 - ENTRY_LINK_CHART_DAYS);
+  const counts = new Map(rows.map((row) => [row.id, Array.from({ length: ENTRY_LINK_CHART_DAYS }, () => 0)]));
+  if (rows.length) {
+    const days = await tx.select({ entryLinkId: entryLinkDailyScans.entryLinkId, day: entryLinkDailyScans.day, scans: entryLinkDailyScans.scans }).from(entryLinkDailyScans)
+      .where(and(eq(entryLinkDailyScans.businessId, businessId), inArray(entryLinkDailyScans.entryLinkId, rows.map((row) => row.id)), sql`${entryLinkDailyScans.day} between ${from}::date and ${today}::date`));
+    for (const { entryLinkId, day, scans } of days) {
+      const index = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS);
+      const link = counts.get(entryLinkId);
+      if (link && index >= 0 && index < ENTRY_LINK_CHART_DAYS) link[index] = scans;
+    }
+  }
+  return rows.map((row) => ({ ...row, recentScans: { from, counts: counts.get(row.id)! } }));
+}
+
 /** The link columns every list reads, with its scan counts. */
 function linkColumns(today: string) {
   return {
@@ -135,7 +165,7 @@ function linkColumns(today: string) {
     opensReceptionistId: sql<string>`app.effective_receptionist(${entryLinks.businessId}, case when ${entryLinks.status} = 'active' then ${entryLinks.receptionistId} end)`,
     createdAt: entryLinks.createdAt,
     updatedAt: entryLinks.updatedAt,
-    scansLast30Days: sql<number>`coalesce((select sum(scan.scans) from public.entry_link_daily_scans scan where scan.entry_link_id = ${entryLinks.id} and scan.day > ${today}::date - 30), 0)::int`,
+    scansLast30Days: sql<number>`coalesce((select sum(scan.scans) from public.entry_link_daily_scans scan where scan.entry_link_id = ${entryLinks.id} and scan.day > ${today}::date - ${ENTRY_LINK_CHART_DAYS}::int), 0)::int`,
     scansKept: sql<number>`coalesce((select sum(scan.scans) from public.entry_link_daily_scans scan where scan.entry_link_id = ${entryLinks.id}), 0)::int`,
     lastScannedOn: sql<string | null>`(select max(scan.day)::text from public.entry_link_daily_scans scan where scan.entry_link_id = ${entryLinks.id})`,
   };
@@ -160,20 +190,24 @@ export async function listEntryLinksInTransaction(
     filters.push(sql`(${entryLinks.label} ilike ${pattern} or ${entryLinks.code} ilike ${pattern})`);
   }
   const where = and(...filters);
+  const today = todayUtc(input.now ?? new Date());
   const [counted] = await tx.select({ total: sql<number>`count(*)::int` }).from(entryLinks).where(where);
-  const links = await tx.select(linkColumns(todayUtc(input.now ?? new Date()))).from(entryLinks)
+  const rows = await tx.select(linkColumns(today)).from(entryLinks)
     .where(where)
     .orderBy(desc(entryLinks.createdAt), asc(entryLinks.id))
     .limit(pageSize)
     .offset((page - 1) * pageSize);
-  return { links, total: counted?.total ?? 0, page, pageSize };
+  return { links: await withRecentScans(tx, input.businessId, rows, today), total: counted?.total ?? 0, page, pageSize };
 }
 
 async function readEntryLink(tx: DatabaseTransaction, input: { businessId: string; linkId: string; now?: Date }): Promise<EntryLink | null> {
   if (!isUuid(input.linkId)) return null;
-  const [link] = await tx.select(linkColumns(todayUtc(input.now ?? new Date()))).from(entryLinks)
+  const today = todayUtc(input.now ?? new Date());
+  const [row] = await tx.select(linkColumns(today)).from(entryLinks)
     .where(and(eq(entryLinks.businessId, input.businessId), eq(entryLinks.id, input.linkId)))
     .limit(1);
+  if (!row) return null;
+  const [link] = await withRecentScans(tx, input.businessId, [row], today);
   return link ?? null;
 }
 

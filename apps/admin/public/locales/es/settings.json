@@ -183,9 +183,88 @@
     "title": "Código QR",
     "loading": "Cargando su código QR…",
     "unavailable": "Su código QR no se puede cargar en este momento.",
-    "card": {
-      "title": "Su código QR",
-      "description": "Póngalo en su puerta, mostrador o mesas. Quien lo escanee llegará a su perfil público."
+    "links": {
+      "title": "Sus códigos QR",
+      "description": "Póngalos en su puerta, mostrador o mesas. Cada código abre su página con la recepcionista que elija.",
+      "descriptionOne": "Póngalos en su puerta, mostrador o mesas. Cada código abre su página y cuenta sus propios escaneos.",
+      "new": "Nuevo enlace",
+      "searchLabel": "Buscar enlaces",
+      "search_one": "Buscar en {{total}} enlace",
+      "search_many": "Buscar en {{total}} enlaces",
+      "search_other": "Buscar en {{total}} enlaces",
+      "columns": {
+        "link": "Enlace",
+        "answeredBy": "Atendido por",
+        "opens": "Abre",
+        "scans": "Escaneos, 30 días",
+        "actions": "Acciones"
+      },
+      "businessPage": "Página del negocio",
+      "notCounted": "No se cuentan",
+      "untitled": "Enlace {{code}}",
+      "paused": "En pausa",
+      "answersNow": "Por ahora atiende {{name}}",
+      "archivedReceptionist": "Recepcionista archivada",
+      "loading": "Cargando sus enlaces QR…",
+      "unavailable": "Sus enlaces QR no se pueden cargar en este momento.",
+      "retry": "Reintentar",
+      "empty": "Aún no hay enlaces. Cree uno para cada cartel y así verá cuál se escanea.",
+      "emptyViewer": "Aún no hay enlaces. Un propietario o administrador puede crear uno para cada cartel.",
+      "noMatches": "Ningún enlace coincide.",
+      "range": "{{from}}–{{to}} de {{total}}",
+      "previous": "Página anterior",
+      "next": "Página siguiente",
+      "menuNote": "El menú de cada fila cambia su recepcionista, lo pausa o copia su dirección.",
+      "menuNoteOne": "El menú de cada fila le cambia el nombre, lo pausa o copia su dirección.",
+      "menuNoteViewer": "El menú de cada fila copia su dirección.",
+      "routingNote": "Un enlace en pausa abre la página de su negocio, y un enlace cuya recepcionista está en pausa o archivada lo atiende {{name}}.",
+      "routingNoteOne": "Un enlace en pausa abre la página de su negocio.",
+      "menu": {
+        "label": "Más opciones para {{name}}",
+        "edit": "Editar",
+        "copy": "Copiar dirección",
+        "pause": "Pausar",
+        "resume": "Reanudar"
+      },
+      "toast": {
+        "created": "El enlace «{{name}}» está listo. Su cartel está más abajo.",
+        "saved": "Enlace «{{name}}» guardado.",
+        "paused": "El enlace «{{name}}» está en pausa. Su cartel abre la página de su negocio hasta que lo reanude.",
+        "resumed": "El enlace «{{name}}» vuelve a estar activo.",
+        "copied": "Dirección copiada.",
+        "copyFailed": "No se pudo copiar la dirección. Es {{url}}"
+      },
+      "dialog": {
+        "newTitle": "Nuevo enlace",
+        "editTitle": "Editar enlace",
+        "newDescription": "Cree un código QR que abra su página, donde atiende una recepcionista.",
+        "newDescriptionOne": "Cree un código QR que abra su página.",
+        "editDescription": "Su código no cambia, así que los carteles que ya imprimió siguen funcionando.",
+        "label": "Etiqueta",
+        "labelPlaceholder": "Escaparate",
+        "labelHint": "Solo su equipo la ve, aquí y en el recuento de escaneos.",
+        "labelMissing": "Ponga una etiqueta al enlace, por ejemplo dónde está su cartel.",
+        "answeredBy": "Atendido por",
+        "answeredByHint": "Los escaneos abren la página de la recepcionista que elija. Mientras esté en pausa, atiende {{name}}.",
+        "address": "Dirección",
+        "addressNewHint": "Se crea para usted al crear el enlace.",
+        "addressHint": "El código nunca cambia.",
+        "cancel": "Cancelar",
+        "create": "Crear enlace",
+        "save": "Guardar"
+      },
+      "errors": {
+        "limit": "Su negocio tiene {{max}} enlaces QR, el máximo que puede tener. Cambie uno en pausa.",
+        "codeUnavailable": "No se pudo crear un código nuevo en este momento. Inténtelo de nuevo.",
+        "invalidLabel": "Las etiquetas pueden tener hasta {{max}} caracteres."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Cartel de la página del negocio",
+      "linkTitle": "Cartel «{{name}}»",
+      "description": "Imprímalo o descargue el código para su propio diseño.",
+      "link": "Enlace",
+      "linkPaused": "Este enlace está en pausa: su cartel abre la página de su negocio hasta que lo reanude."
     },
     "opens": "Abre",
     "open": "Abrir página",
@@ -240,9 +319,28 @@
     "noCode": "Esta dirección no se puede convertir en un código QR.",
     "sign": {
       "defaultMessage": "¿Preguntas?\nPregúntenos cuando quiera.",
+      "defaultMessageFor": "¿Preguntas?\nPregunte a {{name}}.",
       "scanChat": "Escanee para chatear con nosotros",
+      "scanChatWith": "Escanee para chatear con {{name}}",
       "scanPage": "Escanee para ver nuestra página",
       "answeredBy": "Atendido por <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Escaneos por día",
+      "summary_one": "{{total}} escaneo, {{range}}.",
+      "summary_many": "{{total}} escaneos, {{range}}.",
+      "summary_other": "{{total}} escaneos, {{range}}.",
+      "busiest_one": "Día con más escaneos: {{day}}, {{scans}} escaneo.",
+      "busiest_many": "Día con más escaneos: {{day}}, {{scans}} escaneos.",
+      "busiest_other": "Día con más escaneos: {{day}}, {{scans}} escaneos.",
+      "none": "Sin escaneos, {{range}}.",
+      "day_one": "{{day}}: {{scans}} escaneo",
+      "day_many": "{{day}}: {{scans}} escaneos",
+      "day_other": "{{day}}: {{scans}} escaneos",
+      "tableCaption": "Escaneos por día, {{range}}",
+      "dayColumn": "Día",
+      "scansColumn": "Escaneos",
+      "notCounted": "Los escaneos del cartel de la página del negocio no se cuentan. Cree un enlace para un cartel y así contará sus escaneos."
     }
   },
   "billing": {

@@ -183,9 +183,87 @@
     "title": "QR code",
     "loading": "Loading your QR code…",
     "unavailable": "Your QR code can't be loaded right now.",
-    "card": {
-      "title": "Your QR code",
-      "description": "Put it on your door, counter or tables. Anyone who scans it lands on your public profile."
+    "links": {
+      "title": "Your QR codes",
+      "description": "Put them on your door, counter or tables. Each code opens your page with the receptionist you choose.",
+      "descriptionOne": "Put them on your door, counter or tables. Each code opens your page and counts its own scans.",
+      "new": "New link",
+      "searchLabel": "Search links",
+      "search_one": "Search {{total}} link",
+      "search_other": "Search {{total}} links",
+      "columns": {
+        "link": "Link",
+        "answeredBy": "Answered by",
+        "opens": "Opens",
+        "scans": "Scans, 30 days",
+        "actions": "Actions"
+      },
+      "businessPage": "Business page",
+      "notCounted": "Not counted",
+      "untitled": "Link {{code}}",
+      "paused": "Paused",
+      "answersNow": "{{name}} answers for now",
+      "archivedReceptionist": "Archived receptionist",
+      "loading": "Loading your QR links…",
+      "unavailable": "Your QR links can't be loaded right now.",
+      "retry": "Try again",
+      "empty": "No links yet. Make one for each sign to see which one gets scanned.",
+      "emptyViewer": "No links yet. An owner or admin can make one for each sign.",
+      "noMatches": "No links match.",
+      "range": "{{from}}–{{to}} of {{total}}",
+      "previous": "Previous page",
+      "next": "Next page",
+      "menuNote": "Each row's menu changes its receptionist, pauses it or copies its address.",
+      "menuNoteOne": "Each row's menu renames it, pauses it or copies its address.",
+      "menuNoteViewer": "Each row's menu copies its address.",
+      "routingNote": "A paused link opens your business page, and a link whose receptionist is paused or archived answers as {{name}}.",
+      "routingNoteOne": "A paused link opens your business page.",
+      "menu": {
+        "label": "More options for {{name}}",
+        "edit": "Edit",
+        "copy": "Copy address",
+        "pause": "Pause",
+        "resume": "Resume"
+      },
+      "toast": {
+        "created": "{{name}} is ready. Its sign is below.",
+        "saved": "{{name}} saved.",
+        "paused": "{{name}} is paused. Its sign opens your business page until you resume it.",
+        "resumed": "{{name}} is on again.",
+        "copied": "Address copied.",
+        "copyFailed": "The address couldn't be copied. It's {{url}}"
+      },
+      "dialog": {
+        "newTitle": "New link",
+        "editTitle": "Edit link",
+        "newDescription": "Make a QR code that opens your page with one receptionist answering.",
+        "newDescriptionOne": "Make a QR code that opens your page.",
+        "editDescription": "Its code stays the same, so signs you've printed keep working.",
+        "label": "Label",
+        "labelPlaceholder": "Front window",
+        "labelHint": "Only your team sees it, here and in the scan counts.",
+        "labelMissing": "Give the link a label, such as where its sign hangs.",
+        "answeredBy": "Answered by",
+        "answeredByHint": "Scans open the page of the receptionist you pick. While it's paused, {{name}} answers.",
+        "address": "Address",
+        "addressNewHint": "Made for you when you create the link.",
+        "addressHint": "The code never changes.",
+        "cancel": "Cancel",
+        "create": "Create link",
+        "save": "Save"
+      },
+      "errors": {
+        "limit": "Your business has {{max}} QR links, the most it can keep. Change a paused one instead.",
+        "codeUnavailable": "A new code couldn't be made just now. Try again.",
+        "invalidLabel": "Labels can be up to {{max}} characters."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Business page sign",
+      "linkTitle": "{{name}} sign",
+      "description": "Print it, or download the code for your own design.",
+      "link": "Link",
+      "linkPaused": "This link is paused, so its sign opens your business page until you resume it."
     },
     "opens": "Opens",
     "open": "Open page",
@@ -240,9 +318,25 @@
     "noCode": "This address can't be made into a QR code.",
     "sign": {
       "defaultMessage": "Questions?\nAsk us any time.",
+      "defaultMessageFor": "Questions?\nAsk {{name}}.",
       "scanChat": "Scan to chat with us",
+      "scanChatWith": "Scan to chat with {{name}}",
       "scanPage": "Scan to visit our page",
       "answeredBy": "Answered by <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Scans per day",
+      "summary_one": "{{total}} scan, {{range}}.",
+      "summary_other": "{{total}} scans, {{range}}.",
+      "busiest_one": "Busiest: {{day}}, {{scans}} scan.",
+      "busiest_other": "Busiest: {{day}}, {{scans}} scans.",
+      "none": "No scans, {{range}}.",
+      "day_one": "{{day}}: {{scans}} scan",
+      "day_other": "{{day}}: {{scans}} scans",
+      "tableCaption": "Scans per day, {{range}}",
+      "dayColumn": "Day",
+      "scansColumn": "Scans",
+      "notCounted": "Scans of the business page sign aren't counted. Make a link for a sign to count its scans."
     }
   },
   "billing": {

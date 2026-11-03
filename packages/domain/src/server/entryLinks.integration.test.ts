@@ -19,7 +19,7 @@ import {
 } from "@lobbystack/db";
 import { MAX_ENTRY_LINKS_PER_BUSINESS } from "@lobbystack/shared";
 
-import { createEntryLinkInTransaction, deleteExpiredEntryLinkScansInTransaction, followEntryLink, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction } from "./entryLinks";
+import { createEntryLinkInTransaction, deleteExpiredEntryLinkScansInTransaction, followEntryLink, getEntryLinkInTransaction, listEntryLinkScansInTransaction, listEntryLinksInTransaction, updateEntryLinkInTransaction } from "./entryLinks";
 import { getPublicProfilePage } from "./publicProfiles";
 import { archiveReceptionistInTransaction, createReceptionistInTransaction, setReceptionistStatusInTransaction, updateReceptionistInTransaction } from "./receptionists";
 import { createBusiness } from "./tenancy";
@@ -217,10 +217,15 @@ describe.skipIf(!testUrl)("QR links, against PostgreSQL under RLS", () => {
       expect(columns.rows.map((row) => row.column_name)).toEqual(["business_id", "day", "entry_link_id", "scans"]);
       const listed = await owner(tx, chain, () => listEntryLinksInTransaction(tx, { businessId: chain.businessId, now: tuesday }));
       expect(listed.links[0]).toMatchObject({ scansLast30Days: 3, scansKept: 3, lastScannedOn: "2026-11-03" });
+      // A count for each of the chart's 30 days, today last.
+      expect(listed.links[0]!.recentScans).toEqual({ from: "2026-10-05", counts: [...Array.from({ length: 28 }, () => 0), 2, 1] });
+      expect((await owner(tx, chain, () => getEntryLinkInTransaction(tx, { businessId: chain.businessId, linkId: link.id, now: new Date("2026-11-04T01:00:00Z") })))?.recentScans).toEqual({ from: "2026-10-06", counts: [...Array.from({ length: 27 }, () => 0), 2, 1, 0] });
       expect(await owner(tx, chain, () => listEntryLinkScansInTransaction(tx, { businessId: chain.businessId, linkId: link.id, now: tuesday }))).toEqual([{ day: "2026-11-02", scans: 2 }, { day: "2026-11-03", scans: 1 }]);
       // Days before the chart's start, and scans more than 30 days old, stay out of those numbers.
       await tx.insert(entryLinkDailyScans).values({ businessId: chain.businessId, entryLinkId: link.id, day: "2026-08-01", scans: 7 });
-      expect((await owner(tx, chain, () => listEntryLinksInTransaction(tx, { businessId: chain.businessId, now: tuesday }))).links[0]).toMatchObject({ scansLast30Days: 3, scansKept: 10 });
+      const later = (await owner(tx, chain, () => listEntryLinksInTransaction(tx, { businessId: chain.businessId, now: tuesday }))).links[0]!;
+      expect(later).toMatchObject({ scansLast30Days: 3, scansKept: 10 });
+      expect(later.recentScans.counts.reduce((sum, count) => sum + count, 0)).toBe(3);
       expect(await owner(tx, chain, () => listEntryLinkScansInTransaction(tx, { businessId: chain.businessId, linkId: link.id, days: 30, now: tuesday }))).toHaveLength(2);
     });
   });

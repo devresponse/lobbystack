@@ -8,6 +8,8 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
+import { receptionistPagePath } from "@lobbystack/shared";
+
 import { useBranding } from "@/components/branding-provider";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { loadRouteNamespaces } from "@/i18n";
@@ -22,18 +24,23 @@ import { cn } from "@/lib/utils";
 import type { PublicProfileSettingsResponse } from "./live-public-profile-settings-surface";
 import { PageSurface } from "./page-surface";
 import { QR_SIGN_SHEETS, QR_SIGN_SIZES, QR_SIGN_TEMPLATES, QrSignSheet, qrSheetSize, qrSignCodeWidth, type QrSignContent, type QrSignSize, type QrSignTemplate } from "./qr-code/qr-code-sign";
+import { entryLinkName, entryLinkUrl, QrLinksCard, useEntryLinks, type EntryLinkView } from "./qr-code/qr-links";
+import { ScansChart } from "./qr-code/scans-chart";
 import { useDarkLogo } from "./qr-code/use-dark-logo";
 import { QR_SIGN_FONT_FAMILY, useTextMeasure } from "./qr-code/use-text-measure";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button, buttonVariants } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Field, FieldDescription, FieldLabel, FieldLegend, FieldSet } from "./ui/field";
+import { useReceptionistChoices, useReceptionistFilter } from "./receptionists/receptionist-choices";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { Textarea } from "./ui/textarea";
 
-// Settings → QR code: printable signs whose code opens the business's public
-// profile. Everything is drawn in the browser from the page's address, and
-// nothing here is saved.
+// Settings → QR code: the business's QR codes and a printable sign for each.
+// The business page has its own code, which signs printed before QR links
+// existed carry; each QR link is a short /q/<code> address that opens one
+// receptionist's page and counts its scans. Signs are drawn in the browser
+// from the chosen code's address, and nothing about a sign is saved.
 
 const PX_PER_MM = 96 / 25.4;
 // The preview's widest sheet, in pixels: portrait and sideways.
@@ -129,11 +136,22 @@ function TemplateThumbnail({ template }: { template: QrSignTemplate }) {
   );
 }
 
-/** Settings → QR code: the business's printable QR code signs. */
+/** A file-name part from a link's label, such as "front-window": plain letters and digits, at most 40. */
+export function fileNamePart(label: string): string {
+  return label.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+}
+
+/** The name a link's code downloads under, after the page and the link: acme-dental-front-window-7kq2mx. */
+export function linkFileStem(slug: string, link: Pick<EntryLinkView, "label" | "code">): string {
+  return [slug, fileNamePart(link.label), link.code].filter(Boolean).join("-");
+}
+
+/** Settings → QR code: the business's QR codes and their printable signs. */
 export function LiveQrCodeSettingsSurface() {
   const { t } = useTranslation("settings");
   const { businesses, business } = useActiveBusiness();
   const businessId = business?.businessId;
+  const canManage = business ? ["business_owner", "business_admin"].includes(business.role) : false;
   const profile = useQuery({
     queryKey: ["business-profile", businessId],
     queryFn: () => requestJson<PublicProfileSettingsResponse>(`/api/business-profile?businessId=${encodeURIComponent(businessId!)}`),
@@ -143,15 +161,26 @@ export function LiveQrCodeSettingsSurface() {
     <PageSurface title={t("qrCode.title")}>
       {businesses.isLoading || profile.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">{t("qrCode.loading")}</p> : null}
       {businesses.isError || profile.isError ? <p className="py-12 text-center text-sm text-destructive">{t("qrCode.unavailable")}</p> : null}
-      {businessId && profile.data ? <QrCodeStudio key={businessId} view={profile.data} /> : null}
+      {businessId && profile.data ? <QrCodeStudio businessId={businessId} canManage={canManage} key={businessId} view={profile.data} /> : null}
     </PageSurface>
   );
 }
 
-function QrCodeStudio({ view }: { view: PublicProfileSettingsResponse }) {
+function QrCodeStudio({ view, businessId, canManage }: { view: PublicProfileSettingsResponse; businessId: string; canManage: boolean }) {
   const { t, i18n } = useTranslation(["settings", "common"]);
   const locale = resolveLocale(i18n.resolvedLanguage, i18n.language);
   const id = useId();
+  const { receptionists } = useReceptionistChoices(businessId);
+  const [receptionistFilter] = useReceptionistFilter();
+  const [search, setSearch] = useState("");
+  // The page shown, for the filter it was chosen under: another filter starts at the first page.
+  const [paging, setPaging] = useState<{ filter: string | null; page: number }>({ filter: null, page: 1 });
+  const page = paging.filter === receptionistFilter ? paging.page : 1;
+  const filters = { search: search.trim(), page, receptionistId: receptionistFilter };
+  const links = useEntryLinks(businessId, filters);
+  // The link whose sign shows, as last seen; null is the business page.
+  const [chosen, setChosen] = useState<EntryLinkView | null>(null);
+  const link = chosen ? links.data?.links?.find((entry) => entry.id === chosen.id) ?? chosen : null;
   const branding = useBranding();
   const logoSrc = brandLogoSrc(branding);
   const logoNeedsTile = useDarkLogo(logoSrc);
@@ -171,13 +200,39 @@ function QrCodeStudio({ view }: { view: PublicProfileSettingsResponse }) {
 
   const marks: QrCodeMark[] = logoSrc ? ["name", "logo", "none"] : ["name", "none"];
   const chosenMark = marks.includes(mark) ? mark : "name";
-  const drawing = useMemo(() => drawQrCode(view.url, { mark: chosenMark, name: branding.appName, nameWidthEm: plate(branding.appName, 1) }), [view.url, chosenMark, branding.appName, plate]);
-  const message = typed ?? signT("qrCode.sign.defaultMessage");
+  const origin = useMemo(() => { try { return new URL(view.url).origin; } catch { return ""; } }, [view.url]);
+  // The address the code holds: the business page's, or the chosen link's short one.
+  const signUrl = link ? entryLinkUrl(origin, link.code) : view.url;
+  const defaultReceptionist = receptionists.find((receptionist) => receptionist.isDefault);
+  const named = link ? receptionists.find((receptionist) => receptionist.id === link.receptionistId) : undefined;
+  const opens = link ? receptionists.find((receptionist) => receptionist.id === link.opensReceptionistId) : undefined;
+  // A link to a receptionist other than the default one invites visitors to that receptionist by name.
+  const personal = named && !named.isDefault ? named : null;
+  // "Open page" goes straight to the page the code opens now, so checking it doesn't count as a scan.
+  const destination = link ? `${origin}${receptionistPagePath(view.slug, opens && !opens.isDefault ? opens.handle : null)}` : view.url;
+  const drawing = useMemo(() => drawQrCode(signUrl, { mark: chosenMark, name: branding.appName, nameWidthEm: plate(branding.appName, 1) }), [signUrl, chosenMark, branding.appName, plate]);
+  const message = typed ?? (personal ? signT("qrCode.sign.defaultMessageFor", { name: personal.name }) : signT("qrCode.sign.defaultMessage"));
   const chat = Boolean(view.settings.widgetKeyId) && view.widgetKeys.some((key) => key.id === view.settings.widgetKeyId);
+  const scanLine = chat ? (personal ? signT("qrCode.sign.scanChatWith", { name: personal.name }) : signT("qrCode.sign.scanChat")) : signT("qrCode.sign.scanPage");
   const sheet = QR_SIGN_SHEETS[size];
   const content: QrSignContent | null = drawing
-    ? { businessName: view.businessName, message, scanLine: signT(chat ? "qrCode.sign.scanChat" : "qrCode.sign.scanPage"), url: view.url, drawing, appName: branding.appName, logoSrc, logoNeedsTile, t: signT }
+    ? { businessName: view.businessName, message, scanLine, url: signUrl, drawing, appName: branding.appName, logoSrc, logoNeedsTile, t: signT }
     : null;
+  const linkNote = !link ? null
+    : link.status === "paused" ? t("qrCode.signCard.linkPaused")
+      : !named && defaultReceptionist ? t("receptionists:entry.archived", { default: defaultReceptionist.name })
+        : named?.status === "paused" && defaultReceptionist && !named.isDefault ? t("receptionists:entry.paused", { name: named.name, default: defaultReceptionist.name })
+          : null;
+  // The links the sign's Link dropdown offers: the table's page, and the chosen one wherever it is.
+  const linkChoices = [...(links.data?.links ?? [])];
+  if (link && !linkChoices.some((entry) => entry.id === link.id)) linkChoices.unshift(link);
+
+  /** Shows another code's sign; its message starts over from that sign's own. */
+  const choose = (next: EntryLinkView | null) => {
+    if ((next?.id ?? null) === (chosen?.id ?? null)) return;
+    setChosen(next);
+    setTyped(null);
+  };
 
   const numbers = new Intl.NumberFormat(intlLocale(locale), { maximumFractionDigits: 1 });
   const sizeHint = (value: QrSignSize) => {
@@ -193,8 +248,8 @@ function QrCodeStudio({ view }: { view: PublicProfileSettingsResponse }) {
     setBusy(kind);
     setDownloadFailed(false);
     try {
-      const options = { name: branding.appName, logoSrc: drawing.mark === "logo" ? logoSrc : null, fontFamily: QR_SIGN_FONT_FAMILY, title: t("qrCode.codeLabel", { url: view.url }) };
-      saveFile(kind === "png" ? await qrCodePng(drawing, options) : await qrCodeSvgFile(drawing, options), qrCodeFileName(view.slug, kind));
+      const options = { name: branding.appName, logoSrc: drawing.mark === "logo" ? logoSrc : null, fontFamily: QR_SIGN_FONT_FAMILY, title: t("qrCode.codeLabel", { url: signUrl }) };
+      saveFile(kind === "png" ? await qrCodePng(drawing, options) : await qrCodeSvgFile(drawing, options), qrCodeFileName(link ? linkFileStem(view.slug, link) : view.slug, kind));
     } catch {
       setDownloadFailed(true);
     } finally {
@@ -221,20 +276,49 @@ function QrCodeStudio({ view }: { view: PublicProfileSettingsResponse }) {
         </Alert>
       )}
 
-      <Card>
+      <QrLinksCard
+        businessId={businessId}
+        businessPageUrl={view.url}
+        canManage={canManage}
+        filters={filters}
+        links={links}
+        onChanged={(changed) => { if (chosen?.id === changed.id) setChosen(changed); }}
+        onPageChange={(next) => setPaging({ filter: receptionistFilter, page: next })}
+        onSearchChange={(next) => { setSearch(next); setPaging({ filter: receptionistFilter, page: 1 }); }}
+        onSelect={choose}
+        receptionists={receptionists}
+        search={search}
+        selectedId={link?.id ?? null}
+        signId={`${id}-sign`}
+      />
+
+      <Card aria-labelledby={`${id}-sign-title`} id={`${id}-sign`} role="region">
         <CardHeader>
-          <CardTitle className="flex items-center gap-2"><QrCode className="size-5 text-muted-foreground" />{t("qrCode.card.title")}</CardTitle>
-          <CardDescription>{t("qrCode.card.description")}</CardDescription>
+          <CardTitle className="flex items-center gap-2" id={`${id}-sign-title`}><QrCode aria-hidden="true" className="size-5 text-muted-foreground" />{link ? t("qrCode.signCard.linkTitle", { name: entryLinkName(link, t) }) : t("qrCode.signCard.pageTitle")}</CardTitle>
+          <CardDescription>{t("qrCode.signCard.description")}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium">{t("qrCode.opens")}</span>
-            <code className="min-w-0 break-all rounded-xl bg-muted px-3 py-2 text-sm" dir="ltr">{view.url}</code>
-            <a className={cn(buttonVariants({ size: "sm", variant: "outline" }))} href={view.url} rel="noopener noreferrer" target="_blank"><ExternalLink />{view.settings.published ? t("qrCode.open") : t("qrCode.preview")}</a>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium">{t("qrCode.opens")}</span>
+              <code className="min-w-0 break-all rounded-xl bg-muted px-3 py-2 text-sm" dir="ltr">{signUrl}</code>
+              <a className={cn(buttonVariants({ size: "sm", variant: "outline" }))} href={destination} rel="noopener noreferrer" target="_blank"><ExternalLink />{view.settings.published ? t("qrCode.open") : t("qrCode.preview")}</a>
+            </div>
+            {linkNote ? <p className="text-xs text-amber-700 dark:text-amber-400">{linkNote}</p> : null}
           </div>
 
           <div className="flex flex-wrap items-start gap-8">
             <form className="flex min-w-0 flex-[1_1_360px] flex-col gap-6 sm:max-w-[460px]" noValidate onSubmit={(event) => event.preventDefault()}>
+              {linkChoices.length ? (
+                <Field>
+                  <FieldLabel htmlFor={`${id}-link`}>{t("qrCode.signCard.link")}</FieldLabel>
+                  <NativeSelect className="w-full" id={`${id}-link`} onChange={(event) => choose(linkChoices.find((entry) => entry.id === event.target.value) ?? null)} value={link?.id ?? ""}>
+                    <NativeSelectOption value="">{t("qrCode.links.businessPage")}</NativeSelectOption>
+                    {linkChoices.map((entry) => <NativeSelectOption key={entry.id} value={entry.id}>{entryLinkName(entry, t)}</NativeSelectOption>)}
+                  </NativeSelect>
+                </Field>
+              ) : null}
+
               <FieldSet className="gap-0">
                 <FieldLegend variant="label">{t("qrCode.template.label")}</FieldLegend>
                 <div className="grid grid-cols-3 gap-3">
@@ -307,11 +391,14 @@ function QrCodeStudio({ view }: { view: PublicProfileSettingsResponse }) {
               </div>
             </form>
 
-            <div className="flex min-w-0 flex-[999_1_420px] flex-col items-center gap-4 rounded-xl bg-muted px-6 pt-8 pb-6">
-              {sheetElement ? (
-                <SheetPreview label={t("qrCode.previewLabel", { template: t(`qrCode.template.${template}`), size: t(`qrCode.size.${size}`) })} size={size}>{sheetElement}</SheetPreview>
-              ) : <p className="py-12 text-center text-sm text-destructive">{t("qrCode.noCode")}</p>}
-              <p className="text-[13px]/[18px] text-muted-foreground">{t("qrCode.caption", { count: sheet.columns * sheet.rows, width: numbers.format(sheet.piece.width / 10), height: numbers.format(sheet.piece.height / 10) })}</p>
+            <div className="flex min-w-0 flex-[999_1_420px] flex-col gap-6">
+              <div className="flex flex-col items-center gap-4 rounded-xl bg-muted px-6 pt-8 pb-6">
+                {sheetElement ? (
+                  <SheetPreview label={t("qrCode.previewLabel", { template: t(`qrCode.template.${template}`), size: t(`qrCode.size.${size}`) })} size={size}>{sheetElement}</SheetPreview>
+                ) : <p className="py-12 text-center text-sm text-destructive">{t("qrCode.noCode")}</p>}
+                <p className="text-[13px]/[18px] text-muted-foreground">{t("qrCode.caption", { count: sheet.columns * sheet.rows, width: numbers.format(sheet.piece.width / 10), height: numbers.format(sheet.piece.height / 10) })}</p>
+              </div>
+              {link ? <ScansChart scans={link.recentScans} /> : <p className="text-[13px]/[18px] text-muted-foreground">{t("qrCode.chart.notCounted")}</p>}
             </div>
           </div>
         </CardContent>

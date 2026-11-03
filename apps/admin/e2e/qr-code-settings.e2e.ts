@@ -139,7 +139,8 @@ test("an owner prints the business's QR code signs, which open its public profil
     await page.goto("/settings/usage");
     await page.getByRole("link", { name: settings.sections.qrCode, exact: true }).click();
     await expect(page).toHaveURL(/\/settings\/qrcode$/);
-    await expect(page.getByText(copy.card.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(copy.links.title, { exact: true })).toBeVisible();
+    await expect(page.getByText(copy.signCard.pageTitle, { exact: true })).toBeVisible();
     await expect(page.getByText(profileUrl, { exact: true })).toBeVisible();
     await expect(page.getByText(copy.unpublished.title)).toBeVisible();
     await expect(page.getByRole("link", { name: copy.unpublished.link })).toHaveAttribute("href", "/settings/profile");

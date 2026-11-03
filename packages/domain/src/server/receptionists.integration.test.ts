@@ -129,16 +129,28 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       const [business] = await tx.select().from(businesses).where(eq(businesses.id, businessId));
       expect(business).toMatchObject({ summary: "Kitsilano Coffee", summarySource: "placeholder", recordingNotice: true, appointmentChangePolicy: defaultAppointmentChangePolicy });
 
-      // An untouched default name follows the business's language; a name someone chose stays.
+      // An untouched default name follows the business's language, and the audit log says who changed it.
+      const renames = async () => await tx.select({ actorUserId: auditLogs.actorUserId, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs)
+        .where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.updated")));
       await asOwner(tx, { userId, businessId });
-      await updateBusinessInTransaction(tx, { businessId, defaultLocale: "fr" });
+      await updateBusinessInTransaction(tx, { businessId, defaultLocale: "fr", audit: { actorUserId: userId } });
       await as(tx, null);
-      expect((await defaultRow(tx, businessId)).name).toBe("Accueil");
+      const frontDesk = await defaultRow(tx, businessId);
+      expect(frontDesk.name).toBe("Accueil");
+      expect(await renames()).toEqual([{ actorUserId: userId, entityId: frontDesk.id, payload: { fields: ["name"], from: "Front desk", to: "Accueil", reason: "business_language" } }]);
+
+      // A name someone chose stays: their own words, or another language's "Front desk".
       await tx.update(receptionistProfiles).set({ name: "Main counter" }).where(eq(receptionistProfiles.businessId, businessId));
       await asOwner(tx, { userId, businessId });
       await updateBusinessInTransaction(tx, { businessId, defaultLocale: "es" });
       await as(tx, null);
       expect((await defaultRow(tx, businessId)).name).toBe("Main counter");
+      await tx.update(receptionistProfiles).set({ name: "Accueil" }).where(eq(receptionistProfiles.businessId, businessId));
+      await asOwner(tx, { userId, businessId });
+      await updateBusinessInTransaction(tx, { businessId, defaultLocale: "de" });
+      await as(tx, null);
+      expect((await defaultRow(tx, businessId)).name).toBe("Accueil");
+      expect(await renames()).toHaveLength(1);
     });
   });
 

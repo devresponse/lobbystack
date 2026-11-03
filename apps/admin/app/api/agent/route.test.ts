@@ -59,7 +59,7 @@ describe("agent settings validation", () => {
     const response = await patch({ locale: "fr", timezone: "Europe/Belgrade", greeting: "Bonjour, la clinique." });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ profile: { id: "profile", isDefault: true } });
-    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr", timezone: "Europe/Belgrade" });
+    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr", timezone: "Europe/Belgrade", audit: { actorUserId: "owner" } });
     expect(saved()).toEqual({ businessId: "business", businessName: "Clinic", receptionistId: null, patch: { greeting: "Bonjour, la clinique." }, regenerateSummary: false });
   });
 
@@ -90,7 +90,7 @@ describe("agent settings validation", () => {
   it("still moves the business's timezone when another receptionist's settings are open", async () => {
     fixture.loadView.mockResolvedValue({ id: kitsilanoId, isDefault: false, name: "Kitsilano store", locale: "es" });
     expect((await patch({ locale: "es", timezone: "America/Vancouver" }, `?receptionist=${kitsilanoId}`)).status).toBe(200);
-    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", timezone: "America/Vancouver" });
+    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", timezone: "America/Vancouver", audit: { actorUserId: "owner" } });
     // Its language is already Spanish.
     expect(fixture.updateReceptionist).not.toHaveBeenCalled();
   });
@@ -98,7 +98,7 @@ describe("agent settings validation", () => {
   it("lines a default receptionist's own language up with the business's when the language changes", async () => {
     fixture.loadView.mockResolvedValue({ id: "profile", isDefault: true, name: "Recepción", locale: "es" });
     expect((await patch({ locale: "fr" })).status).toBe(200);
-    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr" });
+    expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr", audit: { actorUserId: "owner" } });
     expect(fixture.updateReceptionist).toHaveBeenCalledWith(tx, { businessId: "business", actorUserId: "owner", receptionistId: "profile", patch: { locale: null } });
   });
 

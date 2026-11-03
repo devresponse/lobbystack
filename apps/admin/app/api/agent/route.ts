@@ -47,7 +47,7 @@ export async function PATCH(request: Request) {
 
       // Opening hours keep their clock times in a new zone; booked appointments keep theirs.
       if (businessLocale !== undefined || timezone !== undefined) {
-        await updateBusinessInTransaction(tx, { businessId, ...(businessLocale !== undefined ? { defaultLocale: businessLocale } : {}), ...(timezone !== undefined ? { timezone } : {}) });
+        await updateBusinessInTransaction(tx, { businessId, ...(businessLocale !== undefined ? { defaultLocale: businessLocale } : {}), ...(timezone !== undefined ? { timezone } : {}), audit: { actorUserId: session.user.id } });
       }
       if (speaker && locale !== undefined) {
         // Another receptionist keeps a language of its own. The default one

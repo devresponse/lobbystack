@@ -312,7 +312,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
   const callEmails = { ...(input.call_transcript_recipients !== undefined ? { callTranscriptRecipients: input.call_transcript_recipients } : {}), ...(input.call_transcript_content !== undefined ? { callTranscriptContent: input.call_transcript_content } : {}) };
   if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined && !Object.keys(callEmails).length) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
+    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields, audit: callerAudit(caller) });
     // Read when each AI turn finishes, so no snapshot refresh is needed.
     if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     // Read when each call's email is queued and again when it's sent.

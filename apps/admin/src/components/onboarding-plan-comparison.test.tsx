@@ -4,7 +4,9 @@ import { createInstance } from "i18next";
 import { afterEach, expect, it } from "vitest";
 import { builtInBillingPlanList } from "@lobbystack/shared";
 import en from "../../public/locales/en/onboarding.json";
+import es from "../../public/locales/es/onboarding.json";
 import fr from "../../public/locales/fr/onboarding.json";
+import sr from "../../public/locales/sr/onboarding.json";
 import { OnboardingPlanComparison } from "./onboarding-plan-comparison";
 
 afterEach(cleanup);
@@ -39,7 +41,7 @@ it("shows the plan list's allowances and rates in its currency", async () => {
   const free = plans.plans.find((plan) => plan.slug === "free_cloud")!;
   free.included.voiceSeconds = 3_600;
   const pro = plans.plans.find((plan) => plan.slug === "pro")!;
-  pro.included = { ...pro.included, voiceSeconds: 60, businessNumbers: 2, knowledgeStorageBytes: 2 * 1024 ** 3 };
+  pro.included = { ...pro.included, voiceSeconds: 60, businessNumbers: 2, knowledgeStorageBytes: 2 * 1024 ** 3, receptionists: 8 };
   pro.overageRates.voiceMinuteCents = 15;
   pro.overageRates.alertSmsSegmentCents = null;
   render(<OnboardingPlanComparison locale="en" plans={plans} t={t} />);
@@ -50,4 +52,21 @@ it("shows the plan list's allowances and rates in its currency", async () => {
   expect(cells("alertSms")[3]).toBe("200 included");
   expect(cells("knowledgeStorage").slice(1)).toEqual(["1 MB", "5 MB", "2 GB", "Custom"]);
   expect(cells("phoneNumbers").slice(1)).toEqual([t("plan.comparison.values.common.notIncluded"), "1 dedicated", "2 dedicated", "Multiple"]);
+  expect(cells("receptionists").slice(1)).toEqual(["1 included", "1 included", "8 included", "Custom"]);
+});
+
+it.each(["en", "es", "fr", "sr"] as const)("shows how many receptionists each plan includes, right after the voice minutes, in %s", async (locale) => {
+  const resources = { en: { onboarding: en }, es: { onboarding: es }, fr: { onboarding: fr }, sr: { onboarding: sr } };
+  const i18n = createInstance();
+  await i18n.init({ lng: locale, resources });
+  const t = i18n.getFixedT(locale, "onboarding");
+  render(<OnboardingPlanComparison locale={locale} plans={builtInBillingPlanList()} t={t} />);
+  const row = screen.getByText(t("plan.comparison.features.receptionists")).closest("tr")!;
+  expect(within(row).getAllByRole("cell").slice(1).map((cell) => cell.textContent)).toEqual([
+    t("plan.comparison.values.usage.receptionists.included", { count: 1 }),
+    t("plan.comparison.values.usage.receptionists.included", { count: 1 }),
+    t("plan.comparison.values.usage.receptionists.included", { count: 5 }),
+    t("plan.comparison.values.common.custom"),
+  ]);
+  expect(row.previousElementSibling?.textContent).toContain(t("plan.comparison.features.voiceMinutes"));
 });

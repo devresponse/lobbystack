@@ -64,11 +64,12 @@ export function storageSize(bytes: number, locale = "en"): { amount: string; uni
 }
 
 /** The allowances "What's included" lists, in its order. */
-const includedLineKeys = ["voiceSeconds", "outboundCallAttempts", "alertSmsSegments", "knowledgeStorageBytes"] as const;
+const includedLineKeys = ["voiceSeconds", "receptionists", "outboundCallAttempts", "alertSmsSegments", "knowledgeStorageBytes"] as const;
 
 /**
- * What a plan includes each month as "What's included" lists it: voice
- * minutes, transfers, texts and storage. No limit reads as custom.
+ * What a plan includes as "What's included" lists it: voice minutes,
+ * receptionists active at once, transfers, texts and storage. No limit reads
+ * as custom.
  */
 export function includedLines(included: BillingPlanOffer["included"] | undefined, t: (key: string, options?: Record<string, unknown>) => string, locale = "en"): Array<{ key: typeof includedLineKeys[number]; text: string }> {
   const count = (value: number | null | undefined, key: string) => value === null || value === undefined ? t(`billing.currentPlan.${key}Custom`) : t(`billing.currentPlan.${key}`, { count: value });
@@ -76,6 +77,7 @@ export function includedLines(included: BillingPlanOffer["included"] | undefined
   const storage = included?.knowledgeStorageBytes;
   const text = {
     voiceSeconds: count(voice === null || voice === undefined ? null : Math.floor(voice / 60), "includedVoice"),
+    receptionists: count(included?.receptionists, "includedReceptionists"),
     outboundCallAttempts: count(included?.outboundCallAttempts, "includedOutbound"),
     alertSmsSegments: count(included?.alertSmsSegments, "includedSms"),
     knowledgeStorageBytes: storage === null || storage === undefined ? t("billing.currentPlan.includedStorageCustom") : t("billing.currentPlan.includedStorage", storageSize(storage, locale)),
@@ -86,7 +88,8 @@ export function includedLines(included: BillingPlanOffer["included"] | undefined
 /**
  * A plan's allowances and overage rates as the plan strings take them:
  * {{minutes}}, {{count}} and {{rate}}. A custom allowance reads as zero, so
- * callers show a custom string for it instead.
+ * callers show a custom string for it instead, as Enterprise's card does for
+ * receptionists.
  */
 export function planValues(plan: BillingPlanOffer | undefined, currency: string, locale = "en") {
   const rate = (cents: number | null | undefined) => (cents === null || cents === undefined ? "" : formatMoney(cents, currency, locale));
@@ -95,6 +98,7 @@ export function planValues(plan: BillingPlanOffer | undefined, currency: string,
     alertSmsSegments: plan?.included.alertSmsSegments ?? 0,
     outboundCallAttempts: plan?.included.outboundCallAttempts ?? 0,
     businessNumbers: plan?.included.businessNumbers ?? 0,
+    receptionists: plan?.included.receptionists ?? 0,
     voiceRate: rate(plan?.overageRates.voiceMinuteCents),
     alertSmsRate: rate(plan?.overageRates.alertSmsSegmentCents),
     outboundCallRate: rate(plan?.overageRates.outboundCallAttemptCents),
@@ -108,6 +112,7 @@ export function planValues(plan: BillingPlanOffer | undefined, currency: string,
 export function planStringValues(key: string, values: ReturnType<typeof planValues>): Record<string, string | number> {
   if (key === "voiceMinutes") return { count: values.minutes, rate: values.voiceRate };
   if (key === "dedicatedNumber") return { count: values.businessNumbers };
+  if (key === "receptionists") return { count: values.receptionists };
   if (key === "phoneNumber" || key === "alertSms") return { count: values.alertSmsSegments };
   return {};
 }

@@ -425,12 +425,15 @@
       "includedStorageLabel": "storage",
       "includedVoice_one": "{{count}} voice minute",
       "includedVoice_other": "{{count}} voice minutes",
+      "includedReceptionists_one": "{{count}} receptionist",
+      "includedReceptionists_other": "{{count}} receptionists",
       "includedSms_one": "{{count}} SMS alert",
       "includedSms_other": "{{count}} SMS alerts",
       "includedOutbound_one": "{{count}} transfer attempt",
       "includedOutbound_other": "{{count}} transfer attempts",
       "includedStorageCustom": "Custom storage allowance",
       "includedVoiceCustom": "Custom voice allowance",
+      "includedReceptionistsCustom": "Custom receptionist allowance",
       "includedSmsCustom": "Custom SMS allowance",
       "includedOutboundCustom": "Custom transfer allowance",
       "includedStorage": "{{amount}} {{unit}} storage"
@@ -467,6 +470,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} browser voice minute included",
             "voiceMinutes_other": "{{count}} browser voice minutes included",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "allFeatures": "No telephone number",
             "support": "Community support"
           }
@@ -480,6 +485,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
             "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "dedicatedNumber_one": "{{count}} dedicated business number",
             "dedicatedNumber_other": "{{count}} dedicated business numbers",
             "phoneNumber_one": "{{count}} alert SMS segment",
@@ -496,6 +503,8 @@
           "highlights": {
             "voiceMinutes_one": "{{count}} voice minute included\nThen {{rate}}/min",
             "voiceMinutes_other": "{{count}} voice minutes included\nThen {{rate}}/min",
+            "receptionists_one": "{{count}} receptionist",
+            "receptionists_other": "{{count}} receptionists",
             "dedicatedNumber_one": "{{count}} dedicated business number",
             "dedicatedNumber_other": "{{count}} dedicated business numbers",
             "alertSms_one": "{{count}} alert SMS segment",
@@ -511,6 +520,7 @@
           },
           "highlights": {
             "phoneNumbers": "Multiple dedicated numbers",
+            "customReceptionists": "Custom number of receptionists",
             "selfHosted": "Self-hosted deployment option",
             "support": "Dedicated implementation support"
           }

@@ -430,6 +430,9 @@
       "includedVoice_one": "{{count}} minute vocale",
       "includedVoice_many": "{{count}} minutes vocales",
       "includedVoice_other": "{{count}} minutes vocales",
+      "includedReceptionists_one": "{{count}} réceptionniste",
+      "includedReceptionists_many": "{{count}} réceptionnistes",
+      "includedReceptionists_other": "{{count}} réceptionnistes",
       "includedSms_one": "{{count}} alerte SMS",
       "includedSms_many": "{{count}} alertes SMS",
       "includedSms_other": "{{count}} alertes SMS",
@@ -438,6 +441,7 @@
       "includedOutbound_other": "{{count}} tentatives de transfert",
       "includedStorageCustom": "Volume de stockage sur mesure",
       "includedVoiceCustom": "Volume vocal sur mesure",
+      "includedReceptionistsCustom": "Nombre de réceptionnistes sur mesure",
       "includedSmsCustom": "Volume SMS sur mesure",
       "includedOutboundCustom": "Allocation de transferts personnalisée",
       "includedStorage": "{{amount}} {{unit}} stockage"
@@ -476,6 +480,9 @@
             "voiceMinutes_one": "{{count}} minute vocale dans le navigateur",
             "voiceMinutes_many": "{{count}} minutes vocales dans le navigateur",
             "voiceMinutes_other": "{{count}} minutes vocales dans le navigateur",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "allFeatures": "Aucun numéro de téléphone",
             "support": "Soutien communautaire"
           }
@@ -490,6 +497,9 @@
             "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
             "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
             "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
@@ -509,6 +519,9 @@
             "voiceMinutes_one": "{{count}} minute vocale incluse\nPuis {{rate}}/min",
             "voiceMinutes_many": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
             "voiceMinutes_other": "{{count}} minutes vocales incluses\nPuis {{rate}}/min",
+            "receptionists_one": "{{count}} réceptionniste",
+            "receptionists_many": "{{count}} réceptionnistes",
+            "receptionists_other": "{{count}} réceptionnistes",
             "dedicatedNumber_one": "{{count}} numéro d'entreprise dédié",
             "dedicatedNumber_many": "{{count}} numéros d'entreprise dédiés",
             "dedicatedNumber_other": "{{count}} numéros d'entreprise dédiés",
@@ -526,6 +539,7 @@
           },
           "highlights": {
             "phoneNumbers": "Plusieurs numéros dédiés",
+            "customReceptionists": "Nombre de réceptionnistes sur mesure",
             "selfHosted": "Option de déploiement auto-hébergé",
             "support": "Accompagnement dédié à l'implantation"
           }

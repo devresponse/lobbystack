@@ -148,6 +148,7 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     plans.currency = "cad";
     const starter = plans.plans.find((plan) => plan.slug === "starter")!;
     starter.included.voiceSeconds = 12_000;
+    starter.included.receptionists = 2;
     starter.overageRates.voiceMinuteCents = 25;
     starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2600, checkoutAvailable: true }];
     setup(false, false, "free_cloud", plans);
@@ -156,6 +157,11 @@ describe("original onboarding plan behavior with asynchronous checkout", () => {
     expect(screen.getByText("CA$0")).toBeTruthy();
     expect(translate).toHaveBeenCalledWith("plan.tiers.starter.highlights.voiceMinutes", { count: 200, rate: "CA$0.25" });
     expect(translate).toHaveBeenCalledWith("plan.tiers.starter.description.annual", { minutes: 200 });
+    // Each card says how many receptionists its plan includes; Enterprise's are custom.
+    expect(translate).toHaveBeenCalledWith("plan.tiers.free_cloud.highlights.receptionists", { count: 1 });
+    expect(translate).toHaveBeenCalledWith("plan.tiers.starter.highlights.receptionists", { count: 2 });
+    expect(translate).toHaveBeenCalledWith("plan.tiers.pro.highlights.receptionists", { count: 5 });
+    expect(translate).toHaveBeenCalledWith("plan.tiers.enterprise.highlights.customReceptionists", {});
     // Starter saves 25% a year and Pro 20%, so the badge promises the smaller.
     expect(translate).toHaveBeenCalledWith("plan.billingInterval.save", { percent: 20 });
     await userEvent.click(screen.getByRole("tab", { name: "plan.billingInterval.monthly" }));

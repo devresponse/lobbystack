@@ -276,9 +276,10 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main!.id, patch: { listed: false } }))).toMatchObject({ status: 409, code: "default_receptionist" });
 
       await as(tx, null);
-      const events = await tx.select({ eventType: auditLogs.eventType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.entityType, "receptionist"))).orderBy(asc(auditLogs.createdAt));
-      expect(events.map((event) => event.eventType)).toEqual(["receptionist.created", "receptionist.created", "receptionist.created", "receptionist.updated"]);
-      expect(events[3]?.payload).toEqual({ fields: ["description", "handle", "listed", "name"] });
+      // Rows a transaction writes all take its start time as created_at, so the entries come in no set order.
+      const events = await tx.select({ eventType: auditLogs.eventType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.entityType, "receptionist")));
+      expect(events.map((event) => event.eventType).sort()).toEqual(["receptionist.created", "receptionist.created", "receptionist.created", "receptionist.updated"]);
+      expect(events.find((event) => event.eventType === "receptionist.updated")?.payload).toEqual({ fields: ["description", "handle", "listed", "name"] });
     });
   });
 

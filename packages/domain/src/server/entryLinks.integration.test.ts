@@ -180,11 +180,13 @@ describe.skipIf(!testUrl)("QR links, against PostgreSQL under RLS", () => {
       expect(paused).toMatchObject({ status: "paused", receptionistId: chain.storeId, opensReceptionistId: chain.mainId });
       // Saving what it already has changes nothing and records nothing.
       await owner(tx, chain, () => updateEntryLinkInTransaction(tx, { businessId: chain.businessId, actorUserId: chain.userId, linkId: link.id, patch: { status: "paused" } }));
-      const audits = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, chain.businessId), eq(auditLogs.eventType, "entry_link.updated"))).orderBy(auditLogs.createdAt);
-      expect(audits.map((row) => row.payload)).toEqual([
+      // Rows a transaction writes all take its start time as created_at, so the entries come in no set order.
+      const audits = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, chain.businessId), eq(auditLogs.eventType, "entry_link.updated")));
+      expect(audits).toHaveLength(2);
+      expect(audits.map((row) => row.payload)).toEqual(expect.arrayContaining([
         { receptionistId: { from: chain.mainId, to: chain.storeId }, label: { from: "Counter", to: "Counter, Gastown" } },
         { status: { from: "active", to: "paused" } },
-      ]);
+      ]));
       expect(await owner(tx, chain, () => failure(tx, (inner) => updateEntryLinkInTransaction(inner, { businessId: chain.businessId, actorUserId: chain.userId, linkId: randomUUID(), patch: { label: "x" } })))).toMatchObject({ status: 404, code: "entry_link_not_found" });
     });
   });

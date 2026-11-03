@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   auditLogs,
@@ -175,9 +175,10 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
 
       // Each change is audited and refreshes the snapshot, the summary and the hours.
       await as(tx, null);
-      const audits = await tx.select().from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "knowledge.audience_changed"))).orderBy(asc(auditLogs.createdAt));
-      expect(audits.map((audit) => [audit.entityType, audit.entityId])).toEqual([["knowledge_document", menu], ["knowledge_document", menu], ["knowledge_document", menu], ["knowledge_snippet", parking]]);
-      expect(audits[1]!.payload).toEqual({ audience: "chosen", receptionistIds: [kitsilano.id, gastown.id] });
+      // Rows a transaction writes all take its start time as created_at, so the entries come in no set order.
+      const audits = await tx.select().from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "knowledge.audience_changed")));
+      expect(audits.map((audit) => `${audit.entityType} ${audit.entityId}`).sort()).toEqual([`knowledge_document ${menu}`, `knowledge_document ${menu}`, `knowledge_document ${menu}`, `knowledge_snippet ${parking}`]);
+      expect(audits.map((audit) => audit.payload)).toContainEqual({ audience: "chosen", receptionistIds: [kitsilano.id, gastown.id] });
       const refreshes = await tx.select().from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "snapshot.refresh")));
       expect(refreshes.length - before).toBe(4);
       expect((await tx.select().from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "business.extractHours")))).length).toBeGreaterThan(0);
@@ -326,13 +327,15 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
 
       // One audit entry per change, naming the articles it covered.
       await as(tx, null);
-      const audits = await tx.select().from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "knowledge.audience_changed"), eq(auditLogs.entityType, "knowledge"))).orderBy(asc(auditLogs.createdAt));
-      expect(audits.map((audit) => audit.payload)).toEqual([
+      // In no set order: rows a transaction writes all take its start time as created_at.
+      const audits = await tx.select().from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "knowledge.audience_changed"), eq(auditLogs.entityType, "knowledge")));
+      expect(audits).toHaveLength(4);
+      expect(audits.map((audit) => audit.payload)).toEqual(expect.arrayContaining([
         { audience: "chosen", mode: "add", receptionistIds: [kitsilano.id], documentIds: sorted(menu, gastownPage), snippetIds: [hours] },
         { audience: "chosen", mode: "remove", receptionistIds: [gastown.id], documentIds: sorted(menu, gastownPage), snippetIds: [hours] },
         { audience: "chosen", mode: "replace", receptionistIds: [gastown.id], documentIds: sorted(menu, gastownPage), snippetIds: [hours] },
         { audience: "everyone", documentIds: [gastownPage], snippetIds: [] },
-      ]);
+      ]));
 
       // An archived receptionist can be removed, never added.
       await asOwner(tx, { userId, businessId });

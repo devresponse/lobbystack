@@ -82,10 +82,10 @@ async function owner<T>(tx: DatabaseTransaction, clinic: Clinic, run: () => Prom
   }
 }
 
+/** The business's audit entries of one kind, in no set order: rows a transaction writes all take its start time as created_at. */
 async function audits(tx: DatabaseTransaction, businessId: string, eventType: string) {
   return await tx.select({ actorUserId: auditLogs.actorUserId, entityType: auditLogs.entityType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs)
-    .where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)))
-    .orderBy(auditLogs.createdAt);
+    .where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType)));
 }
 
 describe("a receptionist id in a request", () => {
@@ -132,10 +132,12 @@ describe.skipIf(!testUrl)("who answers each number and widget, against PostgreSQ
       const moved = await owner(tx, clinic, () => setWidgetKeyReceptionistInTransaction(tx, { businessId: clinic.businessId, actorUserId: clinic.userId, widgetKeyId: clinic.widget.id, receptionistId: clinic.kitsilanoId.toUpperCase() }));
       expect(moved).toEqual({ id: clinic.widget.id, receptionistId: clinic.kitsilanoId });
       await owner(tx, clinic, () => setWidgetKeyReceptionistInTransaction(tx, { businessId: clinic.businessId, actorUserId: null, widgetKeyId: clinic.widget.id, receptionistId: clinic.frontDeskId }));
-      expect(await audits(tx, clinic.businessId, "widget_key.receptionist_changed")).toEqual([
+      const changes = await audits(tx, clinic.businessId, "widget_key.receptionist_changed");
+      expect(changes).toHaveLength(2);
+      expect(changes).toEqual(expect.arrayContaining([
         { actorUserId: clinic.userId, entityType: "widget_key", entityId: clinic.widget.id, payload: { from: clinic.frontDeskId, to: clinic.kitsilanoId } },
         { actorUserId: null, entityType: "widget_key", entityId: clinic.widget.id, payload: { from: clinic.kitsilanoId, to: clinic.frontDeskId } },
-      ]);
+      ]));
     });
   });
 

@@ -42,10 +42,14 @@ export type ReceptionistSelectProps = {
   disabled?: boolean;
   /** Shows the dropdown with one receptionist too. */
   alwaysShow?: boolean;
+  /** Which edge of the button the open list lines up with; end for a dropdown near the right of the screen. */
+  align?: "start" | "end";
+  /** sm matches the small buttons of a toolbar. */
+  size?: "default" | "sm";
   className?: string | undefined;
 };
 
-export function ReceptionistSelect({ label, hideLabel = false, receptionists, value, onChange, allLabel, showManage = false, disabled = false, alwaysShow = false, className }: ReceptionistSelectProps) {
+export function ReceptionistSelect({ label, hideLabel = false, receptionists, value, onChange, allLabel, showManage = false, disabled = false, alwaysShow = false, align = "start", size = "default", className }: ReceptionistSelectProps) {
   const { t } = useTranslation("receptionists");
   const router = useRouter();
   const id = useId();
@@ -221,7 +225,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
         disabled={disabled}
         onClick={() => (open ? close() : show())}
         onKeyDown={onKeyDown}
-        className="flex min-h-10 w-full min-w-0 items-center gap-2 rounded-xl border border-border bg-background px-2.5 py-1.5 text-left text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        className={cn("flex w-full min-w-0 items-center gap-2 rounded-xl border border-border bg-background px-2.5 text-left text-sm outline-none transition-colors hover:bg-muted/40 focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50", size === "sm" ? "min-h-8 py-1" : "min-h-10 py-1.5")}
       >
         <span id={valueId} className="flex min-w-0 flex-1 items-center gap-2">
           {selected ? (
@@ -242,7 +246,7 @@ export function ReceptionistSelect({ label, hideLabel = false, receptionists, va
         <ChevronDown aria-hidden="true" className={cn("size-4 flex-none text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
       {open ? (
-        <div className="absolute top-full left-0 z-50 mt-1 flex max-h-[min(26rem,70svh)] w-max min-w-full max-w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg">
+        <div className={cn("absolute top-full z-50 mt-1 flex max-h-[min(26rem,70svh)] w-max min-w-full max-w-[min(26rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-lg", align === "end" ? "right-0" : "left-0")}>
           {searchable ? (
             <div className="flex items-center gap-2 border-b border-border px-2.5">
               <Search aria-hidden="true" className="size-4 flex-none text-muted-foreground" />

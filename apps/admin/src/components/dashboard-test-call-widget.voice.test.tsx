@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DashboardTestCallWidget } from "./dashboard-test-call-widget";
+import { receptionistChoicesQueryKey, type ReceptionistOption } from "./receptionists/receptionist-choices";
 import { DISCONNECT_GRACE_MS } from "@lobbystack/web-voice";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 
@@ -13,6 +15,7 @@ import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 const telemetryRef = vi.hoisted(() => ({ current: null as ReturnType<typeof createRecordedBrowserTelemetry> | null }));
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => telemetryRef.current!.telemetry }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
 
 class FakePeerConnection {
   static last: FakePeerConnection | undefined;
@@ -97,8 +100,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+function receptionist(id: string, name: string, values: Partial<ReceptionistOption> = {}): ReceptionistOption {
+  return { id, name, description: "", handle: null, isDefault: false, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: "audience", ...values };
+}
+
+const FRONT_DESK = receptionist("00000000-0000-4000-8000-0000000000a1", "Front desk", { isDefault: true, knowledgeScope: "all" });
+
+/** The widget, with the business's receptionists already loaded so the only request is the call's. */
+function renderWidget(receptionists: ReceptionistOption[] = [FRONT_DESK]) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  client.setQueryData(receptionistChoicesQueryKey("business-1"), { receptionists });
+  return render(<QueryClientProvider client={client}><DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" /></QueryClientProvider>);
+}
+
 async function startConnectedCall(): Promise<FakePeerConnection> {
-  render(<DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" />);
+  renderWidget();
   fireEvent.click(screen.getByRole("button", { name: "testCall.trigger" }));
   await waitFor(() => expect(FakePeerConnection.last?.setRemoteDescription).toHaveBeenCalled());
   const connection = FakePeerConnection.last!;
@@ -157,15 +173,29 @@ describe("DashboardTestCallWidget voice call endings", () => {
 
   it("sends the offer once ICE gathering finishes, with the gathered candidates", async () => {
     FakePeerConnection.slowIce = true;
-    render(<DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" />);
+    renderWidget();
     fireEvent.click(screen.getByRole("button", { name: "testCall.trigger" }));
     await waitFor(() => expect(FakePeerConnection.last?.setLocalDescription).toHaveBeenCalled());
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(fetchMock).not.toHaveBeenCalled();
     act(() => FakePeerConnection.last!.finishGathering("offer-sdp\na=candidate:1 1 udp 1 192.0.2.1 50000 typ host"));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as { sdp: string };
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body)) as { sdp: string; receptionistId?: string };
     expect(body.sdp).toContain("a=candidate:1");
+    // The default receptionist answers a call that names none.
+    expect(body.receptionistId).toBeUndefined();
+  });
+
+  it("asks for the receptionist chosen beside the button", async () => {
+    const kitsilano = receptionist("00000000-0000-4000-8000-0000000000a2", "Kitsilano clinic", { sortOrder: 1 });
+    renderWidget([FRONT_DESK, kitsilano]);
+    fireEvent.click(screen.getByRole("combobox", { name: /^testCall\.receptionist/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Kitsilano clinic/ }));
+    fireEvent.click(screen.getByRole("button", { name: "testCall.trigger" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("/api/voice/live/session?businessId=business-1");
+    expect(JSON.parse(String(init.body))).toMatchObject({ businessSlug: "acme-dental", widgetId: "lobbystack-dashboard-test-call", receptionistId: kitsilano.id });
   });
 
   it("releases the call when OpenAI never confirms the close", async () => {
@@ -215,7 +245,7 @@ describe("DashboardTestCallWidget voice call endings", () => {
   });
 
   it("marks the call connected when it recovers from a disconnect before ever connecting", async () => {
-    render(<DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" />);
+    renderWidget();
     fireEvent.click(screen.getByRole("button", { name: "testCall.trigger" }));
     await waitFor(() => expect(FakePeerConnection.last?.setRemoteDescription).toHaveBeenCalled());
     const connection = FakePeerConnection.last!;

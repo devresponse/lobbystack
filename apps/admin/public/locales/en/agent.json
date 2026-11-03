@@ -410,5 +410,26 @@
     "edit": "Edit",
     "cancel": "Cancel",
     "notSet": "Not set"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Shared by every receptionist",
+      "description": "The business summary, what callers hear about AI and recording, the business's language and time zone, opening hours and appointment rules."
+    },
+    "own": {
+      "title": "Each receptionist's own",
+      "description": "Its greeting, language, transfer number and booking. Choose the receptionist to change."
+    },
+    "picker": "Receptionist",
+    "businessLanguage": {
+      "label": "Business language",
+      "hint": "The default receptionist speaks it, and so does each receptionist without a language of its own. Calls switch when a caller speaks another one, and call summaries are written in it."
+    },
+    "language": {
+      "label": "Language",
+      "hint": "Its calls start in this language, and switch when a caller speaks another one.",
+      "defaultHint": "The default receptionist speaks the business's language, which the shared settings above set.",
+      "business": "Business language ({{language}})"
+    }
   }
 }

@@ -11,7 +11,7 @@
     },
     "receptionists": {
       "title": "Réceptionnistes",
-      "description": "Qui répond à vos appels, à vos chats et sur vos pages. Ajoutez-en un pour chaque lieu, équipe ou langue."
+      "description": "Qui répond à vos appels, à vos chats et sur vos pages. Ajoutez-en une pour chaque lieu, équipe ou langue."
     },
     "knowledge": {
       "title": "Connaissances",
@@ -410,5 +410,26 @@
     "edit": "Modifier",
     "cancel": "Annuler",
     "notSet": "Non définies"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Communs à toutes les réceptionnistes",
+      "description": "Le résumé de l'entreprise, ce que les appelants entendent sur l'IA et l'enregistrement, la langue et le fuseau horaire de l'entreprise, les heures d'ouverture et les règles de rendez-vous."
+    },
+    "own": {
+      "title": "Propres à chaque réceptionniste",
+      "description": "Son message d'accueil, sa langue, son numéro de transfert et la prise de rendez-vous. Choisissez la réceptionniste à modifier."
+    },
+    "picker": "Réceptionniste",
+    "businessLanguage": {
+      "label": "Langue de l'entreprise",
+      "hint": "La réceptionniste par défaut la parle, comme chaque réceptionniste sans langue propre. Les appels passent à la langue de l'appelant s'il en parle une autre, et les résumés d'appel y sont écrits."
+    },
+    "language": {
+      "label": "Langue",
+      "hint": "Ses appels commencent dans cette langue, puis passent à celle de l'appelant s'il en parle une autre.",
+      "defaultHint": "La réceptionniste par défaut parle la langue de l'entreprise, définie dans les paramètres communs ci-dessus.",
+      "business": "Langue de l'entreprise ({{language}})"
+    }
   }
 }

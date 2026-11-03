@@ -1,17 +1,17 @@
 {
   "picker": {
-    "choose": "Choisir un réceptionniste",
-    "search": "Rechercher un réceptionniste",
-    "noMatches": "Aucun réceptionniste ne correspond.",
+    "choose": "Choisir une réceptionniste",
+    "search": "Rechercher une réceptionniste",
+    "noMatches": "Aucune réceptionniste ne correspond.",
     "default": "Par défaut",
     "paused": "En pause",
-    "unknown": "Un réceptionniste qui n'est plus listé",
-    "add": "Ajouter un réceptionniste",
+    "unknown": "Une réceptionniste qui n'est plus listée",
+    "add": "Ajouter une réceptionniste",
     "manage": "Gérer les réceptionnistes"
   },
   "filter": {
     "label": "Réceptionniste",
-    "all": "Tous les réceptionnistes"
+    "all": "Toutes les réceptionnistes"
   },
   "multi": {
     "summary_one": "{{chosen}} sur {{count}} réceptionniste",
@@ -19,14 +19,14 @@
     "summary_many": "{{chosen}} sur {{count}} réceptionnistes",
     "none": "Choisir",
     "change": "Modifier",
-    "search": "Rechercher un réceptionniste",
-    "selectShown": "Tout sélectionner (affichés)",
+    "search": "Rechercher une réceptionniste",
+    "selectShown": "Tout sélectionner (affichées)",
     "clear": "Effacer",
     "remove": "Retirer {{name}}",
     "more": "+{{count}} de plus"
   },
   "names": {
-    "everyone": "Tous",
+    "everyone": "Toutes",
     "more": "+{{count}}",
     "defaultOnly": "Réceptionniste par défaut seulement"
   },
@@ -34,27 +34,27 @@
     "unavailable": "Impossible de charger les réceptionnistes. Réessayez dans un instant."
   },
   "allowance": {
-    "used_one": "{{active}} sur {{count}} réceptionniste actif de votre forfait",
-    "used_many": "{{active}} sur {{count}} réceptionnistes actifs de votre forfait",
-    "used_other": "{{active}} sur {{count}} réceptionnistes actifs de votre forfait",
-    "full": "Tous les réceptionnistes actifs de votre forfait sont utilisés. Mettez-en un en pause ou changez de forfait pour en ajouter un autre.",
+    "used_one": "{{active}} sur {{count}} réceptionniste active de votre forfait",
+    "used_many": "{{active}} sur {{count}} réceptionnistes actives de votre forfait",
+    "used_other": "{{active}} sur {{count}} réceptionnistes actives de votre forfait",
+    "full": "Toutes les réceptionnistes actives de votre forfait sont utilisées. Mettez-en une en pause ou changez de forfait pour en ajouter une autre.",
     "cap_one": "Une entreprise peut garder jusqu'à {{count}} réceptionniste.",
-    "cap_many": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en un pour en ajouter un autre.",
-    "cap_other": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en un pour en ajouter un autre.",
-    "upgradeTitle": "Un réceptionniste pour chaque lieu, équipe ou langue",
-    "upgradeDescription": "Votre forfait comprend un réceptionniste. Changez de forfait pour en ajouter d'autres, chacun avec son nom, son numéro de téléphone, ses connaissances et sa page.",
+    "cap_many": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en une pour en ajouter une autre.",
+    "cap_other": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en une pour en ajouter une autre.",
+    "upgradeTitle": "Une réceptionniste pour chaque lieu, équipe ou langue",
+    "upgradeDescription": "Votre forfait comprend une réceptionniste. Changez de forfait pour en ajouter d'autres, chacune avec son nom, son numéro de téléphone, ses connaissances et sa page.",
     "upgrade": "Voir les forfaits",
     "upgradeAsk": "Un propriétaire ou un administrateur de l'entreprise peut changer de forfait."
   },
   "toolbar": {
     "search": "Rechercher par nom ou par sujet",
     "status": "Statut",
-    "all": "Tous ({{number}})",
-    "active": "Actifs ({{number}})",
+    "all": "Toutes ({{number}})",
+    "active": "Actives ({{number}})",
     "paused": "En pause ({{number}})",
-    "archived": "Archivés ({{number}})",
+    "archived": "Archivées ({{number}})",
     "sort": "Trier de A à Z",
-    "add": "Ajouter un réceptionniste"
+    "add": "Ajouter une réceptionniste"
   },
   "table": {
     "receptionist": "Réceptionniste",
@@ -65,7 +65,7 @@
     "order": "Ordre",
     "actions": "Actions",
     "default": "Par défaut",
-    "notListed": "Absent de la page de l'entreprise",
+    "notListed": "Absente de la page de l'entreprise",
     "businessLanguage": "Langue de l'entreprise",
     "numbers_one": "{{count}} numéro de téléphone",
     "numbers_many": "{{count}} numéros de téléphone",
@@ -77,17 +77,17 @@
     "links_many": "{{count}} liens QR",
     "links_other": "{{count}} liens QR",
     "pageOnly": "Sa page seulement",
-    "archivedOn": "Archivé le {{date}}",
-    "empty": "Aucun réceptionniste ne correspond.",
-    "emptyArchived": "Aucun réceptionniste archivé.",
+    "archivedOn": "Archivée le {{date}}",
+    "empty": "Aucune réceptionniste ne correspond.",
+    "emptyArchived": "Aucune réceptionniste archivée.",
     "moveUp": "Monter {{name}}",
     "moveDown": "Descendre {{name}}",
     "moreOptions": "Plus d'options pour {{name}}"
   },
   "status": {
-    "active": "Actif",
+    "active": "Active",
     "paused": "En pause",
-    "archived": "Archivé"
+    "archived": "Archivée"
   },
   "actions": {
     "edit": "Modifier les détails",
@@ -101,73 +101,73 @@
   },
   "archive": {
     "title": "Archiver {{name}} ?",
-    "description": "Il disparaît de toutes les listes, et ses numéros de téléphone, widgets et liens QR répondent comme le réceptionniste par défaut. Ses appels, chats et questions restent, et vous pourrez le restaurer depuis Archivés.",
+    "description": "Elle disparaît de toutes les listes, et ses numéros de téléphone, widgets et liens QR répondent comme la réceptionniste par défaut. Ses appels, chats et questions restent, et vous pourrez la restaurer depuis Archivées.",
     "confirm": "Archiver"
   },
   "makeDefault": {
-    "title": "Faire de {{name}} le réceptionniste par défaut ?",
-    "description": "Il répondra sur la page de l'entreprise et à tout ce qui ne nomme aucun réceptionniste. {{current}} garde ses numéros de téléphone, widgets et liens QR, et reçoit sa propre page.",
+    "title": "Faire de {{name}} la réceptionniste par défaut ?",
+    "description": "Elle répondra sur la page de l'entreprise et à tout ce qui ne nomme aucune réceptionniste. {{current}} garde ses numéros de téléphone, widgets et liens QR, et reçoit sa propre page.",
     "confirm": "Définir par défaut"
   },
   "sort": {
     "title": "Trier les réceptionnistes de A à Z ?",
-    "description": "Les listes déroulantes et la page de l'entreprise les afficheront par nom, après celui par défaut. Cela remplace l'ordre que vous avez défini.",
+    "description": "Les listes déroulantes et la page de l'entreprise les afficheront par nom, après celle par défaut. Cela remplace l'ordre que vous avez défini.",
     "confirm": "Trier de A à Z"
   },
   "toast": {
-    "added": "{{name}} ajouté.",
-    "saved": "{{name}} enregistré.",
-    "paused": "{{name}} est en pause. Ses numéros de téléphone, widgets et liens QR répondent comme le réceptionniste par défaut.",
+    "added": "{{name}} ajoutée.",
+    "saved": "{{name}} enregistrée.",
+    "paused": "{{name}} est en pause. Ses numéros de téléphone, widgets et liens QR répondent comme la réceptionniste par défaut.",
     "resumed": "{{name}} répond de nouveau.",
-    "archived": "{{name}} archivé.",
-    "restored": "{{name}} restauré.",
-    "restoredPaused": "{{name}} restauré, en pause : tous les réceptionnistes actifs de votre forfait sont utilisés.",
-    "madeDefault": "{{name}} est maintenant le réceptionniste par défaut.",
-    "sorted": "Réceptionnistes triés de A à Z."
+    "archived": "{{name}} archivée.",
+    "restored": "{{name}} restaurée.",
+    "restoredPaused": "{{name}} restaurée, en pause : toutes les réceptionnistes actives de votre forfait sont utilisées.",
+    "madeDefault": "{{name}} est maintenant la réceptionniste par défaut.",
+    "sorted": "Réceptionnistes triées de A à Z."
   },
   "errors": {
-    "handleTaken": "Un autre réceptionniste utilise déjà cette adresse de page.",
-    "limit": "Tous les réceptionnistes actifs de votre forfait sont utilisés. Mettez-en un en pause ou changez de forfait pour en ajouter un autre.",
-    "limitOne": "Votre forfait comprend un réceptionniste. Changez de forfait pour en ajouter d'autres.",
-    "cap": "Cette entreprise a autant de réceptionnistes qu'elle peut en garder. Archivez-en un pour en ajouter un autre.",
-    "defaultPaused": "Le réceptionniste par défaut répond toujours. Définissez d'abord un autre réceptionniste par défaut.",
-    "defaultArchived": "Le réceptionniste par défaut ne peut pas être archivé. Définissez d'abord un autre réceptionniste par défaut.",
-    "defaultListed": "Le réceptionniste par défaut répond sur la page de l'entreprise, il y reste donc affiché.",
-    "resumeFirst": "Reprenez le réceptionniste avant d'en faire le réceptionniste par défaut.",
-    "notFound": "Ce réceptionniste n'existe plus. Actualisez la page.",
+    "handleTaken": "Une autre réceptionniste utilise déjà cette adresse de page.",
+    "limit": "Toutes les réceptionnistes actives de votre forfait sont utilisées. Mettez-en une en pause ou changez de forfait pour en ajouter une autre.",
+    "limitOne": "Votre forfait comprend une réceptionniste. Changez de forfait pour en ajouter d'autres.",
+    "cap": "Cette entreprise a autant de réceptionnistes qu'elle peut en garder. Archivez-en une pour en ajouter une autre.",
+    "defaultPaused": "La réceptionniste par défaut répond toujours. Définissez d'abord une autre réceptionniste par défaut.",
+    "defaultArchived": "La réceptionniste par défaut ne peut pas être archivée. Définissez d'abord une autre réceptionniste par défaut.",
+    "defaultListed": "La réceptionniste par défaut répond sur la page de l'entreprise, elle y reste donc affichée.",
+    "resumeFirst": "Reprenez la réceptionniste avant d'en faire la réceptionniste par défaut.",
+    "notFound": "Cette réceptionniste n'existe plus. Actualisez la page.",
     "invalid": "Vérifiez les champs et réessayez.",
     "generic": "Cela n'a pas fonctionné. Réessayez dans un instant.",
     "withErrorId": "{{message}} ID d'erreur : {{errorId}}"
   },
   "editor": {
     "editTitle": "Modifier {{name}}",
-    "addTitle": "Ajouter un réceptionniste",
+    "addTitle": "Ajouter une réceptionniste",
     "editDescription": "Son nom, sa page, sa langue et ses connaissances. L'accueil, la réservation et les instructions se trouvent dans les paramètres IA.",
-    "addDescription": "Un nouveau réceptionniste reprend l'accueil, la réservation, le transfert et les instructions d'un autre. Les paramètres IA permettent de les modifier.",
+    "addDescription": "Une nouvelle réceptionniste reprend l'accueil, la réservation, le transfert et les instructions d'une autre. Les paramètres IA permettent de les modifier.",
     "name": "Nom",
     "nameHint": "Les visiteurs le voient quand ils choisissent à qui parler, par exemple Clinique Kitsilano ou Facturation.",
-    "nameRequired": "Donnez un nom au réceptionniste.",
+    "nameRequired": "Donnez un nom à la réceptionniste.",
     "description": "Sujets traités",
     "descriptionHint": "Une ligne sous son nom, par exemple Rendez-vous à notre clinique de West 4th.",
     "handle": "Adresse de la page",
-    "handleDefault": "Le réceptionniste par défaut répond sur la page de l'entreprise elle-même.",
+    "handleDefault": "La réceptionniste par défaut répond sur la page de l'entreprise elle-même.",
     "handleHint": "Lettres minuscules et chiffres, reliés par des tirets. Laissée vide, l'adresse est créée à partir du nom.",
     "handleInvalid": "Utilisez des lettres minuscules et des chiffres, reliés par un seul tiret.",
     "language": "Langue",
-    "languageDefault": "Le réceptionniste par défaut parle la langue de l'entreprise, définie dans les paramètres IA.",
+    "languageDefault": "La réceptionniste par défaut parle la langue de l'entreprise, définie dans les paramètres IA.",
     "languageHint": "Ses appels commencent dans cette langue, puis passent à celle de l'appelant s'il en parle une autre.",
     "businessLanguage": "Langue de l'entreprise ({{language}})",
     "knowledge": "Connaissances",
     "knowledgeAll": "Tous les articles",
-    "knowledgeAudience": "Les articles pour tous, et ceux choisis pour lui",
-    "listed": "Affiché sur la page de l'entreprise",
-    "listedDefault": "Le réceptionniste par défaut est toujours affiché.",
-    "listedHint": "Les visiteurs de la page de l'entreprise peuvent le choisir. Sa propre page, ses numéros de téléphone et ses liens QR fonctionnent dans tous les cas.",
+    "knowledgeAudience": "Les articles pour toutes les réceptionnistes, et ceux choisis pour elle",
+    "listed": "Affichée sur la page de l'entreprise",
+    "listedDefault": "La réceptionniste par défaut est toujours affichée.",
+    "listedHint": "Les visiteurs de la page de l'entreprise peuvent la choisir. Sa propre page, ses numéros de téléphone et ses liens QR fonctionnent dans tous les cas.",
     "copyFrom": "Copier les paramètres de",
     "copyFromHint": "Son accueil, sa réservation, son transfert et ses instructions.",
     "saving": "Enregistrement…",
     "save": "Enregistrer les modifications",
     "adding": "Ajout…",
-    "add": "Ajouter un réceptionniste"
+    "add": "Ajouter une réceptionniste"
   }
 }

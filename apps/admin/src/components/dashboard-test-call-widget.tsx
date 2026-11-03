@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Phone } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
+import { useReceptionistChoices } from "@/components/receptionists/receptionist-choices";
+import { ReceptionistSelect } from "@/components/receptionists/receptionist-select";
 import { AuraVoiceDemo } from "@/components/web-voice/AuraVoiceDemo";
 import { LIVE_WEB_CALL_ENDPOINT } from "@lobbystack/web-voice";
 import { announceTestCallEnded, registerTestCallStarter, setTestCallActive } from "@/lib/test-call-launcher";
@@ -32,6 +34,34 @@ type WebVoiceControls = {
   startCall: () => Promise<void>;
 };
 
+/**
+ * Who answers a test call: the receptionist chosen in the dropdown beside the
+ * button, the default one until then. Only active receptionists are offered:
+ * a paused one answers nothing, so its test call would reach the default one.
+ * The choice belongs to the business it was made for, and gives way to the
+ * default receptionist when the one chosen is paused or archived meanwhile.
+ */
+function useTestCallReceptionist(businessId: string | undefined) {
+  const { receptionists } = useReceptionistChoices(businessId);
+  const options = useMemo(() => receptionists.filter((receptionist) => receptionist.status === "active"), [receptionists]);
+  const [choice, setChoice] = useState<{ businessId: string | undefined; receptionistId: string } | null>(null);
+  const chosen = choice && choice.businessId === businessId ? options.find((receptionist) => receptionist.id === choice.receptionistId && !receptionist.isDefault) : undefined;
+  const receptionistId = chosen?.id ?? null;
+  // Read when a call starts, which can come from another page's "Make a test call" too.
+  const startingWith = useRef<string | null>(receptionistId);
+  useEffect(() => {
+    startingWith.current = receptionistId;
+  }, [receptionistId]);
+  const getStartPayload = useCallback(async (): Promise<Record<string, string>> => (startingWith.current ? { receptionistId: startingWith.current } : {}), []);
+  const choose = useCallback((next: string | null) => setChoice(next ? { businessId, receptionistId: next } : null), [businessId]);
+  return {
+    options,
+    value: receptionistId ?? options.find((receptionist) => receptionist.isDefault)?.id ?? null,
+    choose,
+    getStartPayload,
+  };
+}
+
 export function DashboardTestCallWidget({
   businessId,
   businessSlug,
@@ -40,6 +70,7 @@ export function DashboardTestCallWidget({
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const voiceControlsRef = useRef<WebVoiceControls | null>(null);
+  const receptionist = useTestCallReceptionist(businessId);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
@@ -70,7 +101,18 @@ export function DashboardTestCallWidget({
   }
 
   return (
-    <div className={cn("hidden items-center md:flex", className)}>
+    <div className={cn("hidden items-center gap-1.5 md:flex", className)}>
+      {/* Hidden while the business has one active receptionist. */}
+      <ReceptionistSelect
+        align="end"
+        className="w-44"
+        hideLabel
+        label={t("testCall.receptionist")}
+        onChange={receptionist.choose}
+        receptionists={receptionist.options}
+        size="sm"
+        value={receptionist.value}
+      />
       <Button
         aria-label={t("testCall.trigger")}
         onClick={handleTestCallClick}
@@ -99,6 +141,7 @@ export function DashboardTestCallWidget({
         <TestCallAura
           businessId={businessId}
           businessSlug={businessSlug}
+          getStartPayload={receptionist.getStartPayload}
           onCallEnded={() => { setOpen(false); setTestCallActive(false); announceTestCallEnded(); }}
           onRegisterControls={(controls) => {
             voiceControlsRef.current = controls;
@@ -139,6 +182,8 @@ function TestCallAuraPortal({
 type TestCallAuraProps = {
   businessId?: string | undefined;
   businessSlug: string;
+  /** What the call's start request adds: the receptionist chosen to answer. */
+  getStartPayload: () => Promise<Record<string, string>>;
   onCallEnded: () => void;
   onRegisterControls: (controls: WebVoiceControls) => void;
 };
@@ -146,6 +191,7 @@ type TestCallAuraProps = {
 function TestCallAura({
   businessId,
   businessSlug,
+  getStartPayload,
   onCallEnded,
   onRegisterControls,
 }: TestCallAuraProps) {
@@ -162,6 +208,7 @@ function TestCallAura({
       className="w-full"
       // The operator's login authorizes the call; the ID picks the workspace.
       endpoint={businessId ? `${LIVE_WEB_CALL_ENDPOINT}?businessId=${encodeURIComponent(businessId)}` : LIVE_WEB_CALL_ENDPOINT}
+      getStartPayload={getStartPayload}
       onCallEnded={onCallEnded}
       onEvent={handleVoiceEvent}
       onRegisterControls={onRegisterControls}

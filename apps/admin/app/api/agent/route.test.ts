@@ -10,7 +10,6 @@ const fixture = vi.hoisted(() => ({
   save: vi.fn(),
   updateBusiness: vi.fn(),
   loadView: vi.fn(),
-  choices: vi.fn(),
   updateReceptionist: vi.fn(),
 }));
 const tx = vi.hoisted(() => ({ select: () => ({ from: () => ({ where: () => ({ limit: async () => fixture.business }) }) }) }));
@@ -27,7 +26,6 @@ vi.mock("@lobbystack/domain", async (original) => ({
   saveReceptionistProfileInTransaction: fixture.save,
   updateBusinessInTransaction: fixture.updateBusiness,
   loadReceptionistView: fixture.loadView,
-  listReceptionistChoicesInTransaction: fixture.choices,
   updateReceptionistInTransaction: fixture.updateReceptionist,
 }));
 import { GET, PATCH } from "./route";
@@ -42,7 +40,6 @@ beforeEach(() => {
   fixture.business = [{ name: "Clinic" }];
   fixture.save.mockResolvedValue({ id: "profile", isDefault: true });
   fixture.loadView.mockResolvedValue({ id: "profile", isDefault: true, name: "Front desk" });
-  fixture.choices.mockResolvedValue([{ id: "profile", name: "Front desk", isDefault: true }]);
 });
 
 describe("agent settings validation", () => {
@@ -71,6 +68,23 @@ describe("agent settings validation", () => {
     expect((await patch({ locale: "es" }, `?receptionist=${kitsilanoId}`)).status).toBe(200);
     expect(fixture.updateBusiness).not.toHaveBeenCalled();
     expect(fixture.updateReceptionist).toHaveBeenCalledWith(tx, { businessId: "business", actorUserId: "owner", receptionistId: kitsilanoId, patch: { locale: "es" } });
+  });
+
+  it("lets another receptionist speak the business's language again", async () => {
+    fixture.loadView.mockResolvedValue({ id: kitsilanoId, isDefault: false, name: "Kitsilano store", locale: "es" });
+    expect((await patch({ locale: null }, `?receptionist=${kitsilanoId}`)).status).toBe(200);
+    expect(fixture.updateBusiness).not.toHaveBeenCalled();
+    expect(fixture.updateReceptionist).toHaveBeenCalledWith(tx, { businessId: "business", actorUserId: "owner", receptionistId: kitsilanoId, patch: { locale: null } });
+  });
+
+  it("keeps the business's language, which the default receptionist speaks", async () => {
+    fixture.loadView.mockResolvedValue({ id: "profile", isDefault: true, name: "Recepción", locale: null });
+    const response = await patch({ locale: null, greeting: "Hola." });
+    expect(response.status).toBe(400);
+    expect((await response.json()).code).toBe("invalid_locale");
+    expect(fixture.updateBusiness).not.toHaveBeenCalled();
+    expect(fixture.updateReceptionist).not.toHaveBeenCalled();
+    expect(fixture.save).not.toHaveBeenCalled();
   });
 
   it("still moves the business's timezone when another receptionist's settings are open", async () => {
@@ -153,9 +167,9 @@ describe("agent settings validation", () => {
 describe("reading the AI settings", () => {
   const get = (query = "") => GET(new Request(`http://localhost:3000/api/agent${query}`));
 
-  it("returns the default receptionist's settings and the receptionists to pick from", async () => {
+  it("returns the business and the default receptionist's settings", async () => {
     const response = await get();
-    expect(await response.json()).toEqual({ business: { name: "Clinic" }, profile: { id: "profile", isDefault: true, name: "Front desk" }, receptionists: [{ id: "profile", name: "Front desk", isDefault: true }] });
+    expect(await response.json()).toEqual({ business: { name: "Clinic" }, profile: { id: "profile", isDefault: true, name: "Front desk" } });
     expect(fixture.loadView).toHaveBeenCalledWith(tx, { businessId: "business", receptionistId: null });
   });
 

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
-import { listReceptionistChoicesInTransaction, loadReceptionistView, readReceptionistSettingsChange, saveReceptionistProfileInTransaction, updateBusinessInTransaction, updateReceptionistInTransaction } from "@lobbystack/domain";
+import { loadReceptionistView, readReceptionistSettingsChange, saveReceptionistProfileInTransaction, updateBusinessInTransaction, updateReceptionistInTransaction } from "@lobbystack/domain";
 import { businesses } from "@lobbystack/db";
 import { asApiResponse, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { receptionistIdFromRequest } from "@/lib/receptionist-filter";
@@ -21,8 +21,8 @@ export async function GET(request: Request) {
       const business = await tx.select({ id: businesses.id, name: businesses.name, timezone: businesses.timezone, defaultLocale: businesses.defaultLocale }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
       const profile = await loadReceptionistView(tx, { businessId, receptionistId });
       if (receptionistId && !profile) throw jsonError("Receptionist not found.", 404);
-      const receptionists = await listReceptionistChoicesInTransaction(tx, { businessId });
-      return { business: business[0] ?? null, profile, receptionists };
+      // The dropdown lists the receptionists from /api/receptionists/choices, as every other one does.
+      return { business: business[0] ?? null, profile };
     }));
   } catch (error) {
     return asApiResponse(error);
@@ -41,7 +41,9 @@ export async function PATCH(request: Request) {
 
       const speaker = locale !== undefined ? await loadReceptionistView(tx, { businessId, receptionistId }) : null;
       if (locale !== undefined && !speaker) throw jsonError("Receptionist not found.", 404);
-      const businessLocale = speaker?.isDefault ? locale : undefined;
+      // The business always has a language, which the default receptionist speaks.
+      if (locale === null && speaker?.isDefault) throw jsonError("The default receptionist speaks the business's language, so choose one.", 400, "invalid_locale");
+      const businessLocale = speaker?.isDefault && locale ? locale : undefined;
 
       // Opening hours keep their clock times in a new zone; booked appointments keep theirs.
       if (businessLocale !== undefined || timezone !== undefined) {

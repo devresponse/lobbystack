@@ -11,7 +11,7 @@
     },
     "receptionists": {
       "title": "Recepcionistas",
-      "description": "Quién responde a sus llamadas, chats y páginas. Agregue uno para cada sede, equipo o idioma."
+      "description": "Quién responde a sus llamadas, chats y páginas. Agregue una para cada sede, equipo o idioma."
     },
     "knowledge": {
       "title": "Conocimiento",
@@ -410,5 +410,26 @@
     "edit": "Editar",
     "cancel": "Cancelar",
     "notSet": "Sin definir"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Comunes a todas las recepcionistas",
+      "description": "El resumen del negocio, lo que oye quien llama sobre la IA y la grabación, el idioma y la zona horaria del negocio, el horario y las reglas para las citas."
+    },
+    "own": {
+      "title": "Propios de cada recepcionista",
+      "description": "Su saludo, idioma, número de transferencia y reservas. Elija la recepcionista que quiere cambiar."
+    },
+    "picker": "Recepcionista",
+    "businessLanguage": {
+      "label": "Idioma del negocio",
+      "hint": "Lo habla la recepcionista predeterminada y cada recepcionista sin un idioma propio. Las llamadas cambian al idioma de la persona que llama si habla otro, y los resúmenes de llamadas se escriben en él."
+    },
+    "language": {
+      "label": "Idioma",
+      "hint": "Sus llamadas empiezan en este idioma y cambian al de la persona que llama si habla otro.",
+      "defaultHint": "La recepcionista predeterminada habla el idioma del negocio, que se define en los ajustes comunes de arriba.",
+      "business": "Idioma del negocio ({{language}})"
+    }
   }
 }

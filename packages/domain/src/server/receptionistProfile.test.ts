@@ -52,6 +52,10 @@ describe("readReceptionistSettingsChange", () => {
     expect(readReceptionistSettingsChange({ locale })).toEqual({ patch: {}, locale, regenerateSummary: false });
   });
 
+  it("takes null as speaking the business's language, which only another receptionist can", () => {
+    expect(readReceptionistSettingsChange({ locale: null })).toEqual({ patch: {}, locale: null, regenerateSummary: false });
+  });
+
   it("keeps only the policy's known fields, and the longest allowed text", () => {
     const policy = { enabled: true, allowCancel: false, allowReschedule: true, verificationMode: "otp_required" };
     const longest = "x".repeat(RECEPTIONIST_TEXT_MAX_LENGTH);

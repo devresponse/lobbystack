@@ -112,7 +112,8 @@
       "rateLimited": "Trop d’appels test ont été lancés. Veuillez réessayer bientôt.",
       "unavailable": "Votre réceptionniste IA est indisponible pour le moment.",
       "generic": "Une erreur est survenue au démarrage de l’appel."
-    }
+    },
+    "receptionist": "Réceptionniste des appels test"
   },
   "appointments": {
     "title": "Rendez-vous",

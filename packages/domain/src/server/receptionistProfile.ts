@@ -41,8 +41,12 @@ export type ReceptionistProfilePatch = {
 
 export type ReceptionistSettingsChange = {
   patch: ReceptionistProfilePatch;
-  /** The business's default customer language, which calls open in. */
-  locale?: RuntimeLocale;
+  /**
+   * The language the receptionist's calls open in: for the default one the
+   * business's default customer language; null has another receptionist speak
+   * the business's.
+   */
+  locale?: RuntimeLocale | null;
   timezone?: string;
   /** Hands the summary back to AI, which rewrites it from the knowledge sources. */
   regenerateSummary: boolean;
@@ -98,7 +102,7 @@ export function readReceptionistSettingsChange(body: unknown): ReceptionistSetti
   const patch = { ...fields, ...(policy !== undefined ? { appointmentChangePolicy: policy } : {}), ...(bookingMode !== undefined ? { bookingMode } : {}), ...(recordingNotice !== undefined ? { recordingNotice } : {}) } as ReceptionistProfilePatch;
 
   const locale = input.locale;
-  if (locale !== undefined && !isRuntimeLocale(locale)) throw invalid("locale is invalid.");
+  if (locale !== undefined && locale !== null && !isRuntimeLocale(locale)) throw invalid("locale is invalid.");
   const timezone = input.timezone;
   if (timezone !== undefined && typeof timezone !== "string") throw invalid("timezone must be a string.");
   const regenerateSummary = input.regenerateSummary;

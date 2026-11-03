@@ -1,6 +1,6 @@
 # Publish a business's page and QR code
 
-Each business can publish a public page at `/profile/<slug>` on its deployment, with the website chat and call built in, and print QR code signs that open it. Both came from the fork (fork PRs #28, #29 and #33). Since fork PR #RCPR, a business with several receptionists also has a page for each receptionist, and QR links that open one and count the sign's scans ([receptionists](receptionists.md)). Checked against `main` at `da1f548`, and the receptionist parts against the code of fork PR #RCPR.
+Each business can publish a public page at `/profile/<slug>` on its deployment, with the website chat and call built in, and print QR code signs that open it. Both came from the fork (fork PRs #28, #29 and #33). Since fork PR #129, a business with several receptionists also has a page for each receptionist, and QR links that open one and count the sign's scans ([receptionists](receptionists.md)). Checked against `main` at `da1f548`, and the receptionist parts against the code of fork PR #129.
 
 ## Publish the public profile
 
@@ -22,8 +22,8 @@ With several receptionists, the default one answers the business page, and a **Y
 | --- | --- |
 | Table | `business_public_profiles` (migration `0100`), opt-in, with forced row-level security; `app.resolve_public_profile` finds a published page by slug. |
 | Logic | `packages/domain/src/server/publicProfiles.ts`. `getPublicProfilePage` reads a page, and with a handle a receptionist's page. |
-| Pages | `apps/admin/app/(profile)/profile/[slug]/page.tsx` and, since fork PR #RCPR, `[slug]/[handle]/page.tsx`, both rendered by `apps/admin/src/components/public-profile/profile-route.tsx`, with the dropdown in `receptionist-picker.tsx`. |
-| Dashboard API | `GET` and `PUT /api/business-profile`, and since fork PR #RCPR `PUT /api/receptionists/listed` for the receptionists the page lists and their order. |
+| Pages | `apps/admin/app/(profile)/profile/[slug]/page.tsx` and, since fork PR #129, `[slug]/[handle]/page.tsx`, both rendered by `apps/admin/src/components/public-profile/profile-route.tsx`, with the dropdown in `receptionist-picker.tsx`. |
+| Dashboard API | `GET` and `PUT /api/business-profile`, and since fork PR #129 `PUT /api/receptionists/listed` for the receptionists the page lists and their order. |
 | v1 API (fork PR #33) | `GET` and `PATCH /public-profile` (`business:read`, `business:write`). The first `PATCH` saves the dashboard's defaults, and a `PATCH` that changes nothing writes nothing. |
 | CLI | `lobbystack public-profile get`, `set`, `address`, `publish` and `unpublish`, and `public_profile:` in a `lobbystack onboard` manifest. |
 
@@ -31,7 +31,7 @@ Not built: changing a business's slug, custom domains or subdomains per business
 
 ## Print QR code signs
 
-**Settings > QR code** (`/settings/qrcode`, fork PR #29) makes printable signs, in the browser. Until fork PR #RCPR a sign could only carry the public page's address, and nothing was stored. Since then the page starts with **Your QR codes**: the business page's own address, then the business's QR links, each a short address, `/q/<code>`, stored in `entry_links`, that opens one receptionist's page and counts the scans of the signs that carry it. The sign below the table is made for the address picked in its **Link** dropdown, and a link's sign has a chart of its scans per day ([use QR links](receptionists.md#use-qr-links)). A sign printed before QR links carries the business page's address, which keeps working.
+**Settings > QR code** (`/settings/qrcode`, fork PR #29) makes printable signs, in the browser. Until fork PR #129 a sign could only carry the public page's address, and nothing was stored. Since then the page starts with **Your QR codes**: the business page's own address, then the business's QR links, each a short address, `/q/<code>`, stored in `entry_links`, that opens one receptionist's page and counts the scans of the signs that carry it. The sign below the table is made for the address picked in its **Link** dropdown, and a link's sign has a chart of its scans per day ([use QR links](receptionists.md#use-qr-links)). A sign printed before QR links carries the business page's address, which keeps working.
 
 - Templates: Signal, Front desk and Night.
 - Sizes on an A4 sheet: one A4, two A5, four A6 or eight A7, with cut lines, each piece 5 mm inside its edge.

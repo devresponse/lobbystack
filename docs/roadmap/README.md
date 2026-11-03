@@ -27,7 +27,7 @@ Each feature has a status:
 
 | Feature | What it gives | Effort | Status | Study |
 | --- | --- | --- | --- | --- |
-| [Take several receptionists further](receptionists-next.md) | Receptionists in the API and integrations, a chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and team members limited to some receptionists | 2 to 5 days each; 5 or more for limited members | Ready when needed; more numbers waits on a decision about plans | The design of 2026-11-02, built in fork PR #RCPR ([receptionists](../features/receptionists.md)) |
+| [Take several receptionists further](receptionists-next.md) | Receptionists in the API and integrations, a chat handed to another receptionist, alerts and opening hours per receptionist, more numbers per business, and team members limited to some receptionists | 2 to 5 days each; 5 or more for limited members | Ready when needed; more numbers waits on a decision about plans | The design of 2026-11-02, built in fork PR #129 ([receptionists](../features/receptionists.md)) |
 
 **Calls and conversations**
 

@@ -2,7 +2,7 @@
 
 The dashboard's **Messages** page is the team's inbox: texts, website chats and the messages the receptionist took on calls, one row per conversation, newest first, with **All**, **Web** and **SMS** filters and a search. Since fork PR #108, an owner or admin can archive a conversation to take it off that list, such as a test chat or a thread that's finished, and restore it later. Archiving only hides the conversation: migration `0132` adds `conversations.archived_at`, and nothing is deleted. Checked against the code of fork PR #108.
 
-With several receptionists (fork PR #RCPR), **Messages** also has a receptionist filter, kept in the address as `?receptionist=<id>` (`GET /api/messages?receptionist=<id>`), and an open conversation says which receptionist answered it, such as "Receptionist: Sales". A conversation from before receptionists shows the default receptionist ([receptionists](receptionists.md#know-who-answered)).
+With several receptionists (fork PR #129), **Messages** also has a receptionist filter, kept in the address as `?receptionist=<id>` (`GET /api/messages?receptionist=<id>`), and an open conversation says which receptionist answered it, such as "Receptionist: Sales". A conversation from before receptionists shows the default receptionist ([receptionists](receptionists.md#know-who-answered)).
 
 ## Archive a conversation
 

@@ -1,6 +1,6 @@
 # Take several receptionists further
 
-Since fork PR #RCPR a business can have several receptionists, each with its own name, greeting, language, knowledge, page, numbers, widgets and QR links ([receptionists](../features/receptionists.md)). The design of 2026-11-02 left these for later, each its own pull request, to build when businesses ask for them. The efforts are the design's estimates for one developer.
+Since fork PR #129 a business can have several receptionists, each with its own name, greeting, language, knowledge, page, numbers, widgets and QR links ([receptionists](../features/receptionists.md)). The design of 2026-11-02 left these for later, each its own pull request, to build when businesses ask for them. The efforts are the design's estimates for one developer.
 
 - **Status:** ready when needed, except more numbers per business, which waits on a decision about plans.
 - **Effort:** 2 to 5 days each, and 5 or more for team members limited to some receptionists.

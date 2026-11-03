@@ -28,7 +28,7 @@ The call button shows only when the business has an active voice number, the bus
 
 ## Choose the widget's receptionist
 
-Since fork PR #RCPR a business can have several receptionists. Each widget key names the one that answers its chats and calls: **Receptionist** on the key in **Settings > Website widget**, which a new key sets to the default receptionist unless the form picks another. While that receptionist is paused or archived, the default one answers.
+Since fork PR #129 a business can have several receptionists. Each widget key names the one that answers its chats and calls: **Receptionist** on the key in **Settings > Website widget**, which a new key sets to the default receptionist unless the form picks another. While that receptionist is paused or archived, the default one answers.
 
 - **On the business's own pages,** the page decides instead. `/profile/<slug>` and `/profile/<slug>/<handle>` sign a token naming their receptionist (`createReceptionistPageToken` in `apps/admin/src/lib/widget-keys.ts`, with a key derived from `WIDGET_SESSION_SECRET`), the page's script tag carries it as `data-receptionist-token`, the loader sends it with the session request as `receptionistToken`, and `/api/widget/session` checks it was signed for this business and this key before it puts the receptionist in the session token. A token that doesn't check out is logged as `widget.receptionist_token_rejected` and the key's receptionist answers.
 - **The chat and the call** answer with that receptionist's view of the business's snapshot, and `/api/widget/config` returns its name (`receptionist`), never what it helps with.

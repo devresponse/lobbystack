@@ -25,7 +25,7 @@ Text entries reach calls and chats only through the business's snapshot, which `
 
 ## Give articles to chosen receptionists
 
-Since fork PR #RCPR a business can have several receptionists that share one library, and each article (a file, a website page or a text entry) is available to everyone or to chosen receptionists ([receptionists](../features/receptionists.md#give-each-receptionist-its-knowledge)).
+Since fork PR #129 a business can have several receptionists that share one library, and each article (a file, a website page or a text entry) is available to everyone or to chosen receptionists ([receptionists](../features/receptionists.md#give-each-receptionist-its-knowledge)).
 
 - **Tables:** `knowledge_documents.audience` and `knowledge_snippets.audience` (`everyone` or `chosen`), with `knowledge_document_receptionists` and `knowledge_snippet_receptionists` naming who a chosen article is for, and `knowledge_website_rules`, whose rows give a crawled site's pages under a path to one receptionist (migration `0136`). The worker applies a website's rules to each page it saves, so later crawls follow them.
 - **Who may use what:** a receptionist whose `knowledge_scope` is `all`, as the default receptionist's is, uses every article; one whose scope is `audience` uses the articles for everyone and those chosen for it. An article chosen only for archived receptionists, or for none, is left to the default receptionist. `receptionistMayUse` (`packages/shared/src/receptionists.ts`) and the filter in `searchKnowledgeEvidence` follow the same rule.

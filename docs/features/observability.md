@@ -1,6 +1,6 @@
 # Follow logs, errors and alerts
 
-Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #RCPR.
+Every service writes one JSON line per log event to standard output, which Railway's log viewer shows. With PostHog's variables set, errors, product events and logs also reach PostHog. Since fork PR #41 every log line, error, span and job of a call carries that call's IDs, so one call's whole story can be pulled up at once. This page covers the variables, how to follow a call or a sign-in, what to alert on, and what isn't set up yet. [Telemetry architecture](../telemetry/architecture.md) is the reference for events and traces. Checked against `main` at `1a2c81b`; sign-in lines, against the code of fork PR #104; receptionist lines, against the code of fork PR #129.
 
 ## Set the variables
 
@@ -27,7 +27,7 @@ Since fork PR #41, `withCallContext`, `logEvent`, `reportError` and `reportWarni
 
 The website chat isn't a call, but since fork PR #79 its lines carry `businessId`, and those about one chat its `conversationId`: `widget.chat_reply` for each answer (`durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and token counts), `widget.chat_refused` with the `status` and `code`, and `widget.team_request` with its `outcome`. A failed answer is an `[admin] exception:` line, and a PostHog error, with the `errorId` the widget shows and a `category` that says why ([website widget](website-widget.md#find-out-why-a-reply-failed)).
 
-Since fork PR #RCPR a business can have several receptionists ([receptionists](receptionists.md#deploy-it)). These lines say when the receptionist a visitor's page named didn't answer the chat; the one the widget key names answered instead, or the default one:
+Since fork PR #129 a business can have several receptionists ([receptionists](receptionists.md#deploy-it)). These lines say when the receptionist a visitor's page named didn't answer the chat; the one the widget key names answered instead, or the default one:
 
 - `widget.receptionist_token_rejected`, a warning: the page's signed token didn't check out, with the `businessId`, the `widgetKeyId` and a `reason`. `invalid` is a token this deployment didn't sign, one past its 30 days, or one signed before the widget's secret changed (`WIDGET_SESSION_SECRET`, or `BETTER_AUTH_SECRET` when it's unset); `other_widget` is one signed for another business or widget key.
 - `widget.receptionist_token_archived`: the page's receptionist was archived after the visitor opened the page.

@@ -922,6 +922,8 @@ export const knowledgeDocuments = pgTable(
     uniqueIndex("knowledge_documents_business_url_unique").on(table.businessId, table.sourceUrl),
     index("knowledge_documents_title_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.title})`),
     uniqueIndex("knowledge_documents_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's documents (migration 0141).
+    index("knowledge_documents_business_ranked_idx").on(table.businessId, table.updatedAt.desc(), table.id).where(sql`${table.active} and ${table.status} = 'indexed'`),
   ],
 );
 
@@ -962,6 +964,8 @@ export const knowledgeSnippets = pgTable(
   (table) => [
     index("knowledge_snippets_business_active_idx").on(table.businessId, table.active),
     uniqueIndex("knowledge_snippets_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's text entries (migration 0142).
+    index("knowledge_snippets_business_ranked_idx").on(table.businessId, table.priority.desc(), table.updatedAt.desc(), table.id).where(sql`${table.active}`),
   ],
 );
 

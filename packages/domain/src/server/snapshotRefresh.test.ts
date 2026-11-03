@@ -68,6 +68,7 @@ function makeTx(selectRows: Record<string, unknown>) {
     return name in selectRows ? selectRows[name] : [];
   };
   const tx = {
+    execute: vi.fn(async (statement: SQL) => { executed.push(new PgDialect().sqlToQuery(statement).sql); return { rows: [] }; }),
     select: vi.fn(() => fromChain(rowsFor)),
     insert: vi.fn(() => ({ values: () => Promise.resolve([{ id: "saved" }]) })),
     delete: vi.fn((table: unknown) => ({ where: (condition: SQL) => { deleted.push({ table: tableName(table), where: new PgDialect().sqlToQuery(condition) }); return Promise.resolve(); } })),
@@ -97,10 +98,12 @@ function makeTx(selectRows: Record<string, unknown>) {
 
 const businessRow = { id: businessId, name: "Maple Family Clinic", timezone: "America/Toronto", defaultLocale: "en" };
 let deleted: { table: string; where: { sql: string; params: unknown[] } }[] = [];
+let executed: string[] = [];
 
 beforeEach(() => {
   vi.clearAllMocks();
   deleted = [];
+  executed = [];
   vi.stubEnv("REDIS_PREFIX", "lobbystack");
   mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => await callback(makeTx({ businesses: [businessRow], receptionist_profiles: [profileRow] })));
   mocks.enqueueOutbox.mockResolvedValue(undefined);
@@ -113,6 +116,11 @@ afterEach(() => {
 });
 
 describe("refreshBusinessSnapshot write-through", () => {
+  it("turns query compiling off for the whole rebuild, before its first read", async () => {
+    await refreshBusinessSnapshot({ db: {} as never, snapshotCache: memoryCache() }, { businessId });
+    expect(executed[0]).toBe("SET LOCAL jit = off");
+  });
+
   it("preserves business identity, active contact numbers, locale labels, and opt-out", async () => {
     // The number customer texts come from, which the business's plan decides.
     mocks.resolveSmsSender.mockResolvedValue("+14165550003");

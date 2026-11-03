@@ -560,6 +560,10 @@ async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearch
   const select = sql`WITH ${reader} SELECT ${fields} ${from}`;
   const execute = (statement: ReturnType<typeof sql>) => withBusinessTransaction(context.db, actor, async tx => {
     await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+    // The audience filter's subqueries inflate the planner's estimates past
+    // jit_above_cost on a business with thousands of passages, and compiling
+    // the query then costs more than running it.
+    await tx.execute(sql`SET LOCAL jit = off`);
     return (await tx.execute<KnowledgePassage>(statement)).rows;
   });
   const lexicalQueries = knowledgeLexicalQueries(terms);
@@ -688,6 +692,8 @@ export async function traceKnowledgeSearch(context: DomainContext, input: { busi
   const reach = knowledgeSearchReach(input.businessId, input.receptionistId);
   const read = async <T extends Record<string, unknown>>(statement: SQL): Promise<T[]> => await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async tx => {
     await tx.execute(sql`SET LOCAL statement_timeout = '2000ms'`);
+    // As in the search: the count shares its audience filter.
+    await tx.execute(sql`SET LOCAL jit = off`);
     return (await tx.execute<T>(statement)).rows as T[];
   });
   const lexicalRows = stages.lexical.status === "fulfilled" ? stages.lexical.value : [];
@@ -811,6 +817,10 @@ export async function refreshBusinessSnapshot(
   const startedAt = performance.now();
   let builtSnapshot: BusinessContextSnapshot | undefined;
   const version = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    // Each receptionist's ranking (rankArticlesForReceptionists) has per-row
+    // audience subqueries whose estimates cross jit_above_cost with a few
+    // receptionists, and compiling them took longer than the ranking itself.
+    await tx.execute(sql`SET LOCAL jit = off`);
     const [found] = await tx.select({ business: businesses, published: businessPublicProfiles.published }).from(businesses)
       .leftJoin(businessPublicProfiles, eq(businessPublicProfiles.businessId, businesses.id))
       .where(eq(businesses.id, input.businessId))

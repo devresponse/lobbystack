@@ -65,6 +65,8 @@ describe("knowledge evidence", () => {
     expect(match.content.slice(match.focusStart, match.focusEnd)).toBe(current.find(row => row.chunkId === match.chunkId)!.content);
     expect(result.matches[0]?.content).toContain("MNGT 10407");
     expect(statements.filter(value => value.includes("LIMIT 12"))).toHaveLength(2);
+    // Each read turns query compiling off: the audience filter's estimates would trigger it.
+    expect(statements.filter(value => value === "SET LOCAL jit = off").length).toBe(statements.filter(value => value.startsWith("SET LOCAL statement_timeout")).length);
   });
   it("marks where the ranked chunk sits between its neighbors", async () => {
     const before = { ...primary, chunkId: "before", sequence: 0, content: "Earlier section about mailboxes." };

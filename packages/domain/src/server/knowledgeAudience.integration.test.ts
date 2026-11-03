@@ -18,6 +18,7 @@ import {
   outboxMessages,
   receptionistProfiles,
   rlsContextStatement,
+  storageObjects,
   users,
   websiteIngestionJobs,
   type Database,
@@ -27,7 +28,7 @@ import {
 import { snapshotForReceptionist } from "../snapshot";
 import { loadBusinessHoursInput } from "./businessHours";
 import { loadBusinessSummaryInput } from "./businessSummary";
-import { loadLatestBusinessSnapshot, refreshBusinessSnapshot, searchKnowledgeEvidence } from "./knowledge";
+import { createKnowledgeDocument, createKnowledgeSnippet, loadLatestBusinessSnapshot, refreshBusinessSnapshot, searchKnowledgeEvidence, updateKnowledgeSnippet } from "./knowledge";
 import {
   applyWebsiteRulesInTransaction,
   changeKnowledgeAudienceInTransaction,
@@ -39,6 +40,7 @@ import {
   setKnowledgeArticleAudienceInTransaction,
 } from "./knowledgeAudience";
 import { archiveReceptionistInTransaction, createReceptionistInTransaction, setReceptionistStatusInTransaction, updateReceptionistInTransaction } from "./receptionists";
+import { finalizeUpload, type StorageProvider } from "./storage";
 import { createBusiness } from "./tenancy";
 
 // Explicit opt-in only; never fall back to DATABASE_URL or load an env file.
@@ -193,6 +195,99 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
       await asOwner(tx, { userId, businessId });
       expect(await choose(theirs, [gastown.id])).toMatchObject({ status: 404, code: "knowledge_not_found" });
       expect(await audienceOf(tx, "document", theirs)).toEqual({ audience: "everyone", receptionistIds: [] });
+    });
+  });
+
+  it("saves who a new text entry, file or website's pages are for in the same save, or saves nothing", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, userId, gastown, kitsilano } = await seedStores(tx);
+      const owner = { userId, businessId };
+      const snippetTitled = async (title: string) => {
+        await as(tx, null);
+        return (await tx.select({ id: knowledgeSnippets.id }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.title, title))))[0]?.id;
+      };
+
+      // A text entry for one store, then for everyone, then for both stores.
+      await asOwner(tx, owner);
+      const parking = await createKnowledgeSnippet(context, { ...owner, title: "Gastown parking", content: "Park on Water Street.", audience: { audience: "chosen", receptionistIds: [gastown.id] } });
+      expect(await audienceOf(tx, "snippet", parking)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
+      await asOwner(tx, owner);
+      const hours = await createKnowledgeSnippet(context, { ...owner, title: "Holiday hours", content: "Closed on December 25.", audience: { audience: "everyone" } });
+      expect(await audienceOf(tx, "snippet", hours)).toEqual({ audience: "everyone", receptionistIds: [] });
+      await asOwner(tx, owner);
+      await updateKnowledgeSnippet(context, { ...owner, snippetId: parking, content: "Park on Water Street or Cordova.", audience: { audience: "chosen", receptionistIds: [gastown.id, kitsilano.id] } });
+      expect(await audienceOf(tx, "snippet", parking)).toEqual({ audience: "chosen", receptionistIds: sorted(gastown.id, kitsilano.id) });
+      await asOwner(tx, owner);
+      await updateKnowledgeSnippet(context, { ...owner, snippetId: parking, title: "Parking" });
+      expect(await audienceOf(tx, "snippet", parking)).toEqual({ audience: "chosen", receptionistIds: sorted(gastown.id, kitsilano.id) });
+
+      // A receptionist that can't be chosen keeps the entry from being saved at all, never saved for everyone.
+      await asOwner(tx, owner);
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: kitsilano.id });
+      await asOwner(tx, owner);
+      expect(await failure(tx, (inner) => createKnowledgeSnippet({ db: inner as unknown as Database }, { ...owner, title: "Kitsilano patio", content: "The patio opens in May.", audience: { audience: "chosen", receptionistIds: [kitsilano.id] } })))
+        .toMatchObject({ status: 409, code: "receptionist_archived" });
+      expect(await snippetTitled("Kitsilano patio")).toBeUndefined();
+      await asOwner(tx, owner);
+      expect(await failure(tx, (inner) => updateKnowledgeSnippet({ db: inner as unknown as Database }, { ...owner, snippetId: hours, content: "Closed all week.", audience: { audience: "chosen", receptionistIds: [randomUUID()] } })))
+        .toMatchObject({ status: 404, code: "receptionist_not_found" });
+      await as(tx, null);
+      expect((await tx.select({ content: knowledgeSnippets.content }).from(knowledgeSnippets).where(eq(knowledgeSnippets.id, hours)))[0]!.content).toBe("Closed on December 25.");
+
+      // A file for one store is chosen as it is added, before it is read.
+      const storage = (checksum: string): StorageProvider => ({
+        createUpload: async () => ({ url: "https://storage.invalid/upload" }),
+        headObject: async () => ({ length: 3, contentType: "text/plain", checksum }),
+      } as unknown as StorageProvider);
+      const pendingUpload = async (purpose: "knowledge" | "attachment", checksum: string) => {
+        await as(tx, null);
+        const objectId = randomUUID();
+        await tx.insert(storageObjects).values({ id: objectId, businessId, objectKey: `businesses/${businessId}/${objectId}`, purpose, fileName: "menu.txt", contentType: "text/plain", contentLength: 3, checksum, status: "pending" });
+        return objectId;
+      };
+      const finalize = (db: DatabaseTransaction, objectId: string, checksum: string, audience: Parameters<typeof finalizeUpload>[1]["audience"]) =>
+        finalizeUpload({ db: db as unknown as Database } as Parameters<typeof finalizeUpload>[0], { ...owner, objectId, length: 3, contentType: "text/plain", checksum, title: "Gastown menu", audience }, storage(checksum));
+      const menuUpload = await pendingUpload("knowledge", "c3VtLW1lbnU=");
+      await asOwner(tx, owner);
+      await finalize(tx, menuUpload, "c3VtLW1lbnU=", { audience: "chosen", receptionistIds: [gastown.id] });
+      await as(tx, null);
+      const [menu] = await tx.select({ id: knowledgeDocuments.id, status: knowledgeDocuments.status }).from(knowledgeDocuments).where(eq(knowledgeDocuments.storageObjectId, menuUpload));
+      expect(menu!.status).toBe("pending");
+      expect(await audienceOf(tx, "document", menu!.id)).toEqual({ audience: "chosen", receptionistIds: [gastown.id] });
+
+      // An archived receptionist leaves the upload waiting, with no document; an attachment takes no audience.
+      const patioUpload = await pendingUpload("knowledge", "c3VtLXBhdGlv");
+      await asOwner(tx, owner);
+      expect(await failure(tx, (inner) => finalize(inner, patioUpload, "c3VtLXBhdGlv", { audience: "chosen", receptionistIds: [kitsilano.id] }))).toMatchObject({ status: 409, code: "receptionist_archived" });
+      await as(tx, null);
+      expect((await tx.select({ status: storageObjects.status }).from(storageObjects).where(eq(storageObjects.id, patioUpload)))[0]!.status).toBe("pending");
+      expect(await tx.select().from(knowledgeDocuments).where(eq(knowledgeDocuments.storageObjectId, patioUpload))).toEqual([]);
+      const attachment = await pendingUpload("attachment", "c3VtLWZpbGU=");
+      await asOwner(tx, owner);
+      expect(await failure(tx, (inner) => finalize(inner, attachment, "c3VtLWZpbGU=", { audience: "chosen", receptionistIds: [gastown.id] }))).toMatchObject({ status: 400, code: "invalid_audience" });
+
+      // A website and its page rules are added together, so the first crawled page follows them.
+      await asOwner(tx, owner);
+      const site = await createKnowledgeDocument(context, { ...owner, title: "https://kitsilanocoffee.ca", sourceType: "website", sourceUrl: "https://kitsilanocoffee.ca", websiteRules: [{ pathPrefix: "/stores/gastown/", receptionistId: gastown.id }] });
+      await asOwner(tx, owner);
+      expect((await listWebsiteRulesInTransaction(tx, { businessId })).map((rule) => [rule.rootDocumentId, rule.pathPrefix, rule.receptionistId])).toEqual([[site, "/stores/gastown/", gastown.id]]);
+      await as(tx, null);
+      expect(await tx.select({ id: outboxMessages.id }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "knowledge.crawlWebsite"), eq(outboxMessages.aggregateId, site)))).toHaveLength(1);
+
+      // Adding the same site again keeps the rules it has and adds the new ones.
+      await asOwner(tx, owner);
+      expect(await createKnowledgeDocument(context, { ...owner, title: "https://kitsilanocoffee.ca", sourceType: "website", sourceUrl: "https://kitsilanocoffee.ca/", websiteRules: [{ pathPrefix: "/stores/gastown/", receptionistId: gastown.id }, { pathPrefix: "/deals/", receptionistId: gastown.id }] })).toBe(site);
+      await asOwner(tx, owner);
+      expect((await listWebsiteRulesInTransaction(tx, { businessId })).map((rule) => rule.pathPrefix)).toEqual(["/deals/", "/stores/gastown/"]);
+
+      // A rule for an archived receptionist stops the whole import; rules belong to websites.
+      await asOwner(tx, owner);
+      expect(await failure(tx, (inner) => createKnowledgeDocument({ db: inner as unknown as Database }, { ...owner, title: "https://kitsilanocoffee.com", sourceType: "website", sourceUrl: "https://kitsilanocoffee.com", websiteRules: [{ pathPrefix: "/", receptionistId: kitsilano.id }] })))
+        .toMatchObject({ status: 409, code: "receptionist_archived" });
+      await as(tx, null);
+      expect(await tx.select().from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.sourceUrl, "https://kitsilanocoffee.com/")))).toEqual([]);
+      await asOwner(tx, owner);
+      await expect(createKnowledgeDocument(context, { ...owner, title: "Menu", sourceType: "upload", storageObjectId: randomUUID(), websiteRules: [{ pathPrefix: "/", receptionistId: gastown.id }] })).rejects.toMatchObject({ status: 400, code: "invalid_website_rule" });
     });
   });
 

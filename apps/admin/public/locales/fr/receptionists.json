@@ -174,5 +174,27 @@
     "save": "Enregistrer les modifications",
     "adding": "Ajout…",
     "add": "Ajouter une réceptionniste"
+  },
+  "audience": {
+    "label": "Disponible pour",
+    "everyone": "Toutes",
+    "chosen": "Réceptionnistes choisies",
+    "receptionists": "Réceptionnistes concernées",
+    "chosenOf_one": "{{count}} sur {{total}} choisie",
+    "chosenOf_many": "{{count}} sur {{total}} choisies",
+    "chosenOf_other": "{{count}} sur {{total}} choisies",
+    "required": "Choisissez au moins une réceptionniste, ou rendez-le disponible pour toutes.",
+    "hint": "Les articles réservés à des réceptionnistes choisies restent hors du résumé de l'entreprise.",
+    "hintAll": "{{name}} répond à partir de tout. Les articles réservés à des réceptionnistes choisies restent hors du résumé de l'entreprise.",
+    "byRule": "par règle",
+    "ruleNote": "Une règle de site web a choisi cette page. Ce que vous enregistrez ici reste si la règle est supprimée, et la règle rajoute sa réceptionniste à chaque nouvelle exploration du site.",
+    "errors": {
+      "archived": "L'une des réceptionnistes choisies a été archivée. Actualisez la page et choisissez à nouveau.",
+      "articleGone": "Cet article n'existe plus. Actualisez la page.",
+      "articles": "Sélectionnez entre 1 et {{max}} articles.",
+      "ruleExists": "Ce site donne déjà ce chemin à cette réceptionniste.",
+      "rulePath": "Saisissez un chemin du site, par exemple /stores/kitsilano/.",
+      "ruleGone": "Cette règle n'existe plus. Actualisez la page."
+    }
   }
 }

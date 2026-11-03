@@ -33,7 +33,7 @@ export type ReceptionistMultiSelectProps = {
   disabled?: boolean;
   invalid?: boolean;
   /** The id of a message about the field, such as why it can't be empty. */
-  describedBy?: string;
+  describedBy?: string | undefined;
   alwaysShow?: boolean;
   className?: string | undefined;
 };

@@ -69,6 +69,12 @@ export type WebsiteRule = {
 
 export type WebsiteRuleInput = { rootDocumentId: string; pathPrefix: string; receptionistId: string };
 
+/** A rule a website import asks for: a path on the site the import adds, and its receptionist. */
+export type WebsiteImportRule = Omit<WebsiteRuleInput, "rootDocumentId">;
+
+/** How many rules one website import may ask for: one per receptionist and path, for the largest deployments. */
+export const MAX_WEBSITE_RULES_PER_IMPORT = MAX_RECEPTIONISTS_PER_REQUEST;
+
 /** The receptionists each chosen article is for; articles for everyone have no entry. */
 export type KnowledgeAudienceLinks = {
   documents: Record<string, Array<{ receptionistId: string; websiteRuleId: string | null }>>;
@@ -118,14 +124,37 @@ export function readKnowledgeAudienceChange(body: unknown): KnowledgeAudienceCha
   return { documentIds, snippetIds, audience: "chosen", mode: body.mode as KnowledgeAudienceMode, receptionistIds: readChosenReceptionists(body.receptionistIds) };
 }
 
+/** A path on a site and the receptionist its pages go to, from one rule in a request body. */
+function readRuleTarget(body: Record<string, unknown>): WebsiteImportRule {
+  if (typeof body.receptionistId !== "string" || !isUuid(body.receptionistId)) throw failure("receptionistId must be a receptionist's id.", 400, "invalid_website_rule");
+  const pathPrefix = typeof body.pathPrefix === "string" ? normalizeWebsiteRulePath(body.pathPrefix) : null;
+  if (!pathPrefix) throw failure("Enter a path on the site, such as /stores/kitsilano/.", 400, "invalid_website_rule");
+  return { pathPrefix, receptionistId: body.receptionistId.toLowerCase() };
+}
+
 /** A website rule from a request body: a website source, a path on it and a receptionist. */
 export function readWebsiteRuleInput(body: unknown): WebsiteRuleInput {
   if (!isRecord(body)) throw failure("A JSON object is required.", 400, "invalid_website_rule");
   if (typeof body.rootDocumentId !== "string" || !isUuid(body.rootDocumentId)) throw failure("rootDocumentId must be a website's id.", 400, "invalid_website_rule");
-  if (typeof body.receptionistId !== "string" || !isUuid(body.receptionistId)) throw failure("receptionistId must be a receptionist's id.", 400, "invalid_website_rule");
-  const pathPrefix = typeof body.pathPrefix === "string" ? normalizeWebsiteRulePath(body.pathPrefix) : null;
-  if (!pathPrefix) throw failure("Enter a path on the site, such as /stores/kitsilano/.", 400, "invalid_website_rule");
-  return { rootDocumentId: body.rootDocumentId, pathPrefix, receptionistId: body.receptionistId };
+  return { rootDocumentId: body.rootDocumentId, ...readRuleTarget(body) };
+}
+
+/**
+ * The rules a website import asks for, from a request body's websiteRules:
+ * none when it names none, each path once per receptionist. Throws a 400 for
+ * anything it can't use.
+ */
+export function readWebsiteImportRules(value: unknown): WebsiteImportRule[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) throw failure("websiteRules must be a list of rules.", 400, "invalid_website_rule");
+  if (value.length > MAX_WEBSITE_RULES_PER_IMPORT) throw failure(`Add up to ${MAX_WEBSITE_RULES_PER_IMPORT} rules with a website.`, 400, "invalid_website_rule");
+  const rules = new Map<string, WebsiteImportRule>();
+  for (const entry of value) {
+    if (!isRecord(entry)) throw failure("Each website rule needs a path and a receptionist.", 400, "invalid_website_rule");
+    const rule = readRuleTarget(entry);
+    rules.set(`${rule.pathPrefix} ${rule.receptionistId}`, rule);
+  }
+  return [...rules.values()];
 }
 
 /**
@@ -424,6 +453,27 @@ export async function createWebsiteRuleInTransaction(
   });
   if (pages) await refreshAfterAudienceChange(tx, businessId, "website_rule_created");
   return { id: created.id, rootDocumentId: site.id, siteUrl: site.sourceUrl, pathPrefix: created.pathPrefix, receptionistId: created.receptionistId, createdAt: created.createdAt, pages };
+}
+
+/**
+ * Adds the rules a website import asks for to the site it added, in the
+ * import's transaction, so its first crawled page already follows them. A rule
+ * the site already has (an import of a site it had) stays as it is. The same
+ * checks as one rule: receptionists the business has, not archived.
+ */
+export async function addWebsiteImportRulesInTransaction(
+  tx: DatabaseTransaction,
+  input: { businessId: string; actorUserId: string | null; rootDocumentId: string; rules: WebsiteImportRule[] },
+): Promise<WebsiteRule[]> {
+  const created: WebsiteRule[] = [];
+  for (const rule of input.rules) {
+    try {
+      created.push(await createWebsiteRuleInTransaction(tx, { businessId: input.businessId, actorUserId: input.actorUserId, rule: { rootDocumentId: input.rootDocumentId, ...rule } }));
+    } catch (error) {
+      if ((error as { code?: unknown }).code !== "website_rule_exists") throw error;
+    }
+  }
+  return created;
 }
 
 /**

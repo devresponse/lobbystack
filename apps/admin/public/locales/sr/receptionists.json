@@ -174,5 +174,27 @@
     "save": "Sačuvaj izmene",
     "adding": "Dodaje se…",
     "add": "Dodaj recepcionera"
+  },
+  "audience": {
+    "label": "Dostupno za",
+    "everyone": "Svi",
+    "chosen": "Izabrani recepcioneri",
+    "receptionists": "Recepcioneri kojima je dostupno",
+    "chosenOf_one": "Izabrano: {{count}} od {{total}}",
+    "chosenOf_few": "Izabrano: {{count}} od {{total}}",
+    "chosenOf_other": "Izabrano: {{count}} od {{total}}",
+    "required": "Izaberite bar jednog recepcionera ili ga učinite dostupnim svima.",
+    "hint": "Članci za izabrane recepcionere ne ulaze u opis firme.",
+    "hintAll": "{{name}} odgovara na osnovu svega. Članci za izabrane recepcionere ne ulaze u opis firme.",
+    "byRule": "po pravilu",
+    "ruleNote": "Ovu stranicu je izabralo pravilo sajta. Ono što ovde sačuvate ostaje i ako se pravilo obriše, a pravilo ponovo dodaje svog recepcionera svaki put kada se sajt učita.",
+    "errors": {
+      "archived": "Jedan od izabranih recepcionera je arhiviran. Osvežite stranicu i izaberite ponovo.",
+      "articleGone": "Taj članak više ne postoji. Osvežite stranicu.",
+      "articles": "Izaberite od 1 do {{max}} članaka.",
+      "ruleExists": "Ovaj sajt već daje tu putanju tom recepcioneru.",
+      "rulePath": "Unesite putanju na sajtu, na primer /stores/kitsilano/.",
+      "ruleGone": "To pravilo više ne postoji. Osvežite stranicu."
+    }
   }
 }

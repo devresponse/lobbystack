@@ -168,5 +168,26 @@
     "save": "Save changes",
     "adding": "Adding…",
     "add": "Add receptionist"
+  },
+  "audience": {
+    "label": "Available to",
+    "everyone": "Everyone",
+    "chosen": "Chosen receptionists",
+    "receptionists": "Receptionists it's available to",
+    "chosenOf_one": "{{count}} of {{total}} chosen",
+    "chosenOf_other": "{{count}} of {{total}} chosen",
+    "required": "Choose at least one receptionist, or make it available to everyone.",
+    "hint": "Articles for chosen receptionists stay out of the business summary.",
+    "hintAll": "{{name}} answers from everything. Articles for chosen receptionists stay out of the business summary.",
+    "byRule": "by rule",
+    "ruleNote": "A website rule chose this page. What you save here stays if the rule is deleted, and the rule adds its receptionist again each time the site is crawled.",
+    "errors": {
+      "archived": "One of the chosen receptionists was archived. Refresh the page and choose again.",
+      "articleGone": "That article isn't there any more. Refresh the page.",
+      "articles": "Select between 1 and {{max}} articles.",
+      "ruleExists": "This site already gives that path to that receptionist.",
+      "rulePath": "Enter a path on the site, such as /stores/kitsilano/.",
+      "ruleGone": "That rule isn't there any more. Refresh the page."
+    }
   }
 }

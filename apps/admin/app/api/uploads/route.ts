@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createObjectDownload, createUpload, finalizeUpload } from "@lobbystack/domain";
+import { createObjectDownload, createUpload, finalizeUpload, readKnowledgeAudienceChoice } from "@lobbystack/domain";
 import { uploadCreateRequestSchema, uploadDownloadRequestSchema, uploadFinalizeRequestSchema } from "@lobbystack/contracts";
 import { asApiResponse, readJson, requireApiSession } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
@@ -35,8 +35,11 @@ export async function POST(request: Request) {
 export async function PUT(request: Request) {
   try {
     const session = await requireApiSession(request);
-    const body = uploadFinalizeRequestSchema.parse(await readJson(request));
-    await finalizeUpload(createDomainContext(), { ...body, userId: session.user.id, ...(body.checksum !== undefined ? { checksum: body.checksum } : {}) }, getStorageProvider());
+    const raw = await readJson(request);
+    const body = uploadFinalizeRequestSchema.parse(raw);
+    // A knowledge file can be for chosen receptionists: audience and receptionistIds, set as the file is added.
+    const audience = typeof raw === "object" && raw !== null && "audience" in raw && raw.audience !== undefined ? readKnowledgeAudienceChoice(raw) : undefined;
+    await finalizeUpload(createDomainContext(), { ...body, userId: session.user.id, ...(body.checksum !== undefined ? { checksum: body.checksum } : {}), ...(audience ? { audience } : {}) }, getStorageProvider());
     return NextResponse.json({ ok: true });
   } catch (error) { return asApiResponse(error); }
 }

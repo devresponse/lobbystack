@@ -17,7 +17,7 @@ import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
 import { loadBusinessPlanLimits } from "./usage";
 import { resolveSmsSender } from "./smsSender";
-import { applyWebsiteRulesInTransaction, type RankedReceptionist } from "./knowledgeAudience";
+import { addWebsiteImportRulesInTransaction, applyWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeAudienceChoice, type RankedReceptionist, type WebsiteImportRule } from "./knowledgeAudience";
 import { loadSnapshotKnowledge, loadSnapshotReceptionistRows, rankedReceptionistOf, snapshotReceptionistOf } from "./snapshotKnowledge";
 
 const ragMeter = getMeter("lobbystack-rag");
@@ -68,13 +68,22 @@ export function hashContent(value: string): string {
 // The API reports a website's page limit, so its clients tell a sample from a full read by these.
 export { FULL_CRAWL_PAGE_LIMIT, ONBOARDING_CRAWL_PAGE_LIMIT };
 
+/**
+ * Adds a knowledge source for an owner or admin. websiteRules, for a website,
+ * give its pages under each path to a receptionist, made in the same
+ * transaction so the crawl, which starts once it commits, follows them from
+ * its first page.
+ */
 export async function createKnowledgeDocument(
   context: DomainContext,
-  input: { userId: string; businessId: string; title: string; sourceType: string; sourceUrl?: string; storageObjectId?: string; onboarding?: boolean },
+  input: { userId: string; businessId: string; title: string; sourceType: string; sourceUrl?: string; storageObjectId?: string; onboarding?: boolean; websiteRules?: WebsiteImportRule[] },
 ): Promise<string> {
+  if (input.websiteRules?.length && input.sourceType !== "website") throw Object.assign(new Error("Website rules apply to a website."), { status: 400, code: "invalid_website_rule" });
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    return await createKnowledgeDocumentInTransaction(tx, input);
+    const documentId = await createKnowledgeDocumentInTransaction(tx, input);
+    if (input.websiteRules?.length) await addWebsiteImportRulesInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, rootDocumentId: documentId, rules: input.websiteRules });
+    return documentId;
   });
 }
 
@@ -252,13 +261,20 @@ export async function deleteKnowledgeDocumentInTransaction(tx: DatabaseTransacti
   return true;
 }
 
+/**
+ * Adds a text entry for an owner or admin: for everyone unless audience
+ * chooses receptionists, set in the same transaction so the entry is never
+ * for everyone by mistake.
+ */
 export async function createKnowledgeSnippet(
   context: DomainContext,
-  input: { userId: string; businessId: string; title: string; content: string; tags?: string[]; priority?: number; active?: boolean },
+  input: { userId: string; businessId: string; title: string; content: string; tags?: string[]; priority?: number; active?: boolean; audience?: KnowledgeAudienceChoice | undefined },
 ): Promise<string> {
   return await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    return (await createKnowledgeSnippetInTransaction(tx, input)).id;
+    const { id } = await createKnowledgeSnippetInTransaction(tx, input);
+    if (input.audience?.audience === "chosen") await setKnowledgeArticleAudienceInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, kind: "snippet", articleId: id, choice: input.audience });
+    return id;
   });
 }
 
@@ -274,13 +290,15 @@ export async function createKnowledgeSnippetInTransaction(
   return snippet;
 }
 
+/** Changes a text entry for an owner or admin, and who it is for when audience is given, in one transaction. */
 export async function updateKnowledgeSnippet(
   context: DomainContext,
-  input: { userId: string; businessId: string; snippetId: string; title?: string; content?: string; tags?: string[]; priority?: number; active?: boolean },
+  input: { userId: string; businessId: string; snippetId: string; title?: string; content?: string; tags?: string[]; priority?: number; active?: boolean; audience?: KnowledgeAudienceChoice | undefined },
 ): Promise<void> {
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
     if (!await updateKnowledgeSnippetInTransaction(tx, input)) throw new Error("Knowledge snippet not found.");
+    if (input.audience) await setKnowledgeArticleAudienceInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, kind: "snippet", articleId: input.snippetId, choice: input.audience });
   });
 }
 

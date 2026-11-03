@@ -174,5 +174,27 @@
     "save": "Guardar cambios",
     "adding": "Agregando…",
     "add": "Agregar recepcionista"
+  },
+  "audience": {
+    "label": "Disponible para",
+    "everyone": "Todas",
+    "chosen": "Recepcionistas elegidas",
+    "receptionists": "Recepcionistas para las que está disponible",
+    "chosenOf_one": "{{count}} de {{total}} elegida",
+    "chosenOf_many": "{{count}} de {{total}} elegidas",
+    "chosenOf_other": "{{count}} de {{total}} elegidas",
+    "required": "Elija al menos una recepcionista, o déjelo disponible para todas.",
+    "hint": "Los artículos para recepcionistas elegidas quedan fuera del resumen del negocio.",
+    "hintAll": "{{name}} responde con todo. Los artículos para recepcionistas elegidas quedan fuera del resumen del negocio.",
+    "byRule": "por regla",
+    "ruleNote": "Una regla del sitio web eligió esta página. Lo que guarde aquí se mantiene si se elimina la regla, y la regla vuelve a añadir a su recepcionista cada vez que se rastrea el sitio.",
+    "errors": {
+      "archived": "Una de las recepcionistas elegidas se archivó. Actualice la página y vuelva a elegir.",
+      "articleGone": "Ese artículo ya no existe. Actualice la página.",
+      "articles": "Seleccione entre 1 y {{max}} artículos.",
+      "ruleExists": "Este sitio ya da esa ruta a esa recepcionista.",
+      "rulePath": "Escriba una ruta del sitio, como /stores/kitsilano/.",
+      "ruleGone": "Esa regla ya no existe. Actualice la página."
+    }
   }
 }

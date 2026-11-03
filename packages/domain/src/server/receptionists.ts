@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNotNull, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm";
 
 import { auditLogs, businesses, enqueueOutbox, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
@@ -249,11 +249,23 @@ const choiceColumns = {
 /** The order every list uses: the default receptionist first, then the order the Receptionists page sets, then by name. */
 const listOrder = [desc(receptionistProfiles.isDefault), asc(receptionistProfiles.sortOrder), sql`lower(${receptionistProfiles.name})`, asc(receptionistProfiles.id)] as const;
 
-/** The receptionists that aren't archived, in list order, for ordering. */
-async function liveOrder(tx: DatabaseTransaction, businessId: string): Promise<Array<{ id: string; name: string; isDefault: boolean; sortOrder: number }>> {
-  return await tx.select({ id: receptionistProfiles.id, name: receptionistProfiles.name, isDefault: receptionistProfiles.isDefault, sortOrder: receptionistProfiles.sortOrder }).from(receptionistProfiles)
+type LiveReceptionist = { id: string; name: string; isDefault: boolean; sortOrder: number; handle: string | null };
+
+/** The receptionists that aren't archived, in list order: for ordering, and the page addresses they hold. */
+async function liveOrder(tx: DatabaseTransaction, businessId: string): Promise<LiveReceptionist[]> {
+  return await tx.select({ id: receptionistProfiles.id, name: receptionistProfiles.name, isDefault: receptionistProfiles.isDefault, sortOrder: receptionistProfiles.sortOrder, handle: receptionistProfiles.handle }).from(receptionistProfiles)
     .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt)))
     .orderBy(...listOrder);
+}
+
+/** The page addresses of these receptionists, but except's. */
+function handlesOf(live: readonly LiveReceptionist[], except?: string): string[] {
+  return live.flatMap((row) => (row.handle && row.id !== except ? [row.handle] : []));
+}
+
+/** The place after the last of these receptionists. */
+function placeAfter(live: readonly LiveReceptionist[]): number {
+  return live.reduce((highest, row) => Math.max(highest, row.sortOrder), 0) + 1;
 }
 
 /** The business's language, which names are sorted in. */
@@ -262,37 +274,30 @@ async function businessLocale(tx: DatabaseTransaction, businessId: string): Prom
   return row?.locale ?? "en";
 }
 
-/** Numbers the receptionists 1, 2, 3… in the order given, writing only those whose place changes. Whether any moved. */
+/**
+ * Numbers the receptionists 1, 2, 3… in the order given, in one statement
+ * that writes only those whose place changes (up to the deployment's cap,
+ * 500 by default). Whether any moved.
+ */
 async function writeOrder(tx: DatabaseTransaction, businessId: string, receptionistIds: readonly string[], current: ReadonlyMap<string, number>): Promise<boolean> {
-  const now = new Date();
-  let moved = false;
-  for (const [index, id] of receptionistIds.entries()) {
-    const sortOrder = index + 1;
-    if (current.get(id) === sortOrder) continue;
-    moved = true;
-    await tx.update(receptionistProfiles).set({ sortOrder, updatedAt: now })
-      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, id)));
-  }
-  return moved;
+  const moves = receptionistIds.flatMap((id, index) => (current.get(id) === index + 1 ? [] : [{ id, sortOrder: index + 1 }]));
+  if (!moves.length) return false;
+  const places = sql.join(moves.map((move) => sql`when ${move.id}::uuid then ${move.sortOrder}::integer`), sql` `);
+  await tx.update(receptionistProfiles).set({ sortOrder: sql`case ${receptionistProfiles.id} ${places} end`, updatedAt: new Date() })
+    .where(and(eq(receptionistProfiles.businessId, businessId), inArray(receptionistProfiles.id, moves.map((move) => move.id))));
+  return true;
 }
 
-/** Whether the receptionists go by name now, so one about to be added, restored or renamed should take its place by name. Callers hold the lock. */
-async function listedByName(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
-  return isAlphabeticalReceptionistOrder(await liveOrder(tx, businessId), await businessLocale(tx, businessId));
-}
-
-/** Puts the receptionists after the default in name order, numbered from 1; the default is first whatever its number. Whether any moved. Callers hold the lock. */
-async function orderByName(tx: DatabaseTransaction, businessId: string): Promise<boolean> {
-  const live = await liveOrder(tx, businessId);
+/**
+ * Puts the receptionists after the default in name order, numbered from 1;
+ * the default is first whatever its number. live is the business's
+ * receptionists in list order, as liveOrder reads them. Whether any moved.
+ * Callers hold the lock.
+ */
+async function orderByName(tx: DatabaseTransaction, businessId: string, live: readonly LiveReceptionist[], locale: string): Promise<boolean> {
   const defaults = new Set(live.filter((row) => row.isDefault).map((row) => row.id));
-  const others = alphabeticalReceptionistOrder(live, await businessLocale(tx, businessId)).filter((id) => !defaults.has(id));
+  const others = alphabeticalReceptionistOrder(live, locale).filter((id) => !defaults.has(id));
   return await writeOrder(tx, businessId, others, new Map(live.map((row) => [row.id, row.sortOrder])));
-}
-
-/** The place after the last receptionist that isn't archived. */
-async function lastPlace(tx: DatabaseTransaction, businessId: string): Promise<number> {
-  const live = await liveOrder(tx, businessId);
-  return live.reduce((highest, row) => Math.max(highest, row.sortOrder), 0) + 1;
 }
 
 /** The business's receptionists for dropdowns and pickers, archived ones left out unless asked for. */
@@ -386,12 +391,6 @@ function capReached(cap: number): Error {
   return failure(`A business can keep up to ${cap} receptionists. Archive one to add another.`, 409, "receptionist_cap");
 }
 
-async function liveHandles(tx: DatabaseTransaction, businessId: string, except?: string): Promise<string[]> {
-  const rows = await tx.select({ handle: receptionistProfiles.handle }).from(receptionistProfiles)
-    .where(and(eq(receptionistProfiles.businessId, businessId), isNull(receptionistProfiles.archivedAt), isNotNull(receptionistProfiles.handle), except ? ne(receptionistProfiles.id, except) : undefined));
-  return rows.flatMap((row) => (row.handle ? [row.handle] : []));
-}
-
 /** Whether a query failed on the unique index named; Drizzle wraps the driver's error as its cause. */
 function isUniqueViolation(error: unknown, constraint: string): boolean {
   return [error, (error as { cause?: unknown } | null)?.cause].some((value) => typeof value === "object" && value !== null
@@ -436,7 +435,10 @@ export async function createReceptionistInTransaction(
   const source = await loadReceptionistView(tx, { businessId, receptionistId: input.receptionist.copyFromId ?? null });
   if (!source) throw input.receptionist.copyFromId ? failure("The receptionist to copy from was not found.", 404, "receptionist_not_found") : notFound();
 
-  const taken = await liveHandles(tx, businessId);
+  // One read of the receptionists and the language their names sort in, for the address, the place and the name order.
+  const live = await liveOrder(tx, businessId);
+  const locale = await businessLocale(tx, businessId);
+  const taken = handlesOf(live);
   let handle: string;
   if (input.receptionist.handle) {
     if (taken.includes(input.receptionist.handle)) throw handleTaken();
@@ -444,8 +446,8 @@ export async function createReceptionistInTransaction(
   } else {
     handle = availableReceptionistHandle(receptionistHandleFrom(input.receptionist.name), taken);
   }
-  const byName = await listedByName(tx, businessId);
-  const sortOrder = await lastPlace(tx, businessId);
+  const byName = isAlphabeticalReceptionistOrder(live, locale);
+  const sortOrder = placeAfter(live);
 
   let created: { id: string } | undefined;
   try {
@@ -479,8 +481,10 @@ export async function createReceptionistInTransaction(
     throw error;
   }
   if (!created) throw new Error("Receptionist could not be created.");
-  // While the receptionists go by name, the new one takes its place by name; else it goes last.
-  if (byName) await orderByName(tx, businessId);
+  // While the receptionists go by name, the new one takes its place by name;
+  // else it goes last. Its place is after every other, so it is last in list
+  // order too.
+  if (byName) await orderByName(tx, businessId, [...live, { id: created.id, name: input.receptionist.name, isDefault: false, sortOrder, handle }], locale);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.created", receptionistId: created.id, payload: { name: input.receptionist.name, handle, copiedFrom: source.id } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_created", created.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: created.id });
@@ -521,8 +525,11 @@ export async function updateReceptionistInTransaction(
   const current = await lockReceptionist(tx, input);
   if (current.isDefault && patch.listed === false) throw failure("The default receptionist answers the business page, so it stays listed.", 409, "default_receptionist");
   const renamed = patch.name !== undefined && patch.name !== current.name;
-  const byName = renamed && await listedByName(tx, businessId);
-  if (patch.handle !== undefined && patch.handle !== current.handle && (await liveHandles(tx, businessId, current.id)).includes(patch.handle)) throw handleTaken();
+  const newHandle = patch.handle !== undefined && patch.handle !== current.handle;
+  const live = renamed || newHandle ? await liveOrder(tx, businessId) : [];
+  const locale = renamed ? await businessLocale(tx, businessId) : "";
+  const byName = renamed && isAlphabeticalReceptionistOrder(live, locale);
+  if (newHandle && handlesOf(live, current.id).includes(patch.handle!)) throw handleTaken();
   const values = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined));
   try {
     await tx.update(receptionistProfiles).set({ ...values, updatedAt: new Date() })
@@ -531,7 +538,8 @@ export async function updateReceptionistInTransaction(
     if (isUniqueViolation(error, "receptionist_profiles_business_handle_unique")) throw handleTaken();
     throw error;
   }
-  if (byName) await orderByName(tx, businessId);
+  // Read again: a new name can move it among receptionists in the same place.
+  if (byName) await orderByName(tx, businessId, await liveOrder(tx, businessId), locale);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.updated", receptionistId: current.id, payload: { fields: Object.keys(values).sort() } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_updated", current.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: current.id });
@@ -601,11 +609,15 @@ export async function restoreReceptionistInTransaction(
   const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
   if (allowance.current >= allowance.cap) throw capReached(allowance.cap);
   const status: ReceptionistStatus = current.status === "active" && allowance.active < allowance.limit ? "active" : "paused";
-  const handle = availableReceptionistHandle(current.handle ?? receptionistHandleFrom(current.name), await liveHandles(tx, businessId, current.id));
-  const byName = await listedByName(tx, businessId);
-  await tx.update(receptionistProfiles).set({ archivedAt: null, status, handle, sortOrder: await lastPlace(tx, businessId), updatedAt: new Date() })
+  const live = await liveOrder(tx, businessId);
+  const locale = await businessLocale(tx, businessId);
+  const handle = availableReceptionistHandle(current.handle ?? receptionistHandleFrom(current.name), handlesOf(live, current.id));
+  const byName = isAlphabeticalReceptionistOrder(live, locale);
+  const sortOrder = placeAfter(live);
+  await tx.update(receptionistProfiles).set({ archivedAt: null, status, handle, sortOrder, updatedAt: new Date() })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, current.id)));
-  if (byName) await orderByName(tx, businessId);
+  // Last in list order, like a new one.
+  if (byName) await orderByName(tx, businessId, [...live, { id: current.id, name: current.name, isDefault: current.isDefault, sortOrder, handle }], locale);
   await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.restored", receptionistId: current.id, payload: { status, ...(handle !== current.handle ? { handle } : {}) } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_restored", current.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: current.id });
@@ -651,12 +663,23 @@ export async function setListedReceptionistsInTransaction(
   const wanted = new Set(input.receptionistIds);
   const changed = live.filter((row) => !row.isDefault && row.listed !== wanted.has(row.id));
   if (!changed.length) return;
+  // One statement for those now listed, one for those not, and one for the audit rows.
   const now = new Date();
-  for (const row of changed) {
-    await tx.update(receptionistProfiles).set({ listed: !row.listed, updatedAt: now })
-      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, row.id)));
-    await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.updated", receptionistId: row.id, payload: { fields: ["listed"], listed: !row.listed } });
+  for (const listed of [true, false]) {
+    const ids = changed.filter((row) => wanted.has(row.id) === listed).map((row) => row.id);
+    if (ids.length) {
+      await tx.update(receptionistProfiles).set({ listed, updatedAt: now })
+        .where(and(eq(receptionistProfiles.businessId, businessId), inArray(receptionistProfiles.id, ids)));
+    }
   }
+  await tx.insert(auditLogs).values(changed.map((row) => ({
+    businessId,
+    ...(input.actorUserId ? { actorUserId: input.actorUserId } : {}),
+    eventType: "receptionist.updated",
+    entityType: "receptionist",
+    entityId: row.id,
+    payload: { fields: ["listed"], listed: wanted.has(row.id) },
+  })));
   await refreshSnapshotForReceptionists(tx, businessId, "receptionists_listed");
 }
 
@@ -668,7 +691,7 @@ export async function setListedReceptionistsInTransaction(
 export async function sortReceptionistsByNameInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<void> {
   const { businessId } = input;
   await lockReceptionistsInTransaction(tx, businessId);
-  if (await orderByName(tx, businessId)) await refreshSnapshotForReceptionists(tx, businessId, "receptionists_reordered");
+  if (await orderByName(tx, businessId, await liveOrder(tx, businessId), await businessLocale(tx, businessId))) await refreshSnapshotForReceptionists(tx, businessId, "receptionists_reordered");
 }
 
 /**
@@ -710,7 +733,7 @@ export async function makeDefaultReceptionistInTransaction(
   await tx.update(receptionistProfiles).set({ ...shared, locale: null, updatedAt: now })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)));
   if (previous) {
-    const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), await liveHandles(tx, businessId, previous.id));
+    const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), handlesOf(await liveOrder(tx, businessId), previous.id));
     await tx.update(receptionistProfiles).set({ isDefault: false, handle, updatedAt: now })
       .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, previous.id)));
   }

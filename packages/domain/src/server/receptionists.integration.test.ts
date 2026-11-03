@@ -74,6 +74,22 @@ async function asOwner(tx: DatabaseTransaction, input: { userId: string; busines
   await tx.execute(rlsContextStatement({ userId: input.userId, businessId: input.businessId, actorType: "operator" }));
 }
 
+/** The transaction, counting the updates and inserts a step sends. */
+function counting(tx: DatabaseTransaction) {
+  const calls = { update: 0, insert: 0 };
+  const counted = new Proxy(tx, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property, target);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        if (property === "update" || property === "insert") calls[property] += 1;
+        return (value as (...inner: unknown[]) => unknown).apply(target, args);
+      };
+    },
+  });
+  return { tx: counted, calls };
+}
+
 /** Runs a step that should fail in a savepoint, so the transaction goes on after it. */
 async function failure(tx: DatabaseTransaction, run: (inner: DatabaseTransaction) => Promise<unknown>): Promise<unknown> {
   return await tx.transaction(async (inner) => { await run(inner); }).then(() => null, (error: unknown) => error);
@@ -380,6 +396,54 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       expect(await failure(tx, (inner) => setListedReceptionistsInTransaction(inner, { businessId, actorUserId: userId, receptionistIds: [sales.id, repairs.id] }))).toMatchObject({ status: 404, code: "receptionist_not_found" });
       expect(await failure(tx, (inner) => setListedReceptionistsInTransaction(inner, { businessId, actorUserId: userId, receptionistIds: [randomUUID()] }))).toMatchObject({ status: 404, code: "receptionist_not_found" });
       expect(await listed()).toEqual(["Front desk"]);
+    });
+  });
+
+  it("saves a new order and the listed receptionists in one statement each, however many change", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const main = (await loadReceptionistView(tx, { businessId }))!;
+      const add = async (name: string, inner = tx) => await createReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionist: { name } });
+      const names = async () => (await listReceptionistChoicesInTransaction(tx, { businessId })).map((choice) => choice.name);
+      const annex = await add("Annex");
+      const cafe = await add("Cafe");
+      const deli = await add("Deli");
+
+      // Added by name, Bakery moves Cafe and Deli down: one update for the places.
+      const adding = counting(tx);
+      const bakery = await add("Bakery", adding.tx);
+      expect(await names()).toEqual(["Front desk", "Annex", "Bakery", "Cafe", "Deli"]);
+      expect(adding.calls.update).toBe(1);
+
+      // All four move: one update; the same order again writes nothing.
+      const reordering = counting(tx);
+      await reorderReceptionistsInTransaction(reordering.tx, { businessId, receptionistIds: [main.id, deli.id, cafe.id, bakery.id, annex.id] });
+      expect(await names()).toEqual(["Front desk", "Deli", "Cafe", "Bakery", "Annex"]);
+      expect(reordering.calls.update).toBe(1);
+      const again = counting(tx);
+      await reorderReceptionistsInTransaction(again.tx, { businessId, receptionistIds: [main.id, deli.id, cafe.id, bakery.id, annex.id] });
+      expect(again.calls.update).toBe(0);
+
+      // Three off the page, then two back on and one more off: an update each way, and one insert for the audit rows (and one for the refresh).
+      const listed = async () => (await listReceptionistChoicesInTransaction(tx, { businessId })).filter((choice) => choice.listed).map((choice) => choice.name);
+      const unlisting = counting(tx);
+      await setListedReceptionistsInTransaction(unlisting.tx, { businessId, actorUserId: userId, receptionistIds: [deli.id] });
+      expect(await listed()).toEqual(["Front desk", "Deli"]);
+      expect(unlisting.calls).toEqual({ update: 1, insert: 2 });
+      const relisting = counting(tx);
+      await setListedReceptionistsInTransaction(relisting.tx, { businessId, actorUserId: userId, receptionistIds: [cafe.id, annex.id] });
+      expect(await listed()).toEqual(["Front desk", "Cafe", "Annex"]);
+      expect(relisting.calls).toEqual({ update: 2, insert: 2 });
+      await as(tx, null);
+      const events = await tx.select({ entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs)
+        .where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.updated")));
+      expect(events.map((event) => [event.entityId, event.payload])).toEqual(expect.arrayContaining([
+        [cafe.id, { fields: ["listed"], listed: false }], [cafe.id, { fields: ["listed"], listed: true }],
+        [annex.id, { fields: ["listed"], listed: true }], [deli.id, { fields: ["listed"], listed: false }],
+      ]));
+      expect(events).toHaveLength(6);
     });
   });
 

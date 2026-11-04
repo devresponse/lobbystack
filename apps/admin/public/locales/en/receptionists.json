@@ -43,8 +43,8 @@
     "cap_one": "A business can keep up to {{count}} receptionist.",
     "cap_other": "A business can keep up to {{count}} receptionists. Archive one to add another.",
     "upgradeTitle": "A receptionist for each location, team or language",
-    "upgradeDescription": "Your plan includes one receptionist. Upgrade to add more, each with its own name, phone number, knowledge and page.",
-    "salesDescription": "Your plan includes one receptionist. Enterprise includes more, each with its own name, phone number, knowledge and page. Contact sales to set it up.",
+    "upgradeDescription": "Your plan includes one receptionist. Upgrade to add more, each with its own name, greeting, knowledge and page.",
+    "salesDescription": "Your plan includes one receptionist. Enterprise includes more, each with its own name, greeting, knowledge and page. Contact sales to set it up.",
     "upgrade": "See plans",
     "contactSales": "Contact sales",
     "upgradeAsk": "An owner or admin of the business can upgrade."

@@ -27,13 +27,13 @@ Since fork PR #41, `withCallContext`, `logEvent`, `reportError` and `reportWarni
 
 The website chat isn't a call, but since fork PR #79 its lines carry `businessId`, and those about one chat its `conversationId`: `widget.chat_reply` for each answer (`durationMs`, `timeToFirstTokenMs`, `modelSteps`, `tools`, `finishReason` and token counts), `widget.chat_refused` with the `status` and `code`, and `widget.team_request` with its `outcome`. A failed answer is an `[admin] exception:` line, and a PostHog error, with the `errorId` the widget shows and a `category` that says why ([website widget](website-widget.md#find-out-why-a-reply-failed)).
 
-Since fork PR #129 a business can have several receptionists ([receptionists](receptionists.md#deploy-it)). These lines say when the receptionist a visitor's page named didn't answer the chat; the one the widget key names answered instead, or the default one:
+Since fork PR #129 a business can have several receptionists ([receptionists](receptionists.md)). These lines say when the receptionist a visitor's page named didn't answer the chat; the one the widget key names answered instead, or the default one:
 
 - `widget.receptionist_token_rejected`, a warning: the page's signed token didn't check out, with the `businessId`, the `widgetKeyId` and a `reason`. `invalid` is a token this deployment didn't sign, one past its 30 days, or one signed before the widget's secret changed (`WIDGET_SESSION_SECRET`, or `BETTER_AUTH_SECRET` when it's unset); `other_widget` is one signed for another business or widget key.
 - `widget.receptionist_token_archived`: the page's receptionist was archived after the visitor opened the page.
 - `public_profile.receptionist_token_failed`, an error: a business or receptionist page couldn't sign its token, which happens only on a production admin with neither `WIDGET_SESSION_SECRET` nor `BETTER_AUTH_SECRET`.
 
-The worker writes `receptionists.backfill` each time it fills in the receptionist on older calls, conversations and follow-ups, with how many of each, until none is left. Its job dispatcher counts `lobbystack.outbox.coalesced`, by `topic`: the `snapshot.refresh` rows it marked published without a job of their own, since a rebuild it had already queued for the same business in that batch covers them; they count in `lobbystack.outbox.published` too, with the outcome `coalesced` on `lobbystack.outbox.publish_duration_ms`. A QR link that can't open its page right now answers 503, and the failure is an `[admin] exception:` line, and a PostHog error, with the operation `entry_link.follow`.
+The worker's job dispatcher counts `lobbystack.outbox.coalesced`, by `topic`: the `snapshot.refresh` rows it marked published without a job of their own, since a rebuild it had already queued for the same business in that batch covers them; they count in `lobbystack.outbox.published` too, with the outcome `coalesced` on `lobbystack.outbox.publish_duration_ms`. A QR link that can't open its page right now answers 503, and the failure is an `[admin] exception:` line, and a PostHog error, with the operation `entry_link.follow`.
 
 ## Follow a sign-in
 

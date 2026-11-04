@@ -42,7 +42,10 @@ beforeEach(() => {
       return { onConflictDoUpdate: (conflict: Conflict) => { inserted.conflict = conflict; return { returning: async () => [{ id: questionId, timesAsked: 1, status: "open" }] }; } };
     } }),
     update: () => ({ set: (values: Values) => ({ where: async () => { updates.push(values); } }) }),
-    execute: async (statement: SQL) => { executed.push(statement); return { rows: new PgDialect().sqlToQuery(statement).sql.includes("inner join public.receptionist_profiles p on p.business_id = l.business_id") ? askers : [], rowCount: 1 }; },
+    // Recording a question ignores what execute returns, so every statement can
+    // answer with the askers: only loadAskers reads them. The query itself runs
+    // against PostgreSQL in receptionistRecords.integration.test.ts.
+    execute: async (statement: SQL) => { executed.push(statement); return { rows: askers, rowCount: 1 }; },
   };
   mocks.transaction.mockImplementation(async (_db, _scope, run) => run(tx));
   mocks.createSnippet.mockResolvedValue({ id: "snippet_1" });

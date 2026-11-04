@@ -103,7 +103,7 @@ owner:
 | `rules` | Los campos de `POST /rules`. Una regla con el mismo título se actualiza. |
 | `knowledge.websites` | Los sitios que lee la recepcionista. La primera lectura toma una muestra de cada sitio. |
 | `knowledge.read_full_site` | `true` espera esa muestra y luego lee el resto de cada sitio. |
-| `knowledge.files` | Archivos PDF, Word, de texto, Markdown, JPEG, PNG, WebP o TIFF de hasta 10 MB, como rutas dentro de la carpeta del manifiesto. Dé a una entrada `path`, `title` y `tags` para nombrarla. |
+| `knowledge.files` | Archivos PDF, Word, de texto, Markdown, JPEG, PNG, WebP o TIFF de hasta 25 MB, como rutas dentro de la carpeta del manifiesto. Dé a una entrada `path`, `title` y `tags` para nombrarla. |
 | `knowledge.faqs` | Preguntas y respuestas. Una pregunta frecuente con la misma pregunta recibe la respuesta nueva. |
 | `knowledge.texts` | Notas con un `title` y un `content`. Una nota con el mismo título recibe el contenido nuevo. |
 | `public_profile` | Los campos de `PATCH /public-profile`, que configura la [página pública](/es/settings/public-profile) del negocio en `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` y `widget_key_id`. `published: true` publica la página. Las partes de la dirección que el archivo omite conservan su valor. |

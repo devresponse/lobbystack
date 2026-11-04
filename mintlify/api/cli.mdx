@@ -103,7 +103,7 @@ owner:
 | `rules` | The fields of `POST /rules`. A rule with the same title is updated. |
 | `knowledge.websites` | Sites the receptionist reads. The first read takes a sample of each site. |
 | `knowledge.read_full_site` | `true` waits for that sample, then reads the rest of each site. |
-| `knowledge.files` | PDF, Word, text, Markdown, JPEG, PNG, WebP or TIFF files up to 10 MB, as paths inside the manifest's folder. Give an entry `path`, `title` and `tags` to name it. |
+| `knowledge.files` | PDF, Word, text, Markdown, JPEG, PNG, WebP or TIFF files up to 25 MB, as paths inside the manifest's folder. Give an entry `path`, `title` and `tags` to name it. |
 | `knowledge.faqs` | Questions and answers. An FAQ with the same question gets the new answer. |
 | `knowledge.texts` | Notes with a `title` and `content`. A note with the same title gets the new content. |
 | `public_profile` | The fields of `PATCH /public-profile`, which sets up the business's [public page](/settings/public-profile) at `/profile/<slug>`: `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` and `widget_key_id`. `published: true` publishes the page. Address parts the file leaves out keep what they have. |

@@ -95,7 +95,7 @@
       "headline": "Drag & drop or click to upload",
       "formats": "PDF, DOCX, TXT, MD supported",
       "remove": "Remove",
-      "tooLarge": "Documents must be 10 MB or smaller.",
+      "tooLarge": "Documents must be 25 MB or smaller.",
       "unsupportedType": "Supported types are PDF, DOCX, TXT, and Markdown.",
       "failed": "We couldn't upload that document. Please try again."
     },

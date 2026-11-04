@@ -4,10 +4,10 @@ import { isMainThread, parentPort, Worker, workerData } from "node:worker_thread
 import { inflateRawSync } from "node:zlib";
 
 const textMimeTypes = new Set(["text/plain", "text/markdown", "text/x-markdown"]);
-const maxOcrPdfPages = 10;
+const maxOcrPdfPages = 25;
 const ocrLanguages = ["eng", "fra"] as const;
-// Uploads are at most 10 MB, so only a compressed file can unpack to more text than this.
-const maxExtractedTextLength = 10 * 1024 * 1024;
+// Uploads are at most 25 MB, so only a compressed file can unpack to more text than this.
+const maxExtractedTextLength = 25 * 1024 * 1024;
 const maxInflatedDocxBytes = 256 * 1024 * 1024;
 
 /**
@@ -21,7 +21,7 @@ export function assertDocxInflatesWithin(body: Uint8Array, limit = maxInflatedDo
   const end = zip.lastIndexOf(Buffer.from("PK\x05\x06", "latin1"));
   // Not a zip, or a truncated one: JSZip rejects it before inflating anything.
   if (end < 0 || end + 22 > zip.length) return;
-  // JSZip would read ZIP64 records instead of these fields, and no 10 MB .docx needs them.
+  // JSZip would read ZIP64 records instead of these fields, and no 25 MB .docx needs them.
   if ([4, 6, 8, 10].some((at) => zip.readUInt16LE(end + at) === 0xffff) || [12, 16].some((at) => zip.readUInt32LE(end + at) === 0xffffffff)) throw new Error("ZIP64 .docx files are not supported.");
   // Bytes in front of the archive shift every offset, as in JSZip.
   const prefix = end - zip.readUInt32LE(end + 12) - zip.readUInt32LE(end + 16);
@@ -225,7 +225,7 @@ class ImprovedPdfReaderError extends Error {}
 /**
  * The improved reader: pdfjs-dist's positioned text laid out by layoutPdfPage, a "[Page 2 of 9]"
  * line where each page starts, and OCR for every page without a text layer, not only when no
- * page has text, up to the original's 10 pages.
+ * page has text, up to maxOcrPdfPages, as the original.
  */
 export async function extractPdfTextImproved(body: Uint8Array, recordOcr: OcrRecorder): Promise<string> {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");

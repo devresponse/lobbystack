@@ -1080,7 +1080,7 @@ export const knowledgeUploadContentTypes = [
 export const apiKnowledgeUploadCreateSchema = z.strictObject({
   file_name: z.string().trim().min(1).max(255).regex(/[^.]/, "Use the file's name, such as prices.pdf.").describe("The file's name, such as prices.pdf."),
   content_type: z.enum(knowledgeUploadContentTypes).describe("PDF, Word (DOCX), plain text, Markdown, or a JPEG, PNG, WebP or TIFF image."),
-  length: z.number().int().positive().max(KNOWLEDGE_UPLOAD_MAX_BYTES).describe("The file's size in bytes, up to 10 MB."),
+  length: z.number().int().positive().max(KNOWLEDGE_UPLOAD_MAX_BYTES).describe("The file's size in bytes, up to 25 MB."),
   checksum_sha256: z.string().regex(/^[A-Za-z0-9+/]{43}=$/, "Use the base64 SHA-256 of the file.").describe("The base64-encoded SHA-256 of the file's bytes."),
 });
 

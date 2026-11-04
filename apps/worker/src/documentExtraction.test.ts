@@ -136,9 +136,9 @@ describe("knowledge document extraction", () => {
 
   it("rejects textless PDFs above the OCR page limit", async () => {
     vi.stubEnv("KNOWLEDGE_PDF_READER", "original");
-    mocks.getText.mockResolvedValue({ text: "", total: 11 });
+    mocks.getText.mockResolvedValue({ text: "", total: 26 });
 
-    await expect(extractDocumentText({ body: new Uint8Array([1]), contentType: "application/pdf" })).rejects.toThrow("Scanned PDF OCR is limited to 10 pages");
+    await expect(extractDocumentText({ body: new Uint8Array([1]), contentType: "application/pdf" })).rejects.toThrow("Scanned PDF OCR is limited to 25 pages");
 
     expect(mocks.getScreenshot).not.toHaveBeenCalled();
     expect(mocks.createWorker).not.toHaveBeenCalled();
@@ -178,10 +178,19 @@ describe("knowledge document extraction", () => {
   });
 
   it("refuses a scan longer than the OCR page limit without reading it again", async () => {
-    await expect(extractDocumentText({ body: pdfFile(Array.from({ length: 11 }, () => null)), contentType: pdf })).rejects.toThrow("Scanned PDF OCR is limited to 10 pages.");
+    await expect(extractDocumentText({ body: pdfFile(Array.from({ length: 26 }, () => null)), contentType: pdf })).rejects.toThrow("Scanned PDF OCR is limited to 25 pages.");
 
     expect(mocks.createWorker).not.toHaveBeenCalled();
     expect(mocks.getText).not.toHaveBeenCalled();
+  });
+
+  it("reads every page of a scan as long as the OCR page limit", async () => {
+    mocks.recognize.mockResolvedValue(ocrLine(["Scanned", "page"]));
+
+    const text = await extractDocumentText({ body: pdfFile(Array.from({ length: 25 }, () => null)), contentType: pdf });
+
+    expect(mocks.recognize).toHaveBeenCalledTimes(25);
+    expect(text).toMatch(/^\[Page 25 of 25, read by OCR\]\nScanned page$/mu);
   });
 
   it("leaves a PDF the improved reader can't read to the thread, which has the original read it in a new one", async () => {

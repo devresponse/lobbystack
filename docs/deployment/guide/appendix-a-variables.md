@@ -111,7 +111,7 @@ The admin signs in with all four roles, and the worker with the worker and dispa
 | `AI_DELEGATION_SERVICE_TIER` | The worker | OpenAI's faster tier for answers during calls, at twice the price ([3.2](part-3-outside-services.md#32-openai)) | Unset, for `priority` | Any time. `default` halves that part of the bill, and callers wait longer for answers ([7.13](part-7-operations.md#713-costs-and-usage-limits)) |
 | `AI_CHAT_…`, `AI_SUMMARY_…`, the other `AI_DELEGATION_…` | The admin and the worker | Another text model for the chat, call summaries and answers during calls, its settings, and its prices | Unset: `gpt-6-luna` at OpenAI, through `OPENAI_API_KEY` ([3.2](part-3-outside-services.md#32-openai)). On a server, leave `.env`'s lines as they are | A job for a developer: another model changes how the receptionist answers |
 | `AI_EMBEDDING_…` | The admin and the worker, the same | Another model for indexing knowledge | Unset. On a server, leave `.env`'s lines as they are | On both at once, if ever. At its next start, the worker indexes every business's knowledge again, and until it's done, searches match words only (`apps/worker/src/index.ts:258-270`, `packages/domain/src/server/knowledge.ts:489-491`) |
-| `KNOWLEDGE_PDF_READER` | The worker | Which reader turns an uploaded PDF into text, since fork PR #137 (`apps/worker/src/documentExtraction.ts`) | Unset, for the improved reader: a table's cells kept apart with ` \| `, footnote marks written as `[^n]`, a `[Page 2 of 9]` line where each page starts, and OCR for each page without text, 10 at most. It falls back to the original reader on a PDF it can't read. `original` (or `default`) reads every PDF with the original reader, as before fork PR #137 | Any time, for PDFs read afterwards. Documents already read keep their text until they're uploaded again or read again with `lobbystack knowledge retry <id>` |
+| `KNOWLEDGE_PDF_READER` | The worker | Which reader turns an uploaded PDF into text, since fork PR #137 (`apps/worker/src/documentExtraction.ts`) | Unset, for the improved reader: a table's cells kept apart with ` \| `, footnote marks written as `[^n]`, a `[Page 2 of 9]` line where each page starts, and OCR for each page without text, 25 at most (10 before fork PR #138). It falls back to the original reader on a PDF it can't read. `original` (or `default`) reads every PDF with the original reader, as before fork PR #137 | Any time, for PDFs read afterwards. Documents already read keep their text until they're uploaded again or read again with `lobbystack knowledge retry <id>` |
 
 **Twilio and texts**
 
@@ -184,7 +184,7 @@ The admin signs in with all four roles, and the worker with the worker and dispa
 
 - `RAILWAY_GIT_COMMIT_SHA`, `RAILWAY_DEPLOYMENT_ID` and `RAILWAY_ENVIRONMENT_NAME`: Railway sets them, and the services use them to name the version and the environment, in error reports and in `/api/health/live`.
 - `RAILWAY_PRIVATE_DOMAIN`, `RAILWAY_PUBLIC_DOMAIN`, and the bucket's `BUCKET`, `ENDPOINT`, `REGION`, `ACCESS_KEY_ID` and `SECRET_ACCESS_KEY`: Railway's own values, which your lines refer to, as in `${{Postgres.RAILWAY_PRIVATE_DOMAIN}}`.
-- `NEXT_PUBLIC_SERVICE_VERSION`, `NEXT_PUBLIC_ASSET_VERSION`, `NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT`, `NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`: the admin's build writes them (`apps/admin/next.config.ts:31-44`). Don't set them on any service.
+- `NEXT_PUBLIC_SERVICE_VERSION`, `NEXT_PUBLIC_ASSET_VERSION`, `NEXT_PUBLIC_DEPLOYMENT_ENVIRONMENT`, `NEXT_PUBLIC_BRAND_BASE_URL` and `NEXT_PUBLIC_BRAND_PRESET`: the admin's build writes them (`apps/admin/next.config.ts:47-63`). Don't set them on any service.
 
 **Leave these as they are**
 
@@ -215,7 +215,7 @@ On a server they're in `.env`, from `.env.example`. Keep each line as the genera
 - `LOBBYSTACK_APP_DATABASE_URL` and the other `LOBBYSTACK_…_DATABASE_URL` values: each one points a role at another database. `LOBBYSTACK_MIGRATOR_DATABASE_URL` would replace migrate's `DATABASE_URL` ([Appendix E](appendix-e-doc-problems.md), item 37).
 - `SESSION_ENCRYPTION_KEY`: it stands in for a missing `BETTER_AUTH_SECRET`, which production doesn't allow, so it's never read there.
 - `BETTER_AUTH_URL` and `BETTER_AUTH_TRUSTED_ORIGINS`: the admin passes its own address, and LobbyStack's own list of trusted addresses is `AUTH_TRUSTED_ORIGINS`.
-- `POSTHOG_KEY`, `POSTHOG_SOURCEMAP_API_KEY` and `POSTHOG_PROJECT_ID`: for developers. `POSTHOG_PROJECT_ID` falls back to a project that is presumably the original LobbyStack's (`apps/admin/next.config.ts:104`; inferred).
+- `POSTHOG_KEY`, `POSTHOG_SOURCEMAP_API_KEY` and `POSTHOG_PROJECT_ID`: for developers. `POSTHOG_PROJECT_ID` falls back to a project that is presumably the original LobbyStack's (`apps/admin/next.config.ts:123`; inferred).
 
 **Set somewhere else**
 

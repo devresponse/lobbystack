@@ -95,7 +95,7 @@
       "headline": "Arrastre y suelte o haga clic para subir",
       "formats": "Admite PDF, DOCX, TXT y MD",
       "remove": "Quitar",
-      "tooLarge": "Los documentos deben pesar 10 MB o menos.",
+      "tooLarge": "Los documentos deben pesar 25 MB o menos.",
       "unsupportedType": "Los tipos admitidos son PDF, DOCX, TXT y Markdown.",
       "failed": "No pudimos subir ese documento. Inténtelo de nuevo."
     },

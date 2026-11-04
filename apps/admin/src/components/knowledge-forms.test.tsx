@@ -88,7 +88,7 @@ describe("restored knowledge dialogs", () => {
     const upload = vi.fn();
     render(<UploadKnowledgeDocumentSheet open upload={upload} onOpenChange={vi.fn()} />);
     const large = new File(["x"], "large.pdf", { type: "application/pdf" });
-    Object.defineProperty(large, "size", { value: 10 * 1024 * 1024 + 1 });
+    Object.defineProperty(large, "size", { value: 25 * 1024 * 1024 + 1 });
     const input = document.getElementById("knowledge-document-file")!;
     fireEvent.change(input, { target: { files: [large] } });
     expect(screen.getByText("sections.knowledge.uploadValidation.maxSize")).toBeTruthy();

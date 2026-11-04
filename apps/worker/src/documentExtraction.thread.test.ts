@@ -93,8 +93,8 @@ describe("extraction thread", () => {
   });
 
   it("treats a PDF without a text layer as a scan", async () => {
-    const pages = Array.from({ length: 12 }, (_, index) => `${index + 3} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj`);
-    const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [${pages.map((_, index) => `${index + 3} 0 R`).join(" ")}] /Count 12 >> endobj\n${pages.join("\n")}\ntrailer << /Root 1 0 R >>\n%%EOF\n`;
-    await expect(extractDocumentTextInThread({ body: new TextEncoder().encode(pdf), contentType: "application/pdf" }, () => undefined)).rejects.toThrow("Scanned PDF OCR is limited to 10 pages.");
+    const pages = Array.from({ length: 26 }, (_, index) => `${index + 3} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj`);
+    const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [${pages.map((_, index) => `${index + 3} 0 R`).join(" ")}] /Count 26 >> endobj\n${pages.join("\n")}\ntrailer << /Root 1 0 R >>\n%%EOF\n`;
+    await expect(extractDocumentTextInThread({ body: new TextEncoder().encode(pdf), contentType: "application/pdf" }, () => undefined)).rejects.toThrow("Scanned PDF OCR is limited to 25 pages.");
   });
 });

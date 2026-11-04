@@ -34,7 +34,7 @@ try {
   assert(changedLengthBlocked, "Finalization accepted an object larger than its reserved upload.");
   const [uploaded] = await withBusinessTransaction(app.db, { businessId, userId, actorType: "operator" }, async tx => tx.select().from(knowledgeDocuments).where(eq(knowledgeDocuments.storageObjectId, upload.objectId)));
   assert(uploaded?.title === "Clinic policy" && JSON.stringify(uploaded.tags) === '["clinic","hours"]', "Upload lost its title or tags.");
-  for (const invalidInput of [{ ...uploadInput, userId: viewerId }, { ...uploadInput, length: 10 * 1024 * 1024 + 1 }]) {
+  for (const invalidInput of [{ ...uploadInput, userId: viewerId }, { ...uploadInput, length: 25 * 1024 * 1024 + 1 }]) {
     let blocked = false;
     try { await createUpload({ db: app.db }, invalidInput, storage); } catch { blocked = true; }
     assert(blocked, "Read-only or oversized knowledge upload was accepted.");

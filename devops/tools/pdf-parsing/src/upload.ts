@@ -24,7 +24,7 @@ export type UploadRecord = {
 };
 
 export const UPLOADS_FILE = "uploads.json";
-const maxUploadBytes = 10 * 1024 * 1024;
+const maxUploadBytes = 25 * 1024 * 1024;
 
 export async function readUploads(output: string): Promise<UploadRecord[]> {
   const content = await readFile(path.join(output, UPLOADS_FILE), "utf8").catch((error: NodeJS.ErrnoException) => {
@@ -50,7 +50,7 @@ async function plan(output: string, results: readonly Result[], source: UploadSo
     const size = (await stat(file).catch(() => undefined))?.size;
     if (size === undefined) return { result, file, title, skip: `there's no file at ${file}` };
     if (size === 0) return { result, file, title, skip: "the reader found no text" };
-    if (size > maxUploadBytes) return { result, file, title, skip: "it is over the 10 MB upload limit" };
+    if (size > maxUploadBytes) return { result, file, title, skip: "it is over the 25 MB upload limit" };
     return { result, file, title };
   }));
 }

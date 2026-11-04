@@ -99,7 +99,7 @@ const hoursSet = (path: string): Command => {
 const knowledgeUpload = (path: string): Command => {
   const usage = `lobbystack ${path} <file> [--title <title>] [--tags <tag,tag>] [--wait]`;
   return {
-    summary: "Upload a document the receptionist can answer from: PDF, Word, text, Markdown or an image, up to 10 MB.",
+    summary: "Upload a document the receptionist can answer from: PDF, Word, text, Markdown or an image, up to 25 MB.",
     usage,
     options: {
       title: { type: "string", placeholder: "<title>", description: "Defaults to the file's name." },

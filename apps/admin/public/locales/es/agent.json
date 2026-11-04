@@ -59,7 +59,7 @@
       "uploadValidation": {
         "fileRequired": "Elija un archivo para subir.",
         "unsupportedFile": "Los tipos de documento admitidos son PDF, DOCX, TXT y Markdown.",
-        "maxSize": "Los documentos deben pesar 10 MB o menos.",
+        "maxSize": "Los documentos deben pesar 25 MB o menos.",
         "uploadFailed": "No pudimos subir este documento. Inténtelo de nuevo."
       },
       "fields": {
@@ -125,7 +125,7 @@
       "uploadValidation": {
         "fileRequired": "Elija un archivo para subir.",
         "unsupportedFile": "Los tipos de documento admitidos son PDF, DOCX, TXT y Markdown.",
-        "maxSize": "Los documentos deben pesar 10 MB o menos.",
+        "maxSize": "Los documentos deben pesar 25 MB o menos.",
         "uploadFailed": "No pudimos subir este documento. Inténtelo de nuevo."
       },
       "fields": {
@@ -191,7 +191,7 @@
       "uploadValidation": {
         "fileRequired": "Elija un archivo para subir.",
         "unsupportedFile": "Los tipos de documento admitidos son PDF, DOCX, TXT y Markdown.",
-        "maxSize": "Los documentos deben pesar 10 MB o menos.",
+        "maxSize": "Los documentos deben pesar 25 MB o menos.",
         "uploadFailed": "No pudimos subir este documento. Inténtelo de nuevo."
       },
       "fields": {

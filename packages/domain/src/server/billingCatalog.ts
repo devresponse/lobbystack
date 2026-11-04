@@ -5,6 +5,7 @@ import type { PgTable } from "drizzle-orm/pg-core";
 
 import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
+  DEFAULT_PLAN_RECEPTIONISTS,
   billingProfileHash,
   canonicalBillingProfileJson,
   canonicalJson,
@@ -92,7 +93,9 @@ export type BillingCatalogDiff = { writes: BillingCatalogWrite[]; refusals: ApiB
 // The plan columns an apply sets from the file. terms_hash covers those in
 // billingPlanTermColumns: all but overage, receptionists and the last five.
 const planValueColumns = ["tier", "sold", "custom", "overage", "voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists", "voice_rate", "sms_rate", "call_rate", "months", "ends", "discount", "terms_hash", "names", "access", "offer_end", "sort"] as const;
-const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers", "receptionists"] as const;
+// The allowances a change flags when they go down. Receptionists are compared
+// apart, through storedReceptionists, which reads a row without a number.
+const allowanceColumns = ["voice_sec", "sms_seg", "calls_out", "chat_units", "kb_bytes", "numbers"] as const;
 const rateColumns = ["voice_rate", "sms_rate", "call_rate"] as const;
 const actionOrder: Record<ApiBillingCatalogChange["action"], number> = { retire: 0, update: 1, restore: 2, insert: 3 };
 
@@ -117,6 +120,18 @@ function goesDown(from: unknown, to: unknown): boolean {
 
 function goesUp(from: unknown, to: unknown): boolean {
   return typeof from === "number" && typeof to === "number" && to > from;
+}
+
+/**
+ * The receptionists a stored plan gives the businesses on it, as their limits
+ * read it: null on a custom plan, which gets the deployment's cap, and its
+ * tier's built-in number on a row the previous code wrote during the deploy
+ * of migration 0134, which has none.
+ */
+function storedReceptionists(plan: Pick<StoredBillingPlan, "custom" | "tier" | "receptionists">): number | null {
+  if (plan.custom) return null;
+  if (plan.receptionists !== null) return plan.receptionists;
+  return Object.hasOwn(DEFAULT_PLAN_RECEPTIONISTS, plan.tier) ? DEFAULT_PLAN_RECEPTIONISTS[plan.tier as keyof typeof DEFAULT_PLAN_RECEPTIONISTS] : null;
 }
 
 /** The rows a file's plans resolve to, each with its terms hash. */
@@ -159,6 +174,14 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
     if (termsChanged && existing.frozen_at !== null) {
       refusals.push({ code: "plan_frozen", message: `${plan.code} has had subscribers since ${existing.frozen_at}, so its terms can't change, directly or through its tier. Put new terms under a new code, or write the values it inherits into its entry.`, path: planPath(plan.code) });
     }
+    // The receptionist count is outside the terms hash, so it has a check of
+    // its own: the businesses on a plan that has had subscribers keep the
+    // receptionists it gave them, and its number can only go up.
+    const receptionistsBefore = storedReceptionists(existing);
+    const fewerReceptionists = goesDown(receptionistsBefore, plan.receptionists);
+    if (fewerReceptionists && existing.frozen_at !== null) {
+      refusals.push({ code: "plan_frozen", message: `${plan.code} has had subscribers since ${existing.frozen_at}, so its receptionists can't go down, directly or through its tier, from ${receptionistsBefore} to ${plan.receptionists}: the businesses on it keep what it gave them. Write ${receptionistsBefore} into its entry, or put the lower number under a new code.`, path: planPath(plan.code) });
+    }
     const set: Record<string, unknown> = {};
     const fields: ApiBillingCatalogChange["fields"] = {};
     for (const column of planValueColumns) {
@@ -184,7 +207,7 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
       key: plan.code,
       action: retired ? "restore" : "update",
       fields,
-      lowers_allowance: allowanceColumns.some((column) => column in fields && goesDown(fields[column]!.from, fields[column]!.to)),
+      lowers_allowance: fewerReceptionists || allowanceColumns.some((column) => column in fields && goesDown(fields[column]!.from, fields[column]!.to)),
       raises_price: rateColumns.some((column) => column in fields && goesUp(fields[column]!.from, fields[column]!.to)),
     }, set);
   }

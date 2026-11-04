@@ -23,12 +23,12 @@ One row per plan in `billing.json`, standard or not. The four standard plans are
 | `names` | Display names in `en`, `fr`, `es` and `sr`; null for the standard plans, whose names are translated in the app |
 | `voice_sec`, `sms_seg`, `calls_out`, `chat_units` | Included each month: voice seconds, alert text segments, call transfers, website chats |
 | `kb_bytes`, `numbers` | Knowledge storage limit and included phone numbers (at most one since fork PR #70) |
-| `receptionists` | Active receptionists included, from `limits.receptionists` (migration `0134`, fork PR #129); null on a custom plan, which gets the deployment's cap. It stays out of `terms_hash`: Polar never sees it |
+| `receptionists` | Active receptionists included, from `limits.receptionists` (migration `0134`, fork PR #129); null on a custom plan, which gets the deployment's cap. It stays out of `terms_hash`, since Polar never sees it, so an apply checks it apart: on a plan with `frozen_at` it may only go up (fork PR #134) |
 | `voice_rate`, `sms_rate`, `call_rate` | Overage cents per voice minute, text segment and transfer; set exactly when `overage` is |
 | `months`, `ends` | How many months a promo plan lasts, and what follows: `tier`, `keep` or `cancel` |
 | `offer_end` | No new subscription after this moment |
 | `discount`, `polar_disc` | The plan's code-less Polar discount, and its Polar ID |
-| `terms_hash`, `frozen_at` | A hash of the terms subscribers depend on, and when the first business took the plan, after which a promo plan's terms can't change |
+| `terms_hash`, `frozen_at` | A hash of the terms subscribers depend on, and when the first business took the plan, after which a promo plan's terms can't change and its receptionists can't go down |
 | `sort`, `run_id`, `retired_at`, `created_at`, `updated_at` | Display order, the run that last changed the row, and its times |
 
 Checks keep the shapes apart: a standard plan has no names and no promo fields, a custom plan is never sold and has no allowances, and a plan has all three overage rates or none.

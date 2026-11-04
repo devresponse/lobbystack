@@ -19,4 +19,5 @@ Since fork PR #129 a business can have several receptionists, each with its own 
 ## Know the smaller items
 
 - **A voice for each receptionist** comes with a voice picker ([custom voices](custom-voices.md)).
+- **A number per Enterprise customer:** every custom plan gets the deployment's cap, `MAX_RECEPTIONISTS_PER_BUSINESS`. Giving one Enterprise customer 10 receptionists and another 30 needs a number on the custom plan, which migration `0134`'s check refuses, and a way to set it for one customer. The maintainer chose the one cap on 2026-11-04, until the first Enterprise customer needs its own ([decisions](../project/decisions.md#choose-what-to-build)).
 - **A very large snapshot:** each text entry is stored once in the business's snapshot, and each receptionist keeps its best 50. If a business's snapshot ever passes 1 MB, text entries should move to the database search that files already use.

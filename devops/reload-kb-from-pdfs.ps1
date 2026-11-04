@@ -13,8 +13,9 @@
   Deleting can't be undone. Run with -DryRun first: it only lists what would be deleted and
   uploaded.
 
-  Limits on the server: a file can be at most 10 MB, so bigger PDFs are skipped and listed at
-  the end. Scanned PDFs (no text layer) are read with OCR, up to their first 10 pages.
+  Limits on the server: a file can be at most 25 MB, so bigger PDFs are skipped and listed at
+  the end. Pages without a text layer are read with OCR, 25 at most, and a scan of more than
+  25 pages is refused.
 
 .EXAMPLE
   .\reload-kb-from-pdfs.ps1 -DryRun
@@ -30,7 +31,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$MaxBytes = 10MB
+$MaxBytes = 25MB
 $StateFile = Join-Path $PSScriptRoot "lms869-kb.state.json"
 
 function Invoke-Lobbystack {
@@ -79,7 +80,7 @@ foreach ($e in $entries) { Write-Host ("  - [{0}] {1}" -f $e.type, $e.title) }
 Write-Host ""
 Write-Host "To upload: $($toUpload.Count) PDFs from $SourceFolder."
 foreach ($f in $toUpload) { $i = Get-UploadInfo $f; Write-Host ("  + {0}  ->  {1}  [{2}]" -f $f.Name, $i.Title, $i.Tags) }
-foreach ($f in $tooBig) { Write-Host ("  ! skipped, over 10 MB ({0:N1} MB): {1}" -f ($f.Length / 1MB), $f.Name) -ForegroundColor Yellow }
+foreach ($f in $tooBig) { Write-Host ("  ! skipped, over 25 MB ({0:N1} MB): {1}" -f ($f.Length / 1MB), $f.Name) -ForegroundColor Yellow }
 Write-Host ""
 
 if ($DryRun) { Write-Host "Dry run: nothing was changed."; exit 0 }
@@ -126,6 +127,6 @@ foreach ($f in $toUpload) {
 Write-Host ""
 $results | Format-Table -AutoSize
 $failed = @($results | Where-Object Status -eq "FAILED")
-Write-Host "Uploaded and read: $($results.Count - $failed.Count). Failed: $($failed.Count). Skipped over 10 MB: $($tooBig.Count)."
+Write-Host "Uploaded and read: $($results.Count - $failed.Count). Failed: $($failed.Count). Skipped over 25 MB: $($tooBig.Count)."
 foreach ($f in $tooBig) { Write-Host "  Skipped: $($f.Name)" -ForegroundColor Yellow }
 if ($failed.Count) { exit 1 }

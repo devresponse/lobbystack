@@ -31,7 +31,7 @@ export async function readUploadFile(path: string): Promise<UploadFile> {
   const contentType = uploadTypes[extname(path).toLowerCase()];
   if (!contentType) throw new CliError(`${name} isn't a type the receptionist reads. Upload a PDF, Word (.docx), text, Markdown, JPEG, PNG, WebP or TIFF file.`);
   const size = await stat(path).then((info) => info.size, (error: Error) => { throw new CliError(`Couldn't read ${path}: ${error.message}`); });
-  if (size === 0 || size > KNOWLEDGE_UPLOAD_MAX_BYTES) throw new CliError(`${name} has to be between 1 byte and 10 MB.`);
+  if (size === 0 || size > KNOWLEDGE_UPLOAD_MAX_BYTES) throw new CliError(`${name} has to be between 1 byte and 25 MB.`);
   const bytes = await readFile(path);
   return { name, contentType, bytes, sha256: createHash("sha256").update(bytes).digest("base64") };
 }

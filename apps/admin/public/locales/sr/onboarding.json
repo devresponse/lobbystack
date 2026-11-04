@@ -95,7 +95,7 @@
       "headline": "Prevucite fajlove ili kliknite za otpremanje",
       "formats": "Podržani su PDF, DOCX, TXT i MD",
       "remove": "Ukloni",
-      "tooLarge": "Dokument može imati najviše 10 MB.",
+      "tooLarge": "Dokument može imati najviše 25 MB.",
       "unsupportedType": "Podržani tipovi su PDF, DOCX, TXT i Markdown.",
       "failed": "Nismo mogli da otpremimo dokument. Pokušajte ponovo."
     },

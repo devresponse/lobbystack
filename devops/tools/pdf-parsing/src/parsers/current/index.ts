@@ -11,7 +11,7 @@ import { extractDocumentTextInThread } from "./documentExtraction.ts";
  */
 export const currentParser: Parser = {
   name: "current",
-  summary: "The worker's original reader, copied byte for byte: pdf-parse 2.4.5, OCR with tesseract.js only when no page has text, 10 pages at most.",
+  summary: "The worker's original reader, copied byte for byte: pdf-parse 2.4.5, OCR with tesseract.js only when no page has text, 25 pages at most.",
   async parse(input, options) {
     // The thread starts with a copy of this process's variables, so this picks the original reader in it.
     process.env.KNOWLEDGE_PDF_READER = "original";

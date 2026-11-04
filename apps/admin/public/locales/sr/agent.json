@@ -59,7 +59,7 @@
       "uploadValidation": {
         "fileRequired": "Izaberite fajl za otpremanje.",
         "unsupportedFile": "Podržani tipovi dokumenata su PDF, DOCX, TXT i Markdown.",
-        "maxSize": "Dokument može imati najviše 10 MB.",
+        "maxSize": "Dokument može imati najviše 25 MB.",
         "uploadFailed": "Nismo mogli da otpremimo ovaj dokument. Pokušajte ponovo."
       },
       "fields": {
@@ -125,7 +125,7 @@
       "uploadValidation": {
         "fileRequired": "Izaberite fajl za otpremanje.",
         "unsupportedFile": "Podržani tipovi dokumenata su PDF, DOCX, TXT i Markdown.",
-        "maxSize": "Dokument može imati najviše 10 MB.",
+        "maxSize": "Dokument može imati najviše 25 MB.",
         "uploadFailed": "Nismo mogli da otpremimo ovaj dokument. Pokušajte ponovo."
       },
       "fields": {
@@ -191,7 +191,7 @@
       "uploadValidation": {
         "fileRequired": "Izaberite fajl za otpremanje.",
         "unsupportedFile": "Podržani tipovi dokumenata su PDF, DOCX, TXT i Markdown.",
-        "maxSize": "Dokument može imati najviše 10 MB.",
+        "maxSize": "Dokument može imati najviše 25 MB.",
         "uploadFailed": "Nismo mogli da otpremimo ovaj dokument. Pokušajte ponovo."
       },
       "fields": {

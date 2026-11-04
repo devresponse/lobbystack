@@ -1,8 +1,8 @@
 # Test PDF readers
 
-A command-line tool that reads a folder of PDFs with today's worker reader or with pdfjs-dist, writes each document's text and chunks to a folder of its own, scores them, and can upload a reader's text to a test business so the receptionist's knowledge search can be checked against it.
+A command-line tool that reads a folder of PDFs with the worker's original reader or with pdfjs-dist, writes each document's text and chunks to a folder of its own, scores them, and can upload a reader's text to a test business so the receptionist's knowledge search can be checked against it.
 
-It is a test tool only. It changes nothing in `apps/` or `packages/` and imports nothing from them: today's reader and `chunkText` are copied in byte for byte, and a check fails when the copies drift. It is its own npm package, outside the pnpm workspace, so its dependencies never touch the workspace's lockfile.
+It is a test tool only. It changes nothing in `apps/` or `packages/` and imports nothing from them: the worker's reader and `chunkText` are copied in byte for byte, and a check fails when the copies drift. Since fork PR #137 the worker reads PDFs with its improved reader, whose layout is the `pdfjs` reader's, so `current` shows how PDFs were read before, and how they're read with `KNOWLEDGE_PDF_READER=original`. It is its own npm package, outside the pnpm workspace, so its dependencies never touch the workspace's lockfile.
 
 ## Set it up
 
@@ -46,9 +46,9 @@ Running `parse` again with another reader into the same output folder adds its r
 
 ## Know the readers
 
-**current** is `apps/worker/src/documentExtraction.ts`, copied byte for byte to `src/parsers/current/documentExtraction.ts`, with the same pdf-parse 2.4.5, tesseract.js 7.0.0 and mammoth 1.13.0 the worker's lockfile resolves. The tool calls `extractDocumentTextInThread` as the worker's `knowledge.extractDocument` job does: in its own thread, with a 512 MB heap cap and a 5-minute deadline (`--max-heap-mb`, `--timeout-ms`). So it shows today's failures as they happen in production: footnote marks fused into amounts (`$25,0002`), no page numbers, and a scan of more than 10 pages refused.
+**current** is the worker's original reader, `extractPdfTextDefault` in `apps/worker/src/documentExtraction.ts`, copied byte for byte to `src/parsers/current/documentExtraction.ts`, with the same pdf-parse 2.4.5, pdfjs-dist 6.4.299, tesseract.js 7.0.0 and mammoth 1.13.0 the worker's lockfile resolves. The tool calls `extractDocumentTextInThread` as the worker's `knowledge.extractDocument` job does, with `KNOWLEDGE_PDF_READER=original`: in its own thread, with a 512 MB heap cap and a 5-minute deadline (`--max-heap-mb`, `--timeout-ms`). So it shows the original reader's failures as they happened in production: footnote marks fused into amounts (`$25,0002`), no page numbers, and a scan of more than 10 pages refused.
 
-**pdfjs** reads pdfjs-dist 6.4's text items, which carry each piece of text's position and font size, and applies the repairs the design proposes, with no AI:
+**pdfjs** reads pdfjs-dist 6.4's text items, which carry each piece of text's position and font size, and applies the repairs the design proposes, with no AI. The worker's improved reader, `extractPdfTextImproved` (fork PR #137), lays text out the same way, with `[Page 2 of 9]` markers, and gave the same text on every fixture; it reads 10 pages at most by OCR and refuses a scan of more than 10 pages, as the original does:
 
 - Cells split by a gap wider than 7 units (where pdf-parse puts its tab) are written with ` | `, which chunkText keeps, while it turns tabs into spaces.
 - A small mark raised above the text beside it becomes a footnote: `$25,000 [^2]`, and `[^2]: Per claim.` where the footnote itself starts.
@@ -108,7 +108,7 @@ node src/cli.ts evaluate --questions questions.csv --output out --label pdfjs --
 node src/cli.ts remove --output out --business <test business id>
 ```
 
-- `upload` tags each file `pdf-parsing` and `parser:<name>` (add more with `--tag`), titles it `<document> (<reader>)`, waits until it's read, and records it in `out/uploads.json`. It skips a document already uploaded for that reader. `--source pdf` uploads the PDFs themselves instead, which the deployment reads with its own reader, today's: a baseline from the deployment itself.
+- `upload` tags each file `pdf-parsing` and `parser:<name>` (add more with `--tag`), titles it `<document> (<reader>)`, waits until it's read, and records it in `out/uploads.json`. It skips a document already uploaded for that reader. `--source pdf` uploads the PDFs themselves instead, which the deployment reads with its own reader, the improved one since fork PR #137 unless its worker has `KNOWLEDGE_PDF_READER=original`: a baseline from the deployment itself.
 - `evaluate` reads a CSV or JSON file of questions with `question`, `answer` and, optionally, `document` (the PDF's name without `.pdf`) and `page`. An answer with numbers is found when a passage holds all of them in canonical form; other answers when a passage holds their words. It writes `out/evaluations/<label>/results.md` and `results.json`, with each search's whole answer in `searches/`.
 - `remove` deletes from the business exactly the sources `uploads.json` lists, and nothing else. `--parser <name>` limits it to one reader's uploads, and `--dry-run` lists them first.
 
@@ -141,4 +141,4 @@ The OCR test runs once tesseract.js's English and French language files are cach
 
 - It doesn't change how text is chunked. Both readers' text goes through the repository's chunkText, so the design's chunks around tables can't be measured here yet.
 - The scorer checks numbers and rows. A two-level header flattened into one line or a blank cell that shifts the values after it isn't caught unless the row loses a number.
-- The pdfjs reader reads PDFs only. Word files still go through today's reader in the worker.
+- The pdfjs reader reads PDFs only, as the worker's improved reader does. The worker reads Word files with mammoth, as `current` does.

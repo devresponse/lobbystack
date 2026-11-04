@@ -5,7 +5,7 @@ import path from "node:path";
 export const copies = {
   reader: { repo: "apps/worker/src/documentExtraction.ts", tool: "src/parsers/current/documentExtraction.ts" },
   chunkText: { repo: "packages/domain/src/server/knowledge.ts", tool: "src/chunkText.ts" },
-  libraries: ["pdf-parse", "tesseract.js", "mammoth"],
+  libraries: ["pdf-parse", "pdfjs-dist", "tesseract.js", "mammoth"],
 } as const;
 
 /** The chunkText function's source, from its signature to its closing brace. */

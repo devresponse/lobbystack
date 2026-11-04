@@ -51,6 +51,7 @@ export * from "./publicApi";
 export * from "./publicProfiles";
 export * from "./oauth";
 export * from "./receptionistActions";
+export * from "./receptionistInput";
 export * from "./receptionistProfile";
 export * from "./receptionists";
 export * from "./receptionistEntryPoints";

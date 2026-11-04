@@ -1,0 +1,2 @@
+# Fictional PDFs the reader tests read: binary, so Git never changes their line endings.
+*.pdf binary

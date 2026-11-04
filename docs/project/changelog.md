@@ -6,6 +6,12 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-11-04
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#136](https://github.com/devresponse/lobbystack/pull/136) | Add a command-line tool to test PDF readers, `devops/tools/pdf-parsing`: it reads a folder of PDFs with a byte-for-byte copy of the worker's reader or with pdfjs-dist, scores each reader's text, and uploads it to a test business to check the receptionist's search |  | `49181fa` | [docs](../knowledge/architecture.md#measure-how-pdfs-are-read) |
+
 ### 2026-11-03
 
 | PR | What changed | Migrations | Merge | More |

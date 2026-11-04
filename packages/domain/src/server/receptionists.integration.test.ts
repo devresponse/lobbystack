@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
-import { and, asc, eq, sql } from "drizzle-orm";
-import { afterAll, describe, expect, it } from "vitest";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import {
   auditLogs,
   billingAccounts,
@@ -13,6 +13,7 @@ import {
   inboxItems,
   outboxMessages,
   phoneNumbers,
+  providerEvents,
   receptionistProfiles,
   rlsContextStatement,
   users,
@@ -22,7 +23,7 @@ import {
 } from "@lobbystack/db";
 import { defaultAppointmentChangePolicy, isAlphabeticalReceptionistOrder } from "@lobbystack/shared";
 
-import { endManagedPlanInTransaction, setManagedPlanInTransaction } from "./billing";
+import { endManagedPlanInTransaction, reconcileBillingProviderEvent, setManagedPlanInTransaction } from "./billing";
 import { loadReceptionistView, saveReceptionistProfileInTransaction } from "./receptionistProfile";
 import {
   archiveReceptionistInTransaction,
@@ -541,6 +542,132 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       await as(tx, "lobbystack_worker");
       expect(await enforceReceptionistAllowance(context, { businessId, env })).toEqual([]);
     });
+  });
+
+  it("queues the plan check when Polar moves the business from Pro to Starter, and the worker pauses every extra", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, userId } = await seedBusiness(tx);
+      const proEnv = { MAX_RECEPTIONISTS_PER_BUSINESS: "50" };
+      /** Stores a Polar event for the business and applies it as the webhook's job does. */
+      const polarEvent = async (eventType: string, payload: Record<string, unknown>) => {
+        await as(tx, null);
+        const [stored] = await tx.insert(providerEvents).values({
+          provider: "polar",
+          providerEventId: `evt-${randomUUID()}`,
+          eventType,
+          businessId,
+          payload: { billingKey: `business:${businessId}`, billingInterval: "monthly", subscriptionId: "sub_receptionists", currentPeriodStart: "2026-11-01T00:00:00.000Z", currentPeriodEnd: "2026-12-01T00:00:00.000Z", ...payload },
+        }).returning({ id: providerEvents.id });
+        await as(tx, "lobbystack_worker");
+        return await reconcileBillingProviderEvent(context, { businessId, providerEventId: stored!.id });
+      };
+      const queuedChecks = async () => {
+        await as(tx, null);
+        return await tx.select({ payload: outboxMessages.payload }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "receptionists.enforceAllowance")));
+      };
+
+      expect(await polarEvent("subscription.active", { plan: "pro", status: "active" })).toBe("processed");
+      await asOwner(tx, { userId, businessId });
+      for (const name of ["Kitsilano", "Gastown", "Yaletown", "Main Street"]) await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env: proEnv });
+      const before = (await queuedChecks()).length;
+
+      expect(await polarEvent("subscription.updated", { plan: "starter", status: "active" })).toBe("processed");
+      const queued = await queuedChecks();
+      expect(queued).toHaveLength(before + 1);
+      expect(queued.at(-1)?.payload).toEqual({ businessId, reason: "billing_reconcile" });
+
+      await as(tx, "lobbystack_worker");
+      expect(await enforceReceptionistAllowance(context, { businessId, env: proEnv })).toHaveLength(4);
+      await asOwner(tx, { userId, businessId });
+      expect(await receptionistAllowanceInTransaction(tx, { businessId, env: proEnv })).toMatchObject({ plan: "starter", limit: 1, active: 1, current: 5, canAdd: false });
+      await as(tx, null);
+      expect((await defaultRow(tx, businessId)).status).toBe("active");
+      const reasons = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.paused")));
+      expect(reasons.map((row) => row.payload)).toEqual(Array.from({ length: 4 }, () => ({ reason: "plan_limit", plan: "starter", limit: 1 })));
+    });
+  });
+
+  it("pauses the newest receptionists first when the new limit leaves room for some", async () => {
+    await rollbackTest(async (tx) => {
+      const { context, businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      const ids: string[] = [];
+      for (const name of ["Oldest", "Older", "Newer", "Newest"]) ids.push((await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env: { MAX_RECEPTIONISTS_PER_BUSINESS: "50" } })).id);
+      // Rows one transaction writes share its start time, so each gets a minute of its own, oldest first.
+      await as(tx, null);
+      const start = Date.now() - 60 * 60_000;
+      for (const [index, id] of ids.entries()) await tx.update(receptionistProfiles).set({ createdAt: new Date(start + index * 60_000) }).where(eq(receptionistProfiles.id, id));
+
+      // A deployment cap of 3 holds Pro to 3 active, the default included: two of the four must pause.
+      await as(tx, "lobbystack_worker");
+      expect((await enforceReceptionistAllowance(context, { businessId, env: { MAX_RECEPTIONISTS_PER_BUSINESS: "3" } })).sort()).toEqual([ids[2]!, ids[3]!].sort());
+      await as(tx, null);
+      const rows = await tx.select({ name: receptionistProfiles.name, status: receptionistProfiles.status }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+      expect(Object.fromEntries(rows.map((row) => [row.name, row.status]))).toEqual({ "Front desk": "active", Oldest: "active", Older: "active", Newer: "paused", Newest: "paused" });
+    });
+  });
+
+  it("refuses to restore a receptionist when the business already keeps the deployment's cap", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId } = await seedBusiness(tx);
+      await putOnPlan(tx, businessId, "pro");
+      await asOwner(tx, { userId, businessId });
+      // The default and three more fill the cap of 4; archiving one frees a place, and a new one takes it.
+      const added: string[] = [];
+      for (const name of ["Kitsilano", "Gastown", "Yaletown"]) added.push((await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env })).id);
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: added[0]! });
+      await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Main Street" }, env });
+      expect(await failure(tx, (inner) => restoreReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: added[0]!, env }))).toMatchObject({ status: 409, code: "receptionist_cap", message: "A business can keep up to 4 receptionists. Archive one to add another." });
+      await as(tx, null);
+      expect((await tx.select({ archivedAt: receptionistProfiles.archivedAt }).from(receptionistProfiles).where(eq(receptionistProfiles.id, added[0]!)))[0]?.archivedAt).not.toBeNull();
+    });
+  });
+
+  it("lets only one of two adds racing for the plan's last place through", async () => {
+    // Committed rows, so two transactions really race; deleted at the end.
+    const userId = randomUUID();
+    const proEnv = { MAX_RECEPTIONISTS_PER_BUSINESS: "50" };
+    const businessId = await client!.db.transaction(async (tx) => {
+      await tx.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid`, name: "Riley Owner" });
+      await as(tx, "lobbystack_app");
+      const created = await createBusiness({ db: tx as unknown as Database }, { userId, name: "Kitsilano Coffee", timezone: "America/Vancouver", businessType: "restaurant", deploymentMode: "cloud" });
+      await putOnPlan(tx, created.businessId, "pro");
+      // The default and three more leave one of Pro's five places.
+      await asOwner(tx, { userId, businessId: created.businessId });
+      for (const name of ["Kitsilano", "Gastown", "Yaletown"]) await createReceptionistInTransaction(tx, { businessId: created.businessId, actorUserId: userId, receptionist: { name }, env: proEnv });
+      return created.businessId;
+    });
+    const blocker = await client!.pool.connect();
+    let pending: Promise<PromiseSettledResult<unknown>[]> | undefined;
+    try {
+      // Hold the business's receptionists lock so both adds queue behind it, then release them together.
+      await blocker.query("begin");
+      await blocker.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [`receptionists:${businessId}`]);
+      pending = Promise.allSettled(["Main Street", "Commercial Drive"].map((name) => client!.db.transaction(async (tx) => {
+        await asOwner(tx, { userId, businessId });
+        return await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name }, env: proEnv });
+      })));
+      await vi.waitFor(async () => {
+        // Count only this blocker's waiters: other test files run their own lock races in parallel.
+        const result = await blocker.query("select count(*)::int as waiting from pg_locks where not granted and pg_backend_pid() = any(pg_blocking_pids(pid))");
+        expect(result.rows[0].waiting).toBe(2);
+      }, { timeout: 3000 });
+      await blocker.query("rollback");
+      const results = await pending;
+      expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+      const refused = results.find((result) => result.status === "rejected");
+      expect(refused?.status === "rejected" ? refused.reason : null).toMatchObject({ status: 409, code: "receptionist_limit", message: "Your plan includes 5 active receptionists. Pause one or contact sales about Enterprise to add another." });
+      const active = await client!.db.select({ id: receptionistProfiles.id }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.status, "active"), isNull(receptionistProfiles.archivedAt)));
+      expect(active).toHaveLength(5);
+    } finally {
+      await blocker.query("rollback");
+      blocker.release();
+      await pending;
+      await client!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await client!.db.delete(users).where(eq(users.id, userId));
+    }
   });
 
   it("names the default receptionist on rows whose writer names none, and counts entry points per receptionist", async () => {

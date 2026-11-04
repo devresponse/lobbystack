@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { asJson, receptionistAllowanceState, receptionistListItem, receptionistListPage, receptionistView } from "@/lib/receptionist-testing";
+
 // What the route reads from the request and hands to the domain; the queries
-// themselves are covered by receptionists.integration.test.ts.
+// themselves are covered by receptionists.integration.test.ts. The mocks are
+// typed, so the fixtures keep the domain's shapes.
+type Domain = typeof import("@lobbystack/domain");
 const fixture = vi.hoisted(() => ({
   denied: false,
   options: vi.fn(),
-  list: vi.fn(),
-  allowance: vi.fn(),
-  create: vi.fn(),
+  list: vi.fn<Domain["listReceptionistsInTransaction"]>(),
+  allowance: vi.fn<Domain["receptionistAllowanceInTransaction"]>(),
+  create: vi.fn<Domain["createReceptionistInTransaction"]>(),
 }));
 const tx = vi.hoisted(() => ({ name: "tx" }));
 vi.mock("@/lib/api-helpers", async (original) => ({
@@ -26,9 +30,10 @@ vi.mock("@lobbystack/domain", async (original) => ({
 }));
 import { GET, POST } from "./route";
 
+const FRONT_DESK = "00000000-0000-4000-8000-0000000000a1";
 const GASTOWN = "00000000-0000-4000-8000-0000000000b2";
-const allowance = { plan: "pro", limit: 5, used: 2, remaining: 3 };
-const page = { receptionists: [{ id: "front-desk", name: "Front desk" }], total: 1, page: 1, pageSize: 10 };
+const allowance = receptionistAllowanceState();
+const page = receptionistListPage([receptionistListItem({ id: FRONT_DESK, name: "Front desk", isDefault: true }), receptionistListItem({ id: GASTOWN, name: "Gastown store", sortOrder: 1, phoneNumbers: 1 })]);
 const list = (query = "") => GET(new Request(`http://localhost:3000/api/receptionists${query}`));
 const add = (body: unknown) => POST(new Request("http://localhost:3000/api/receptionists", { method: "POST", body: JSON.stringify(body) }));
 
@@ -37,14 +42,14 @@ beforeEach(() => {
   fixture.denied = false;
   fixture.list.mockResolvedValue(page);
   fixture.allowance.mockResolvedValue(allowance);
-  fixture.create.mockImplementation(async (_tx, input: { receptionist: { name: string } }) => ({ id: GASTOWN, name: input.receptionist.name }));
+  fixture.create.mockImplementation(async (_tx, input) => receptionistView({ id: GASTOWN, name: input.receptionist.name }));
 });
 
 describe("the Receptionists page's list", () => {
   it("gives the first page of current receptionists with the plan's allowance, to anyone on the team", async () => {
     const response = await list();
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ...page, allowance });
+    expect(await response.json()).toEqual(asJson({ ...page, allowance }));
     expect(fixture.list).toHaveBeenCalledWith(tx, { businessId: "business", view: "current", status: undefined, search: undefined, page: 1, pageSize: 10 });
     expect(fixture.allowance).toHaveBeenCalledWith(tx, { businessId: "business" });
     expect(fixture.options).toHaveBeenCalledWith(undefined);
@@ -74,7 +79,7 @@ describe("adding a receptionist", () => {
   it("adds it for an owner or admin, copying another's settings when asked", async () => {
     const response = await add({ name: "  Gastown store ", description: "Our store on Water Street", handle: "gastown", copyFromId: "00000000-0000-4000-8000-0000000000A1" });
     expect(response.status).toBe(201);
-    expect(await response.json()).toEqual({ receptionist: { id: GASTOWN, name: "Gastown store" } });
+    expect(await response.json()).toEqual({ receptionist: asJson(receptionistView({ id: GASTOWN, name: "Gastown store" })) });
     expect(fixture.options).toHaveBeenCalledWith({ minimumRole: "business_admin" });
     expect(fixture.create).toHaveBeenCalledWith(tx, {
       businessId: "business",

@@ -1,0 +1,5 @@
+node_modules/
+# tesseract.js keeps its eng and fra language files here (about 6 MB).
+.cache/
+# Default output folder.
+out/

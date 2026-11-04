@@ -10,6 +10,7 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#131](https://github.com/devresponse/lobbystack/pull/131) | Save each knowledge search's answer in a folder from the CLI: `lobbystack knowledge search --log-dir <folder>`, or `LOBBYSTACK_KNOWLEDGE_LOG_DIR`, writes the request and the API's answer as a JSON file of its own |  | `6bb1b3c` | [docs](../features/api-cli-integrations.md#save-each-answer-in-a-folder) |
 | [#130](https://github.com/devresponse/lobbystack/pull/130) | Search knowledge as the receptionist does through `POST /api/v1/knowledge/search` and `lobbystack knowledge search`, with every stage shown: the passages after ranking, the tool's result, what a call hears, and each search's scores |  | `bede2bc` | [docs](../features/api-cli-integrations.md#test-the-receptionists-knowledge-search) |
 
 ### 2026-11-02

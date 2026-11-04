@@ -36,6 +36,10 @@ Each returns up to 12 chunks. Reciprocal rank fusion (`rankKnowledgeCandidates` 
 
 `POST /api/v1/knowledge/search` and `lobbystack knowledge search` (fork PR #130) run that same code through `traceKnowledgeSearch` and return every stage: the evidence, the tool's result, the call's answer, each search's results with their scores, and every candidate with what became of it. Use it to see why the receptionist answered as it did, or to compare answers before and after a change to how documents are read ([API, CLI and integrations](../features/api-cli-integrations.md#test-the-receptionists-knowledge-search)). Checked against `main` at `2a4004c` with fork PR #130.
 
+## Measure how PDFs are read
+
+`apps/worker/src/documentExtraction.ts` reads an uploaded PDF with pdf-parse 2.4.5, or with Tesseract OCR for a scan of 10 pages at most when no page has text, and `chunkText` then cuts the text into chunks of about 1,800 characters. `devops/tools/pdf-parsing` is a test tool outside the pnpm workspace that changes nothing the worker runs. It reads a folder of PDFs with a byte-for-byte copy of that reader, or with pdfjs-dist laid out by position (cells written with ` | `, footnote marks split off as `[^n]`, a marker on each page, OCR for every page without text), and writes each document's text and chunks to a folder of its own. It scores them against each document's correct numbers and table rows, and can upload one reader's text to a test business and check the knowledge search's answers against it ([its README](../../devops/tools/pdf-parsing/README.md)). Checked against `main` at `6bb1b3c`.
+
 ## Keep provider boundaries
 
 - Configured OpenAI-compatible adapters handle non-realtime text generation and embeddings behind `packages/providers`. Chat and embedding models/endpoints are deployment-wide and independently configurable.

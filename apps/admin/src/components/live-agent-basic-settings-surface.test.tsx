@@ -4,12 +4,9 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-  AgentBasicSettingsPage,
-  agentSettingsQueryKey,
-  buildAppointmentChangePolicyForSave,
-  resolveTransferNumberForSave,
-} from "./live-agent-basic-settings-surface";
+import { AgentBasicSettingsPage, agentSettingsQueryKey } from "./live-agent-basic-settings-surface";
+import { buildAppointmentChangePolicyForSave } from "./agent-settings/business-settings";
+import { resolveTransferNumberForSave } from "./agent-settings/receptionist-settings";
 import { testNavigation } from "@/lib/navigation-testing";
 
 vi.mock("@/components/product-analytics", () => ({ useTelemetry: () => ({ track: vi.fn() }) }));

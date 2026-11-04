@@ -122,8 +122,9 @@ export async function recordUnansweredQuestion(
     }).returning({ id: unansweredQuestions.id, timesAsked: unansweredQuestions.timesAsked, status: unansweredQuestions.status });
     if (!row) return null;
     // Who heard it: the receptionist the call or chat records, else the one
-    // named, else the default. The same question at another store counts on
-    // the same question, under that store's receptionist.
+    // named, else the default, which every business has (migration 0143), so
+    // every question has someone who asked it. The same question at another
+    // store counts on the same question, under that store's receptionist.
     const named = input.receptionistId && isUuid(input.receptionistId) ? input.receptionistId : null;
     const asker = sql`coalesce(
       ${lastCallId ? sql`(select c.receptionist_id from public.calls c where c.id = ${input.callId}::uuid and c.business_id = ${businessId}::uuid)` : sql`null::uuid`},
@@ -135,7 +136,6 @@ export async function recordUnansweredQuestion(
       insert into public.unanswered_question_receptionists (business_id, question_id, receptionist_id, times_asked, last_asked_at)
       select ${businessId}::uuid, ${row.id}::uuid, asker.id, 1, ${now.toISOString()}::timestamptz
       from (select ${asker} as id) as asker
-      where asker.id is not null
       on conflict (question_id, receptionist_id) do update
         set times_asked = unanswered_question_receptionists.times_asked + 1,
             last_asked_at = greatest(unanswered_question_receptionists.last_asked_at, excluded.last_asked_at)
@@ -144,32 +144,21 @@ export async function recordUnansweredQuestion(
   });
 }
 
-/**
- * Questions some receptionist heard: one with rows for who asked, or, with
- * none (a business without receptionists then), the default one.
- */
+/** Questions some receptionist heard. Every question records who asked it, from its first ask. */
 function askedOfReceptionist(businessId: string, receptionistId: string): SQL {
-  return sql`(
-    exists (select 1 from public.unanswered_question_receptionists l where l.business_id = ${businessId}::uuid and l.question_id = ${unansweredQuestions.id} and l.receptionist_id = ${receptionistId}::uuid)
-    or (
-      not exists (select 1 from public.unanswered_question_receptionists l where l.business_id = ${businessId}::uuid and l.question_id = ${unansweredQuestions.id})
-      and exists (select 1 from public.receptionist_profiles p where p.business_id = ${businessId}::uuid and p.id = ${receptionistId}::uuid and p.is_default)
-    )
-  )`;
+  return sql`exists (select 1 from public.unanswered_question_receptionists l where l.business_id = ${businessId}::uuid and l.question_id = ${unansweredQuestions.id} and l.receptionist_id = ${receptionistId}::uuid)`;
 }
 
-/** Who heard each question, most often first; a question without rows was heard by the default receptionist. */
+/** Who heard each question, most often first. */
 async function loadAskers(tx: DatabaseTransaction, businessId: string, questionIds: string[]): Promise<Map<string, UnansweredQuestionAsker[]>> {
   const byQuestion = new Map<string, UnansweredQuestionAsker[]>();
   if (!questionIds.length) return byQuestion;
   const result = await tx.execute<{ question_id: string; receptionist_id: string; name: string; archived: boolean; times_asked: number; last_asked_at: Date | string }>(sql`
-    select q.id as question_id, p.id as receptionist_id, p.name, p.archived_at is not null as archived,
-      coalesce(l.times_asked, q.times_asked) as times_asked, coalesce(l.last_asked_at, q.last_asked_at) as last_asked_at
-    from public.unanswered_questions q
-    left join public.unanswered_question_receptionists l on l.business_id = q.business_id and l.question_id = q.id
-    inner join public.receptionist_profiles p on p.business_id = q.business_id and (p.id = l.receptionist_id or (l.question_id is null and p.is_default))
-    where q.business_id = ${businessId}::uuid and q.id = any(${sql.param(questionIds)}::uuid[])
-    order by times_asked desc, last_asked_at desc, p.name, p.id
+    select l.question_id, p.id as receptionist_id, p.name, p.archived_at is not null as archived, l.times_asked, l.last_asked_at
+    from public.unanswered_question_receptionists l
+    inner join public.receptionist_profiles p on p.business_id = l.business_id and p.id = l.receptionist_id
+    where l.business_id = ${businessId}::uuid and l.question_id = any(${sql.param(questionIds)}::uuid[])
+    order by l.times_asked desc, l.last_asked_at desc, p.name, p.id
   `);
   for (const row of result.rows) {
     const askers = byQuestion.get(row.question_id) ?? [];
@@ -179,17 +168,16 @@ async function loadAskers(tx: DatabaseTransaction, businessId: string, questionI
   return byQuestion;
 }
 
-/** How many open questions each receptionist heard, for the filter's list; ones without rows count for the default. */
+/** How many open questions each receptionist heard, for the filter's list. */
 async function countOpenByReceptionist(tx: DatabaseTransaction, businessId: string): Promise<Record<string, number>> {
   const result = await tx.execute<{ receptionist_id: string; open: number }>(sql`
-    select coalesce(l.receptionist_id, d.id) as receptionist_id, count(*)::int as open
-    from public.unanswered_questions q
-    left join public.unanswered_question_receptionists l on l.business_id = q.business_id and l.question_id = q.id
-    left join public.receptionist_profiles d on d.business_id = q.business_id and d.is_default and l.question_id is null
-    where q.business_id = ${businessId}::uuid and q.status = 'open'
-    group by 1
+    select l.receptionist_id, count(*)::int as open
+    from public.unanswered_question_receptionists l
+    inner join public.unanswered_questions q on q.business_id = l.business_id and q.id = l.question_id
+    where l.business_id = ${businessId}::uuid and q.status = 'open'
+    group by l.receptionist_id
   `);
-  return Object.fromEntries(result.rows.filter((row) => row.receptionist_id).map((row) => [row.receptionist_id, Number(row.open)]));
+  return Object.fromEntries(result.rows.map((row) => [row.receptionist_id, Number(row.open)]));
 }
 
 /**

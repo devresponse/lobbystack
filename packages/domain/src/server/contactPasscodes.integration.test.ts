@@ -56,7 +56,8 @@ async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChange
     await tx.insert(users).values({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` });
     await tx.insert(businessMemberships).values({ businessId, userId: id, role });
   }
-  await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Test", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant", appointmentChangePolicy: { enabled: true, verificationMode, allowCancel: true, allowReschedule: true } });
+  await tx.update(businesses).set({ summary: "Test", appointmentChangePolicy: { enabled: true, verificationMode, allowCancel: true, allowReschedule: true } }).where(eq(businesses.id, businessId));
+  await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   const [member] = await tx.insert(staff).values({ businessId, name: "Sam", timezone }).returning();
   const [service] = await tx.insert(services).values({ businessId, name: "Cut", slug: "cut", durationMinutes: 30 }).returning();
   await tx.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 0, closeMinutes: 1439 })));
@@ -132,7 +133,7 @@ async function seed(tx: DatabaseTransaction, verificationMode: AppointmentChange
     },
     setMode: async (mode: AppointmentChangeVerificationMode) => {
       await asOwner();
-      await tx.update(receptionistProfiles).set({ appointmentChangePolicy: { enabled: true, verificationMode: mode, allowCancel: true, allowReschedule: true } }).where(eq(receptionistProfiles.businessId, businessId));
+      await tx.update(businesses).set({ appointmentChangePolicy: { enabled: true, verificationMode: mode, allowCancel: true, allowReschedule: true } }).where(eq(businesses.id, businessId));
     },
     expire: async (verificationId: string) => {
       await asOwner();

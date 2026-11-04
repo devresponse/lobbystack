@@ -90,7 +90,8 @@ export async function createBusiness(
 
 /**
  * Inserts a business with what every new business needs: its owner, the staff
- * member that stands for it, a receptionist profile, and its first snapshot.
+ * member that stands for it, its default receptionist's settings, and its
+ * first snapshot.
  * The transaction must be scoped to businessId, and timezone must already be
  * an IANA name. A generated slug gets a random suffix when taken; a taken slug
  * the caller chose fails with a unique violation.
@@ -120,7 +121,7 @@ export async function insertBusinessInTransaction(
       deploymentMode: input.deploymentMode ?? (parseDeploymentMode(process.env.DEPLOYMENT_MODE) === "self_hosted_standard" ? "self_hosted_standard" : "cloud"),
       onboardingStage: "website",
       // Settings every receptionist shares. The summary starts as the business
-      // name, like defaultReceptionistProfile; summarySource marks it as the placeholder.
+      // name; summarySource marks it as the placeholder.
       summary: name,
       summarySource: "placeholder",
       appointmentChangePolicy: defaultAppointmentChangePolicy,
@@ -147,22 +148,19 @@ export async function insertBusinessInTransaction(
   // Booking assigns every appointment to a staff member. Businesses that don't
   // manage a team get one hidden member that stands for the business itself.
   await tx.insert(staff).values({ businessId, name, timezone });
-  // The business's first receptionist is its default one, "Front desk" in its language.
-  await tx.insert(receptionistProfiles).values({
-    businessId,
-    name: defaultReceptionistName(defaultLocale ?? "en"),
-    isDefault: true,
+  // The database made the business's default receptionist with it, "Front
+  // desk" in its language (migration 0143); sign-up gives it these settings.
+  const [receptionist] = await tx.update(receptionistProfiles).set({
     greeting: `Thanks for calling ${name}.`,
     tone: "warm and direct",
-    // A copy of the business's shared settings, which the code of the release
-    // before reads, until the clean-up deploy.
-    summary: name,
     bookingPolicy: "Only confirm a booking after availability is checked.",
     voiceInstructions: "Sound calm, confident, and concise. Escalate urgent requests to a human when policy requires it.",
     smsInstructions: "Keep replies concise and friendly. Ask one follow-up question at a time.",
     transferMode: "on_request",
-    appointmentChangePolicy: defaultAppointmentChangePolicy,
-  });
+  }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).returning({ id: receptionistProfiles.id });
+  if (!receptionist) {
+    throw new Error("The business's default receptionist could not be set up.");
+  }
   await enqueueOutbox(tx, {
     topic: "snapshot.refresh",
     businessId,

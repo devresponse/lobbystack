@@ -36,7 +36,7 @@ export async function PATCH(request: Request) {
       // The field rules live in the domain, which the v1 API shares.
       const { patch, locale, timezone, regenerateSummary } = readReceptionistSettingsChange(await readJson(request));
 
-      const business = (await tx.select({ name: businesses.name }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
+      const business = (await tx.select({ id: businesses.id }).from(businesses).where(eq(businesses.id, businessId)).limit(1))[0];
       if (!business) throw jsonError("Business not found.", 404);
 
       const speaker = locale !== undefined ? await loadReceptionistView(tx, { businessId, receptionistId }) : null;
@@ -57,7 +57,7 @@ export async function PATCH(request: Request) {
         if ((speaker.locale ?? null) !== own) await updateReceptionistInTransaction(tx, { businessId, actorUserId: session.user.id, receptionistId: speaker.id, patch: { locale: own } });
       }
 
-      const profile = await saveReceptionistProfileInTransaction(tx, { businessId, businessName: business.name, receptionistId, patch, regenerateSummary });
+      const profile = await saveReceptionistProfileInTransaction(tx, { businessId, receptionistId, patch, regenerateSummary });
       if (!profile) throw jsonError("Receptionist profile could not be saved.", 500);
       return { profile };
     }, { minimumRole: "business_admin" }));

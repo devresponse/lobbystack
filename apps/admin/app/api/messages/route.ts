@@ -2,7 +2,7 @@ import { and, desc, eq, ilike, isNotNull, isNull, ne, or, sql } from "drizzle-or
 import { NextResponse } from "next/server";
 
 import { contacts, conversations, messages, receptionistProfiles, widgetVisitors } from "@lobbystack/db";
-import { answeredByReceptionist, appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, recordReceptionistJoin, setAutomationState, setConversationArchived } from "@lobbystack/domain";
+import { appendMessage, findNewerWidgetChatInTransaction, loadSmsReachInTransaction, recordReceptionistJoin, setAutomationState, setConversationArchived } from "@lobbystack/domain";
 import { isUuid, smsFailureReason } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
       const rows = await tx.select({ id: latest.id, ...conversationFields, body: latest.body, direction: latest.direction, status: latest.status, createdAt: latest.createdAt }).from(conversations).innerJoinLateral(latest, sql`true`).leftJoin(contacts, eq(conversations.contactId, contacts.id)).leftJoin(widgetVisitors, eq(conversations.widgetVisitorId, widgetVisitors.id)).leftJoin(receptionistProfiles, answeredBy).where(and(
         eq(conversations.businessId, businessId),
         archived ? isNotNull(conversations.archivedAt) : isNull(conversations.archivedAt),
-        receptionistId ? answeredByReceptionist(conversations.receptionistId, businessId, receptionistId) : undefined,
+        receptionistId ? eq(conversations.receptionistId, receptionistId) : undefined,
         channel === "web_chat" ? eq(conversations.channel, "web_chat") : channel === "sms" ? ne(conversations.channel, "web_chat") : undefined,
         search ? or(...[contacts.name, contacts.phone, widgetVisitors.name, widgetVisitors.email, latest.body].map((column) => ilike(column, `%${search}%`))) : undefined,
       )).orderBy(desc(latest.createdAt), desc(conversations.id)).limit(limit + 1).offset(offset);

@@ -19,8 +19,8 @@ import { liveAudienceLinks, rankArticlesForReceptionists, type RankedReceptionis
 // What the snapshot keeps of a business's knowledge for its receptionists:
 // each receptionist's best text entries and newest documents among the ones
 // it may use, stored once however many receptionists use them. The default
-// receptionist's are the snapshot's own fields, as before receptionists;
-// snapshotForReceptionist cuts any other receptionist's view.
+// receptionist's are the snapshot's own fields, which a reader that names no
+// receptionist uses; snapshotForReceptionist cuts any other receptionist's view.
 
 type ProfileRow = typeof receptionistProfiles.$inferSelect;
 
@@ -52,8 +52,7 @@ export function rankedReceptionistOf(row: ProfileRow): RankedReceptionist {
 
 /**
  * Each answering receptionist's text entries and digest documents, from the
- * business's receptionists that aren't archived, the default among them. A
- * business from before receptionists passes one that sees every article.
+ * business's receptionists that aren't archived, the default among them.
  */
 export async function loadSnapshotKnowledge(tx: DatabaseTransaction, input: { businessId: string; receptionists: RankedReceptionist[] }): Promise<SnapshotKnowledge> {
   const { businessId, receptionists } = input;

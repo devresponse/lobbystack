@@ -19,9 +19,9 @@ describe("worker schedulers", () => {
 
     await configureSchedulers(queues, [{ id: "business-a", active: true }, { id: "business-b", active: true }]);
 
-    expect(upsertJobScheduler).toHaveBeenCalledTimes(28);
+    expect(upsertJobScheduler).toHaveBeenCalledTimes(26);
     const tenantCalls = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId !== null);
-    expect(tenantCalls).toHaveLength(22);
+    expect(tenantCalls).toHaveLength(20);
     expect(tenantCalls.filter((call) => call[2].data.type === "api.retention")).toHaveLength(2);
     for (const call of tenantCalls) {
       expect(call[2].data.businessId).toMatch(/^business-[ab]$/);
@@ -43,11 +43,6 @@ describe("worker schedulers", () => {
     expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.type === "billing.sweep").map((call) => [call[0], call[1], call[2].data.queue, call[2].data.businessId])).toEqual([
       ["billing-sweep", { every: 5 * 60_000 }, "maintenance", null],
     ]);
-    // Each business's records from before receptionists get the default one, once a day until none are left.
-    expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.type === "receptionists.backfillRecords").map((call) => [call[0], call[1], call[2].data.queue, call[2].data.businessId])).toEqual([
-      ["receptionist-backfill:business-a", { every: 24 * 60 * 60_000 }, "maintenance", "business-a"],
-      ["receptionist-backfill:business-b", { every: 24 * 60 * 60_000 }, "maintenance", "business-b"],
-    ]);
     // And one daily pass that keeps every phone business's call opening recorded.
     expect(upsertJobScheduler.mock.calls.filter((call) => call[2].data.type === "live.recordGreetings").map((call) => [call[0], call[1], call[2].data.queue, call[2].data.businessId])).toEqual([
       ["live-greeting-recordings", { every: 24 * 60 * 60_000 }, "maintenance", null],
@@ -65,9 +60,8 @@ describe("worker schedulers", () => {
       "outbox-backlog-sample:dormant",
     ]);
     const tenantTypes = upsertJobScheduler.mock.calls.filter((call) => call[2].data.businessId === "dormant").map((call) => call[2].data.type);
-    expect(tenantTypes).toHaveLength(9);
+    expect(tenantTypes).toHaveLength(8);
     expect(tenantTypes).toContain("privacy.scrubMessage");
-    expect(tenantTypes).toContain("receptionists.backfillRecords");
     // A dormant business can still pay for a promo plan that ends.
     expect(upsertJobScheduler).toHaveBeenCalledWith("promo-plan-end:dormant", { every: 24 * 60 * 60_000 }, expect.anything());
     expect(upsertJobScheduler).toHaveBeenCalledWith("telemetry-flush:dormant", { every: 60 * 60_000 }, expect.anything());
@@ -92,8 +86,6 @@ describe("worker schedulers", () => {
       // Its numbers still go back to Twilio when their 30 days are up.
       ["phone-number-reclaim:closed", 60 * 60_000],
       ["privacy-retention-sweep:closed", 60 * 60_000],
-      // Its old records still get the default receptionist before the column is required.
-      ["receptionist-backfill:closed", 24 * 60 * 60_000],
       ["telemetry-flush:closed", 60 * 60_000],
       ["unit-economics-rollup:closed", 60 * 60_000],
     ]);
@@ -134,7 +126,6 @@ describe("worker schedulers", () => {
       "phone-number-reclaim:b",
       "privacy-retention-sweep:b",
       "promo-plan-end:b",
-      "receptionist-backfill:b",
       "telemetry-flush:b",
       "unit-economics-rollup:b",
     ]);

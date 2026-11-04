@@ -17,7 +17,7 @@ import { recordProductEventBestEffort } from "./productEvents";
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
 import { loadBusinessPlanLimits } from "./usage";
 import { resolveSmsSender } from "./smsSender";
-import { addWebsiteImportRulesInTransaction, applyWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeAudienceChoice, type RankedReceptionist, type WebsiteImportRule } from "./knowledgeAudience";
+import { addWebsiteImportRulesInTransaction, applyWebsiteRulesInTransaction, setKnowledgeArticleAudienceInTransaction, type KnowledgeAudienceChoice, type WebsiteImportRule } from "./knowledgeAudience";
 import { loadSnapshotKnowledge, loadSnapshotReceptionistRows, rankedReceptionistOf, snapshotReceptionistOf } from "./snapshotKnowledge";
 
 const ragMeter = getMeter("lobbystack-rag");
@@ -521,8 +521,8 @@ export async function searchKnowledgeEvidence(context: DomainContext, input: Kno
  * answer as the default (receptionistMayUse in @lobbystack/shared, here in
  * SQL). It may read documents for everyone, every document when it sees them
  * all, and those chosen for it; the default also reads documents chosen only
- * for archived receptionists. A business from before receptionists has no
- * reader and reads everything.
+ * for archived receptionists. Every business has its default receptionist
+ * (migration 0143), so there is always a reader.
  */
 function knowledgeSearchReach(businessId: string, receptionistId: string | null | undefined): { reader: SQL; filters: SQL } {
   const named = receptionistId && isUuid(receptionistId) ? receptionistId : null;
@@ -807,9 +807,6 @@ export function businessPageUrl(slug: string, published: boolean, environment: R
   }
 }
 
-/** A business from before receptionists answers as one receptionist that sees every article. */
-const LEGACY_RECEPTIONIST: RankedReceptionist = { id: "00000000-0000-0000-0000-000000000000", isDefault: true, status: "active", knowledgeScope: "all" };
-
 export async function refreshBusinessSnapshot(
   context: DomainContext,
   input: { businessId: string },
@@ -829,16 +826,18 @@ export async function refreshBusinessSnapshot(
       throw new Error("Business not found.");
     }
     const { business } = found;
-    // Every business has one default receptionist; should none be left, the
-    // first stands in so its numbers and pages still answer.
-    const loaded = await loadSnapshotReceptionistRows(tx, input.businessId);
-    const profiles = loaded.length && !loaded.some((row) => row.isDefault) ? loaded.map((row, index) => index === 0 ? { ...row, isDefault: true } : row) : loaded;
+    // The database gives every business its default receptionist (migration
+    // 0143), and the default can't be archived.
+    const profiles = await loadSnapshotReceptionistRows(tx, input.businessId);
     const defaultProfile = profiles.find((row) => row.isDefault);
+    if (!defaultProfile) {
+      throw new Error("The business has no default receptionist.");
+    }
     const hours = await tx.select().from(businessHours).where(eq(businessHours.businessId, input.businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
     const closureRows = await tx.select().from(closures).where(eq(closures.businessId, input.businessId)).orderBy(asc(closures.startsAt));
     const serviceRows = await tx.select().from(services).where(and(eq(services.businessId, input.businessId), eq(services.active, true))).orderBy(asc(services.name));
     const ruleRows = await tx.select().from(agentRules).where(and(eq(agentRules.businessId, input.businessId), eq(agentRules.active, true))).orderBy(asc(agentRules.sortOrder), asc(agentRules.createdAt), asc(agentRules.id));
-    const knowledge = await loadSnapshotKnowledge(tx, { businessId: input.businessId, receptionists: defaultProfile ? profiles.map(rankedReceptionistOf) : [LEGACY_RECEPTIONIST] });
+    const knowledge = await loadSnapshotKnowledge(tx, { businessId: input.businessId, receptionists: profiles.map(rankedReceptionistOf) });
     const numbers = await tx.select().from(phoneNumbers).where(and(eq(phoneNumbers.businessId, input.businessId), eq(phoneNumbers.status, "active"))).orderBy(desc(phoneNumbers.createdAt), asc(phoneNumbers.id));
     const phoneNumber = numbers.find((number) => number.status === "active" && number.voiceEnabled)?.e164;
     // The number customer texts come from, so the agent offers texts only to
@@ -846,9 +845,7 @@ export async function refreshBusinessSnapshot(
     // sender for a cloud business without one.
     const smsNumber = await resolveSmsSender(tx, input.businessId);
     const publicPageUrl = businessPageUrl(business.slug, found.published === true);
-    const receptionists = defaultProfile
-      ? profiles.map((row) => snapshotReceptionistOf(row, { displayName: business.name, timezone: business.timezone, publicPageUrl, snippetIds: knowledge.snippetIds.get(row.id) ?? [] }))
-      : undefined;
+    const receptionists = profiles.map((row) => snapshotReceptionistOf(row, { displayName: business.name, timezone: business.timezone, publicPageUrl, snippetIds: knowledge.snippetIds.get(row.id) ?? [] }));
     const version = `${Date.now()}`;
     builtSnapshot = buildBusinessContextSnapshot({
       businessId: input.businessId,
@@ -857,20 +854,20 @@ export async function refreshBusinessSnapshot(
       displayName: business.name,
       ...(business.legalName ? { legalName: business.legalName } : {}),
       timezone: business.timezone,
-      // The fields below the shared ones are the default receptionist's, as calls read them before receptionists.
-      defaultLocale: normalizeRuntimeLocale(defaultProfile?.locale) ?? normalizeRuntimeLocale(business.defaultLocale) ?? "en",
+      // The fields below the shared ones are the default receptionist's, which answers when no receptionist is named.
+      defaultLocale: normalizeRuntimeLocale(defaultProfile.locale) ?? normalizeRuntimeLocale(business.defaultLocale) ?? "en",
       businessType: ["clinic", "repair_shop", "salon", "service_company"].includes(business.businessType) ? business.businessType as BusinessContextSnapshot["businessType"] : "other",
       telemetryEnabled: business.telemetryEnabled,
       ...(phoneNumber ? { phoneNumber } : {}),
       ...(smsNumber ? { smsNumber } : {}),
-      greeting: defaultProfile?.greeting ?? `Thank you for calling ${business.name}.`,
+      greeting: defaultProfile.greeting,
       // Every receptionist shares the AI notice, the summary and the appointment change rules: they are the business's.
       recordingNotice: business.recordingNotice,
-      tone: defaultProfile?.tone ?? "professional",
-      bookingPolicy: defaultProfile?.bookingPolicy ?? "Confirm availability before booking.",
-      ...(defaultProfile?.voiceInstructions ? { voiceInstructions: defaultProfile.voiceInstructions } : {}),
-      ...(defaultProfile?.smsInstructions ? { smsInstructions: defaultProfile.smsInstructions } : {}),
-      ...(defaultProfile?.chatInstructions ? { chatInstructions: defaultProfile.chatInstructions } : {}),
+      tone: defaultProfile.tone,
+      bookingPolicy: defaultProfile.bookingPolicy,
+      ...(defaultProfile.voiceInstructions ? { voiceInstructions: defaultProfile.voiceInstructions } : {}),
+      ...(defaultProfile.smsInstructions ? { smsInstructions: defaultProfile.smsInstructions } : {}),
+      ...(defaultProfile.chatInstructions ? { chatInstructions: defaultProfile.chatInstructions } : {}),
       // A sign-up placeholder says nothing about the business, so prompts get no summary until AI or a person writes one.
       summary: business.summarySource !== "placeholder" ? business.summary : "",
       knowledgeDigest: knowledgeDigestOf(knowledge.defaultDocuments),
@@ -887,9 +884,9 @@ export async function refreshBusinessSnapshot(
       rules: ruleRows.map((row) => ({ id: row.id, title: row.title, content: row.content, order: row.sortOrder })),
       snippets: knowledge.defaultSnippets,
       appointmentChangePolicy: normalizeAppointmentChangePolicy(business.appointmentChangePolicy),
-      bookingMode: normalizeBookingMode(defaultProfile?.bookingMode),
-      transferPolicy: { mode: normalizeTransferMode(defaultProfile?.transferMode), ...(defaultProfile?.transferNumber ? { transferNumber: defaultProfile.transferNumber } : {}) },
-      ...(receptionists ? { receptionists } : {}),
+      bookingMode: normalizeBookingMode(defaultProfile.bookingMode),
+      transferPolicy: { mode: normalizeTransferMode(defaultProfile.transferMode), ...(defaultProfile.transferNumber ? { transferNumber: defaultProfile.transferNumber } : {}) },
+      receptionists,
       ...(knowledge.extraSnippets.length ? { extraSnippets: knowledge.extraSnippets } : {}),
       ...(knowledge.documents ? { knowledgeDocuments: knowledge.documents } : {}),
       ...(publicPageUrl ? { publicPageUrl } : {}),

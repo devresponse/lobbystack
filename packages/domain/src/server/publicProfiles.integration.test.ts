@@ -83,7 +83,8 @@ async function seed(tx: DatabaseTransaction) {
     { businessId, userId: adminId!, role: "business_admin" },
     { businessId, userId: schedulerId!, role: "scheduler" },
   ]);
-  await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "A family dental clinic.", summarySource: "generated", bookingPolicy: "Book", transferMode: "on_request", transferNumber: "+16045550199", bookingMode: "instant" });
+  await tx.update(businesses).set({ summary: "A family dental clinic.", summarySource: "generated" }).where(eq(businesses.id, businessId));
+  await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "on_request", transferNumber: "+16045550199", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await tx.insert(staff).values({ businessId, name: "Dr. Lee", timezone: "UTC" });
   const [service] = await tx.insert(services).values({ businessId, name: "Check-up", slug: "check-up", durationMinutes: 30 }).returning({ id: services.id });
   await tx.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 0, closeMinutes: 1440 })));

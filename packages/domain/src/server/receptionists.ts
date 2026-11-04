@@ -332,10 +332,11 @@ export async function listReceptionistsInTransaction(
     conditions.push(or(sql`${receptionistProfiles.name} ilike ${pattern}`, sql`${receptionistProfiles.description} ilike ${pattern}`));
   }
   const where = and(...conditions);
-  // Numbers and widget keys from before receptionists name none, which means
-  // the default one. The subqueries name their tables in full: in a one-table
-  // select Drizzle prints the columns of a sql`` field without their table,
-  // which a correlated subquery would read as its own (as in contacts.ts).
+  // A number or widget key naming none means the default one, as
+  // app.effective_receptionist reads it. The subqueries name their tables in
+  // full: in a one-table select Drizzle prints the columns of a sql`` field
+  // without their table, which a correlated subquery would read as its own
+  // (as in contacts.ts).
   const namesThis = (alias: string) =>
     sql.raw(`("${alias}"."receptionist_id" = "receptionist_profiles"."id" or ("${alias}"."receptionist_id" is null and "receptionist_profiles"."is_default"))`);
   const rows = await tx.select({
@@ -448,7 +449,7 @@ export async function createReceptionistInTransaction(
       name: input.receptionist.name,
       description: input.receptionist.description ?? "",
       handle,
-      // A row inserted without saying is the default, for the code before receptionists.
+      // The business has its default receptionist already.
       isDefault: false,
       knowledgeScope: input.receptionist.knowledgeScope ?? "audience",
       listed: input.receptionist.listed ?? true,
@@ -464,9 +465,6 @@ export async function createReceptionistInTransaction(
       transferMode: source.transferMode,
       transferNumber: source.transferNumber,
       bookingMode: source.bookingMode,
-      // The business keeps the shared settings; this row's copies are never read.
-      summary: "",
-      recordingNotice: source.recordingNotice,
     }).returning({ id: receptionistProfiles.id });
   } catch (error) {
     if (isUniqueViolation(error, "receptionist_profiles_business_handle_unique")) throw handleTaken();
@@ -689,9 +687,8 @@ export async function sortReceptionistsByNameInTransaction(tx: DatabaseTransacti
 /**
  * Makes an active receptionist the default one: it answers the business page
  * and whatever names no receptionist. The previous default keeps its numbers,
- * widget keys and links, and gets a page address if it had none. The new
- * default's row takes the business's shared settings first, as the copy the
- * code of the release before reads.
+ * widget keys and links, and gets a page address if it had none. The
+ * business's shared settings don't move: they are the business's.
  */
 export async function makeDefaultReceptionistInTransaction(
   tx: DatabaseTransaction,
@@ -710,19 +707,10 @@ export async function makeDefaultReceptionistInTransaction(
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)))
     .limit(1)
     .for("update");
-  const [shared] = await tx.select({
-    summary: businesses.summary,
-    summarySource: businesses.summarySource,
-    summaryFingerprint: businesses.summaryFingerprint,
-    summaryGeneratedAt: businesses.summaryGeneratedAt,
-    recordingNotice: businesses.recordingNotice,
-    appointmentChangePolicy: businesses.appointmentChangePolicy,
-  }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!shared) throw notFound();
   const now = new Date();
   // The default speaks the business's language (AI settings offers it no
   // language of its own), so the new default gives up the one it had.
-  await tx.update(receptionistProfiles).set({ ...shared, locale: null, updatedAt: now })
+  await tx.update(receptionistProfiles).set({ locale: null, updatedAt: now })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)));
   if (previous) {
     const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), handlesOf(await liveOrder(tx, businessId), previous.id));

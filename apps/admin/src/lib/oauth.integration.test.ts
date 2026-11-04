@@ -70,7 +70,8 @@ async function auth(path: string, init: RequestInit = {}): Promise<Response> {
 async function seedBusiness(name: string, userId: string, role: string): Promise<string> {
   const businessId = randomUUID();
   await admin!.db.insert(businesses).values({ id: businessId, slug: `oauth-it-${businessId}`, name, timezone: "UTC", businessType: "test" });
-  await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: name, bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+  await admin!.db.update(businesses).set({ summary: name }).where(eq(businesses.id, businessId));
+  await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await admin!.db.insert(businessMemberships).values({ businessId, userId, role });
   cleanup.businesses.push(businessId);
   return businessId;

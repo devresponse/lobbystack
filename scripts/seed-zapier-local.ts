@@ -58,7 +58,8 @@ async function main(): Promise<void> {
       if (existing) return existing.id;
       const [business] = await tx.insert(businesses).values({ slug: SLUG, name: "Zapier Local Test Clinic", timezone: "America/Toronto", defaultLocale: "en", businessType: "service_company", deploymentMode: "development", onboardingStage: "complete" }).returning({ id: businesses.id });
       const id = business!.id;
-      await tx.insert(receptionistProfiles).values({ businessId: id, greeting: "Hi", tone: "warm", summary: "Zapier local test", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+      await tx.update(businesses).set({ summary: "Zapier local test" }).where(eq(businesses.id, id));
+      await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, id));
       await tx.insert(staff).values({ businessId: id, name: "Alex Morgan", timezone: "America/Toronto" });
       await tx.insert(services).values({ businessId: id, name: "Consultation", slug: "consultation", durationMinutes: 30 });
       await tx.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId: id, dayOfWeek, openMinutes: 8 * 60, closeMinutes: 20 * 60 })));

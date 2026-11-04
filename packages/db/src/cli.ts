@@ -11,7 +11,6 @@ import type { PoolClient } from "pg";
 import { initializeTelemetry, shutdownTelemetry } from "@lobbystack/telemetry/node";
 
 import { createDatabaseClient, databaseHealthCheck } from "./client";
-import { checkReceptionistData, describeReceptionistData } from "./receptionist-checks";
 import {
   concurrentIndexName,
   MIGRATION_JOURNAL_TABLE,
@@ -290,14 +289,6 @@ async function main(): Promise<void> {
         if (receptionistFailures.length > 0) {
           throw new Error(`Receptionist grant verification failed for: ${receptionistFailures.join(", ")}`);
         }
-        // Until the clean-up deploy: the default receptionist's copy of the
-        // shared settings, and the records the backfill hasn't reached yet.
-        const receptionistData = describeReceptionistData(await checkReceptionistData(migrator.db));
-        for (const warning of receptionistData.warnings) console.warn(warning);
-        console.log(receptionistData.info);
-        if (receptionistData.failures.length > 0) {
-          throw new Error(`Receptionist data verification failed: ${receptionistData.failures.join("; ")}`);
-        }
         if (process.env.VERIFY_RLS_BEHAVIOR === "true") {
           await verifyRlsBehavior(migrator);
         }
@@ -458,7 +449,7 @@ async function verifyReceptionistGrants(client: ReturnType<typeof createDatabase
     select 'PUBLIC:' || function_name || ':EXECUTE'
     from unnest(array[
       'app.effective_receptionist(uuid, uuid)', 'app.resolve_receptionist_by_phone(text)', 'app.resolve_entry_link(text)',
-      'app.copy_shared_receptionist_settings()', 'app.fill_default_receptionist()'
+      'app.fill_default_receptionist()', 'app.add_default_receptionist()', 'app.default_receptionist_name(text)'
     ]) as function_name
     where exists (
       select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) acl

@@ -275,8 +275,8 @@ export type OpenLiveCall = {
   lastActivityAt: Date;
   /** The highest transcript sequence saved, so a new owner numbers its turns after it. */
   lastSequence: number;
-  /** The receptionist that answered, so a new owner answers as it; absent means the default. */
-  receptionistId?: string;
+  /** The receptionist that answered, which every call names, so a new owner answers as it. */
+  receptionistId: string;
 };
 
 // No call runs longer than MAX_PHONE_CALL_MS, so an open call older than this
@@ -337,7 +337,7 @@ export async function listOpenLiveCalls(context: DomainContext, input: { busines
         slicedReservation: channel === "voice" && row.reservedSeconds !== null,
         lastActivityAt: row.lastActivityAt,
         lastSequence: row.lastSequence,
-        ...(row.receptionistId ? { receptionistId: row.receptionistId } : {}),
+        receptionistId: row.receptionistId,
       };
     });
   });

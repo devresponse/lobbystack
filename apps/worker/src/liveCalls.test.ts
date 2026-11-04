@@ -115,6 +115,8 @@ afterEach(() => { vi.unstubAllEnvs(); });
 // What a call opens with for the snapshot most tests use: its greeting, then
 // the notice that the call is with an AI and recorded.
 const opening = "Hi You're speaking with an AI assistant, and this call is recorded and transcribed.";
+// The business's default receptionist, which a call names unless another receptionist answered it.
+const frontDesk = "00000000-0000-4000-8000-0000000000a1";
 
 describe("createLiveCallHandler", () => {
   it("opens one sideband when two attaches for a session overlap", async () => {
@@ -180,7 +182,7 @@ describe("createLiveCallHandler", () => {
     expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
     await (mocks.controllers_.at(-1)!.options.setup as Promise<unknown>);
     expect((mocks.createReceptionistAgent.mock.lastCall![0] as { context: { snapshot: unknown } }).context.snapshot).toBe(view);
-    // An attach from before receptionists answers as the default receptionist.
+    // An attach that names none answers as the default receptionist.
     await handler.handle(attachRequest({ sessionId: "live_default", businessId: "biz_1", callId: "call_2", channel: "voice" }), response());
     expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: undefined });
   });
@@ -755,7 +757,7 @@ describe("worker shutdown drain", () => {
     const handler = createLiveCallHandler({ domain: { db: {} as never }, attachLock: slowLock });
     const before = mocks.controllers;
     const now = Date.now();
-    const recovered = handler.recover({ businessId: "biz_1", callId: "call_drain_recover", sessionId: "live_drain_recover", channel: "voice", intakeOnly: false, startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 0 });
+    const recovered = handler.recover({ businessId: "biz_1", callId: "call_drain_recover", sessionId: "live_drain_recover", channel: "voice", intakeOnly: false, startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 0, receptionistId: frontDesk });
     await handler.drain(0);
     await expect(recovered).resolves.toBe("skipped");
     expect(mocks.controllers - before).toBe(0);
@@ -765,10 +767,10 @@ describe("worker shutdown drain", () => {
 
 describe("recovering a call whose worker died", () => {
   const now = Date.now();
-  // Started two minutes ago with ten minutes reserved; its last turn was saved a minute ago.
+  // Started two minutes ago with ten minutes reserved, answered by the default receptionist; its last turn was saved a minute ago.
   const orphan = (sessionId: string, overrides: Record<string, unknown> = {}) => ({
     businessId: "biz_1", callId: `call_${sessionId}`, sessionId, channel: "voice" as const, conversationId: "conv_1", callerPhone: "+14165550100", intakeOnly: false,
-    startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 7,
+    startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 7, receptionistId: frontDesk,
     ...overrides,
   });
 
@@ -912,9 +914,8 @@ describe("recovering a call whose worker died", () => {
     const kitsilano = "00000000-0000-4000-8000-0000000000a2";
     await expect(recoveringWorker().recover(orphan("live_orphan_kits", { receptionistId: kitsilano }))).resolves.toBe("attached");
     expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
-    // A call from before receptionists answers as the default.
-    await expect(recoveringWorker().recover(orphan("live_orphan_default", { receptionistId: null }))).resolves.toBe("attached");
-    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: undefined });
+    await expect(recoveringWorker().recover(orphan("live_orphan_default"))).resolves.toBe("attached");
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: frontDesk });
   });
 
   it("finishes an orphan whose session is gone with its best known length", async () => {

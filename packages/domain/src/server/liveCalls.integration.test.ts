@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, contacts, createDatabaseClient, enqueueOutbox, outboxMessages, transcripts, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, contacts, createDatabaseClient, enqueueOutbox, outboxMessages, receptionistProfiles, transcripts, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 
 import { getBillingUsageStatus, reserveAlertSmsUsage, reserveWidgetChatUsageInTransaction } from "./billing";
 import { blockLiveCaller, extendLiveCallReservation, finishLiveCall, lastLiveCallSequence, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, markLiveCallMediaStarted, prepareLiveCallTransfer, retryLiveCallRecording, saveLiveCallTurn, startLivePhoneCall, startLiveWebCall } from "./liveCalls";
@@ -285,6 +285,8 @@ describe.skipIf(!testUrl)("GPT-Live phone calls against PostgreSQL", () => {
     await rollbackTest(async (tx) => {
       // 1,200 seconds left, so the phone call reserves a 300-second slice.
       const businessId = await business(tx, { plan: "free_cloud", usedSeconds: 600 });
+      // The default receptionist the database made with the business answers calls that name none.
+      const front = (await tx.select({ id: receptionistProfiles.id }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))))[0]!.id;
       const phone = call(businessId, "+14165550134");
       const demo = { businessId, sessionId: `live_${randomUUID()}`, widgetId: "prospect-demo", billable: false, maxDurationMs: 120_000, sessionPurpose: "prospect_demo" };
       const [phoneCall, demoCall, endedCall, recentCall] = await asWorker(tx, async (context) => [
@@ -308,11 +310,11 @@ describe.skipIf(!testUrl)("GPT-Live phone calls against PostgreSQL", () => {
       expect(open.map((row) => row.callId).sort()).toEqual([phoneCall!.callId, demoCall!.callId].sort());
       expect(open.find((row) => row.callId === phoneCall!.callId)).toEqual({
         businessId, callId: phoneCall!.callId, sessionId: phone.sessionId, channel: "voice", conversationId: phoneCall!.conversationId, callerPhone: "+14165550134", intakeOnly: false,
-        startedAt, reservedSeconds: 300, slicedReservation: true, lastActivityAt: new Date(startedAt.getTime() + 90_000), lastSequence: 2,
+        startedAt, reservedSeconds: 300, slicedReservation: true, lastActivityAt: new Date(startedAt.getTime() + 90_000), lastSequence: 2, receptionistId: front,
       });
       expect(open.find((row) => row.callId === demoCall!.callId)).toEqual({
         businessId, callId: demoCall!.callId, sessionId: demo.sessionId, channel: "web_voice", conversationId: demoCall!.conversationId, intakeOnly: true,
-        startedAt, reservedSeconds: 120, slicedReservation: false, lastActivityAt: new Date(startedAt.getTime() + 3_000), lastSequence: 0,
+        startedAt, reservedSeconds: 120, slicedReservation: false, lastActivityAt: new Date(startedAt.getTime() + 3_000), lastSequence: 0, receptionistId: front,
       });
       expect(open.map((row) => row.callId)).not.toContain(recentCall!.callId);
       // A top-up grows the reservation a recovery reads.

@@ -29,6 +29,12 @@ const legacyId = {
   legacyConvexId: text("legacy_convex_id"),
 };
 
+// The receptionist that answered a call, conversation or inbox item: always
+// set (migration 0143). An insert that leaves it out sends DEFAULT, and the
+// database gives the row its business's default receptionist
+// (app.fill_default_receptionist).
+const answeringReceptionistId = () => uuid("receptionist_id").notNull().$defaultFn(() => sql`default`);
+
 const vector = customType<{ data: number[]; driverData: string }>({
   dataType() {
     return "vector(1536)";
@@ -157,9 +163,8 @@ export const businesses = pgTable(
     // When and by whom an owner canceled the business (status "canceled"), which closes it to its team and deletes nothing. See migration 0130.
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
     canceledByUserId: uuid("canceled_by_user_id").references(() => users.id, { onDelete: "set null" }),
-    // Settings every receptionist shares, moved from receptionist_profiles in
-    // migration 0133. The default receptionist's row keeps a copy that the code
-    // writes too until the clean-up deploy (docs/features/receptionists.md).
+    // Settings every receptionist shares (migration 0133): the business
+    // summary, the AI and recording notice and the appointment change rules.
     summary: text("summary").default("").notNull(),
     // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
     // from the articles for everyone) or "operator". Generation never replaces
@@ -393,27 +398,16 @@ export const receptionistProfiles = pgTable(
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     greeting: text("greeting").notNull(),
     tone: text("tone").notNull(),
-    summary: text("summary").notNull(),
-    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
-    // from the knowledge sources) or "operator". Generation never replaces an
-    // operator's summary.
-    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
-    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
-    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
     bookingPolicy: text("booking_policy").notNull(),
     voiceInstructions: text("voice_instructions"),
     smsInstructions: text("sms_instructions"),
     chatInstructions: text("chat_instructions"),
     transferMode: varchar("transfer_mode", { length: 32 }).notNull(),
     transferNumber: text("transfer_number"),
-    appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     bookingMode: varchar("booking_mode", { length: 16 }).default("instant").notNull(),
-    // Whether calls say, after the greeting, that the caller is speaking with
-    // an AI and the call is recorded and transcribed. See migration 0118.
-    recordingNotice: boolean("recording_notice").default(true).notNull(),
-    // One row per receptionist since migration 0133. The summary columns,
-    // recordingNotice and appointmentChangePolicy above moved to businesses;
-    // the default receptionist's row keeps a copy until the clean-up deploy.
+    // One row per receptionist since migration 0133. The settings every
+    // receptionist shares are on businesses, and a new business gets its
+    // default receptionist from the database (migration 0143).
     name: varchar("name", { length: 80 }).default("Front desk").notNull(),
     // "What it helps with": the picker shows it, and the other receptionists use it to send visitors here.
     description: varchar("description", { length: 160 }).default("").notNull(),
@@ -622,8 +616,8 @@ export const conversations = pgTable(
     summary: text("summary"),
     currentIntent: text("current_intent"),
     locale: varchar("locale", { length: 8 }),
-    // The receptionist that answered; null means the default (old rows until the worker's backfill).
-    receptionistId: uuid("receptionist_id"),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
@@ -727,8 +721,8 @@ export const calls = pgTable(
     // Set when an owner or admin archives the call, which hides it from the
     // Calls list and Home's recent calls. Nothing is deleted.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
-    // The receptionist that answered; null means the default (old rows until the worker's backfill).
-    receptionistId: uuid("receptionist_id"),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
@@ -756,8 +750,8 @@ export const inboxItems = pgTable(
     contentRetentionStatus: varchar("content_retention_status", { length: 32 }).default("active").notNull(),
     contentExpiresAt: timestamp("content_expires_at", { withTimezone: true }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
-    // The receptionist whose call or chat made the item; null means the default.
-    receptionistId: uuid("receptionist_id"),
+    // The receptionist whose call or chat made the item. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     ...legacyId,
     ...timestamps,
   },

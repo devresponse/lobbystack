@@ -58,7 +58,8 @@ async function createKey(businessId: string, scopes: ApiKeyScope[]): Promise<{ i
 async function createFixture(label: string): Promise<Fixture> {
   const businessId = randomUUID();
   await admin!.db.insert(businesses).values({ id: businessId, slug: `mcp-${label}-${businessId}`, name: `MCP ${label}`, timezone: "America/Toronto", businessType: "test" });
-  await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: label, bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+  await admin!.db.update(businesses).set({ summary: label }).where(eq(businesses.id, businessId));
+  await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await admin!.db.insert(staff).values({ businessId, name: "Sam", timezone: "America/Toronto" });
   const [service] = await admin!.db.insert(services).values({ businessId, name: "Cleaning", slug: "cleaning", durationMinutes: 30 }).returning({ id: services.id });
   await admin!.db.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 8 * 60, closeMinutes: 20 * 60 })));

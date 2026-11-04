@@ -60,7 +60,7 @@ describe("agent settings validation", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ profile: { id: "profile", isDefault: true } });
     expect(fixture.updateBusiness).toHaveBeenCalledWith(tx, { businessId: "business", defaultLocale: "fr", timezone: "Europe/Belgrade", audit: { actorUserId: "owner" } });
-    expect(saved()).toEqual({ businessId: "business", businessName: "Clinic", receptionistId: null, patch: { greeting: "Bonjour, la clinique." }, regenerateSummary: false });
+    expect(saved()).toEqual({ businessId: "business", receptionistId: null, patch: { greeting: "Bonjour, la clinique." }, regenerateSummary: false });
   });
 
   it("saves another receptionist's language as its own, leaving the business's alone", async () => {

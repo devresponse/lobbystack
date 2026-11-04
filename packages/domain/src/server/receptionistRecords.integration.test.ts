@@ -1,15 +1,13 @@
 import { randomUUID } from "node:crypto";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   billingAccounts,
   businesses,
   calls,
-  checkReceptionistData,
   conversations,
   createDatabaseClient,
-  fillDefaultReceptionistBatch,
   inboxItems,
   knowledgeSnippetReceptionists,
   knowledgeSnippets,
@@ -23,7 +21,7 @@ import {
 } from "@lobbystack/db";
 
 import { findCurrentWidgetChat, findWidgetConversationId, getOrCreateConversation, getOrCreateWidgetConversation, setAutomationState } from "./conversations";
-import { backfillReceptionistRecords, listPhoneReceptionists } from "./receptionistRecords";
+import { listPhoneReceptionists } from "./receptionistRecords";
 import { archiveReceptionistInTransaction, createReceptionistInTransaction, setReceptionistStatusInTransaction } from "./receptionists";
 import { receiveInboundSms } from "./sms";
 import { createBusiness } from "./tenancy";
@@ -86,103 +84,64 @@ async function seedChain(tx: DatabaseTransaction, name = "Kitsilano Coffee") {
   return { context, userId, businessId, mainId: main!.id, storeId: store.id };
 }
 
-/** Clears receptionist_id the way rows from before migration 0137 have it: the insert trigger fills every new row. */
-async function fromBeforeReceptionists(tx: DatabaseTransaction, table: "calls" | "conversations" | "inbox_items" | "phone_numbers", businessId: string, receptionistId: string) {
-  await tx.execute(sql`update ${sql.identifier(table)} set receptionist_id = null where business_id = ${businessId}::uuid and receptionist_id = ${receptionistId}::uuid`);
-}
-
-async function nullCount(tx: DatabaseTransaction, table: "calls" | "conversations" | "inbox_items", businessId: string) {
-  const result = await tx.execute<{ count: number }>(sql`select count(*)::int as count from ${sql.identifier(table)} where business_id = ${businessId}::uuid and receptionist_id is null`);
-  return Number(result.rows[0]?.count ?? 0);
+/** The PostgreSQL error code a step fails with, as a savepoint, or null when it succeeds. */
+async function errorCode(tx: DatabaseTransaction, run: (inner: DatabaseTransaction) => Promise<unknown>): Promise<string | null> {
+  const error = await failure(tx, run) as { code?: string; cause?: { code?: string } } | null;
+  return error ? error.cause?.code ?? error.code ?? "unknown" : null;
 }
 
 const newCall = (businessId: string, receptionistId?: string) => ({ businessId, providerCallId: `call-${randomUUID()}`, transport: "sip", startedAt: new Date(), ...(receptionistId ? { receptionistId } : {}) });
 
 describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL under RLS", () => {
-  it("gives old records the default receptionist in batches until a pass changes nothing, leaving named records and other businesses alone", async () => {
+  it("gives every new business its default receptionist, named in its language, however the business is made", async () => {
     await rollbackTest(async (tx) => {
-      const { context, businessId, mainId, storeId } = await seedChain(tx);
-      await tx.insert(calls).values(Array.from({ length: 5 }, () => newCall(businessId)));
-      await tx.insert(calls).values(newCall(businessId, storeId));
-      await tx.insert(conversations).values(Array.from({ length: 3 }, () => ({ businessId, channel: "web_chat" })));
-      await tx.insert(conversations).values({ businessId, channel: "web_chat", receptionistId: storeId });
-      await tx.insert(inboxItems).values({ businessId, kind: "callback", title: "Call back", body: "Asked for a call back." });
-      for (const table of ["calls", "conversations", "inbox_items"] as const) await fromBeforeReceptionists(tx, table, businessId, mainId);
+      // Made outside sign-up, as the seed and other tools do: the database adds it with the default settings.
+      const bare = randomUUID();
+      await tx.insert(businesses).values({ id: bare, slug: bare, name: "Boulangerie Javor", timezone: "UTC", businessType: "test", defaultLocale: "fr" });
+      const made = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, bare));
+      expect(made).toEqual([expect.objectContaining({ isDefault: true, name: "Accueil", handle: null, status: "active", knowledgeScope: "all", greeting: "Thank you for calling Boulangerie Javor.", tone: "professional", bookingPolicy: "Confirm availability before booking.", transferMode: "on_request", locale: null })]);
+      // A business can't get a second default receptionist.
+      expect(await errorCode(tx, (inner) => inner.insert(receptionistProfiles).values({ businessId: bare, greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never" }))).toBe("23505");
+
+      // Sign-up gives the one the database made its own greeting and instructions, and adds no other.
+      const { businessId, mainId } = await seedChain(tx);
+      const [main] = await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.id, mainId));
+      expect(main).toMatchObject({ businessId, isDefault: true, name: "Front desk", greeting: "Thanks for calling Kitsilano Coffee.", tone: "warm and direct", transferMode: "on_request" });
+      expect(await tx.select({ id: receptionistProfiles.id }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)))).toEqual([{ id: mainId }]);
+    });
+  });
+
+  it("requires the receptionist on every call, conversation and follow-up, giving one whose insert names none the default", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, mainId, storeId } = await seedChain(tx);
       const other = await seedChain(tx, "Other Roasters");
-      await tx.insert(calls).values(Array.from({ length: 3 }, () => newCall(other.businessId)));
-      await fromBeforeReceptionists(tx, "calls", other.businessId, other.mainId);
+      const [call] = await tx.insert(calls).values(newCall(businessId)).returning({ id: calls.id, receptionistId: calls.receptionistId });
+      const [chat] = await tx.insert(conversations).values({ businessId, channel: "web_chat" }).returning({ id: conversations.id, receptionistId: conversations.receptionistId });
+      const [item] = await tx.insert(inboxItems).values({ businessId, kind: "callback", title: "Call back", body: "Asked for a call back." }).returning({ id: inboxItems.id, receptionistId: inboxItems.receptionistId });
+      const [named] = await tx.insert(calls).values(newCall(businessId, storeId)).returning({ receptionistId: calls.receptionistId });
+      expect([call?.receptionistId, chat?.receptionistId, item?.receptionistId, named?.receptionistId]).toEqual([mainId, mainId, mainId, storeId]);
 
-      await as(tx, "lobbystack_worker");
-      const pauses: number[] = [];
-      const result = await backfillReceptionistRecords(context, { businessId, batchSize: 2, pauseMs: 5, sleep: async (ms) => { pauses.push(ms); } });
-      // Two of each a pass: 5 rows, then 3, then 1, then none.
-      expect(result).toEqual({ filled: { calls: 5, conversations: 3, inbox_items: 1 }, passes: 4, finished: true });
-      expect(pauses).toEqual([5, 5, 5]);
-
-      await as(tx, null);
-      for (const table of ["calls", "conversations", "inbox_items"] as const) expect(await nullCount(tx, table, businessId)).toBe(0);
-      const callRows = await tx.select({ receptionistId: calls.receptionistId }).from(calls).where(eq(calls.businessId, businessId));
-      expect(callRows.filter((row) => row.receptionistId === mainId)).toHaveLength(5);
-      expect(callRows.filter((row) => row.receptionistId === storeId)).toHaveLength(1);
-      const conversationRows = await tx.select({ receptionistId: conversations.receptionistId }).from(conversations).where(eq(conversations.businessId, businessId));
-      expect(conversationRows.map((row) => row.receptionistId).sort()).toEqual([mainId, mainId, mainId, storeId].sort());
-      // Another business's records wait for its own job.
-      expect(await nullCount(tx, "calls", other.businessId)).toBe(3);
-
-      // Once nothing is left, a run changes nothing.
-      await as(tx, "lobbystack_worker");
-      expect(await backfillReceptionistRecords(context, { businessId, pauseMs: 0 })).toEqual({ filled: { calls: 0, conversations: 0, inbox_items: 0 }, passes: 1, finished: true });
-      // A run that reaches its limit says so, and the next one carries on.
-      expect(await backfillReceptionistRecords(context, { businessId: other.businessId, batchSize: 1, pauseMs: 0, maxPasses: 2 })).toEqual({ filled: { calls: 2, conversations: 0, inbox_items: 0 }, passes: 2, finished: false });
-      expect(await backfillReceptionistRecords(context, { businessId: other.businessId, pauseMs: 0 })).toMatchObject({ filled: { calls: 1 }, finished: true });
+      // Nothing can clear it, and a record can only name a receptionist of its own business.
+      for (const table of ["calls", "conversations", "inbox_items"] as const) {
+        expect(await errorCode(tx, (inner) => inner.execute(sql`update ${sql.identifier(table)} set receptionist_id = null where business_id = ${businessId}::uuid`))).toBe("23502");
+        expect(await errorCode(tx, (inner) => inner.execute(sql`update ${sql.identifier(table)} set receptionist_id = ${other.mainId}::uuid where business_id = ${businessId}::uuid`))).toBe("23503");
+      }
+      const keys = await tx.execute<{ conname: string; convalidated: boolean }>(sql`select conname, convalidated from pg_constraint where conname in ('calls_receptionist_fk', 'conversations_receptionist_fk', 'inbox_items_receptionist_fk') order by conname`);
+      expect(keys.rows).toEqual([
+        { conname: "calls_receptionist_fk", convalidated: true },
+        { conname: "conversations_receptionist_fk", convalidated: true },
+        { conname: "inbox_items_receptionist_fk", convalidated: true },
+      ]);
     });
   });
 
-  it("leaves a business without a default receptionist as it is", async () => {
+  it("keeps the settings every receptionist shares on the business alone", async () => {
     await rollbackTest(async (tx) => {
-      const businessId = randomUUID();
-      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "No profile yet", timezone: "UTC", businessType: "test" });
-      await tx.insert(calls).values(newCall(businessId));
-      await as(tx, "lobbystack_worker");
-      await tx.execute(rlsContextStatement({ businessId, actorType: "worker" }));
-      expect(await fillDefaultReceptionistBatch(tx, { table: "calls", businessId, limit: 10 })).toBe(0);
-      await expect(fillDefaultReceptionistBatch(tx, { table: "contacts" as never, businessId, limit: 10 })).rejects.toThrow("Unknown record table");
-      await as(tx, null);
-      expect(await nullCount(tx, "calls", businessId)).toBe(1);
+      const columns = await tx.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_schema = 'public' and table_name = 'receptionist_profiles' and column_name in ('summary', 'summary_source', 'summary_fingerprint', 'summary_generated_at', 'recording_notice', 'appointment_change_policy')`);
+      expect(columns.rows).toEqual([]);
+      const copier = await tx.execute<{ name: string }>(sql`select tgname as name from pg_trigger where tgname = 'receptionist_profiles_copy_shared_settings' union all select proname from pg_proc where proname = 'copy_shared_receptionist_settings'`);
+      expect(copier.rows).toEqual([]);
     });
-  });
-
-  it("skips a record a live transaction holds, so nothing waits on the backfill, and fills it on a later run", async () => {
-    const businessId = randomUUID();
-    const holder = await client!.pool.connect();
-    try {
-      await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Backfill lock test", timezone: "UTC", businessType: "test" });
-      const [main] = await client!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hello.", tone: "professional", summary: "Backfill lock test", bookingPolicy: "", transferMode: "never" }).returning({ id: receptionistProfiles.id });
-      const rows = await client!.db.insert(calls).values([newCall(businessId), newCall(businessId)]).returning({ id: calls.id });
-      await client!.db.execute(sql`update calls set receptionist_id = null where business_id = ${businessId}::uuid`);
-      const held = rows[0]!.id;
-      // A call in progress holds its row.
-      await holder.query("begin");
-      await holder.query("select id from calls where id = $1 for update", [held]);
-
-      const first = await client!.db.transaction(async (tx) => {
-        await as(tx, "lobbystack_worker");
-        await tx.execute(rlsContextStatement({ businessId, actorType: "worker" }));
-        return await fillDefaultReceptionistBatch(tx, { table: "calls", businessId, limit: 10 });
-      });
-      expect(first).toBe(1);
-      const [heldRow] = await client!.db.select({ receptionistId: calls.receptionistId }).from(calls).where(eq(calls.id, held));
-      expect(heldRow?.receptionistId).toBeNull();
-
-      await holder.query("commit");
-      expect(await backfillReceptionistRecords({ db: client!.db }, { businessId, pauseMs: 0 })).toMatchObject({ filled: { calls: 1 }, finished: true });
-      const filled = await client!.db.select({ receptionistId: calls.receptionistId }).from(calls).where(eq(calls.businessId, businessId));
-      expect(filled.map((row) => row.receptionistId)).toEqual([main!.id, main!.id]);
-    } finally {
-      await holder.query("rollback").catch(() => undefined);
-      holder.release();
-      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
-    }
   });
 
   it("lists the receptionists that answer the business's numbers, a paused or archived one's as the default", async () => {
@@ -216,18 +175,17 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
       expect(await resolve(labNumber)).toBe(mainId);
       expect(await resolve(phone())).toBeNull();
       await as(tx, null);
-      await fromBeforeReceptionists(tx, "phone_numbers", businessId, storeId);
+      await tx.update(phoneNumbers).set({ receptionistId: null }).where(eq(phoneNumbers.e164, storeNumber));
       await as(tx, "lobbystack_app");
-      // A number from before receptionists answers as the default.
+      // A number naming no receptionist answers as the default.
       expect(await resolve(storeNumber)).toBe(mainId);
     });
   });
 
-  it("filters calls by the receptionist that answered and names it, old calls counting for the default", async () => {
+  it("filters calls by the receptionist that answered and names it, a call that named none counting for the default", async () => {
     await rollbackTest(async (tx) => {
       const { context, userId, businessId, mainId, storeId } = await seedChain(tx);
       const [old] = await tx.insert(calls).values(newCall(businessId)).returning({ id: calls.id });
-      await fromBeforeReceptionists(tx, "calls", businessId, mainId);
       const [front] = await tx.insert(calls).values(newCall(businessId, mainId)).returning({ id: calls.id });
       const [store] = await tx.insert(calls).values(newCall(businessId, storeId)).returning({ id: calls.id });
 
@@ -339,26 +297,6 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
     });
   });
 
-  it("lets the receptionist answering now carry on a website chat from before receptionists", async () => {
-    await rollbackTest(async (tx) => {
-      const { context, businessId, mainId, storeId } = await seedChain(tx);
-      const widgetVisitorId = randomUUID();
-      await as(tx, "lobbystack_worker");
-      const old = await getOrCreateWidgetConversation(context, { businessId, widgetVisitorId });
-      // Named by the insert trigger, then cleared as the migration left older chats.
-      expect(old.receptionistId).toBe(mainId);
-      await as(tx, null);
-      await fromBeforeReceptionists(tx, "conversations", businessId, mainId);
-
-      await as(tx, "lobbystack_worker");
-      expect(await findCurrentWidgetChat(context, { businessId, widgetVisitorId, receptionistId: storeId })).toEqual({ conversationId: old.conversationId, idle: false });
-      expect(await getOrCreateWidgetConversation(context, { businessId, widgetVisitorId, receptionistId: storeId })).toEqual({ conversationId: old.conversationId, automationState: "ai_active", receptionistId: storeId });
-      await as(tx, null);
-      const [row] = await tx.select({ receptionistId: conversations.receptionistId }).from(conversations).where(eq(conversations.id, old.conversationId));
-      expect(row?.receptionistId).toBe(storeId);
-    });
-  });
-
   it("counts a question under each receptionist that heard it, and filters the list by one", async () => {
     await rollbackTest(async (tx) => {
       const { context, userId, businessId, mainId, storeId } = await seedChain(tx);
@@ -396,14 +334,6 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
       expect(atStore.openCount).toBe(1);
       expect((await listOpenUnansweredQuestions(context, { userId, businessId, receptionistId: mainId })).questions.map((question) => question.id).sort()).toEqual([fromCall!.id, parking!.id].sort());
       await expect(listOpenUnansweredQuestions(context, { userId, businessId, receptionistId: "store" })).rejects.toMatchObject({ status: 400, code: "invalid_receptionist" });
-
-      // A question from before receptionists, with no rows for who asked, was the default's.
-      await as(tx, null);
-      await tx.delete(unansweredQuestionReceptionists).where(eq(unansweredQuestionReceptionists.questionId, parking!.id));
-      await as(tx, "lobbystack_app");
-      const withOld = await listOpenUnansweredQuestions(context, { userId, businessId, receptionistId: mainId });
-      expect(withOld.questions.find((question) => question.id === parking!.id)?.askedOf).toEqual([expect.objectContaining({ receptionistId: mainId, name: "Front desk", timesAsked: 2 })]);
-      expect((await listOpenUnansweredQuestions(context, { userId, businessId, receptionistId: storeId })).questions.map((question) => question.id)).toEqual([fromCall!.id]);
     });
   });
 
@@ -445,32 +375,6 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
       expect(linked.filter((row) => row.snippetId === asked.snippetId).map((row) => row.receptionistId).sort()).toEqual([storeId, catering.id].sort());
       expect(linked.filter((row) => row.snippetId === chosen.snippetId).map((row) => row.receptionistId).sort()).toEqual([mainId, storeId].sort());
       expect(linked.filter((row) => row.snippetId === everyone.snippetId)).toEqual([]);
-    });
-  });
-
-  it("reports the migrate service's receptionist checks: shared settings that differ, a missing default, records left to fill", async () => {
-    await rollbackTest(async (tx) => {
-      const { businessId, mainId } = await seedChain(tx);
-      const bare = randomUUID();
-      await tx.insert(businesses).values({ id: bare, slug: bare, name: "No profile yet", timezone: "UTC", businessType: "test" });
-      await tx.insert(calls).values(newCall(businessId));
-      await fromBeforeReceptionists(tx, "calls", businessId, mainId);
-
-      const before = await checkReceptionistData(tx);
-      expect(before.mismatchedSharedSettings).not.toContain(businessId);
-      expect(before.withoutDefault).toContain(bare);
-      expect(before.withoutDefault).not.toContain(businessId);
-      expect(before.unfilled.calls).toBeGreaterThanOrEqual(1);
-
-      // A write that reached only one side.
-      await tx.execute(sql`update businesses set recording_notice = not recording_notice where id = ${businessId}::uuid`);
-      expect((await checkReceptionistData(tx)).mismatchedSharedSettings).toContain(businessId);
-      await tx.update(receptionistProfiles).set({ recordingNotice: sql`not ${receptionistProfiles.recordingNotice}` }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)));
-      // The default's write is copied to the business, so both sides agree again.
-      expect((await checkReceptionistData(tx)).mismatchedSharedSettings).not.toContain(businessId);
-      await tx.execute(sql`update businesses set summary_fingerprint = 'stale' where id = ${businessId}::uuid`);
-      expect((await checkReceptionistData(tx)).mismatchedSharedSettings).toContain(businessId);
-      expect((await tx.select({ id: calls.id }).from(calls).where(and(eq(calls.businessId, businessId), isNull(calls.receptionistId))))).toHaveLength(1);
     });
   });
 });

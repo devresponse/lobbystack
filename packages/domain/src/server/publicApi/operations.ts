@@ -121,7 +121,7 @@ import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "
 import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
-import { defaultReceptionistProfile, loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
+import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
@@ -1284,18 +1284,18 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
 
 /**
  * The business's default receptionist, which the v1 receptionist resource is,
- * with the settings every receptionist shares, or the defaults it would be
- * saved with when the business has none yet.
+ * with the settings every receptionist shares. Every business has one from
+ * the moment it exists (migration 0143), so none means the business is out of
+ * sight.
  */
-async function loadReceptionistState(tx: DatabaseTransaction, businessId: string, lock: boolean) {
-  const [business] = await tx.select({ name: businesses.name, updatedAt: businesses.updatedAt }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!business) throw notFound("Business");
-  const profile = await loadReceptionistView(tx, { businessId, lock });
-  return { business, profile, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
+async function loadDefaultReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean): Promise<ReceptionistView> {
+  const receptionist = await loadReceptionistView(tx, { businessId, lock });
+  if (!receptionist) throw notFound("Business");
+  return receptionist;
 }
 
 export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
-  return await inBusiness(context, caller, async (tx) => serializeReceptionist((await loadReceptionistState(tx, caller.businessId, false)).shown));
+  return await inBusiness(context, caller, async (tx) => serializeReceptionist(await loadDefaultReceptionist(tx, caller.businessId, false)));
 }
 
 /**
@@ -1307,7 +1307,7 @@ export async function getReceptionistForApi(context: DomainContext, caller: ApiC
 export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate): Promise<ApiReceptionist> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    const { business, profile: current, shown } = await loadReceptionistState(tx, caller.businessId, true);
+    const current = await loadDefaultReceptionist(tx, caller.businessId, true);
     const policy = input.appointment_change_policy;
     const requested: ReceptionistProfilePatch = {
       ...(input.greeting !== undefined ? { greeting: input.greeting } : {}),
@@ -1324,15 +1324,14 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
       ...(policy ? { appointmentChangePolicy: { enabled: policy.enabled, allowCancel: policy.allow_cancel, allowReschedule: policy.allow_reschedule, verificationMode: policy.verification_mode } } : {}),
     };
     const unchanged = (field: keyof ReceptionistProfilePatch): boolean => {
-      if (!current) return false;
       if (field === "summary") return requested.summary === current.summary && current.summarySource === "operator";
       if (field === "appointmentChangePolicy") return JSON.stringify(requested.appointmentChangePolicy) === JSON.stringify(normalizeAppointmentChangePolicy(current.appointmentChangePolicy));
       return requested[field] === current[field];
     };
     const patch = Object.fromEntries(Object.entries(requested).filter(([field]) => !unchanged(field as keyof ReceptionistProfilePatch))) as ReceptionistProfilePatch;
     const regenerateSummary = input.regenerate_summary === true;
-    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(shown);
-    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, businessName: business.name, patch, regenerateSummary });
+    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(current);
+    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, patch, regenerateSummary });
     if (!profile) throw new Error("The receptionist settings could not be saved.");
     const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
     await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });

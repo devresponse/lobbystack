@@ -1,11 +1,9 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 
 import { businesses, enqueueOutbox, receptionistProfiles, type DatabaseTransaction } from "@lobbystack/db";
 import {
   appointmentChangeVerificationModes,
   bookingModes,
-  defaultAppointmentChangePolicy,
-  defaultReceptionistName,
   isRuntimeLocale,
   RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH,
   RECEPTIONIST_TEXT_MAX_LENGTH,
@@ -112,25 +110,6 @@ export function readReceptionistSettingsChange(body: unknown): ReceptionistSetti
   return { patch, ...(locale !== undefined ? { locale } : {}), ...(timezone !== undefined ? { timezone } : {}), regenerateSummary: regenerateSummary === true };
 }
 
-/** The settings a receptionist has before anyone edits them. */
-export function defaultReceptionistProfile(businessName: string) {
-  return {
-    greeting: `Thank you for calling ${businessName}.`,
-    tone: "professional",
-    summary: businessName,
-    summarySource: "placeholder" as const,
-    bookingPolicy: "Confirm availability before booking.",
-    voiceInstructions: null,
-    smsInstructions: null,
-    chatInstructions: null,
-    transferMode: "on_request" as const,
-    transferNumber: null,
-    appointmentChangePolicy: defaultAppointmentChangePolicy,
-    bookingMode: "instant" as const,
-    recordingNotice: true,
-  };
-}
-
 /** The fields of a patch every receptionist shares, which the business keeps. */
 export const sharedReceptionistFields = ["summary", "recordingNotice", "appointmentChangePolicy"] as const satisfies ReadonlyArray<keyof ReceptionistProfilePatch>;
 export type SharedReceptionistField = (typeof sharedReceptionistFields)[number];
@@ -149,11 +128,9 @@ export function splitReceptionistPatch(patch: ReceptionistProfilePatch): { share
 
 /**
  * A receptionist as the dashboard and the API show it: its own row, with the
- * settings every receptionist shares read from the business. Its row's copies
- * of those settings are left over from before receptionists, kept current on
- * the default receptionist only, and never read.
+ * settings every receptionist shares read from the business.
  */
-export type ReceptionistView = typeof receptionistProfiles.$inferSelect;
+export type ReceptionistView = typeof receptionistProfiles.$inferSelect & Pick<typeof businesses.$inferSelect, keyof typeof sharedReceptionistColumns>;
 
 /** The columns of businesses that hold the settings every receptionist shares. */
 export const sharedReceptionistColumns = {
@@ -188,47 +165,32 @@ export async function loadReceptionistView(
   return row ? { ...row.profile, ...row.shared } : null;
 }
 
-/**
- * Gives the default receptionist's row the business's new shared settings,
- * which the code of the release before reads from there. Until the clean-up
- * deploy, every write of them to businesses calls this in its transaction.
- */
-export async function copySharedSettingsToDefaultReceptionist(
-  tx: DatabaseTransaction,
-  businessId: string,
-  values: Partial<{ [Key in keyof typeof sharedReceptionistColumns]: ReceptionistView[Key] }>,
-): Promise<void> {
-  if (!Object.keys(values).length) return;
-  await tx.update(receptionistProfiles).set(values)
-    .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)));
-}
-
 function notFound(message: string): Error {
   return Object.assign(new Error(message), { status: 404 });
 }
 
 /**
  * Saves the fields given and refreshes the snapshot calls read receptionists
- * from. The shared settings go to the business and to the default
- * receptionist's copy; the others to the receptionist named, or the default
- * one, which is created from the defaults when the business has none. A
- * summary someone writes is never replaced by AI; regenerateSummary hands it
- * back to AI and queues the rewrite. Callers authorize and check the fields
- * first. Null when nothing was saved; a 404 error for a receptionist the
- * business doesn't have or has archived.
+ * from. The shared settings go to the business; the others to the
+ * receptionist named, or the default one, which every business has from the
+ * moment it exists (migration 0143). A summary someone writes is never
+ * replaced by AI; regenerateSummary hands it back to AI and queues the
+ * rewrite. Callers authorize and check the fields first. Null when nothing
+ * was saved; a 404 error for a receptionist the business doesn't have or has
+ * archived.
  */
 export async function saveReceptionistProfileInTransaction(
   tx: DatabaseTransaction,
-  input: { businessId: string; businessName: string; receptionistId?: string | null | undefined; patch: ReceptionistProfilePatch; regenerateSummary?: boolean | undefined },
+  input: { businessId: string; receptionistId?: string | null | undefined; patch: ReceptionistProfilePatch; regenerateSummary?: boolean | undefined },
 ): Promise<ReceptionistView | null> {
   const { businessId } = input;
   const { shared, own } = splitReceptionistPatch(input.patch);
   const now = new Date();
 
-  // The receptionist named, unless it is the default one.
-  let target: { id: string; isDefault: boolean } | undefined;
+  // The receptionist named; none means the default one.
+  let target: { id: string } | undefined;
   if (input.receptionistId) {
-    [target] = await tx.select({ id: receptionistProfiles.id, isDefault: receptionistProfiles.isDefault }).from(receptionistProfiles)
+    [target] = await tx.select({ id: receptionistProfiles.id }).from(receptionistProfiles)
       .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, input.receptionistId), isNull(receptionistProfiles.archivedAt)))
       .limit(1)
       .for("update");
@@ -238,57 +200,20 @@ export async function saveReceptionistProfileInTransaction(
   // 1. The business keeps the shared settings.
   const summarySource = shared.summary !== undefined ? "operator" as const : input.regenerateSummary ? "generated" as const : undefined;
   const businessSet = { ...shared, ...(summarySource ? { summarySource } : {}) };
-  const [business] = Object.keys(businessSet).length
-    ? await tx.update(businesses).set({ ...businessSet, updatedAt: now }).where(eq(businesses.id, businessId)).returning({ defaultLocale: businesses.defaultLocale, ...sharedReceptionistColumns })
-    : await tx.select({ defaultLocale: businesses.defaultLocale, ...sharedReceptionistColumns }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!business) return null;
-  const { defaultLocale, ...sharedNow } = business;
-  const sharedChanged = Object.keys(businessSet).length > 0;
-
-  // 2. The default receptionist keeps a copy of them until the clean-up
-  // deploy, for the code of the release before, and its own settings when it
-  // is the one being saved. It is created from the defaults when the business
-  // has none, which only a business from before receptionist profiles can be.
-  let saved: { id: string; updatedAt: Date } | undefined;
-  if (!target || target.isDefault || sharedChanged) {
-    const ownOfDefault = !target || target.isDefault ? own : {};
-    const defaults = defaultReceptionistProfile(input.businessName);
-    const [defaultProfile] = await tx.insert(receptionistProfiles).values({
-      businessId,
-      name: defaultReceptionistName(defaultLocale),
-      isDefault: true,
-      greeting: ownOfDefault.greeting ?? defaults.greeting,
-      tone: ownOfDefault.tone ?? defaults.tone,
-      bookingPolicy: ownOfDefault.bookingPolicy ?? defaults.bookingPolicy,
-      ...(ownOfDefault.voiceInstructions !== undefined ? { voiceInstructions: ownOfDefault.voiceInstructions } : {}),
-      ...(ownOfDefault.smsInstructions !== undefined ? { smsInstructions: ownOfDefault.smsInstructions } : {}),
-      ...(ownOfDefault.chatInstructions !== undefined ? { chatInstructions: ownOfDefault.chatInstructions } : {}),
-      transferMode: ownOfDefault.transferMode ?? defaults.transferMode,
-      ...(ownOfDefault.transferNumber !== undefined ? { transferNumber: ownOfDefault.transferNumber } : {}),
-      ...(ownOfDefault.bookingMode !== undefined ? { bookingMode: ownOfDefault.bookingMode } : {}),
-      ...sharedNow,
-      // A business that never had a summary starts from the placeholder,
-      // which the copy trigger then gives the business too.
-      ...(sharedNow.summarySource === "placeholder" && !sharedNow.summary ? { summary: defaults.summary } : {}),
-      appointmentChangePolicy: sharedNow.appointmentChangePolicy ?? defaults.appointmentChangePolicy,
-    }).onConflictDoUpdate({
-      target: receptionistProfiles.businessId,
-      targetWhere: sql`${receptionistProfiles.isDefault}`,
-      set: { ...ownOfDefault, ...(sharedChanged ? sharedNow : {}), updatedAt: now },
-    }).returning({ id: receptionistProfiles.id, updatedAt: receptionistProfiles.updatedAt });
-    if (!defaultProfile) return null;
-    saved = defaultProfile;
+  if (Object.keys(businessSet).length) {
+    const [business] = await tx.update(businesses).set({ ...businessSet, updatedAt: now }).where(eq(businesses.id, businessId)).returning({ id: businesses.id });
+    if (!business) return null;
   }
 
-  // 3. Any other receptionist keeps its own settings.
-  if (target && !target.isDefault) {
-    const [other] = await tx.update(receptionistProfiles).set({ ...own, updatedAt: now })
-      .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)))
-      .returning({ id: receptionistProfiles.id, updatedAt: receptionistProfiles.updatedAt });
-    if (!other) throw notFound("Receptionist not found.");
-    saved = other;
+  // 2. The receptionist keeps its own settings. A save of shared settings
+  // alone still marks it saved, which names the snapshot refresh below.
+  const [saved] = await tx.update(receptionistProfiles).set({ ...own, updatedAt: now })
+    .where(and(eq(receptionistProfiles.businessId, businessId), target ? eq(receptionistProfiles.id, target.id) : eq(receptionistProfiles.isDefault, true)))
+    .returning({ id: receptionistProfiles.id, updatedAt: receptionistProfiles.updatedAt });
+  if (!saved) {
+    if (target) throw notFound("Receptionist not found.");
+    return null;
   }
-  if (!saved) return null;
 
   await enqueueOutbox(tx, {
     topic: "snapshot.refresh",

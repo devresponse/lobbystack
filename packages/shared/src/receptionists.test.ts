@@ -51,8 +51,9 @@ describe("default receptionist names", () => {
     expect(defaultReceptionistName("constructor")).toBe("Front desk");
   });
 
-  it("matches the names migration 0133 gives existing receptionists", () => {
-    const migration = readFileSync(new URL("../../db/migrations/0133_receptionists.sql", import.meta.url), "utf8");
+  // 0133 named the receptionists businesses had; 0143 names the one each new business gets.
+  it.each(["0133_receptionists.sql", "0143_receptionists_cleanup.sql"])("matches the names migration %s gives default receptionists", (file) => {
+    const migration = readFileSync(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
     const names = Object.fromEntries([...migration.matchAll(/WHEN '([a-z]{2})' THEN '([^']+)'/g)].map((match) => [match[1], match[2]]));
     expect(names).toEqual(DEFAULT_RECEPTIONIST_NAMES);
     expect(migration).toContain(`ELSE '${DEFAULT_RECEPTIONIST_NAMES.en}'`);

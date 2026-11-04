@@ -157,7 +157,7 @@ async function answerChat(request: Request) {
             return;
           }
 
-          const activeSnapshot = storedSnapshot ? snapshotForReceptionist(storedSnapshot, conversation.receptionistId ?? pageReceptionistId) : fallbackSnapshot(session);
+          const activeSnapshot = storedSnapshot ? snapshotForReceptionist(storedSnapshot, conversation.receptionistId) : fallbackSnapshot(session);
           const history = await loadWidgetChatHistory(context, { businessId: session.businessId, conversationId });
           // The widget's language, which the visitor reads the chat in. A widget
           // from before it sent one shows its settings' language, or else the

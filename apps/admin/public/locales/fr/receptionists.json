@@ -46,8 +46,8 @@
     "cap_many": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en une pour en ajouter une autre.",
     "cap_other": "Une entreprise peut garder jusqu'à {{count}} réceptionnistes. Archivez-en une pour en ajouter une autre.",
     "upgradeTitle": "Une réceptionniste pour chaque lieu, équipe ou langue",
-    "upgradeDescription": "Votre forfait comprend une réceptionniste. Changez de forfait pour en ajouter d'autres, chacune avec son nom, son numéro de téléphone, ses connaissances et sa page.",
-    "salesDescription": "Votre forfait comprend une réceptionniste. Le forfait Entreprise en comprend davantage, chacune avec son nom, son numéro de téléphone, ses connaissances et sa page. Contactez l'équipe commerciale pour le mettre en place.",
+    "upgradeDescription": "Votre forfait comprend une réceptionniste. Changez de forfait pour en ajouter d'autres, chacune avec son nom, son message d'accueil, ses connaissances et sa page.",
+    "salesDescription": "Votre forfait comprend une réceptionniste. Le forfait Entreprise en comprend davantage, chacune avec son nom, son message d'accueil, ses connaissances et sa page. Contactez l'équipe commerciale pour le mettre en place.",
     "upgrade": "Voir les forfaits",
     "contactSales": "Contacter l'équipe commerciale",
     "upgradeAsk": "Un propriétaire ou un administrateur de l'entreprise peut changer de forfait."

@@ -1,6 +1,9 @@
 import { beforeEach, expect, it, vi } from "vitest";
 
-const fixture = vi.hoisted(() => ({ options: vi.fn(), choices: vi.fn() }));
+import { receptionistChoice } from "@/lib/receptionist-testing";
+
+type Domain = typeof import("@lobbystack/domain");
+const fixture = vi.hoisted(() => ({ options: vi.fn(), choices: vi.fn<Domain["listReceptionistChoicesInTransaction"]>() }));
 const tx = vi.hoisted(() => ({ name: "tx" }));
 vi.mock("@/lib/api-helpers", async (original) => ({
   ...await original<typeof import("@/lib/api-helpers")>(),
@@ -15,7 +18,7 @@ import { GET } from "./route";
 beforeEach(() => vi.clearAllMocks());
 
 it("gives every picker the receptionists that aren't archived, in the business's order, to anyone on the team", async () => {
-  const receptionists = [{ id: "front-desk", name: "Front desk", isDefault: true }, { id: "gastown", name: "Gastown store", isDefault: false }];
+  const receptionists = [receptionistChoice({ id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk", isDefault: true }), receptionistChoice({ id: "00000000-0000-4000-8000-0000000000b2", name: "Gastown store", handle: "gastown", sortOrder: 1 })];
   fixture.choices.mockResolvedValue(receptionists);
   const response = await GET(new Request("http://localhost:3000/api/receptionists/choices?businessId=business"));
   expect(response.status).toBe(200);

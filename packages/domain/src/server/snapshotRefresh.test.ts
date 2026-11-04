@@ -160,14 +160,12 @@ describe("refreshBusinessSnapshot write-through", () => {
     expect(mocks.loadSnapshotKnowledge).toHaveBeenCalledWith(expect.anything(), { businessId, receptionists: [{ id: profileRow.id, isDefault: true, status: "active", knowledgeScope: "all" }] });
   });
 
-  it("ranks a business from before receptionists as one receptionist that sees every article", async () => {
+  it("builds nothing for a business without its default receptionist, which the database never leaves", async () => {
     mocks.withBusinessTransaction.mockImplementation(async (_db, _ctx, callback) => callback(makeTx({ businesses: [businessRow] })));
     const cache = memoryCache();
-    await refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId });
-    expect(mocks.loadSnapshotKnowledge).toHaveBeenCalledWith(expect.anything(), { businessId, receptionists: [expect.objectContaining({ isDefault: true, status: "active", knowledgeScope: "all" })] });
-    const cached = await cache.get(businessId);
-    expect(cached).not.toHaveProperty("receptionists");
-    expect(cached).toMatchObject({ greeting: "Thank you for calling Maple Family Clinic.", bookingPolicy: "Confirm availability before booking." });
+    await expect(refreshBusinessSnapshot({ db: {} as never, snapshotCache: cache }, { businessId })).rejects.toThrow("The business has no default receptionist.");
+    expect(mocks.loadSnapshotKnowledge).not.toHaveBeenCalled();
+    expect(await cache.get(businessId)).toBeNull();
   });
 
   it("pushes the regenerated snapshot into the shared cache", async () => {

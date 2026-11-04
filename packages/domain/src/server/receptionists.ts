@@ -3,31 +3,23 @@ import { and, asc, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } fro
 import { auditLogs, businesses, enqueueOutbox, receptionistProfiles, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import {
   availableReceptionistHandle,
-  isReceptionistHandle,
-  isRuntimeLocale,
   alphabeticalReceptionistOrder,
   isAlphabeticalReceptionistOrder,
   isUuid,
   maxReceptionistsPerBusiness,
   receptionistAllowance,
   receptionistHandleFrom,
-  receptionistKnowledgeScopes,
-  receptionistStatuses,
   receptionistUpgrade,
-  MAX_RECEPTIONISTS_PER_REQUEST,
-  RECEPTIONIST_DESCRIPTION_MAX_LENGTH,
-  RECEPTIONIST_HANDLE_MAX_LENGTH,
-  RECEPTIONIST_NAME_MAX_LENGTH,
   type BillingPlanSlug,
   type ReceptionistKnowledgeScope,
   type ReceptionistStatus,
   type ReceptionistUpgrade,
-  type RuntimeLocale,
 } from "@lobbystack/shared";
 
 import type { DomainContext } from "./context";
+import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "./receptionistInput";
 import { loadReceptionistView, type ReceptionistView } from "./receptionistProfile";
-import { failure, isRecord, isUniqueViolation } from "./requestHelpers";
+import { failure, isUniqueViolation } from "./requestHelpers";
 import { loadBusinessPlanLimits } from "./usage";
 
 // Several receptionists per business. Each is a receptionist_profiles row; the
@@ -37,7 +29,8 @@ import { loadBusinessPlanLimits } from "./usage";
 // them. The plan limit counts receptionists that are active and not archived;
 // the deployment's cap (MAX_RECEPTIONISTS_PER_BUSINESS) also bounds how many a
 // business keeps that aren't archived, paused ones included. Callers authorize:
-// reading is for anyone on the team, every change for owners and admins.
+// reading is for anyone on the team, every change for owners and admins. What
+// the routes send is read in receptionistInput.ts.
 
 /** A receptionist as dropdowns and pickers list it. */
 export type ReceptionistChoice = {
@@ -94,132 +87,11 @@ export type ReceptionistAllowanceState = {
   upgrade: ReceptionistUpgrade;
 };
 
-/** A new receptionist's fields. Settings it doesn't name come from copyFromId's receptionist, else the default one. */
-export type ReceptionistCreateInput = {
-  name: string;
-  description?: string | undefined;
-  /** Its page address, /profile/<slug>/<handle>; made from the name when left out. */
-  handle?: string | undefined;
-  /** The language its calls open in; null or left out uses the business's. */
-  locale?: RuntimeLocale | null | undefined;
-  /** New receptionists answer from articles for everyone plus their own unless told otherwise. */
-  knowledgeScope?: ReceptionistKnowledgeScope | undefined;
-  listed?: boolean | undefined;
-  copyFromId?: string | null | undefined;
-};
-
-/** Fields the Receptionists page changes; AI settings change the rest (saveReceptionistProfileInTransaction). */
-export type ReceptionistIdentityPatch = {
-  name?: string;
-  description?: string;
-  handle?: string;
-  locale?: RuntimeLocale | null;
-  knowledgeScope?: ReceptionistKnowledgeScope;
-  listed?: boolean;
-};
-
 const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 50;
 const MAX_SEARCH_LENGTH = 80;
 
 const notFound = () => failure("Receptionist not found.", 404, "receptionist_not_found");
-
-function readName(value: unknown): string {
-  if (typeof value !== "string") throw failure("name must be a string.", 400, "invalid_name");
-  const name = value.replace(/\s+/g, " ").trim();
-  if (!name) throw failure("Give the receptionist a name.", 400, "invalid_name");
-  if (name.length > RECEPTIONIST_NAME_MAX_LENGTH) throw failure(`Names can be up to ${RECEPTIONIST_NAME_MAX_LENGTH} characters.`, 400, "invalid_name");
-  return name;
-}
-
-function readDescription(value: unknown): string {
-  if (value === null) return "";
-  if (typeof value !== "string") throw failure("description must be a string.", 400, "invalid_description");
-  const description = value.replace(/\s+/g, " ").trim();
-  if (description.length > RECEPTIONIST_DESCRIPTION_MAX_LENGTH) throw failure(`"What it helps with" can be up to ${RECEPTIONIST_DESCRIPTION_MAX_LENGTH} characters.`, 400, "invalid_description");
-  return description;
-}
-
-function readHandle(value: unknown): string {
-  if (typeof value !== "string") throw failure("handle must be a string.", 400, "invalid_handle");
-  const handle = value.trim().toLowerCase();
-  if (!isReceptionistHandle(handle)) throw failure(`A page address is up to ${RECEPTIONIST_HANDLE_MAX_LENGTH} lower-case letters and digits, joined by single dashes.`, 400, "invalid_handle");
-  return handle;
-}
-
-function readLocale(value: unknown): RuntimeLocale | null {
-  if (value === null || value === "") return null;
-  if (!isRuntimeLocale(value)) throw failure("locale is not a language calls support.", 400, "invalid_locale");
-  return value;
-}
-
-function readScope(value: unknown): ReceptionistKnowledgeScope {
-  if (!(receptionistKnowledgeScopes as readonly unknown[]).includes(value)) throw failure("knowledgeScope must be all or audience.", 400, "invalid_knowledge_scope");
-  return value as ReceptionistKnowledgeScope;
-}
-
-function readBoolean(value: unknown, field: string): boolean {
-  if (typeof value !== "boolean") throw failure(`${field} must be true or false.`, 400, `invalid_${field}`);
-  return value;
-}
-
-/** Reads the body that adds a receptionist. Throws a 400 error naming the first field that is wrong. */
-export function readReceptionistCreateInput(body: unknown): ReceptionistCreateInput {
-  if (!isRecord(body)) throw failure("A receptionist object is required.", 400, "invalid_body");
-  const input: ReceptionistCreateInput = { name: readName(body.name) };
-  if (body.description !== undefined) input.description = readDescription(body.description);
-  if (body.handle !== undefined && body.handle !== null && body.handle !== "") input.handle = readHandle(body.handle);
-  if (body.locale !== undefined) input.locale = readLocale(body.locale);
-  if (body.knowledgeScope !== undefined) input.knowledgeScope = readScope(body.knowledgeScope);
-  if (body.listed !== undefined) input.listed = readBoolean(body.listed, "listed");
-  if (body.copyFromId !== undefined && body.copyFromId !== null) {
-    if (!isUuid(body.copyFromId)) throw failure("copyFromId must be a receptionist id.", 400, "invalid_copy_from");
-    input.copyFromId = body.copyFromId.toLowerCase();
-  }
-  return input;
-}
-
-/** Reads the body that changes a receptionist's name, page address, language, knowledge or listing. */
-export function readReceptionistIdentityPatch(body: unknown): ReceptionistIdentityPatch {
-  if (!isRecord(body)) throw failure("A receptionist object is required.", 400, "invalid_body");
-  const patch: ReceptionistIdentityPatch = {};
-  if (body.name !== undefined) patch.name = readName(body.name);
-  if (body.description !== undefined) patch.description = readDescription(body.description);
-  if (body.handle !== undefined) patch.handle = readHandle(body.handle);
-  if (body.locale !== undefined) patch.locale = readLocale(body.locale);
-  if (body.knowledgeScope !== undefined) patch.knowledgeScope = readScope(body.knowledgeScope);
-  if (body.listed !== undefined) patch.listed = readBoolean(body.listed, "listed");
-  if (!Object.keys(patch).length) throw failure("Send at least one field to change.", 400, "invalid_body");
-  return patch;
-}
-
-/** Reads a status change: active resumes a paused receptionist, paused pauses it. */
-export function readReceptionistStatus(value: unknown): ReceptionistStatus {
-  if (!(receptionistStatuses as readonly unknown[]).includes(value)) throw failure("status must be active or paused.", 400, "invalid_status");
-  return value as ReceptionistStatus;
-}
-
-/** Reads a listing order: every receptionist that isn't archived, once each. */
-export function readReceptionistOrder(value: unknown): string[] {
-  if (!Array.isArray(value) || !value.length || value.length > MAX_RECEPTIONISTS_PER_REQUEST) throw failure("receptionistIds must list the receptionists in order.", 400, "invalid_order");
-  const ids = value.map((id) => {
-    if (!isUuid(id)) throw failure("receptionistIds must list receptionist ids.", 400, "invalid_order");
-    return id.toLowerCase();
-  });
-  if (new Set(ids).size !== ids.length) throw failure("A receptionist appears twice in the order.", 400, "invalid_order");
-  return ids;
-}
-
-/** Reads the receptionists the business page lists besides the default: receptionist ids, once each, none at all allowed. */
-export function readListedReceptionists(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length > MAX_RECEPTIONISTS_PER_REQUEST) throw failure("receptionistIds must list the receptionists the business page shows.", 400, "invalid_listed");
-  const ids = value.map((id) => {
-    if (!isUuid(id)) throw failure("receptionistIds must list receptionist ids.", 400, "invalid_listed");
-    return id.toLowerCase();
-  });
-  if (new Set(ids).size !== ids.length) throw failure("A receptionist appears twice.", 400, "invalid_listed");
-  return ids;
-}
 
 /**
  * Holds the business's receptionists until the transaction ends, so two adds,
@@ -332,10 +204,11 @@ export async function listReceptionistsInTransaction(
     conditions.push(or(sql`${receptionistProfiles.name} ilike ${pattern}`, sql`${receptionistProfiles.description} ilike ${pattern}`));
   }
   const where = and(...conditions);
-  // Numbers and widget keys from before receptionists name none, which means
-  // the default one. The subqueries name their tables in full: in a one-table
-  // select Drizzle prints the columns of a sql`` field without their table,
-  // which a correlated subquery would read as its own (as in contacts.ts).
+  // A number or widget key naming none means the default one, as
+  // app.effective_receptionist reads it. The subqueries name their tables in
+  // full: in a one-table select Drizzle prints the columns of a sql`` field
+  // without their table, which a correlated subquery would read as its own
+  // (as in contacts.ts).
   const namesThis = (alias: string) =>
     sql.raw(`("${alias}"."receptionist_id" = "receptionist_profiles"."id" or ("${alias}"."receptionist_id" is null and "receptionist_profiles"."is_default"))`);
   const rows = await tx.select({
@@ -376,16 +249,16 @@ export async function receptionistAllowanceInTransaction(tx: DatabaseTransaction
   return { plan, limit, cap, active, current, canAdd: active < limit && current < cap, upgrade: receptionistUpgrade(plan, limit, cap, tiers) };
 }
 
-/** The plan's active receptionists are all in use, and what would raise the number. */
-function planLimitReached({ limit, upgrade }: Pick<ReceptionistAllowanceState, "limit" | "upgrade">): Error {
+/** The refusal when the plan's active receptionists are all in use, naming what would raise the number. */
+export function receptionistPlanLimitReached({ limit, upgrade }: Pick<ReceptionistAllowanceState, "limit" | "upgrade">): Error {
   const message = limit === 1
     ? `Your plan includes one receptionist.${upgrade === "plan" ? " Upgrade to add more." : upgrade === "sales" ? " Contact sales about Enterprise to add more." : ""}`
     : `Your plan includes ${limit} active receptionists. Pause one${upgrade === "plan" ? " or upgrade" : upgrade === "sales" ? " or contact sales about Enterprise" : ""} to add another.`;
   return failure(message, 409, "receptionist_limit");
 }
 
-/** The business keeps the deployment's cap of receptionists that aren't archived. */
-function capReached(cap: number): Error {
+/** The refusal when the business keeps the deployment's cap of receptionists that aren't archived. */
+export function receptionistCapReached(cap: number): Error {
   return failure(`A business can keep up to ${cap} receptionists. Archive one to add another.`, 409, "receptionist_cap");
 }
 
@@ -421,8 +294,8 @@ export async function createReceptionistInTransaction(
   const { businessId } = input;
   await lockReceptionistsInTransaction(tx, businessId);
   const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
-  if (allowance.current >= allowance.cap) throw capReached(allowance.cap);
-  if (allowance.active >= allowance.limit) throw planLimitReached(allowance);
+  if (allowance.current >= allowance.cap) throw receptionistCapReached(allowance.cap);
+  if (allowance.active >= allowance.limit) throw receptionistPlanLimitReached(allowance);
 
   const source = await loadReceptionistView(tx, { businessId, receptionistId: input.receptionist.copyFromId ?? null });
   if (!source) throw input.receptionist.copyFromId ? failure("The receptionist to copy from was not found.", 404, "receptionist_not_found") : notFound();
@@ -448,7 +321,7 @@ export async function createReceptionistInTransaction(
       name: input.receptionist.name,
       description: input.receptionist.description ?? "",
       handle,
-      // A row inserted without saying is the default, for the code before receptionists.
+      // The business has its default receptionist already.
       isDefault: false,
       knowledgeScope: input.receptionist.knowledgeScope ?? "audience",
       listed: input.receptionist.listed ?? true,
@@ -464,9 +337,6 @@ export async function createReceptionistInTransaction(
       transferMode: source.transferMode,
       transferNumber: source.transferNumber,
       bookingMode: source.bookingMode,
-      // The business keeps the shared settings; this row's copies are never read.
-      summary: "",
-      recordingNotice: source.recordingNotice,
     }).returning({ id: receptionistProfiles.id });
   } catch (error) {
     if (isUniqueViolation(error, "receptionist_profiles_business_handle_unique")) throw handleTaken();
@@ -555,7 +425,7 @@ export async function setReceptionistStatusInTransaction(
   if (current.status !== input.status) {
     if (input.status === "active") {
       const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
-      if (allowance.active >= allowance.limit) throw planLimitReached(allowance);
+      if (allowance.active >= allowance.limit) throw receptionistPlanLimitReached(allowance);
     }
     await tx.update(receptionistProfiles).set({ status: input.status, updatedAt: new Date() })
       .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, current.id)));
@@ -599,7 +469,7 @@ export async function restoreReceptionistInTransaction(
   await lockReceptionistsInTransaction(tx, businessId);
   const current = await lockReceptionist(tx, { ...input, archived: true });
   const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
-  if (allowance.current >= allowance.cap) throw capReached(allowance.cap);
+  if (allowance.current >= allowance.cap) throw receptionistCapReached(allowance.cap);
   const status: ReceptionistStatus = current.status === "active" && allowance.active < allowance.limit ? "active" : "paused";
   const live = await liveOrder(tx, businessId);
   const locale = await businessLocale(tx, businessId);
@@ -689,9 +559,8 @@ export async function sortReceptionistsByNameInTransaction(tx: DatabaseTransacti
 /**
  * Makes an active receptionist the default one: it answers the business page
  * and whatever names no receptionist. The previous default keeps its numbers,
- * widget keys and links, and gets a page address if it had none. The new
- * default's row takes the business's shared settings first, as the copy the
- * code of the release before reads.
+ * widget keys and links, and gets a page address if it had none. The
+ * business's shared settings don't move: they are the business's.
  */
 export async function makeDefaultReceptionistInTransaction(
   tx: DatabaseTransaction,
@@ -710,19 +579,10 @@ export async function makeDefaultReceptionistInTransaction(
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true)))
     .limit(1)
     .for("update");
-  const [shared] = await tx.select({
-    summary: businesses.summary,
-    summarySource: businesses.summarySource,
-    summaryFingerprint: businesses.summaryFingerprint,
-    summaryGeneratedAt: businesses.summaryGeneratedAt,
-    recordingNotice: businesses.recordingNotice,
-    appointmentChangePolicy: businesses.appointmentChangePolicy,
-  }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!shared) throw notFound();
   const now = new Date();
   // The default speaks the business's language (AI settings offers it no
   // language of its own), so the new default gives up the one it had.
-  await tx.update(receptionistProfiles).set({ ...shared, locale: null, updatedAt: now })
+  await tx.update(receptionistProfiles).set({ locale: null, updatedAt: now })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)));
   if (previous) {
     const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), handlesOf(await liveOrder(tx, businessId), previous.id));

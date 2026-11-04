@@ -1,6 +1,6 @@
 // Several receptionists per business: the rules the database, the dashboard,
 // the worker and the public pages share. A business always has exactly one
-// default receptionist, the row it had before receptionists existed; it
+// default receptionist, which the database makes with the business; it
 // answers whatever names no receptionist, or one that is paused or archived.
 
 import type { BillingPlanLimits, BillingPlanSlug } from "./billing";

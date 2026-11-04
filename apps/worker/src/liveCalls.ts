@@ -407,7 +407,7 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
         maxDurationMs: remainingMs,
         ...(orphan.intakeOnly ? { intakeOnly: true } : {}),
         // The call record says who answered, so the new owner answers as it.
-        ...(orphan.receptionistId ? { receptionistId: orphan.receptionistId } : {}),
+        receptionistId: orphan.receptionistId,
         recovery: orphan,
       }, client, model);
       return "attached";

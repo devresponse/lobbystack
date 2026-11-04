@@ -591,23 +591,21 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
     });
   });
 
-  it("keeps the snapshot of a business without receptionists as it was, every article included", async () => {
+  it("builds no snapshot for a business without its default receptionist, which the database never leaves", async () => {
     await rollbackTest(async (tx) => {
-      const { context, businessId } = await seedBusiness(tx);
-      await as(tx, null);
-      await tx.delete(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
-      const hours = await addSnippet(tx, businessId, { title: "Hours", priority: 2 });
-      const chosen = await addSnippet(tx, businessId, { title: "Chosen once", priority: 1 });
-      await tx.update(knowledgeSnippets).set({ audience: "chosen" }).where(eq(knowledgeSnippets.id, chosen));
-      await addDocument(tx, businessId, { title: "Menu" });
+      const { context, businessId, front } = await seedBusiness(tx);
       await as(tx, "lobbystack_worker");
       await refreshBusinessSnapshot(context, { businessId });
-      const snapshot = (await loadLatestBusinessSnapshot(context, { businessId }))!;
-      expect(snapshot).not.toHaveProperty("receptionists");
-      expect(snapshot).not.toHaveProperty("knowledgeDocuments");
-      expect(snapshot).toMatchObject({ greeting: "Thank you for calling Kitsilano Coffee.", bookingPolicy: "Confirm availability before booking." });
-      expect(snapshot.knowledgeSnippets?.map((entry) => entry.id)).toEqual([hours, chosen]);
-      expect(snapshotForReceptionist(snapshot, randomUUID())).toEqual(snapshot);
+      const built = (await loadLatestBusinessSnapshot(context, { businessId }))!;
+      expect(built.receptionists?.map((receptionist) => [receptionist.id, receptionist.isDefault])).toEqual([[front.id, true]]);
+      expect(built).toMatchObject({ greeting: front.greeting, bookingPolicy: front.bookingPolicy });
+
+      // Only a delete outside the code can take the default receptionist away. The refresh then fails rather than make one up, and calls keep the last snapshot.
+      await as(tx, null);
+      await tx.delete(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+      await as(tx, "lobbystack_worker");
+      await expect(refreshBusinessSnapshot(context, { businessId })).rejects.toThrow("The business has no default receptionist.");
+      expect((await loadLatestBusinessSnapshot(context, { businessId }))?.version).toBe(built.version);
     });
   });
 

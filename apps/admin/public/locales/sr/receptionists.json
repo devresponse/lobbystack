@@ -46,8 +46,8 @@
     "cap_few": "Firma može da ima najviše {{count}} recepcionera. Arhivirajte jednog da biste dodali novog.",
     "cap_other": "Firma može da ima najviše {{count}} recepcionera. Arhivirajte jednog da biste dodali novog.",
     "upgradeTitle": "Po jedan recepcioner za svaku lokaciju, tim ili jezik",
-    "upgradeDescription": "Vaš paket uključuje jednog recepcionera. Pređite na veći paket da biste dodali još, svakog sa svojim imenom, brojem telefona, znanjem i stranicom.",
-    "salesDescription": "Vaš paket uključuje jednog recepcionera. Enterprise paket uključuje više, svakog sa svojim imenom, brojem telefona, znanjem i stranicom. Kontaktirajte prodaju da biste ga podesili.",
+    "upgradeDescription": "Vaš paket uključuje jednog recepcionera. Pređite na veći paket da biste dodali još, svakog sa svojim imenom, pozdravom, znanjem i stranicom.",
+    "salesDescription": "Vaš paket uključuje jednog recepcionera. Enterprise paket uključuje više, svakog sa svojim imenom, pozdravom, znanjem i stranicom. Kontaktirajte prodaju da biste ga podesili.",
     "upgrade": "Pogledajte pakete",
     "contactSales": "Kontaktirajte prodaju",
     "upgradeAsk": "Vlasnik ili administrator firme može da promeni paket."

@@ -32,15 +32,9 @@ async function main(): Promise<void> {
     // Booking requires an open hours window for the requested weekday.
     await db.db.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 0, closeMinutes: 1439 })));
     await db.db.insert(phoneNumbers).values({ businessId, e164: "+14165550992", providerPhoneId: `PN-${randomUUID()}` });
-    await db.db.insert(receptionistProfiles).values({
-      businessId,
-      greeting: "Thanks for calling.",
-      tone: "professional",
-      summary: "Appointment audit certification",
-      bookingPolicy: "Confirm availability before booking.",
-      transferMode: "on_request",
-      appointmentChangePolicy: { enabled: true, verificationMode: "otp_required", allowCancel: true, allowReschedule: true },
-    });
+    // The database gave the business its default receptionist; the change rules are the business's.
+    await db.db.update(businesses).set({ summary: "Appointment audit certification", appointmentChangePolicy: { enabled: true, verificationMode: "otp_required", allowCancel: true, allowReschedule: true } }).where(eq(businesses.id, businessId));
+    await db.db.update(receptionistProfiles).set({ greeting: "Thanks for calling.", tone: "professional", bookingPolicy: "Confirm availability before booking.", transferMode: "on_request" }).where(eq(receptionistProfiles.businessId, businessId));
     assert(contact && service && staffMember, "Appointment audit fixtures could not be created.");
     await bookAppointment({ db: db.db }, { businessId, serviceId: service.id, startsAt: bookingSlot(10).toISOString(), timezone: "UTC", contactPhone: callerPhone, sourceChannel: "voice", smsConsent: "agreed" });
     const reminderConsent = await db.db.select().from(smsConsentEvents).where(and(eq(smsConsentEvents.businessId, businessId), eq(smsConsentEvents.action, "reminder_consent_granted")));

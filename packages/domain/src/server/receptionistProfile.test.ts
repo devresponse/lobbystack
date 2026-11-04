@@ -1,7 +1,7 @@
 import { defaultAppointmentChangePolicy, RECEPTIONIST_INSTRUCTIONS_MAX_LENGTH, RECEPTIONIST_TEXT_MAX_LENGTH } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
-import { defaultReceptionistProfile, readReceptionistSettingsChange, sharedReceptionistFields, splitReceptionistPatch } from "./receptionistProfile";
+import { readReceptionistSettingsChange, sharedReceptionistFields, splitReceptionistPatch } from "./receptionistProfile";
 
 // The dashboard answers with these messages, so moving the rules here must not reword them.
 describe("readReceptionistSettingsChange", () => {
@@ -69,16 +69,6 @@ describe("readReceptionistSettingsChange", () => {
 
   it("takes a summary regeneration on its own", () => {
     expect(readReceptionistSettingsChange({ regenerateSummary: true })).toEqual({ patch: {}, regenerateSummary: true });
-  });
-});
-
-describe("defaultReceptionistProfile", () => {
-  it("greets callers with the business's name until someone writes a greeting", () => {
-    expect(defaultReceptionistProfile("Maple Clinic")).toMatchObject({ greeting: "Thank you for calling Maple Clinic.", summary: "Maple Clinic", summarySource: "placeholder", transferMode: "on_request", bookingMode: "instant" });
-  });
-
-  it("has calls say they're with an AI and recorded", () => {
-    expect(defaultReceptionistProfile("Maple Clinic").recordingNotice).toBe(true);
   });
 });
 

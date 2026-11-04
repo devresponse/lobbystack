@@ -22,10 +22,6 @@ const tenantSchedules: Array<{ queue: JobQueue; name: string; type: JobType; eve
   { queue: "maintenance", name: "api-retention", type: "api.retention", every: 60 * 60_000, housekeeping: true },
   // A promo plan's ending is told to Polar and its owners a week ahead, so once a day is enough.
   { queue: "default", name: "promo-plan-end", type: "billing.endPromoPlan", every: 24 * 60 * 60_000 },
-  // Gives records from before receptionists the default receptionist. A new
-  // scheduler runs at once, so a deploy starts it; later runs find nothing
-  // left and change nothing. shortcut: drop it with the clean-up deploy that requires the column.
-  { queue: "maintenance", name: "receptionist-backfill", type: "receptionists.backfillRecords", every: 24 * 60 * 60_000, housekeeping: true },
 ];
 
 /**

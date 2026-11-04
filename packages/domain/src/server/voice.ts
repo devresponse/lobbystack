@@ -18,7 +18,7 @@ import { buildCallEvents } from "./callEvents";
 import { recordingListState, recordingState, type RecordingState } from "./recordingState";
 import { recordProductEventBestEffort } from "./productEvents";
 import { emitWebhookEventInTransaction } from "./publicApi/webhooks";
-import { answeredByReceptionist, recordReceptionistJoin } from "./receptionistRecords";
+import { recordReceptionistJoin } from "./receptionistRecords";
 
 /** Live calls run over either the phone carrier or the browser; only the transport is durable. */
 function voiceChannelForTransport(transport: string): "voice" | "web_voice" {
@@ -444,8 +444,8 @@ export async function recordCallProviderPricing(
 
 /**
  * The business's calls, newest first. `receptionistId` keeps the calls that
- * receptionist answered (a call from before receptionists counts for the
- * default one), and each call says who answered it.
+ * receptionist answered, which every call names, and each call says who
+ * answered it.
  */
 export async function listCalls(
   context: DomainContext,
@@ -462,7 +462,7 @@ export async function listCalls(
     const filter = and(
       eq(calls.businessId, input.businessId),
       isNull(calls.archivedAt),
-      input.receptionistId ? answeredByReceptionist(calls.receptionistId, input.businessId, input.receptionistId) : undefined,
+      input.receptionistId ? eq(calls.receptionistId, input.receptionistId) : undefined,
       ...(search ? [or(ilike(contacts.name, `%${search}%`), ilike(contacts.phone, `%${search}%`), ilike(conversations.summary, `%${search}%`), ilike(calls.disposition, `%${search}%`), ilike(calls.providerCallId, `%${search}%`), ilike(transcriptPreview, `%${search}%`))!] : []),
     );
     const rows = await tx.select({
@@ -562,7 +562,7 @@ export async function getCallDetail(
       contactPhone: contacts.phone,
       contactEmail: contacts.email,
       contactBlockedAt: contacts.operatorBlockedAt,
-      // The receptionist that answered; a call from before receptionists shows the default one.
+      // The receptionist that answered, which every call names.
       receptionistId: receptionistProfiles.id,
       receptionistName: receptionistProfiles.name,
     }).from(calls)
@@ -679,7 +679,7 @@ export async function createVoiceFollowUpTask(
       const [call] = await tx.select({ id: calls.id, receptionistId: calls.receptionistId }).from(calls).where(and(eq(calls.id, input.callId), eq(calls.businessId, input.businessId))).limit(1).for("update");
       if (!call) throw new Error("Call not found in this business.");
       // The call says who answered it, even for a follow-up saved after the call.
-      receptionistId = call.receptionistId ?? receptionistId;
+      receptionistId = call.receptionistId;
     }
     const title = `Voice message from ${input.callerName?.trim() || input.callbackPhone?.trim() || "unknown caller"}`;
     const body = [

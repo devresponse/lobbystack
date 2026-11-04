@@ -4,7 +4,6 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 import { businessContextSnapshots, businessMemberships, businesses, calls, enqueueOutbox, knowledgeDocuments, prospectDemos, receptionistProfiles, services, staff, staffServiceAssignments, users, websiteIngestionJobs, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
-import { defaultReceptionistName } from "@lobbystack/shared";
 import { type TelemetryEventName, type TelemetryProperties } from "@lobbystack/telemetry";
 
 import type { DomainContext } from "./context";
@@ -190,18 +189,16 @@ export async function createProspectDemo(
     const summary = `${name} virtual receptionist`;
     await tx.insert(businesses).values({ id: businessId, slug, name, timezone, defaultLocale: locale, websiteUrl: normalizedWebsiteUrl, businessType: "general", deploymentMode: process.env.DEPLOYMENT_MODE === "cloud" ? "cloud" : "development", summary });
     await tx.insert(businessMemberships).values({ businessId, userId: input.operatorUserId, role: "business_owner", status: "active" });
-    await tx.insert(receptionistProfiles).values({
-      businessId,
-      name: defaultReceptionistName(locale),
-      isDefault: true,
+    // The database made the demo's default receptionist with the business (migration 0143).
+    const [receptionist] = await tx.update(receptionistProfiles).set({
       greeting: input.greeting?.trim() || `Thanks for calling ${name}.`,
       tone: "professional and friendly",
-      summary,
       bookingPolicy: "Do not book appointments during this prospect demo.",
       voiceInstructions: `This is a prospect demo made with ${appName}. Answer from public business knowledge. Collect sample contact details for a quote or service request. Do not book appointments, transfer calls, or promise outbound messages.`,
       smsInstructions: "Do not send SMS during prospect demos.",
       transferMode: "on_request",
-    });
+    }).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).returning({ id: receptionistProfiles.id });
+    if (!receptionist) throw new Error("The demo's receptionist could not be set up.");
     const [defaultStaff] = await tx.insert(staff).values({ businessId, name: name, timezone }).returning({ id: staff.id });
     if (!defaultStaff) throw new Error("Default demo staff could not be created.");
     for (const [index, serviceName] of serviceNames.entries()) {

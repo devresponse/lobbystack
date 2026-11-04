@@ -46,8 +46,8 @@
     "cap_many": "Un negocio puede tener hasta {{count}} recepcionistas. Archive una para agregar otra.",
     "cap_other": "Un negocio puede tener hasta {{count}} recepcionistas. Archive una para agregar otra.",
     "upgradeTitle": "Una recepcionista para cada sede, equipo o idioma",
-    "upgradeDescription": "Su plan incluye una recepcionista. Mejore su plan para agregar más, cada una con su propio nombre, número de teléfono, conocimiento y página.",
-    "salesDescription": "Su plan incluye una recepcionista. El plan Enterprise incluye más, cada una con su propio nombre, número de teléfono, conocimiento y página. Contacte a ventas para configurarlo.",
+    "upgradeDescription": "Su plan incluye una recepcionista. Mejore su plan para agregar más, cada una con su propio nombre, saludo, conocimiento y página.",
+    "salesDescription": "Su plan incluye una recepcionista. El plan Enterprise incluye más, cada una con su propio nombre, saludo, conocimiento y página. Contacte a ventas para configurarlo.",
     "upgrade": "Ver planes",
     "contactSales": "Contactar a ventas",
     "upgradeAsk": "Un propietario o administrador del negocio puede mejorar el plan."

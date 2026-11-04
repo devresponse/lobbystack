@@ -53,7 +53,7 @@ vi.mock("@/lib/api-helpers", async (original) => ({
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app" }) }));
 vi.mock("@lobbystack/domain", async (importOriginal) => {
   const domain = await importOriginal<typeof import("@lobbystack/domain")>();
-  return { answeredByReceptionist: domain.answeredByReceptionist, recordReceptionistJoin: domain.recordReceptionistJoin, appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction };
+  return { recordReceptionistJoin: domain.recordReceptionistJoin, appendMessage: mocks.appendMessage, setAutomationState: mocks.setAutomationState, setConversationArchived: mocks.setConversationArchived, findNewerWidgetChatInTransaction: mocks.findNewerWidgetChatInTransaction, loadSmsReachInTransaction: mocks.loadSmsReachInTransaction };
 });
 
 import { GET, PATCH, POST } from "./route";
@@ -175,14 +175,14 @@ describe("GET /api/messages, the conversation list", () => {
     expect(listCondition()).toContain('"conversations"."channel" <> ');
   });
 
-  it("keeps the conversations one receptionist answered, those from before receptionists counting for the default", async () => {
+  it("keeps the conversations one receptionist answered, by plain equality, since every conversation names its receptionist", async () => {
     mocks.transaction = listTransaction;
     const gastown = "00000000-0000-4000-8000-0000000000a1";
 
     await GET(new Request(`http://localhost/api/messages?limit=50&offset=0&channel=all&receptionist=${gastown}`));
     const condition = new PgDialect().sqlToQuery(mocks.conditions.at(-1)!);
     expect(condition.sql).toContain('"conversations"."receptionist_id" = ');
-    expect(condition.sql).toContain('"conversations"."receptionist_id" is null and exists');
+    expect(condition.sql).not.toContain('"conversations"."receptionist_id" is null');
     expect(condition.params).toContain(gastown);
 
     await GET(new Request("http://localhost/api/messages?limit=50&offset=0&channel=all"));

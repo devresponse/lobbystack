@@ -6,5 +6,3 @@ export * from "./rls/context";
 export * from "./schema";
 
 export { dashboardAggregatesQuery, type DashboardAggregates } from "./dashboard-aggregates";
-export { fillDefaultReceptionistBatch, receptionistRecordTables, type ReceptionistRecordTable } from "./receptionist-backfill";
-export { checkReceptionistData, describeReceptionistData, type ReceptionistDataReport } from "./receptionist-checks";

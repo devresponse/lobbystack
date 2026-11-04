@@ -6,7 +6,6 @@ import { countKnowledgeTokens } from "../knowledgeRanking";
 import { businesses, enqueueOutbox, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import type { DomainContext } from "./context";
-import { copySharedSettingsToDefaultReceptionist } from "./receptionistProfile";
 
 // The worker writes the business summary with AI from the business's knowledge
 // sources: its text entries, uploaded documents and website pages. The
@@ -111,7 +110,6 @@ export async function resetGeneratedBusinessSummary(context: DomainContext, inpu
       .where(and(eq(businesses.id, input.businessId), eq(businesses.summarySource, "generated")))
       .returning({ id: businesses.id });
     if (!updated[0]) return false;
-    await copySharedSettingsToDefaultReceptionist(tx, input.businessId, values);
     await enqueueOutbox(tx, {
       topic: "snapshot.refresh",
       businessId: input.businessId,
@@ -133,7 +131,6 @@ export async function saveGeneratedBusinessSummary(context: DomainContext, input
       .where(and(eq(businesses.id, input.businessId), ne(businesses.summarySource, "operator")))
       .returning({ id: businesses.id });
     if (!updated[0]) return false;
-    await copySharedSettingsToDefaultReceptionist(tx, input.businessId, values);
     await enqueueOutbox(tx, {
       topic: "snapshot.refresh",
       businessId: input.businessId,

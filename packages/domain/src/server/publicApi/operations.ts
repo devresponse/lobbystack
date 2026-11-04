@@ -118,6 +118,7 @@ import { completeUploadInTransaction, insertPendingUploadInTransaction, planUplo
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
+import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
 import { defaultReceptionistProfile, loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
@@ -264,11 +265,6 @@ function apiChange(caller: ApiCaller) {
   return { source: "api" as const, audit: callerAudit(caller) };
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  return [error, cause].some((value) => typeof value === "object" && value !== null && "code" in value && (value as { code: unknown }).code === "23505");
-}
-
 function assertTimeZone(value: string, field: string): void {
   if (!ianaTimeZone(value)) {
     throw invalidRequest(`${field} is not a valid IANA time zone.`, [{ path: field, message: "Use an IANA time zone such as America/Toronto." }]);
@@ -316,7 +312,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
   const callEmails = { ...(input.call_transcript_recipients !== undefined ? { callTranscriptRecipients: input.call_transcript_recipients } : {}), ...(input.call_transcript_content !== undefined ? { callTranscriptContent: input.call_transcript_content } : {}) };
   if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined && !Object.keys(callEmails).length) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
+    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields, audit: callerAudit(caller) });
     // Read when each AI turn finishes, so no snapshot refresh is needed.
     if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     // Read when each call's email is queued and again when it's sent.

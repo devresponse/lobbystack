@@ -5,7 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import { widgetKeys as widgetKeysTable, withBusinessTransaction } from "@lobbystack/db";
 import { hashWidgetKey } from "@lobbystack/domain";
-import { defaultWidgetConfig, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
+import { defaultWidgetConfig, isUuid, normalizeWidgetOrigin, widgetConfigSchema, type WidgetAppearance, type WidgetConfig, type WidgetKeyConfig } from "@lobbystack/shared";
 
 import { getWorkerDatabase } from "./api-helpers";
 import { trustedClientIp } from "./trusted-client-ip";
@@ -125,8 +125,6 @@ type WidgetSessionTokenPayload = {
   receptionistId?: string;
 };
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 function widgetSessionSecret(): string {
   const secret = [process.env.WIDGET_SESSION_SECRET, process.env.BETTER_AUTH_SECRET]
     .map((value) => value?.trim())
@@ -188,7 +186,7 @@ export function verifyWidgetSessionToken(token: string): WidgetSessionTokenPaylo
   const parsed = verifiedPayload(token, "session");
   if (!parsed) return null;
   if (parsed.v !== 1 || typeof parsed.widgetKeyId !== "string" || typeof parsed.businessId !== "string" || typeof parsed.visitorId !== "string" || typeof parsed.origin !== "string" || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
-  if (parsed.receptionistId !== undefined && (typeof parsed.receptionistId !== "string" || !UUID.test(parsed.receptionistId))) return null;
+  if (parsed.receptionistId !== undefined && !isUuid(parsed.receptionistId)) return null;
   return {
     v: 1,
     widgetKeyId: parsed.widgetKeyId,
@@ -227,7 +225,7 @@ export function createReceptionistPageToken(input: { businessId: string; widgetK
 export function verifyReceptionistPageToken(token: string): ReceptionistPageTokenPayload | null {
   const parsed = verifiedPayload(token, "receptionist");
   if (!parsed) return null;
-  if (parsed.v !== 1 || parsed.purpose !== "receptionist_page" || typeof parsed.businessId !== "string" || typeof parsed.widgetKeyId !== "string" || typeof parsed.receptionistId !== "string" || !UUID.test(parsed.receptionistId) || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
+  if (parsed.v !== 1 || parsed.purpose !== "receptionist_page" || typeof parsed.businessId !== "string" || typeof parsed.widgetKeyId !== "string" || !isUuid(parsed.receptionistId) || typeof parsed.exp !== "number" || parsed.exp <= Math.floor(Date.now() / 1000)) return null;
   return { v: 1, purpose: "receptionist_page", businessId: parsed.businessId, widgetKeyId: parsed.widgetKeyId, receptionistId: parsed.receptionistId.toLowerCase(), exp: parsed.exp };
 }
 

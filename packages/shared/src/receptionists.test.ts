@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { builtInBillingPlanLimits, type BillingPlanSlug } from "./billing";
 import { interfaceLocales, runtimeLocales } from "./locales";
 import {
   DEFAULT_MAX_RECEPTIONISTS_PER_BUSINESS,
@@ -28,6 +29,7 @@ import {
   receptionistInitials,
   receptionistLocale,
   receptionistPagePath,
+  receptionistUpgrade,
 } from "./receptionists";
 
 describe("default receptionist names", () => {
@@ -139,6 +141,42 @@ describe("receptionist limits", () => {
     expect(receptionistAllowance(undefined, 20)).toBe(20);
     expect(receptionistAllowance(5, 3)).toBe(3);
     expect(receptionistAllowance(0, 50)).toBe(1);
+  });
+
+  describe("what raises the limit", () => {
+    // Each tier's receptionists as this build's plans have them: Free 1, Starter 1, Pro 5, custom plans none.
+    const tiers = builtInBillingPlanLimits;
+    const withPro = (receptionists: number | null) => ({ ...tiers, pro: { ...tiers.pro, includedReceptionists: receptionists } });
+
+    it("upgrades Free and Starter while a plan they can buy includes more", () => {
+      for (const plan of ["free_cloud", "starter"] satisfies BillingPlanSlug[]) {
+        expect(receptionistUpgrade(plan, 1, 50, tiers)).toBe("plan");
+        // A promo plan's three are still fewer than Pro's five.
+        expect(receptionistUpgrade(plan, 3, 50, tiers)).toBe("plan");
+      }
+    });
+
+    it("sends Pro, and a plan that has as many as Pro, to sales for Enterprise", () => {
+      expect(receptionistUpgrade("pro", 5, 50, tiers)).toBe("sales");
+      expect(receptionistUpgrade("starter", 5, 50, tiers)).toBe("sales");
+      expect(receptionistUpgrade("free_cloud", 1, 50, withPro(1))).toBe("sales");
+    });
+
+    it("offers nothing on self-hosting, on Enterprise, or at the deployment's cap", () => {
+      expect(receptionistUpgrade("self_host", 1, 1, tiers)).toBeNull();
+      expect(receptionistUpgrade("self_host", 50, 50, tiers)).toBeNull();
+      expect(receptionistUpgrade("enterprise", 50, 50, tiers)).toBeNull();
+      // A deployment that keeps one receptionist a business: Pro's five are one too.
+      expect(receptionistUpgrade("free_cloud", 1, 1, tiers)).toBeNull();
+      expect(receptionistUpgrade("pro", 4, 4, tiers)).toBeNull();
+    });
+
+    it("counts a higher plan's number only up to the deployment's cap", () => {
+      // Pro's five are two here, which is still more than Starter's one.
+      expect(receptionistUpgrade("starter", 1, 2, tiers)).toBe("plan");
+      // A Pro with no number of its own gets the cap.
+      expect(receptionistUpgrade("starter", 1, 50, withPro(null))).toBe("plan");
+    });
   });
 });
 

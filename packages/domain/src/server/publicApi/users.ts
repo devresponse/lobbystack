@@ -6,6 +6,7 @@ import { enqueueOutbox, users, withBusinessTransaction, type Database } from "@l
 import { normalizeAuthEmail, type ApiUser, type ApiUserCreate, type InterfaceLocale } from "@lobbystack/shared";
 
 import { deploymentAppName } from "../branding";
+import { isUniqueViolation } from "../requestHelpers";
 import { isSingleEmailAddress } from "../tenancy";
 import { conflict, invalidRequest, PublicApiError } from "./errors";
 import type { ResolvedPlatformKey } from "./platformKeys";
@@ -33,11 +34,6 @@ type UserRow = { id: string; email: string; name: string | null; preferredLocale
 const toApiUser = (row: UserRow): ApiUser => ({ id: row.id, email: row.email, name: row.name, locale: row.preferredLocale, email_verified: row.emailVerified, created_at: row.createdAt.toISOString() });
 
 const userColumns = { id: users.id, email: users.email, name: users.name, preferredLocale: users.preferredLocale, emailVerified: users.emailVerified, createdAt: users.createdAt };
-
-function isUniqueViolation(error: unknown): boolean {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  return [error, cause].some((value) => typeof value === "object" && value !== null && "code" in value && (value as { code: unknown }).code === "23505");
-}
 
 /**
  * Creates an account for a platform key, recording the key and its partner on

@@ -25,6 +25,7 @@ import {
 } from "@lobbystack/shared";
 
 import { enqueueKnowledgeDerivedRefresh } from "./businessHours";
+import { failure, isRecord, isUniqueViolation } from "./requestHelpers";
 
 // Who may use each article. Every file, website page and text entry is for
 // everyone, the default, or for the receptionists chosen for it (a link row
@@ -81,14 +82,6 @@ export type KnowledgeAudienceLinks = {
   documents: Record<string, Array<{ receptionistId: string; websiteRuleId: string | null }>>;
   snippets: Record<string, string[]>;
 };
-
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readIds(value: unknown, field: string, max: number, code: string): string[] {
   if (value === undefined || value === null) return [];
@@ -347,14 +340,6 @@ export async function knowledgeAudienceLinksInTransaction(tx: DatabaseTransactio
 }
 
 // Website rules
-
-function isUniqueViolation(error: unknown, constraint: string): boolean {
-  for (let current = error; current && typeof current === "object"; current = (current as { cause?: unknown }).cause) {
-    const value = current as { code?: unknown; constraint?: unknown };
-    if (value.code === "23505" && value.constraint === constraint) return true;
-  }
-  return false;
-}
 
 /** The business's website rules, by site and path. */
 export async function listWebsiteRulesInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<WebsiteRule[]> {

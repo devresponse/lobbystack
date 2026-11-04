@@ -40,12 +40,13 @@
   "allowance": {
     "used_one": "{{active}} of {{count}} active receptionist on your plan",
     "used_other": "{{active}} of {{count}} active receptionists on your plan",
-    "full": "All the active receptionists your plan includes are in use. Pause one or upgrade to add another.",
     "cap_one": "A business can keep up to {{count}} receptionist.",
     "cap_other": "A business can keep up to {{count}} receptionists. Archive one to add another.",
     "upgradeTitle": "A receptionist for each location, team or language",
     "upgradeDescription": "Your plan includes one receptionist. Upgrade to add more, each with its own name, phone number, knowledge and page.",
+    "salesDescription": "Your plan includes one receptionist. Enterprise includes more, each with its own name, phone number, knowledge and page. Contact sales to set it up.",
     "upgrade": "See plans",
+    "contactSales": "Contact sales",
     "upgradeAsk": "An owner or admin of the business can upgrade."
   },
   "toolbar": {
@@ -128,6 +129,9 @@
     "handleTaken": "Another receptionist already uses this page address.",
     "limit": "All the active receptionists your plan includes are in use. Pause one or upgrade to add another.",
     "limitOne": "Your plan includes one receptionist. Upgrade to add more.",
+    "limitSales": "All the active receptionists your plan includes are in use. Pause one or contact sales about Enterprise to add another.",
+    "limitOneSales": "Your plan includes one receptionist. Contact sales about Enterprise to add more.",
+    "limitNone": "All the active receptionists this business can have are in use. Pause one to add another.",
     "cap": "This business keeps as many receptionists as it can. Archive one to add another.",
     "defaultPaused": "The default receptionist always answers. Make another one the default first.",
     "defaultArchived": "The default receptionist can't be archived. Make another one the default first.",

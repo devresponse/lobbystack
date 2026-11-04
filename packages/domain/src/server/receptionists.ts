@@ -13,6 +13,7 @@ import {
   receptionistHandleFrom,
   receptionistKnowledgeScopes,
   receptionistStatuses,
+  receptionistUpgrade,
   MAX_RECEPTIONISTS_PER_REQUEST,
   RECEPTIONIST_DESCRIPTION_MAX_LENGTH,
   RECEPTIONIST_HANDLE_MAX_LENGTH,
@@ -20,11 +21,13 @@ import {
   type BillingPlanSlug,
   type ReceptionistKnowledgeScope,
   type ReceptionistStatus,
+  type ReceptionistUpgrade,
   type RuntimeLocale,
 } from "@lobbystack/shared";
 
 import type { DomainContext } from "./context";
 import { loadReceptionistView, type ReceptionistView } from "./receptionistProfile";
+import { failure, isRecord, isUniqueViolation } from "./requestHelpers";
 import { loadBusinessPlanLimits } from "./usage";
 
 // Several receptionists per business. Each is a receptionist_profiles row; the
@@ -87,6 +90,8 @@ export type ReceptionistAllowanceState = {
   current: number;
   /** Whether one more can be added, or resumed, now. */
   canAdd: boolean;
+  /** What raises limit: a plan the business can buy, Enterprise through sales, or nothing. */
+  upgrade: ReceptionistUpgrade;
 };
 
 /** A new receptionist's fields. Settings it doesn't name come from copyFromId's receptionist, else the default one. */
@@ -117,15 +122,7 @@ const DEFAULT_PAGE_SIZE = 10;
 const MAX_PAGE_SIZE = 50;
 const MAX_SEARCH_LENGTH = 80;
 
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
-
 const notFound = () => failure("Receptionist not found.", 404, "receptionist_not_found");
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readName(value: unknown): string {
   if (typeof value !== "string") throw failure("name must be a string.", 400, "invalid_name");
@@ -368,7 +365,7 @@ export async function listReceptionistsInTransaction(
 /** The business's plan limit on active receptionists, the deployment's cap, and how many it has. */
 export async function receptionistAllowanceInTransaction(tx: DatabaseTransaction, input: { businessId: string; env?: Record<string, string | undefined> }): Promise<ReceptionistAllowanceState> {
   const cap = maxReceptionistsPerBusiness(input.env ?? process.env);
-  const { plan, limits } = await loadBusinessPlanLimits(tx, input.businessId);
+  const { plan, limits, tiers } = await loadBusinessPlanLimits(tx, input.businessId);
   const limit = receptionistAllowance(limits.includedReceptionists, cap);
   const [counts] = await tx.select({
     active: sql<number>`count(*) filter (where ${receptionistProfiles.status} = 'active')::int`,
@@ -376,25 +373,20 @@ export async function receptionistAllowanceInTransaction(tx: DatabaseTransaction
   }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, input.businessId), isNull(receptionistProfiles.archivedAt)));
   const active = counts?.active ?? 0;
   const current = counts?.current ?? 0;
-  return { plan, limit, cap, active, current, canAdd: active < limit && current < cap };
+  return { plan, limit, cap, active, current, canAdd: active < limit && current < cap, upgrade: receptionistUpgrade(plan, limit, cap, tiers) };
 }
 
-/** The plan's active receptionists are all in use. */
-function planLimitReached(limit: number): Error {
-  return failure(limit === 1
-    ? "Your plan includes one receptionist. Upgrade to add more."
-    : `Your plan includes ${limit} active receptionists. Pause one or upgrade to add another.`, 409, "receptionist_limit");
+/** The plan's active receptionists are all in use, and what would raise the number. */
+function planLimitReached({ limit, upgrade }: Pick<ReceptionistAllowanceState, "limit" | "upgrade">): Error {
+  const message = limit === 1
+    ? `Your plan includes one receptionist.${upgrade === "plan" ? " Upgrade to add more." : upgrade === "sales" ? " Contact sales about Enterprise to add more." : ""}`
+    : `Your plan includes ${limit} active receptionists. Pause one${upgrade === "plan" ? " or upgrade" : upgrade === "sales" ? " or contact sales about Enterprise" : ""} to add another.`;
+  return failure(message, 409, "receptionist_limit");
 }
 
 /** The business keeps the deployment's cap of receptionists that aren't archived. */
 function capReached(cap: number): Error {
   return failure(`A business can keep up to ${cap} receptionists. Archive one to add another.`, 409, "receptionist_cap");
-}
-
-/** Whether a query failed on the unique index named; Drizzle wraps the driver's error as its cause. */
-function isUniqueViolation(error: unknown, constraint: string): boolean {
-  return [error, (error as { cause?: unknown } | null)?.cause].some((value) => typeof value === "object" && value !== null
-    && (value as { code?: unknown }).code === "23505" && (value as { constraint?: unknown }).constraint === constraint);
 }
 
 const handleTaken = () => failure("Another receptionist already uses this page address.", 409, "handle_taken");
@@ -430,7 +422,7 @@ export async function createReceptionistInTransaction(
   await lockReceptionistsInTransaction(tx, businessId);
   const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
   if (allowance.current >= allowance.cap) throw capReached(allowance.cap);
-  if (allowance.active >= allowance.limit) throw planLimitReached(allowance.limit);
+  if (allowance.active >= allowance.limit) throw planLimitReached(allowance);
 
   const source = await loadReceptionistView(tx, { businessId, receptionistId: input.receptionist.copyFromId ?? null });
   if (!source) throw input.receptionist.copyFromId ? failure("The receptionist to copy from was not found.", 404, "receptionist_not_found") : notFound();
@@ -563,7 +555,7 @@ export async function setReceptionistStatusInTransaction(
   if (current.status !== input.status) {
     if (input.status === "active") {
       const allowance = await receptionistAllowanceInTransaction(tx, { businessId, ...(input.env ? { env: input.env } : {}) });
-      if (allowance.active >= allowance.limit) throw planLimitReached(allowance.limit);
+      if (allowance.active >= allowance.limit) throw planLimitReached(allowance);
     }
     await tx.update(receptionistProfiles).set({ status: input.status, updatedAt: new Date() })
       .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, current.id)));

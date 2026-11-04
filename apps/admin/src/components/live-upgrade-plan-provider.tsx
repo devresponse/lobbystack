@@ -4,11 +4,11 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { billingPlanName, brandLinks, contactEmailFor, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingPlanName, isPaidSubscription, type BillingInterval, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type HostedCheckoutPlanIntervals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { useActiveBusiness } from "@/hooks/use-active-business";
 import { requestJson } from "@/lib/request-json";
 import { selectActiveBusiness } from "@/lib/active-business";
-import { isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
+import { enterpriseSalesHref, isBillingRateLimited, isPlanChangePending, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
 import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import type { WorkspaceViewModel } from "@/lib/page-view-models";
 import { BillingEmailForm, isBillingEmailRefusal, type BillingEmailRefusal } from "./billing-email-form";
@@ -139,7 +139,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
       loadingPlan={checkout?.target ?? (mutation.isPending ? mutation.variables.target : null)}
       locale={i18n.language}
       onBillingIntervalChange={setInterval}
-      onContactEnterprise={() => window.location.assign(`mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(t("billing.upgradeDialog.enterpriseSubject"))}`)}
+      onContactEnterprise={() => window.location.assign(enterpriseSalesHref(t("billing.upgradeDialog.enterpriseSubject")))}
       onOpenChange={(next) => { setOpen(next); if (!next) setEmailPrompt(null); }}
       onStartCheckout={(target, billingInterval) => { setEmailPrompt(null); mutation.mutate({ businessId, target, billingInterval }); }}
       open={open}

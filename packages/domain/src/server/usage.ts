@@ -1,7 +1,7 @@
 import { and, asc, eq, sql } from "drizzle-orm";
 
 import { billingAccounts, billingUsageEvents, billingUsageMonths, businesses, calls, enqueueOutbox, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, isBillingPlanSlug, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, isBillingPlanSlug, liveSubscriptionStates, MAX_PHONE_CALL_MS, PHONE_RESERVATION_SLICE_SECONDS, type BillingPlanLimits, type BillingPlanLimitTable, type BillingPlanSlug } from "@lobbystack/shared";
 
 import { limitsFor, readBillingPlanLimitBook, type BillingPlanLimitBook } from "./billingPlans";
 
@@ -202,10 +202,13 @@ async function loadUsageContext(tx: DatabaseTransaction, businessId: string): Pr
   return { ...await loadBillingContext(tx, businessId), limits: await readBillingPlanLimitBook(tx) };
 }
 
-/** The business's effective plan, its promo plan when it has one, and the limits it enforces now. */
-export async function loadBusinessPlanLimits(tx: DatabaseTransaction, businessId: string): Promise<PlanInForce & { limits: BillingPlanLimits }> {
+/**
+ * The business's effective plan, its promo plan when it has one, the limits it
+ * enforces now, and each tier's limits, which say what another plan would give.
+ */
+export async function loadBusinessPlanLimits(tx: DatabaseTransaction, businessId: string): Promise<PlanInForce & { limits: BillingPlanLimits; tiers: BillingPlanLimitTable }> {
   const billing = await loadUsageContext(tx, businessId);
-  return { plan: billing.plan, planCode: billing.planCode, limits: currentLimits(billing) };
+  return { plan: billing.plan, planCode: billing.planCode, limits: currentLimits(billing), tiers: billing.limits.tiers };
 }
 
 async function loadEvents(tx: DatabaseTransaction, businessId: string, periodKey: string): Promise<ReplayEvent[]> {

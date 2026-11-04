@@ -3,16 +3,14 @@ import { and, eq, ne } from "drizzle-orm";
 import { auditLogs, enqueueOutbox, phoneNumbers, receptionistProfiles, widgetKeys, type DatabaseTransaction } from "@lobbystack/db";
 import { isUuid, type ReceptionistStatus } from "@lobbystack/shared";
 
+import { failure } from "./requestHelpers";
+
 // Who answers each phone number and website widget. Every number and widget
 // key names one receptionist (a new one gets the default from a trigger); a
 // paused or archived one's calls and chats go to the default receptionist
 // (app.effective_receptionist). QR links name theirs in entryLinks.ts. Callers
 // authorize: pointing an entry point at a receptionist is for owners and
 // admins.
-
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
 
 /** A receptionist id from a request body. Throws a 400 for anything else. */
 export function readEntryPointReceptionist(value: unknown): string {

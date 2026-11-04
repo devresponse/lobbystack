@@ -8,8 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import agent from "../../../../public/locales/en/agent.json";
 import receptionistsCopy from "../../../../public/locales/en/receptionists.json";
+import settings from "../../../../public/locales/en/settings.json";
 import type { ReceptionistAllowance, ReceptionistRow } from "@/components/live-receptionists-surface";
 import { UpgradePlanDialogProvider } from "@/components/upgrade-plan-dialog-context";
+import { enterpriseSalesHref } from "@/lib/billing-plans";
 import AgentLayout from "../layout";
 import AgentReceptionistsPage from "./page";
 
@@ -59,7 +61,7 @@ const KITSILANO = row("a2", "Kitsilano clinic", { handle: "kitsilano", descripti
 const GASTOWN = row("a3", "Gastown store", { handle: "gastown", listed: false, sortOrder: 3 });
 const BILLING = row("a4", "Billing", { handle: "billing", status: "paused", sortOrder: 4, widgetKeys: 2 });
 const OLD_STORE = row("a5", "Old store", { handle: "old-store", archivedAt: "2026-10-01T12:00:00Z" });
-const PRO: ReceptionistAllowance = { plan: "pro", limit: 5, cap: 50, active: 3, current: 4, canAdd: true };
+const PRO: ReceptionistAllowance = { plan: "pro", limit: 5, cap: 50, active: 3, current: 4, canAdd: true, upgrade: "sales" };
 
 type Call = { method: string; path: string; query: URLSearchParams; body: unknown };
 type Reply = { status: number; body: unknown };
@@ -116,7 +118,7 @@ function fakeApi(options: { current?: ReceptionistRow[]; archived?: Receptionist
 
 async function openPage({ role = "business_owner", businesses }: { role?: string; businesses?: object[] } = {}) {
   const i18n = createInstance();
-  await i18n.init({ lng: "en", defaultNS: "receptionists", interpolation: { escapeValue: false }, resources: { en: { agent, receptionists: receptionistsCopy } } });
+  await i18n.init({ lng: "en", defaultNS: "receptionists", interpolation: { escapeValue: false }, resources: { en: { agent, receptionists: receptionistsCopy, settings } } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses: businesses ?? [{ businessId: "business", name: "Clinic", slug: "clinic", active: true, role, defaultLocale: "en" }] });
@@ -172,7 +174,7 @@ describe("the Receptionists page at /agent/receptionists", () => {
   });
 
   it("offers a business on Free or Starter an upgrade beside its one receptionist", async () => {
-    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "free", limit: 1, cap: 50, active: 1, current: 1, canAdd: false } });
+    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "free_cloud", limit: 1, cap: 50, active: 1, current: 1, canAdd: false, upgrade: "plan" } });
     const { openUpgrade } = await openPage();
     await screen.findByText("Front desk");
     expect(screen.getByText("A receptionist for each location, team or language")).toBeTruthy();
@@ -186,7 +188,7 @@ describe("the Receptionists page at /agent/receptionists", () => {
   });
 
   it("tells the rest of the team who can upgrade, and shows them the list without changes", async () => {
-    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "starter", limit: 1, cap: 50, active: 1, current: 1, canAdd: false } });
+    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "starter", limit: 1, cap: 50, active: 1, current: 1, canAdd: false, upgrade: "plan" } });
     await openPage({ role: "viewer" });
     await screen.findByText("Front desk");
     expect(screen.getByText(/An owner or admin of the business can upgrade\./)).toBeTruthy();
@@ -292,23 +294,68 @@ describe("adding and editing", () => {
 });
 
 describe("what stops another receptionist", () => {
-  it("says the plan's receptionists are all active, and Add explains instead of opening", async () => {
-    fakeApi({ allowance: { plan: "pro", limit: 5, cap: 50, active: 5, current: 6, canAdd: false } });
-    await openPage();
+  const salesHref = enterpriseSalesHref(settings.billing.upgradeDialog.enterpriseSubject);
+
+  it("says Pro's receptionists are all active, and sends the owner to sales for Enterprise, not to the plans", async () => {
+    fakeApi({ allowance: { ...PRO, active: 5, current: 6, canAdd: false } });
+    const { openUpgrade } = await openPage();
     await screen.findByText("Kitsilano clinic");
-    expect(screen.getByText(/^5 of 5 active receptionists on your plan All the active receptionists your plan includes are in use\./)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "See plans" })).toBeTruthy();
+    expect(screen.getByText(`5 of 5 active receptionists on your plan ${receptionistsCopy.errors.limitSales}`)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "See plans" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Contact sales" }).getAttribute("href")).toBe(salesHref);
+    expect(salesHref).toMatch(/^mailto:[^?]+\?subject=Enterprise%20plan$/);
+    await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(receptionistsCopy.errors.limitSales);
+    expect(openUpgrade).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("offers the plans while a plan the business can buy has more, and Add explains instead of opening", async () => {
+    // A Starter promo plan with three, fewer than Pro's five.
+    fakeApi({ allowance: { plan: "starter", limit: 3, cap: 50, active: 3, current: 4, canAdd: false, upgrade: "plan" } });
+    const { openUpgrade } = await openPage();
+    await screen.findByText("Kitsilano clinic");
+    expect(screen.getByText(`3 of 3 active receptionists on your plan ${receptionistsCopy.errors.limit}`)).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Contact sales" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "See plans" }));
+    expect(openUpgrade).toHaveBeenCalledTimes(1);
     await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
     expect(toast.error).toHaveBeenCalledExactlyOnceWith(receptionistsCopy.errors.limit);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("sends a plan with one receptionist to sales when only Enterprise has more", async () => {
+    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "starter", limit: 1, cap: 50, active: 1, current: 1, canAdd: false, upgrade: "sales" } });
+    const { openUpgrade } = await openPage();
+    await screen.findByText("Front desk");
+    expect(screen.getByText(receptionistsCopy.allowance.upgradeTitle)).toBeTruthy();
+    expect(screen.getByText(receptionistsCopy.allowance.salesDescription)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Contact sales" }).getAttribute("href")).toBe(salesHref);
+    await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(receptionistsCopy.errors.limitOneSales);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
+  it("offers nothing to buy where nothing raises the limit, such as self-hosting that keeps one receptionist a business", async () => {
+    fakeApi({ current: [FRONT_DESK], archived: [], allowance: { plan: "self_host", limit: 1, cap: 1, active: 1, current: 1, canAdd: false, upgrade: null } });
+    const { openUpgrade } = await openPage();
+    await screen.findByText("Front desk");
+    expect(screen.getByText("1 of 1 active receptionist on your plan A business can keep up to 1 receptionist.")).toBeTruthy();
+    expect(screen.queryByText(receptionistsCopy.allowance.upgradeTitle)).toBeNull();
+    expect(screen.queryByRole("button", { name: "See plans" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Contact sales" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(receptionistsCopy.errors.cap);
+    expect(openUpgrade).not.toHaveBeenCalled();
+  });
+
   it("says when the business keeps the deployment's cap", async () => {
-    fakeApi({ allowance: { plan: "enterprise", limit: 50, cap: 4, active: 3, current: 4, canAdd: false } });
+    fakeApi({ allowance: { plan: "enterprise", limit: 50, cap: 4, active: 3, current: 4, canAdd: false, upgrade: null } });
     await openPage();
     await screen.findByText("Kitsilano clinic");
     expect(screen.getByText(/A business can keep up to 4 receptionists\. Archive one to add another\./)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "See plans" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Contact sales" })).toBeNull();
     await userEvent.click(screen.getByRole("button", { name: "Add receptionist" }));
     expect(toast.error).toHaveBeenCalledExactlyOnceWith(receptionistsCopy.errors.cap);
   });
@@ -342,7 +389,8 @@ describe("a receptionist's menu", () => {
     await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kitsilano clinic paused. Its phone numbers, widgets and QR links answer as the default receptionist."));
     expect(api.requests("POST", `/api/receptionists/${KITSILANO.id}`)[0]!.body).toEqual({ action: "pause" });
     await userEvent.click(within(await openMenu("Billing")).getByRole("menuitem", { name: "Resume" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(receptionistsCopy.errors.limit));
+    // Pro's next step is Enterprise, so the refusal says to contact sales.
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(receptionistsCopy.errors.limitSales));
   });
 
   it("archives after saying what happens, and restores from Archived", async () => {
@@ -441,7 +489,7 @@ describe("with many receptionists", () => {
   const chain = [FRONT_DESK, ...Array.from({ length: 11 }, (_, index) => row(`c${index.toString(16)}`, `Store ${index + 1}`, { handle: `store-${index + 1}`, sortOrder: index + 2 }))];
 
   it("pages through them 10 at a time, and searches from the first page", async () => {
-    const api = fakeApi({ current: chain, archived: [], allowance: { plan: "enterprise", limit: 50, cap: 50, active: 12, current: 12, canAdd: true } });
+    const api = fakeApi({ current: chain, archived: [], allowance: { plan: "enterprise", limit: 50, cap: 50, active: 12, current: 12, canAdd: true, upgrade: null } });
     await openPage();
     await screen.findByText("Store 9");
     expect(bodyRows()).toHaveLength(10);
@@ -453,7 +501,7 @@ describe("with many receptionists", () => {
   });
 
   it("filters by status from the first page", async () => {
-    const api = fakeApi({ current: chain, archived: [], allowance: { plan: "enterprise", limit: 50, cap: 50, active: 12, current: 12, canAdd: true } });
+    const api = fakeApi({ current: chain, archived: [], allowance: { plan: "enterprise", limit: 50, cap: 50, active: 12, current: 12, canAdd: true, upgrade: null } });
     await openPage();
     await screen.findByText("Store 9");
     await userEvent.click(screen.getByRole("button", { name: "Next page" }));

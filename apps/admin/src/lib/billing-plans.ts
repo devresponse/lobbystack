@@ -1,4 +1,4 @@
-import { annualFreeMonths, annualSavingPercent, billingPlanPrice, type BillingInterval, type BillingPlanList, type BillingPlanOffer, type CloudBillingPlanSlug } from "@lobbystack/shared";
+import { annualFreeMonths, annualSavingPercent, billingPlanPrice, brandLinks, contactEmailFor, type BillingInterval, type BillingPlanList, type BillingPlanOffer, type CloudBillingPlanSlug } from "@lobbystack/shared";
 
 import { intlLocale } from "./locale";
 
@@ -12,6 +12,15 @@ import { intlLocale } from "./locale";
  * A webhook that lands later shows the next time the plan page loads billing.
  */
 export const PLAN_CHANGE_SYNC_MS = 90_000;
+
+/**
+ * The mail to the deployment's sales address about Enterprise, which is agreed
+ * with sales rather than bought: subject is the mail's subject, in the
+ * dashboard's language.
+ */
+export function enterpriseSalesHref(subject: string): string {
+  return `mailto:${contactEmailFor(brandLinks(), "sales")}?subject=${encodeURIComponent(subject)}`;
+}
 
 /** Whether a checkout or billing portal request was refused for too many this hour. */
 export function isBillingRateLimited(error: unknown): boolean {

@@ -18,6 +18,7 @@ import {
 
 import type { DomainContext } from "./context";
 import { receptionistSearchPattern } from "./receptionists";
+import { failure, isRecord } from "./requestHelpers";
 
 // QR short links, /q/<code> (migration 0140). A printed sign carries one: it
 // opens one receptionist's page, or the business page when the link or its
@@ -70,15 +71,7 @@ const MAX_PAGE_SIZE = 50;
 // A clash among 887 million codes is rare; a few tries make one unlikely ever to show.
 const CODE_ATTEMPTS = 8;
 
-function failure(message: string, status: number, code: string): Error {
-  return Object.assign(new Error(message), { status, code });
-}
-
 const notFound = () => failure("QR link not found.", 404, "entry_link_not_found");
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function readReceptionistId(value: unknown): string {
   if (typeof value !== "string" || !isUuid(value)) throw failure("receptionistId must name a receptionist.", 400, "invalid_receptionist");

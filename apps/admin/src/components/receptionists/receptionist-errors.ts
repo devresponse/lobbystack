@@ -3,6 +3,8 @@
 // words are English, so a code the page doesn't know gets a general message,
 // with the error ID a logged failure came with.
 
+import type { ReceptionistUpgrade } from "@lobbystack/shared";
+
 type Translate = (key: string, options: Record<string, string>) => string;
 
 /** The change that failed, for the refusals whose meaning depends on it. */
@@ -29,13 +31,27 @@ const defaultReceptionistKeys: Partial<Record<ReceptionistAction, string>> = {
   edit: "errors.defaultListed",
 };
 
+/** The plan's number of active receptionists, and what raises it, as GET /api/receptionists gives them. */
+export type ReceptionistLimit = { limit: number; upgrade: ReceptionistUpgrade };
+
 /**
- * Explains a refused receptionist change in the dashboard's language. `limit`
- * is the plan's number of active receptionists, which words the plan refusal.
+ * Says the plan's active receptionists are all in use, and what would raise
+ * the number: a plan to upgrade to, Enterprise through sales, or nothing.
  */
-export function receptionistErrorMessage(error: unknown, t: Translate, action: ReceptionistAction, limit?: number): string {
+export function receptionistLimitMessage(allowance: ReceptionistLimit | undefined, t: Translate): string {
+  const one = allowance?.limit === 1;
+  if (allowance?.upgrade === "sales") return t(one ? "errors.limitOneSales" : "errors.limitSales", {});
+  if (allowance?.upgrade === null) return t("errors.limitNone", {});
+  return t(one ? "errors.limitOne" : "errors.limit", {});
+}
+
+/**
+ * Explains a refused receptionist change in the dashboard's language.
+ * `allowance` words the plan refusal.
+ */
+export function receptionistErrorMessage(error: unknown, t: Translate, action: ReceptionistAction, allowance?: ReceptionistLimit): string {
   const { code, errorId } = typeof error === "object" && error !== null ? error as { code?: unknown; errorId?: unknown } : {};
-  if (code === "receptionist_limit") return t(limit === 1 ? "errors.limitOne" : "errors.limit", {});
+  if (code === "receptionist_limit") return receptionistLimitMessage(allowance, t);
   if (code === "default_receptionist") return t(defaultReceptionistKeys[action] ?? "errors.generic", {});
   if (typeof code === "string" && Object.hasOwn(keysByCode, code)) return t(keysByCode[code]!, {});
   if (typeof errorId === "string" && errorId) return t("errors.withErrorId", { message: t("errors.generic", {}), errorId });

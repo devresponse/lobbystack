@@ -173,10 +173,9 @@ describe("billing catalog diff", () => {
     expect(summary(removed.writes)).toEqual(["retire billing_plans pro-launch", "retire billing_prices pro-launch/monthly/cad"]);
   });
 
-  it("changes a plan's receptionists without touching its terms, flagging fewer, even on a plan with subscribers", () => {
-    const before = profile();
-    const current = stored(desiredBillingPlans(before), () => "active");
-    current.plans.find((plan) => plan.code === "pro")!.frozen_at = earlier;
+  it("changes a standard plan's receptionists without touching its terms, flagging fewer", () => {
+    // Standard plans never freeze (migration 0108's billing_plans_standard), so Pro's number may go down.
+    const current = stored(desiredBillingPlans(profile()), () => "active");
     const fewer = diff(profile((file) => { file.plans.pro.limits.receptionists = 3; }), current);
     expect(fewer.refusals).toEqual([]);
     expect(summary(fewer.writes)).toEqual(["update billing_plans pro"]);
@@ -188,6 +187,39 @@ describe("billing catalog diff", () => {
     expect(more.writes[0]!.change).toMatchObject({ key: "starter", lowers_allowance: false, fields: { receptionists: { from: 1, to: 2 } } });
   });
 
+  it("keeps a frozen plan's receptionists from going down, directly or through its tier, and lets them go up", () => {
+    const launch = (receptionists?: number) => (receptionists === undefined ? proLaunch : { ...proLaunch, limits: { receptionists } });
+    const frozen = (before: BillingProfile) => {
+      const current = stored(desiredBillingPlans(before), () => "active");
+      current.plans.find((plan) => plan.code === "pro-launch")!.frozen_at = earlier;
+      return current;
+    };
+    const inheriting = frozen(profile((file) => { file.plans["pro-launch"] = launch(); }));
+    // Pro may go down, but pro-launch inherits its number.
+    const inherited = diff(profile((file) => { file.plans["pro-launch"] = launch(); file.plans.pro.limits.receptionists = 3; }), inheriting);
+    expect(inherited.refusals).toEqual([{ code: "plan_frozen", path: "billing_file.plans.pro-launch", message: `pro-launch has had subscribers since ${earlier}, so its receptionists can't go down, directly or through its tier, from 5 to 3: the businesses on it keep what it gave them. Write 5 into its entry, or put the lower number under a new code.` }]);
+    // Its number written into its entry keeps it, and Pro's goes down alone.
+    const kept = diff(profile((file) => { file.plans["pro-launch"] = launch(5); file.plans.pro.limits.receptionists = 3; }), inheriting);
+    expect(kept.refusals).toEqual([]);
+    expect(summary(kept.writes)).toEqual(["update billing_plans pro"]);
+
+    const own = frozen(profile((file) => { file.plans["pro-launch"] = launch(4); }));
+    expect(diff(profile((file) => { file.plans["pro-launch"] = launch(2); }), own).refusals.map((refusal) => refusal.message)).toEqual([expect.stringContaining("from 4 to 2")]);
+    // New terms and fewer receptionists: one refusal for each.
+    const both = diff(profile((file) => { file.plans["pro-launch"] = { ...launch(2), prices: { monthlyCents: 6500 } }; }), own);
+    expect(both.refusals.map((refusal) => [refusal.code, refusal.path])).toEqual([["plan_frozen", "billing_file.plans.pro-launch"], ["plan_frozen", "billing_file.plans.pro-launch"]]);
+    expect(both.refusals[1]!.message).toContain("its receptionists can't go down");
+    const more = diff(profile((file) => { file.plans["pro-launch"] = launch(8); }), own);
+    expect(more.refusals).toEqual([]);
+    expect(more.writes.map((write) => write.change)).toEqual([expect.objectContaining({ key: "pro-launch", action: "update", lowers_allowance: false, fields: { receptionists: { from: 4, to: 8 } } })]);
+
+    // Businesses may still be on a retired plan, so bringing it back with fewer is refused too.
+    const retired = frozen(profile((file) => { file.plans["pro-launch"] = launch(4); }));
+    Object.assign(retired.plans.find((plan) => plan.code === "pro-launch")!, { status: "retired", retired_at: earlier });
+    expect(diff(profile((file) => { file.plans["pro-launch"] = launch(2); }), retired).refusals.map((refusal) => refusal.code)).toEqual(["plan_frozen"]);
+    expect(diff(profile((file) => { file.plans["pro-launch"] = launch(4); }), retired).refusals).toEqual([]);
+  });
+
   it("fills receptionists on rows applied before the column, from the file or the tier", () => {
     const file = profile();
     const current = stored(desiredBillingPlans(file), () => "active");
@@ -196,6 +228,16 @@ describe("billing catalog diff", () => {
     expect(refusals).toEqual([]);
     expect(writes.map((write) => [write.change.key, write.set])).toEqual([["free_cloud", { receptionists: 1 }], ["pro", { receptionists: 5 }], ["starter", { receptionists: 1 }]]);
     expect(writes.every((write) => !write.change.lowers_allowance)).toBe(true);
+    // A row without a number gives its tier's, so a lower one in the file goes down.
+    const fewer = diff(profile((value) => { value.plans.pro.limits.receptionists = 3; }), current);
+    expect(fewer.refusals).toEqual([]);
+    expect(fewer.writes.find((write) => write.change.key === "pro")!.change).toMatchObject({ lowers_allowance: true, fields: { receptionists: { from: null, to: 3 } } });
+    // On a plan that has had subscribers, that is refused.
+    const launch = profile((value) => { value.plans["pro-launch"] = proLaunch; });
+    const unfilled = stored(desiredBillingPlans(launch), () => "active");
+    Object.assign(unfilled.plans.find((plan) => plan.code === "pro-launch")!, { receptionists: null, frozen_at: earlier });
+    expect(diff(profile((value) => { value.plans["pro-launch"] = { ...proLaunch, limits: { receptionists: 3 } }; }), unfilled).refusals).toEqual([expect.objectContaining({ code: "plan_frozen", message: expect.stringContaining("from 5 to 3") })]);
+    expect(diff(launch, unfilled).refusals).toEqual([]);
   });
 
   it("never matches, changes or retires a plan made through the API, and refuses a file plan with its code", () => {

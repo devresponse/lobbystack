@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { jsonError } from "@/lib/api-helpers";
 
@@ -8,7 +8,6 @@ const mocks = vi.hoisted(() => ({
   snapshot: vi.fn(async (_businessId: string): Promise<Record<string, unknown> | null> => null),
   status: vi.fn(async (_snapshot: unknown) => "ready"),
   request: vi.fn(async (_input: unknown) => true),
-  requireLive: vi.fn(() => undefined),
 }));
 
 vi.mock("@/lib/api-helpers", async (original) => ({
@@ -21,7 +20,7 @@ vi.mock("@/lib/api-helpers", async (original) => ({
 }));
 vi.mock("@/lib/business-snapshot", () => ({ loadValidBusinessSnapshot: mocks.snapshot }));
 vi.mock("@/lib/live-greeting", () => ({ greetingRecordingStatus: mocks.status }));
-vi.mock("@/lib/live-prototype", () => ({ requestGreetingRecording: mocks.request, requireLivePrototype: mocks.requireLive }));
+vi.mock("@/lib/live-prototype", () => ({ requestGreetingRecording: mocks.request }));
 
 import { POST } from "./route";
 
@@ -41,12 +40,13 @@ const ask = (body: unknown = {}) => POST(new Request("http://localhost:3000/api/
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
   mocks.snapshot.mockResolvedValue(business);
   mocks.status.mockResolvedValue("ready");
   mocks.request.mockResolvedValue(true);
-  mocks.requireLive.mockImplementation(() => undefined);
   mocks.operator.mockResolvedValue("business_1");
 });
+afterEach(() => { vi.unstubAllEnvs(); });
 
 describe("POST /api/test-call/greeting", () => {
   it("says a recorded opening is ready, for owners and admins, who make test calls", async () => {
@@ -93,15 +93,26 @@ describe("POST /api/test-call/greeting", () => {
     expect(mocks.status).not.toHaveBeenCalled();
   });
 
-  it("refuses a receptionist that isn't an ID, and answers 404 while GPT-Live is off", async () => {
+  it("refuses a receptionist that isn't an ID", async () => {
     for (const receptionistId of ["front desk", 7]) {
       const response = await ask({ receptionistId });
       expect(response.status).toBe(400);
       await expect(response.json()).resolves.toMatchObject({ code: "invalid_receptionist" });
     }
-    mocks.requireLive.mockImplementation(() => { throw jsonError("The GPT-Live prototype is off.", 404, "live_prototype_disabled"); });
-    expect((await ask()).status).toBe(404);
     expect(mocks.status).not.toHaveBeenCalled();
+  });
+
+  // The dashboard asks on every page, and a 404 would be an error in the browser's console.
+  it("is off while GPT-Live is off, for owners and admins only", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "false");
+    const response = await ask();
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ status: "off" });
+    expect(mocks.options).toHaveBeenCalledWith({ minimumRole: "business_admin" });
+    expect(mocks.snapshot).not.toHaveBeenCalled();
+    expect(mocks.request).not.toHaveBeenCalled();
+    mocks.operator.mockRejectedValueOnce(jsonError("Forbidden.", 403, "forbidden"));
+    expect((await ask()).status).toBe(403);
   });
 
   it("refuses someone who can't make test calls", async () => {

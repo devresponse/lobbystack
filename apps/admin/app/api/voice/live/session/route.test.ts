@@ -202,7 +202,7 @@ describe("POST /api/voice/live/session", () => {
     await expect(response.json()).resolves.toMatchObject({ sessionId: "live_1", greeting: "Hi" });
   });
 
-  it("opens the call as before when LIVE_RECORDED_GREETING is off or the recording isn't made yet", async () => {
+  it("opens the call as before when LIVE_RECORDED_GREETING is false or the recording isn't made yet", async () => {
     mocks.access.mockResolvedValue(widget);
     const off = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });

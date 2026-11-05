@@ -21,7 +21,6 @@ import {
 } from "@lobbystack/db";
 
 import { findCurrentWidgetChat, findWidgetConversationId, getOrCreateConversation, getOrCreateWidgetConversation, setAutomationState } from "./conversations";
-import { listPhoneReceptionists } from "./receptionistRecords";
 import { archiveReceptionistInTransaction, createReceptionistInTransaction, setReceptionistStatusInTransaction } from "./receptionists";
 import { receiveInboundSms } from "./sms";
 import { createBusiness } from "./tenancy";
@@ -144,9 +143,9 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
     });
   });
 
-  it("lists the receptionists that answer the business's numbers, a paused or archived one's as the default", async () => {
+  it("routes a number's calls to its receptionist, a paused or archived one's to the default", async () => {
     await rollbackTest(async (tx) => {
-      const { context, userId, businessId, mainId, storeId } = await seedChain(tx);
+      const { userId, businessId, mainId, storeId } = await seedChain(tx);
       await asOwner(tx, { userId, businessId });
       const lab = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Lab results" } });
       const catering = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Catering" } });
@@ -156,23 +155,22 @@ describe.skipIf(!testUrl)("records naming their receptionist, against PostgreSQL
       await as(tx, null);
       const storeNumber = phone();
       const labNumber = phone();
+      const cateringNumber = phone();
+      const releasedNumber = phone();
       await tx.insert(phoneNumbers).values([
         { businessId, e164: storeNumber, receptionistId: storeId },
         { businessId, e164: labNumber, receptionistId: lab.id },
-        { businessId, e164: phone(), receptionistId: catering.id },
-        // Downtown's numbers take no calls.
-        { businessId, e164: phone(), receptionistId: downtown.id, voiceEnabled: false },
-        { businessId, e164: phone(), receptionistId: downtown.id, status: "released" },
+        { businessId, e164: cateringNumber, receptionistId: catering.id },
+        { businessId, e164: releasedNumber, receptionistId: downtown.id, status: "released" },
       ]);
 
-      await as(tx, "lobbystack_worker");
-      expect((await listPhoneReceptionists(context, { businessId })).sort()).toEqual([mainId, storeId].sort());
-
-      // The incoming call webhook asks the same before it knows the business.
+      // The incoming call webhook asks before it knows the business.
       await as(tx, "lobbystack_app");
       const resolve = async (e164: string) => (await tx.execute<{ id: string | null }>(sql`select app.resolve_receptionist_by_phone(${e164}) as id`)).rows[0]?.id ?? null;
       expect(await resolve(storeNumber)).toBe(storeId);
       expect(await resolve(labNumber)).toBe(mainId);
+      expect(await resolve(cateringNumber)).toBe(mainId);
+      expect(await resolve(releasedNumber)).toBeNull();
       expect(await resolve(phone())).toBeNull();
       await as(tx, null);
       await tx.update(phoneNumbers).set({ receptionistId: null }).where(eq(phoneNumbers.e164, storeNumber));

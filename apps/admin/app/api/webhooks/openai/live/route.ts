@@ -130,7 +130,7 @@ function createTiming() {
     eventAgeMs: undefined as number | undefined,
     // The header whose number picked the business.
     routedBy: undefined as string | undefined,
-    // With LIVE_RECORDED_GREETING=true, whether the call opened with a recording.
+    // Unless LIVE_RECORDED_GREETING=false, whether the call opened with a recording.
     greetingRecording: undefined as boolean | undefined,
     // Another delivery's decision on the call came before this one's accept.
     decisionAlreadyMade: undefined as true | undefined,

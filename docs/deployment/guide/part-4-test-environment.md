@@ -329,7 +329,7 @@ Later runs print `Skipping already-applied migration <file>.` for each file alre
    | You use PostHog ([3.7](part-3-outside-services.md#37-optional-services)) | The values in [3.7](part-3-outside-services.md#37-optional-services)'s PostHog table | The services that table names |
    | You use website import ([3.7](part-3-outside-services.md#37-optional-services)) | `FIRECRAWL_API_KEY=<the fc- key>` | worker |
    | You use the map on public profile pages ([3.7](part-3-outside-services.md#37-optional-services)) | `GOOGLE_MAPS_EMBED_API_KEY=<the AIza key>` | admin |
-   | Calls should open with a recorded greeting. Since fork PR #96 phone calls do too, and `LIVE_RECORDED_GREETING_PHONE=false` on the admin keeps them on the spoken greeting | `LIVE_RECORDED_GREETING=true` | admin and worker |
+   | Calls should not open with a recorded greeting. Since fork PR #139 they do unless this is set; on an older copy, set `LIVE_RECORDED_GREETING=true` instead to turn it on. `LIVE_RECORDED_GREETING_PHONE=false` on the admin keeps only phone calls on the spoken greeting | `LIVE_RECORDED_GREETING=false` | admin and worker |
    | Replies to LobbyStack's emails should reach a real inbox ([3.4](part-3-outside-services.md#34-email)) | `EMAIL_REPLY_TO=<the address>` | worker |
    | Feedback sent from the dashboard should reach you ([3.4](part-3-outside-services.md#34-email)) | `FEEDBACK_TO_EMAIL=<your address>` | admin |
 

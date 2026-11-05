@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   lastLiveCallSequence: vi.fn(async (..._args: unknown[]) => 0),
   extendLiveCallReservation: vi.fn(async (..._args: unknown[]) => 300),
   recordGreeting: vi.fn(async (..._args: unknown[]) => ({ audio: "UklGRg==", tries: 1 })),
+  businessSnapshot: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown> | null> => null),
 }));
 
 vi.mock("@lobbystack/agent-core", () => ({
@@ -39,6 +40,9 @@ vi.mock("@lobbystack/agent-core", () => ({
   GREETING_RECORDING_TTL_SECONDS: 604_800,
   LIVE_VOICE: "marin",
   greetingRecordingKey: (greeting: string) => `recording:${greeting}`,
+  greetingRecordingFailedKey: (key: string) => `${key}:failed`,
+  greetingRecordingInProgressKey: (key: string) => `${key}:recording`,
+  recordedGreetingEnabled: () => process.env.LIVE_RECORDED_GREETING !== "false",
   recordingMs: () => 2_400,
   recordGreeting: mocks.recordGreeting,
   LiveCallController: class {
@@ -60,6 +64,8 @@ vi.mock("@lobbystack/agent-core", () => ({
 }));
 vi.mock("@lobbystack/domain", async (importOriginal) => ({
   orphanedLiveCallSeconds: (await importOriginal<typeof import("@lobbystack/domain")>()).orphanedLiveCallSeconds,
+  snapshotForReceptionist: (await importOriginal<typeof import("@lobbystack/domain")>()).snapshotForReceptionist,
+  getCachedBusinessSnapshot: mocks.businessSnapshot,
   saveLiveCallTurn: mocks.saveLiveCallTurn,
   lastLiveCallSequence: mocks.lastLiveCallSequence,
   extendLiveCallReservation: mocks.extendLiveCallReservation,
@@ -656,6 +662,90 @@ describe("greeting recordings", () => {
     expect(setup).not.toHaveProperty("greeting");
     expect(setup).not.toHaveProperty("greetingRecording");
     expect(store.get).not.toHaveBeenCalled();
+  });
+});
+
+describe("recording a test call's opening", () => {
+  const businessId = "00000000-0000-4000-8000-0000000000c1";
+  const second = "00000000-0000-4000-8000-0000000000c2";
+  // Redis without any recording yet.
+  const emptyStore = () => ({ get: vi.fn(async (_key: string): Promise<string | null> => null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 0), exists: vi.fn(async () => 0) });
+  const business = {
+    businessId, greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: {},
+    receptionists: [
+      { id: frontDesk, name: "Front desk", description: "", isDefault: true, status: "active", listed: true, order: 0, knowledgeScope: "all", greeting: "Thanks for calling.", voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [] },
+      { id: second, name: "Second desk", description: "", isDefault: false, status: "active", listed: true, order: 1, knowledgeScope: "all", greeting: "Hi, this is the second desk.", voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [] },
+    ],
+  };
+  const greetingRequest = (body: Record<string, unknown>) => attachRequest(body, "/internal/live/greeting");
+
+  function setUp(options: { redis?: boolean } = {}) {
+    const store = options.redis === false ? undefined : emptyStore();
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.recordGreeting.mockClear();
+    mocks.businessSnapshot.mockReset().mockResolvedValue(business);
+    return { store, handler: createLiveCallHandler({ domain: { db: {} as never }, ...(store ? { greetingRecordings: store } : {}) }) };
+  }
+
+  it("starts recording the chosen receptionist's opening and answers at once", async () => {
+    const { store, handler } = setUp();
+    let finish: (value: { audio: string; tries: number }) => void = () => undefined;
+    mocks.recordGreeting.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const reply = response();
+    await expect(handler.handle(greetingRequest({ businessId, receptionistId: second }), reply)).resolves.toBe(true);
+    expect(reply.writeHead).toHaveBeenCalledWith(202, expect.anything());
+    expect(reply.end).toHaveBeenCalledWith(JSON.stringify({ recording: true }));
+    await vi.waitFor(() => expect(mocks.recordGreeting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ greeting: "Hi, this is the second desk.", snapshot: expect.objectContaining({ receptionist: expect.objectContaining({ id: second }) }) }), expect.anything()));
+    expect(store!.set).toHaveBeenCalledWith("recording:Hi, this is the second desk.:recording", "1", "EX", 120, "NX");
+    finish({ audio: "UklGRg==", tries: 1 });
+    await vi.waitFor(() => expect(store!.set).toHaveBeenCalledWith("recording:Hi, this is the second desk.", "UklGRg==", "EX", 604_800));
+    // Without a receptionist, the default one's.
+    await handler.handle(greetingRequest({ businessId }), response());
+    await vi.waitFor(() => expect(mocks.recordGreeting).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ greeting: "Thanks for calling." }), expect.anything()));
+  });
+
+  it("records nothing with LIVE_RECORDED_GREETING=false, without Redis, or for a business it can't load", async () => {
+    const { handler } = setUp();
+    vi.stubEnv("LIVE_RECORDED_GREETING", "false");
+    const off = response();
+    await handler.handle(greetingRequest({ businessId }), off);
+    expect(off.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    vi.stubEnv("LIVE_RECORDED_GREETING", undefined);
+    const withoutRedis = setUp({ redis: false }).handler;
+    const noRedis = response();
+    await withoutRedis.handle(greetingRequest({ businessId }), noRedis);
+    expect(noRedis.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    const missing = response();
+    mocks.businessSnapshot.mockResolvedValueOnce(null);
+    await handler.handle(greetingRequest({ businessId }), missing);
+    expect(missing.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+  });
+
+  it("refuses a request without a business, with a receptionist that isn't an ID, or without the service token", async () => {
+    const { handler } = setUp();
+    for (const body of [{}, { businessId: "biz_1" }, { businessId, receptionistId: "front desk" }, { businessId, receptionistId: 7 }]) {
+      const reply = response();
+      await handler.handle(greetingRequest(body), reply);
+      expect(reply.writeHead).toHaveBeenCalledWith(400, expect.anything());
+    }
+    const unauthorized = response();
+    await handler.handle(Object.assign(greetingRequest({ businessId }), { headers: { "x-internal-service-token": "wrong" } }), unauthorized);
+    expect(unauthorized.writeHead).toHaveBeenCalledWith(401, expect.anything());
+    expect(mocks.businessSnapshot).not.toHaveBeenCalled();
+  });
+
+  // The drain waits for calls, not recordings, so the dashboard opens its call without waiting.
+  it("records nothing while the worker shuts down", async () => {
+    const { handler } = setUp();
+    await handler.drain(0);
+    const reply = response();
+    await handler.handle(greetingRequest({ businessId }), reply);
+    expect(reply.writeHead).toHaveBeenCalledWith(503, { "content-type": "application/json", connection: "close" });
+    expect(mocks.businessSnapshot).not.toHaveBeenCalled();
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
   });
 });
 

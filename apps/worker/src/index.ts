@@ -1,5 +1,5 @@
 import { assertDatabaseRole, businesses, createDatabaseClient, databaseHealthCheck, enqueueOutbox, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
-import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer } from "@lobbystack/agent-core";
+import { createBusinessHoursExtractor, createBusinessSummarizer, createCallSummarizer, recordedGreetingEnabled } from "@lobbystack/agent-core";
 import { assertProductionSecrets, brandEmailLogo, brandStartupReport, currentBrand, emailSender, isMaintenanceMode, polarBaseUrls } from "@lobbystack/shared";
 import type { OnboardingFollowupSender } from "@lobbystack/domain";
 import { createQueue, createRedisConnection, createWorkerOptions, enqueueJob, jobQueues, type JobEnvelope, type JobQueue } from "@lobbystack/jobs";
@@ -189,9 +189,15 @@ async function main(): Promise<void> {
     storage,
     ...(openai ? { liveSessions: openai.live.sessions } : {}),
     recoverLiveCall: liveCalls.recover,
-    // With LIVE_RECORDED_GREETING=true here as on the admin, each phone
-    // business's opening is recorded ahead of its calls.
-    ...(liveCalls.greetingRecordings && process.env.LIVE_RECORDED_GREETING === "true" ? { greetingRecordings: liveCalls.greetingRecordings } : {}),
+    // Unless LIVE_RECORDED_GREETING=false, as on the admin, each
+    // receptionist's opening is recorded ahead of its calls.
+    ...(liveCalls.greetingRecordings && recordedGreetingEnabled() ? { greetingRecordings: liveCalls.greetingRecordings } : {}),
+    // A refreshed snapshot's openings are recorded on the maintenance queue,
+    // once per snapshot version.
+    queueOpeningRecordings: async ({ businessId, version }) => {
+      const maintenanceQueue = queues.get("maintenance");
+      if (maintenanceQueue) await enqueueJob(maintenanceQueue, { type: "live.recordGreetings", businessId, payload: {}, idempotencyKey: `live-greeting-recordings:${businessId}:${version}` });
+    },
     listBusinesses: async () => await listSchedulerBusinesses(dispatcherDatabase.db),
     ...(polar ? { polar } : {}),
     ...(polarCatalog ? { polarCatalog } : {}),

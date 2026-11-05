@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { agentModelId, callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, receptionistInstructions, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
+import { agentModelId, callerIsDone, closeLiveSession, createAgentModel, createReceptionistAgent, LiveCallController, liveDelegationEnvironment, receptionistInstructions, recordedGreetingEnabled, WRAP_UP_MAX_MS, type AgentChannel, type CallControl, type KeypadPasscodeCheck, type LiveCallSetup, type LiveCallSummary, type LiveCallWrapUp } from "@lobbystack/agent-core";
 import {
   blockLiveCaller,
   extendLiveCallReservation,
@@ -24,12 +24,14 @@ import { callOpening, isUuid, MAX_PHONE_CALL_MS, normalizeAppointmentChangePolic
 import { logEvent, recordException, reportError, setSpanAttributes, withCallContext, withOpenSpan, type CallContext, type Span } from "@lobbystack/telemetry/node";
 import OpenAI from "openai";
 
-import { createGreetingRecordings, type GreetingRecordingStore } from "./greetingRecordings";
+import { createGreetingRecordings, startOpeningRecording, type GreetingRecordingStore } from "./greetingRecordings";
 import { recordLiveCallLatency, recordLiveDelegation, recordLiveDelegationGeneration } from "./liveCallTelemetry";
 
 export const LIVE_ATTACH_PATH = "/internal/live/attach";
 /** Ends a browser session with session.close, for the admin, which has no sideband. */
 export const LIVE_END_PATH = "/internal/live/end";
+/** Starts recording a receptionist's opening, for the dashboard's test call (POST /api/test-call/greeting). */
+export const LIVE_GREETING_PATH = "/internal/live/greeting";
 const MAX_BODY_BYTES = 16 * 1024;
 
 /** Where the call came from: a phone number (SIP) or a browser (WebRTC). */
@@ -58,8 +60,8 @@ type AttachRequest = {
    */
   resume?: boolean;
   /**
-   * The greeting a call opened with, when LIVE_RECORDED_GREETING is on (for a
-   * phone call, unless LIVE_RECORDED_GREETING_PHONE is false). `play`: the
+   * The greeting a call opened with, unless LIVE_RECORDED_GREETING is false
+   * (or, for a phone call, LIVE_RECORDED_GREETING_PHONE). `play`: the
    * session's starting history has it as already said, and the worker plays
    * its recording as the call connects. Otherwise the call opened as before,
    * and the worker records it for the next one.
@@ -698,13 +700,35 @@ export function createLiveCallHandler(input: { domain: DomainContext; attachLock
 
   async function handle(request: IncomingMessage, response: ServerResponse): Promise<boolean> {
     const path = new URL(request.url ?? "/", "http://localhost").pathname;
-    if ((path !== LIVE_ATTACH_PATH && path !== LIVE_END_PATH) || !isLivePrototypeEnabled()) return false;
+    if (![LIVE_ATTACH_PATH, LIVE_END_PATH, LIVE_GREETING_PATH].includes(path) || !isLivePrototypeEnabled()) return false;
     if (request.method !== "POST") {
       reply(response, 405, { error: "Method not allowed." });
       return true;
     }
     if (!tokenMatches(request.headers["x-internal-service-token"] as string | undefined)) {
       reply(response, 401, { error: "Unauthorized." });
+      return true;
+    }
+    if (path === LIVE_GREETING_PATH) {
+      try {
+        const body = JSON.parse(await readBody(request)) as { businessId?: unknown; receptionistId?: unknown };
+        // A recording isn't a call the drain waits for, so one started now could be cut off.
+        if (draining) {
+          reply(response, 503, { error: "This worker is shutting down." }, { connection: "close" });
+          return true;
+        }
+        const { businessId, receptionistId } = body;
+        if (typeof businessId !== "string" || !isUuid(businessId) || (receptionistId !== undefined && (typeof receptionistId !== "string" || !isUuid(receptionistId)))) {
+          reply(response, 400, { error: "businessId is required, and receptionistId must be an ID." });
+          return true;
+        }
+        // Answered at once: the recording takes GPT-Live 10 seconds or more, and the dashboard asks again.
+        const recording = Boolean(recordings && recordedGreetingEnabled()) && await withCallContext({ businessId }, async () => await startOpeningRecording(recordings!, input.domain, { businessId, ...(receptionistId ? { receptionistId } : {}) }));
+        reply(response, 202, { recording });
+      } catch (error) {
+        logFailure("live.greeting_request_failed")(error);
+        reply(response, 500, { error: "Recording request failed." });
+      }
       return true;
     }
     if (path === LIVE_END_PATH) {

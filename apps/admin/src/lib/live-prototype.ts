@@ -33,7 +33,8 @@ function workerUrl(): string {
   return process.env.WORKER_INTERNAL_URL ?? `http://127.0.0.1:${process.env.WORKER_PORT ?? 3002}`;
 }
 
-async function postToWorker(action: "attach" | "end", body: unknown): Promise<void> {
+// Resolves to the worker's JSON answer, or undefined when it isn't JSON.
+async function postToWorker(action: "attach" | "end" | "greeting", body: unknown): Promise<unknown> {
   const token = process.env.INTERNAL_SERVICE_TOKEN;
   if (!token) throw new Error("INTERNAL_SERVICE_TOKEN is not set.");
   // A sleeping staging worker needs a few seconds to wake. Retries share this budget.
@@ -52,7 +53,7 @@ async function postToWorker(action: "attach" | "end", body: unknown): Promise<vo
       continue;
     }
     if (!response.ok) throw new Error(`Worker ${action} failed with status ${response.status}.`);
-    return;
+    return await response.json().catch(() => undefined);
   }
 }
 
@@ -68,4 +69,16 @@ export async function attachWorkerToLiveSession(input: WorkerAttachInput): Promi
  */
 export async function endLiveBrowserSession(sessionId: string): Promise<void> {
   await postToWorker("end", { sessionId });
+}
+
+/**
+ * Asks the worker to record a receptionist's opening, the default one's
+ * without `receptionistId`, unless it's recorded, being recorded or failed
+ * lately. The worker answers before it records: false when it records none,
+ * as with LIVE_RECORDED_GREETING=false there or a call that opens with
+ * nothing to say.
+ */
+export async function requestGreetingRecording(input: { businessId: string; receptionistId?: string }): Promise<boolean> {
+  const answer = await postToWorker("greeting", input);
+  return typeof answer === "object" && answer !== null && (answer as { recording?: unknown }).recording === true;
 }

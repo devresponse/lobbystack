@@ -37,7 +37,7 @@ const { values } = parseArgs({
     snapshot: { type: "string" },
     // A browser call, as from the website widget: its own instructions, and full-band audio.
     browser: { type: "boolean", default: false },
-    // A browser call that opens with a recording of the greeting, as with LIVE_RECORDED_GREETING=true.
+    // A browser call that opens with a recording of the greeting, as calls do unless LIVE_RECORDED_GREETING=false.
     "recorded-greeting": { type: "boolean", default: false },
   },
 });

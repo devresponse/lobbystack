@@ -21,12 +21,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { requestJson } from "@/lib/request-json";
 import { cn } from "@/lib/utils";
 
 type TestCallWidgetProps = {
   businessId?: string;
   businessSlug?: string;
   className?: string;
+  /** The signed-in member's role in the business: owners and admins make test calls. */
+  role?: string;
 };
 
 type WebVoiceControls = {
@@ -52,28 +55,151 @@ function useTestCallReceptionist(businessId: string | undefined) {
   useEffect(() => {
     startingWith.current = receptionistId;
   }, [receptionistId]);
-  const getStartPayload = useCallback(async (): Promise<Record<string, string>> => (startingWith.current ? { receptionistId: startingWith.current } : {}), []);
+  const startPayload = useCallback((): Record<string, string> => (startingWith.current ? { receptionistId: startingWith.current } : {}), []);
   const choose = useCallback((next: string | null) => setChoice(next ? { businessId, receptionistId: next } : null), [businessId]);
   return {
     options,
     value: receptionistId ?? options.find((receptionist) => receptionist.isDefault)?.id ?? null,
+    /** The receptionist chosen, null for the default one. */
+    chosenId: receptionistId,
     choose,
-    getStartPayload,
+    /** What the call's start request adds: the receptionist chosen to answer. */
+    startPayload,
   };
+}
+
+/** What POST /api/test-call/greeting answers about the opening's recording. */
+type GreetingStatus = "ready" | "recording" | "missing" | "failed" | "off";
+
+// A call that starts while its greeting is being recorded waits this long at
+// most, asking again every GREETING_POLL_MS, then opens without the recording.
+// Recording one takes GPT-Live several seconds.
+export const GREETING_WAIT_MS = 15_000;
+const GREETING_POLL_MS = 1_000;
+
+/** Undefined when the answer doesn't come, and the call then starts at once. */
+async function askForGreeting(businessId: string, receptionistId: string | null, signal?: AbortSignal): Promise<GreetingStatus | undefined> {
+  try {
+    const { status } = await requestJson<{ status?: GreetingStatus }>(`/api/test-call/greeting?businessId=${encodeURIComponent(businessId)}`, {
+      method: "POST",
+      body: JSON.stringify(receptionistId ? { receptionistId } : {}),
+      ...(signal ? { signal } : {}),
+    });
+    return status;
+  } catch {
+    return undefined;
+  }
+}
+
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+  });
+}
+
+/**
+ * Asks for the greeting's recording, and again while it's being recorded,
+ * for GREETING_WAIT_MS at most, a slow answer included. Never throws.
+ */
+async function waitWhileRecording(businessId: string, receptionistId: string | null, signal: AbortSignal): Promise<void> {
+  const wait = new AbortController();
+  const stop = () => wait.abort();
+  const timer = setTimeout(stop, GREETING_WAIT_MS);
+  signal.addEventListener("abort", stop, { once: true });
+  try {
+    let status = await askForGreeting(businessId, receptionistId, wait.signal);
+    while (status === "recording" && !wait.signal.aborted) {
+      await pause(GREETING_POLL_MS, wait.signal);
+      if (wait.signal.aborted) break;
+      status = await askForGreeting(businessId, receptionistId, wait.signal);
+    }
+  } finally {
+    clearTimeout(timer);
+    signal.removeEventListener("abort", stop);
+  }
+}
+
+/**
+ * Gets the test call's greeting recorded before the call starts. GPT-Live
+ * skips its spoken greeting on about one browser call in three, and a call
+ * opens with the recording only once the worker has made one
+ * (docs/voice/runtime.md). So the dashboard asks for the recording as it
+ * opens and when the receptionist changes, which has the worker record a
+ * missing one, and a call that starts while it's being recorded waits for
+ * it, at most GREETING_WAIT_MS, showing "Connecting".
+ */
+function useTestCallGreeting(businessId: string | undefined, receptionistId: string | null, enabled: boolean) {
+  const latest = useRef({ businessId, receptionistId, enabled });
+  useEffect(() => {
+    latest.current = { businessId, receptionistId, enabled };
+  }, [businessId, enabled, receptionistId]);
+  const pending = useRef<{ businessId: string; receptionistId: string | null; controller: AbortController; done: Promise<void> } | null>(null);
+
+  useEffect(() => {
+    if (enabled && businessId) void askForGreeting(businessId, receptionistId);
+  }, [businessId, enabled, receptionistId]);
+
+  const cancel = useCallback(() => {
+    pending.current?.controller.abort();
+    pending.current = null;
+  }, []);
+  useEffect(() => cancel, [cancel]);
+
+  const check = useCallback((forReceptionist: string | null): Promise<void> => {
+    cancel();
+    const { businessId: business, enabled: on } = latest.current;
+    if (!on || !business) return Promise.resolve();
+    const controller = new AbortController();
+    const done = waitWhileRecording(business, forReceptionist, controller.signal);
+    pending.current = { businessId: business, receptionistId: forReceptionist, controller, done };
+    return done;
+  }, [cancel]);
+
+  // As the call starts, beside the microphone and the connection, so a ready greeting adds no wait.
+  const prepare = useCallback(() => {
+    void check(latest.current.receptionistId);
+  }, [check]);
+  // Before the call's request, with the check prepare started, or a new one for a call started from the orb.
+  const ready = useCallback(async (forReceptionist: string | null) => {
+    const started = pending.current;
+    const done = started && started.businessId === latest.current.businessId && started.receptionistId === forReceptionist ? started.done : check(forReceptionist);
+    await done;
+    if (pending.current?.done === done) pending.current = null;
+  }, [check]);
+  return { prepare, ready, cancel };
 }
 
 export function DashboardTestCallWidget({
   businessId,
   businessSlug,
   className,
+  role,
 }: TestCallWidgetProps) {
   const { t } = useTranslation("common");
   const [open, setOpen] = useState(false);
   const voiceControlsRef = useRef<WebVoiceControls | null>(null);
   const receptionist = useTestCallReceptionist(businessId);
+  const { startPayload } = receptionist;
+  const { prepare: prepareGreeting, ready: greetingReady, cancel: stopGreetingWait } = useTestCallGreeting(
+    businessId,
+    receptionist.chosenId,
+    Boolean(businessSlug && role && ["business_owner", "business_admin"].includes(role)),
+  );
+  const getStartPayload = useCallback(async () => {
+    const payload = startPayload();
+    await greetingReady(payload.receptionistId ?? null);
+    return payload;
+  }, [greetingReady, startPayload]);
 
   const handleOpenChange = (nextOpen: boolean) => {
     if (!nextOpen) {
+      stopGreetingWait();
       void voiceControlsRef.current?.forceEndCall();
       setTestCallActive(false);
     }
@@ -83,8 +209,9 @@ export function DashboardTestCallWidget({
   const handleTestCallClick = useCallback(() => {
     setOpen(true);
     setTestCallActive(true);
+    prepareGreeting();
     void Promise.resolve(voiceControlsRef.current?.startCall()).catch(() => setTestCallActive(false));
-  }, []);
+  }, [prepareGreeting]);
 
   // The flag lives in a module, so it outlives this widget: leaving the
   // dashboard mid-call must not keep every other surface waiting on a call
@@ -141,8 +268,8 @@ export function DashboardTestCallWidget({
         <TestCallAura
           businessId={businessId}
           businessSlug={businessSlug}
-          getStartPayload={receptionist.getStartPayload}
-          onCallEnded={() => { setOpen(false); setTestCallActive(false); announceTestCallEnded(); }}
+          getStartPayload={getStartPayload}
+          onCallEnded={() => { stopGreetingWait(); setOpen(false); setTestCallActive(false); announceTestCallEnded(); }}
           onRegisterControls={(controls) => {
             voiceControlsRef.current = controls;
           }}
@@ -182,7 +309,7 @@ function TestCallAuraPortal({
 type TestCallAuraProps = {
   businessId?: string | undefined;
   businessSlug: string;
-  /** What the call's start request adds: the receptionist chosen to answer. */
+  /** What the call's start request adds, the receptionist chosen to answer, once its greeting is ready. */
   getStartPayload: () => Promise<Record<string, string>>;
   onCallEnded: () => void;
   onRegisterControls: (controls: WebVoiceControls) => void;

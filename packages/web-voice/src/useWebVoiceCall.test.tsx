@@ -30,11 +30,13 @@ function createMockMediaStream(trackStop: ReturnType<typeof vi.fn>) {
 function HookHarness(props: {
   endpoint: string;
   onReady: (controls: HookControls) => void;
+  getStartPayload?: () => Promise<Record<string, string>>;
 }) {
-  const { endpoint, onReady } = props;
+  const { endpoint, onReady, getStartPayload } = props;
   const controls = useWebVoiceCall({
     businessSlug: "acme-dental",
     endpoint,
+    ...(getStartPayload ? { getStartPayload } : {}),
   });
 
   useEffect(() => {
@@ -117,6 +119,49 @@ describe("useWebVoiceCall", () => {
     expect(trackStop).toHaveBeenCalledTimes(1);
     expect(peerConnectionMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  // The dashboard's test call waits for its greeting's recording there.
+  it("starts no session for a call ended while its start payload is prepared", async () => {
+    const payload = createDeferred<Record<string, string>>();
+    const trackStop = vi.fn();
+    const peerConnectionInstance = {
+      addTrack: vi.fn(),
+      close: vi.fn(),
+      connectionState: "new",
+      createDataChannel: vi.fn(() => ({ readyState: "connecting", send: vi.fn(), onmessage: null })),
+      createOffer: vi.fn(async () => ({ sdp: "offer-sdp" })),
+      iceGatheringState: "complete",
+      localDescription: { sdp: "offer-sdp" },
+      onconnectionstatechange: null,
+      ontrack: null,
+      setLocalDescription: vi.fn(async () => undefined),
+      setRemoteDescription: vi.fn(async () => undefined),
+    } as unknown as RTCPeerConnection;
+    const fetchMock = vi.fn(async () => Response.json({ sessionId: "session-123", endToken: "end", sdp: "answer-sdp" }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.stubGlobal("RTCPeerConnection", vi.fn(function () { return peerConnectionInstance; }));
+    vi.stubGlobal("navigator", { ...navigator, mediaDevices: { getUserMedia: vi.fn(async () => createMockMediaStream(trackStop)) } });
+    const getStartPayload = vi.fn(() => payload.promise);
+
+    let controls: HookControls | null = null;
+    render(createElement(HookHarness, { endpoint: "https://app.example.com/api/voice/live/session", getStartPayload, onReady: (next) => { controls = next; } }));
+    await waitFor(() => expect(controls).not.toBeNull());
+    const startPromise = controls!.startCall();
+    await waitFor(() => expect(getStartPayload).toHaveBeenCalled());
+    expect(controls!.status).toBe("connecting");
+
+    await act(async () => {
+      await controls!.forceEndCall();
+    });
+    payload.resolve({ receptionistId: "00000000-0000-4000-8000-0000000000a2" });
+    await act(async () => {
+      await startPromise;
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(peerConnectionInstance.close).toHaveBeenCalled();
+    expect(trackStop).toHaveBeenCalled();
   });
 });
 

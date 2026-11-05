@@ -1,5 +1,5 @@
-import { GREETING_RECORDING_TTL_SECONDS, greetingRecordingKey, LIVE_VOICE, recordGreeting, recordingMs } from "@lobbystack/agent-core";
-import { getCachedBusinessSnapshot, listPhoneReceptionists, snapshotForReceptionist, type DomainContext } from "@lobbystack/domain";
+import { GREETING_RECORDING_TTL_SECONDS, greetingRecordingFailedKey, greetingRecordingInProgressKey, greetingRecordingKey, LIVE_VOICE, recordGreeting, recordingMs } from "@lobbystack/agent-core";
+import { getCachedBusinessSnapshot, snapshotForReceptionist, type DomainContext } from "@lobbystack/domain";
 import { callOpening, type BusinessContextSnapshot } from "@lobbystack/shared";
 import { logEvent } from "@lobbystack/telemetry/node";
 import type OpenAI from "openai";
@@ -7,7 +7,8 @@ import type OpenAI from "openai";
 /** The slice of a Redis client greeting recordings use. */
 export type GreetingRecordingStore = {
   get(key: string): Promise<string | null>;
-  set(key: string, value: string, mode: "EX", seconds: number): Promise<unknown>;
+  /** With "NX", sets only a key that doesn't exist, and answers "OK" when it did. */
+  set(key: string, value: string, mode: "EX", seconds: number, condition?: "NX"): Promise<unknown>;
   expire(key: string, seconds: number): Promise<unknown>;
   exists(key: string): Promise<number>;
 };
@@ -21,6 +22,9 @@ const RECORD_TIMEOUT_MS = 90_000;
 // so the calls of a business whose opening GPT-Live won't say don't each
 // start three more sessions.
 const FAILED_RETRY_SECONDS = 6 * 60 * 60;
+// The mark a worker sets while it records an opening, so another worker
+// doesn't record it too, outlasts the recording's own time limit.
+const IN_PROGRESS_SECONDS = Math.ceil(RECORD_TIMEOUT_MS / 1_000) + 30;
 
 export type GreetingRecordings = ReturnType<typeof createGreetingRecordings>;
 
@@ -37,11 +41,14 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
    */
   async function record(greeting: string, snapshot: BusinessContextSnapshot): Promise<void> {
     const key = greetingRecordingKey(greeting, LIVE_VOICE);
-    const failedKey = `${key}:failed`;
+    const failedKey = greetingRecordingFailedKey(key);
     if (recording.has(key)) return;
     recording.add(key);
     try {
       if (await input.store.exists(key) || await input.store.exists(failedKey)) return;
+      // Another worker is recording it. The mark also tells the dashboard's
+      // test call that the recording is coming.
+      if (await input.store.set(greetingRecordingInProgressKey(key), "1", "EX", IN_PROGRESS_SECONDS, "NX") !== "OK") return;
       const startedAt = performance.now();
       const recorded = await recordGreeting(input.client, { greeting, voice: LIVE_VOICE, snapshot }, { signal: AbortSignal.timeout(RECORD_TIMEOUT_MS) }).catch(async (error: unknown) => {
         await input.store.set(failedKey, "1", "EX", FAILED_RETRY_SECONDS).catch(() => undefined);
@@ -92,24 +99,28 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
 }
 
 /**
- * Keeps the opening of a business with a phone number recorded ahead of its
- * calls, so its first call after the opening changes, or after a week
- * without calls, still opens with the recording. Each receptionist that
- * answers one of its numbers opens with its own greeting, in its own
- * language: the default one's first, then the others' in the Receptionists
- * page's order, each opening once. A receptionist only on the website has
- * browser calls, which record their opening as they end. False when the
- * business has no phone number or its calls open with nothing to say.
- * Throws only when the business can't be loaded.
+ * Keeps the openings of a business's receptionists recorded ahead of their
+ * calls, so the first call after an opening changes, or after a week without
+ * calls, still opens with the recording. Every active receptionist takes
+ * browser calls, from the dashboard's test call, its page, a widget key or a
+ * QR link, and those that answer a number take phone calls, each opening
+ * with its own greeting in its own language: the default one's first, then
+ * the others in the Receptionists page's order, each opening once. A paused
+ * receptionist's calls go to the default one. With `phoneOnly`, as in the
+ * daily sweep, a business without a phone number is left out: it takes only
+ * browser calls, and the dashboard's test calls ask for their opening while
+ * a website call after a quiet week records it for the next one. False when
+ * the business has nothing to keep. Throws only when the business can't be
+ * loaded.
  */
-export async function keepOpeningRecorded(recordings: GreetingRecordings, domain: DomainContext, businessId: string): Promise<boolean> {
+export async function keepOpeningsRecorded(recordings: GreetingRecordings, domain: DomainContext, businessId: string, options: { phoneOnly?: boolean } = {}): Promise<boolean> {
   const snapshot = await getCachedBusinessSnapshot(domain, { businessId });
-  if (!snapshot?.contactChannels.phoneNumber) return false;
-  const order = snapshot.receptionists?.map((receptionist) => receptionist.id) ?? [];
-  const position = (id: string) => (order.includes(id) ? order.indexOf(id) : order.length);
-  const numbered = order.length ? (await listPhoneReceptionists(domain, { businessId })).sort((left, right) => position(left) - position(right)) : [];
+  if (!snapshot || (options.phoneOnly && !snapshot.contactChannels.phoneNumber)) return false;
+  const active = (snapshot.receptionists ?? [])
+    .filter((receptionist) => receptionist.status === "active")
+    .sort((left, right) => Number(right.isDefault) - Number(left.isDefault) || left.order - right.order);
   // A snapshot from before receptionists is the default's view.
-  const answering: Array<string | undefined> = numbered.length ? numbered : [undefined];
+  const answering: Array<string | undefined> = active.length ? active.map((receptionist) => receptionist.id) : [undefined];
   const kept = new Set<string>();
   // One at a time, like the businesses of the daily sweep.
   for (const receptionistId of answering) {
@@ -120,4 +131,22 @@ export async function keepOpeningRecorded(recordings: GreetingRecordings, domain
     await recordings.keep(opening, view);
   }
   return kept.size > 0;
+}
+
+/**
+ * Starts recording one receptionist's opening, unless it's recorded, being
+ * recorded or failed in the last 6 hours, for the dashboard's test call,
+ * which asks as the dashboard opens and waits a little for it. Doesn't wait
+ * for the recording. False when the business can't be loaded or its calls
+ * open with nothing to say.
+ */
+export async function startOpeningRecording(recordings: GreetingRecordings, domain: DomainContext, input: { businessId: string; receptionistId?: string }): Promise<boolean> {
+  const snapshot = await getCachedBusinessSnapshot(domain, { businessId: input.businessId });
+  if (!snapshot) return false;
+  // A paused or archived receptionist's calls go to the default one, whose opening this records.
+  const view = snapshotForReceptionist(snapshot, input.receptionistId);
+  const opening = callOpening(view);
+  if (!opening) return false;
+  void recordings.record(opening, view);
+  return true;
 }

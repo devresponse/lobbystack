@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { attachWorkerToLiveSession, endLiveBrowserSession } from "./live-prototype";
+import { attachWorkerToLiveSession, endLiveBrowserSession, requestGreetingRecording } from "./live-prototype";
 
 const fetchMock = vi.fn();
 const attachInput = { sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "voice" as const };
@@ -68,6 +68,28 @@ describe("endLiveBrowserSession", () => {
   it("doesn't retry a 503", async () => {
     fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
     await expect(endLiveBrowserSession("live_1")).rejects.toThrow("Worker end failed with status 503.");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("requestGreetingRecording", () => {
+  it("asks the worker to record a receptionist's opening, and says whether it does", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ recording: true }, { status: 202 }));
+    await expect(requestGreetingRecording({ businessId: "biz_1", receptionistId: "receptionist_1" })).resolves.toBe(true);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://worker.test/internal/live/greeting");
+    expect(init).toMatchObject({ method: "POST", headers: { "x-internal-service-token": "token" } });
+    expect(JSON.parse(String(init.body))).toEqual({ businessId: "biz_1", receptionistId: "receptionist_1" });
+    // A worker with LIVE_RECORDED_GREETING=false, or one that answers without a body, records none.
+    fetchMock.mockResolvedValueOnce(Response.json({ recording: false }, { status: 202 }));
+    await expect(requestGreetingRecording({ businessId: "biz_1" })).resolves.toBe(false);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 202 }));
+    await expect(requestGreetingRecording({ businessId: "biz_1" })).resolves.toBe(false);
+  });
+
+  it("fails on a worker that refuses, without retrying", async () => {
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 503 }));
+    await expect(requestGreetingRecording({ businessId: "biz_1" })).rejects.toThrow("Worker greeting failed with status 503.");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

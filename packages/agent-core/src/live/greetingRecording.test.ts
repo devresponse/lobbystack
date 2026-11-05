@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { greetingRecordingKey, recordingMs } from "./greetingRecording";
+import { greetingRecordingFailedKey, greetingRecordingInProgressKey, greetingRecordingKey, recordedGreetingEnabled, recordingMs } from "./greetingRecording";
 
 afterEach(() => { vi.unstubAllEnvs(); });
 
@@ -22,6 +22,24 @@ describe("greeting recordings", () => {
   it("doesn't find the recordings OpenAI's speech model made", () => {
     const speechModelKey = createHash("sha256").update(JSON.stringify(["gpt-4o-mini-tts", "Speak warmly and naturally, like a receptionist answering a call.", "marin", "Thanks for calling."])).digest("hex");
     expect(greetingRecordingKey("Thanks for calling.", "marin")).not.toBe(`lobbystack:live:greeting-recording:${speechModelKey}`);
+  });
+
+  // Its failures and a recording under way sit next to it, so the admin and every worker find them.
+  it("keeps a failed recording's and a recording under way's marks next to its key", () => {
+    const key = greetingRecordingKey("Thanks for calling.", "marin");
+    expect(greetingRecordingFailedKey(key)).toBe(`${key}:failed`);
+    expect(greetingRecordingInProgressKey(key)).toBe(`${key}:recording`);
+  });
+
+  // GPT-Live skips the spoken greeting on about one call in three, so calls open with the recording unless it's turned off.
+  it("opens calls with the recording unless LIVE_RECORDED_GREETING is false", () => {
+    expect(recordedGreetingEnabled({})).toBe(true);
+    expect(recordedGreetingEnabled({ LIVE_RECORDED_GREETING: "" })).toBe(true);
+    expect(recordedGreetingEnabled({ LIVE_RECORDED_GREETING: "true" })).toBe(true);
+    expect(recordedGreetingEnabled({ LIVE_RECORDED_GREETING: "false" })).toBe(false);
+    expect(recordedGreetingEnabled({ LIVE_RECORDED_GREETING: " FALSE " })).toBe(false);
+    vi.stubEnv("LIVE_RECORDED_GREETING", "false");
+    expect(recordedGreetingEnabled()).toBe(false);
   });
 
   it("plays 16-bit PCM at 24 kHz for as long as its samples last", () => {

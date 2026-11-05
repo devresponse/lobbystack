@@ -106,11 +106,14 @@ function receptionist(id: string, name: string, values: Partial<ReceptionistOpti
 
 const FRONT_DESK = receptionist("00000000-0000-4000-8000-0000000000a1", "Front desk", { isDefault: true, knowledgeScope: "all" });
 
-/** The widget, with the business's receptionists already loaded so the only request is the call's. */
-function renderWidget(receptionists: ReceptionistOption[] = [FRONT_DESK]) {
+/**
+ * The widget, with the business's receptionists already loaded so the only
+ * request is the call's, and the greeting's too for an owner or admin.
+ */
+function renderWidget(receptionists: ReceptionistOption[] = [FRONT_DESK], role?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   client.setQueryData(receptionistChoicesQueryKey("business-1"), { receptionists });
-  return render(<QueryClientProvider client={client}><DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><DashboardTestCallWidget businessId={"business-1" as never} businessSlug="acme-dental" {...(role ? { role } : {})} /></QueryClientProvider>);
 }
 
 async function startConnectedCall(): Promise<FakePeerConnection> {
@@ -196,6 +199,34 @@ describe("DashboardTestCallWidget voice call endings", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe("/api/voice/live/session?businessId=business-1");
     expect(JSON.parse(String(init.body))).toMatchObject({ businessSlug: "acme-dental", widgetId: "lobbystack-dashboard-test-call", receptionistId: kitsilano.id });
+  });
+
+  // A call opens with the greeting's recording only once the worker has made one.
+  it("asks for the session once the greeting's recording is ready", async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    let greetingStatus = "recording";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      requests.push({ url, body: JSON.parse(String(init?.body)) });
+      if (url.startsWith("/api/test-call/greeting")) return Response.json({ status: greetingStatus });
+      return Response.json({ sessionId: "sess_1", endToken: "token_1", sdp: "answer-sdp" }, { status: 201 });
+    }));
+    const kitsilano = receptionist("00000000-0000-4000-8000-0000000000a2", "Kitsilano clinic", { sortOrder: 1 });
+    renderWidget([FRONT_DESK, kitsilano], "business_owner");
+    fireEvent.click(screen.getByRole("combobox", { name: /^testCall\.receptionist/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Kitsilano clinic/ }));
+    fireEvent.click(screen.getByRole("button", { name: "testCall.trigger" }));
+    await waitFor(() => expect(requests.filter(({ url }) => url.startsWith("/api/test-call/greeting")).length).toBeGreaterThanOrEqual(3));
+    expect(statusText()).toBe("testCall.status.connecting");
+    expect(requests.some(({ url }) => url.startsWith("/api/voice/live/session"))).toBe(false);
+
+    greetingStatus = "ready";
+    await waitFor(() => expect(FakePeerConnection.last?.setRemoteDescription).toHaveBeenCalled(), { timeout: 3_000 });
+    const session = requests.findIndex(({ url }) => url.startsWith("/api/voice/live/session"));
+    expect(requests.slice(session - 1).map(({ url, body }) => ({ url, body }))).toEqual([
+      { url: "/api/test-call/greeting?businessId=business-1", body: { receptionistId: kitsilano.id } },
+      { url: "/api/voice/live/session?businessId=business-1", body: expect.objectContaining({ receptionistId: kitsilano.id }) },
+    ]);
   });
 
   it("releases the call when OpenAI never confirms the close", async () => {

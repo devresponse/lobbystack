@@ -30,7 +30,7 @@ beforeEach(() => {
   for (const key of ["POSTHOG_KEY", "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", "POSTHOG_API_KEY"]) vi.stubEnv(key, undefined);
   mocks.reject.mockResolvedValue(undefined);
   mocks.execute.mockResolvedValue({ rows: [{ business_id: null, position: 1 }] });
-  // LIVE_RECORDED_GREETING is off unless a test says otherwise.
+  // No recording plays unless a test says otherwise.
   mocks.recordedGreeting.mockResolvedValue(undefined);
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });

@@ -298,7 +298,7 @@ describe("who an uploaded file is for", () => {
   });
 
   it("explains a receptionist the server no longer has, and keeps the server's upload limits as they are", async () => {
-    const upload = vi.fn().mockRejectedValueOnce(refused("receptionist_not_found")).mockRejectedValueOnce(new Error("Documents must be 10 MB or smaller."));
+    const upload = vi.fn().mockRejectedValueOnce(refused("receptionist_not_found")).mockRejectedValueOnce(new Error("Documents must be 25 MB or smaller."));
     wrap(<UploadKnowledgeDocumentSheet open receptionists={TEAM} upload={upload} onOpenChange={vi.fn()} />);
     pick();
     await userEvent.click(screen.getByRole("radio", { name: "Chosen receptionists" }));
@@ -306,7 +306,7 @@ describe("who an uploaded file is for", () => {
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(await screen.findByText("That receptionist isn't there any more. Refresh the page.")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    expect(await screen.findByText("Documents must be 10 MB or smaller.")).toBeTruthy();
+    expect(await screen.findByText("Documents must be 25 MB or smaller.")).toBeTruthy();
   });
 
   it("drops a chosen receptionist the business no longer lists", async () => {

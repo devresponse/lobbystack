@@ -17,6 +17,7 @@ import {
 } from "@lobbystack/shared";
 
 import type { DomainContext } from "./context";
+import { applyReceptionistWebsiteRulesInTransaction } from "./knowledgeAudience";
 import type { ReceptionistCreateInput, ReceptionistIdentityPatch } from "./receptionistInput";
 import { loadReceptionistView, type ReceptionistView } from "./receptionistProfile";
 import { failure, isUniqueViolation } from "./requestHelpers";
@@ -480,7 +481,8 @@ export async function restoreReceptionistInTransaction(
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, current.id)));
   // Last in list order, like a new one.
   if (byName) await orderByName(tx, businessId, [...live, { id: current.id, name: current.name, isDefault: current.isDefault, sortOrder, handle }], locale);
-  await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.restored", receptionistId: current.id, payload: { status, ...(handle !== current.handle ? { handle } : {}) } });
+  const websitePages = await applyReceptionistWebsiteRulesInTransaction(tx, { businessId, receptionistId: current.id });
+  await writeAudit(tx, { businessId, actorUserId: input.actorUserId, eventType: "receptionist.restored", receptionistId: current.id, payload: { status, ...(handle !== current.handle ? { handle } : {}), ...(websitePages ? { websitePages } : {}) } });
   await refreshSnapshotForReceptionists(tx, businessId, "receptionist_restored", current.id);
   const view = await loadReceptionistView(tx, { businessId, receptionistId: current.id });
   if (!view) throw notFound();

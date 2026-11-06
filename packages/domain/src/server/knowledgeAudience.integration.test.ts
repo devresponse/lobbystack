@@ -39,7 +39,7 @@ import {
   rankArticlesForReceptionists,
   setKnowledgeArticleAudienceInTransaction,
 } from "./knowledgeAudience";
-import { archiveReceptionistInTransaction, createReceptionistInTransaction, setReceptionistStatusInTransaction, updateReceptionistInTransaction } from "./receptionists";
+import { archiveReceptionistInTransaction, createReceptionistInTransaction, restoreReceptionistInTransaction, setReceptionistStatusInTransaction, updateReceptionistInTransaction } from "./receptionists";
 import { finalizeUpload, type StorageProvider } from "./storage";
 import { createBusiness } from "./tenancy";
 
@@ -429,6 +429,45 @@ describe.skipIf(!testUrl)("knowledge audiences against PostgreSQL under RLS", ()
       expect(await create({ rootDocumentId: site, pathPrefix: "/team/", receptionistId: kitsilano.id })).toMatchObject({ status: 409, code: "receptionist_archived" });
       await as(tx, null);
       expect(await tx.select().from(knowledgeWebsiteRules).where(eq(knowledgeWebsiteRules.businessId, businessId))).toHaveLength(1);
+    });
+  });
+
+  it("applies a restored receptionist's website rules to the pages crawled while it was archived", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId, userId, gastown, kitsilano } = await seedStores(tx);
+      const site = await addWebsite(tx, businessId);
+      const page = (path: string) => addDocument(tx, businessId, { title: path, sourceType: "website", sourceUrl: `https://kitsilanocoffee.ca${path}` });
+      const store = await page("/stores/kitsilano");
+      await asOwner(tx, { userId, businessId });
+      await createWebsiteRuleInTransaction(tx, { businessId, actorUserId: userId, rule: { rootDocumentId: site, pathPrefix: "/stores/kitsilano/", receptionistId: kitsilano.id } });
+      await asOwner(tx, { userId, businessId });
+      await createWebsiteRuleInTransaction(tx, { businessId, actorUserId: userId, rule: { rootDocumentId: site, pathPrefix: "/stores/gastown/", receptionistId: gastown.id } });
+      await asOwner(tx, { userId, businessId });
+      await archiveReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: kitsilano.id });
+
+      // A crawl while it's archived leaves its rule out, so the new page is for everyone.
+      const hours = await page("/stores/kitsilano/hours");
+      const about = await page("/about");
+      const gastownHours = await page("/stores/gastown/hours");
+      await as(tx, "lobbystack_worker");
+      await tx.execute(rlsContextStatement({ businessId, actorType: "worker" }));
+      expect(await applyWebsiteRulesInTransaction(tx, { businessId, rootDocumentId: site, documentIds: [hours] })).toBe(0);
+      expect(await audienceOf(tx, "document", hours)).toEqual({ audience: "everyone", receptionistIds: [] });
+
+      await asOwner(tx, { userId, businessId });
+      await restoreReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: kitsilano.id, env });
+      expect(await audienceOf(tx, "document", hours)).toEqual({ audience: "chosen", receptionistIds: [kitsilano.id] });
+      expect(await audienceOf(tx, "document", store)).toEqual({ audience: "chosen", receptionistIds: [kitsilano.id] });
+      // Only its own rules run: the other receptionist's wait for their next crawl, as they did.
+      expect(await audienceOf(tx, "document", about)).toEqual({ audience: "everyone", receptionistIds: [] });
+      expect(await audienceOf(tx, "document", gastownHours)).toEqual({ audience: "everyone", receptionistIds: [] });
+
+      await as(tx, null);
+      const [restored] = await tx.select({ payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, "receptionist.restored"), eq(auditLogs.entityId, kitsilano.id)));
+      expect(restored?.payload).toMatchObject({ websitePages: 2 });
+      // What reads audiences catches up: the snapshot, and the summary and hours, which read articles for everyone.
+      const refreshes = await tx.select({ topic: outboxMessages.topic }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), sql`${outboxMessages.payload}->>'reason' = 'website_rules_restored'`));
+      expect(refreshes.map((refresh) => refresh.topic)).toContain("snapshot.refresh");
     });
   });
 

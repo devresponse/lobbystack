@@ -418,6 +418,24 @@ export async function applyWebsiteRulesInTransaction(
 }
 
 /**
+ * Applies a receptionist's website rules on every site they name, for one
+ * restored from the archive: a crawl while it was archived left them out, so
+ * the pages it found under them are still for everyone. Returns how many
+ * pages fall under the rules, and when any do, refreshes what reads audiences.
+ */
+export async function applyReceptionistWebsiteRulesInTransaction(tx: DatabaseTransaction, input: { businessId: string; receptionistId: string }): Promise<number> {
+  const { businessId } = input;
+  const rules = await tx.select({ id: knowledgeWebsiteRules.id, rootDocumentId: knowledgeWebsiteRules.rootDocumentId }).from(knowledgeWebsiteRules)
+    .where(and(eq(knowledgeWebsiteRules.businessId, businessId), eq(knowledgeWebsiteRules.receptionistId, input.receptionistId)));
+  const rulesBySite = new Map<string, string[]>();
+  for (const rule of rules) rulesBySite.set(rule.rootDocumentId, [...(rulesBySite.get(rule.rootDocumentId) ?? []), rule.id]);
+  let pages = 0;
+  for (const [rootDocumentId, ruleIds] of rulesBySite) pages += await applyWebsiteRulesInTransaction(tx, { businessId, rootDocumentId, ruleIds });
+  if (pages) await refreshAfterAudienceChange(tx, businessId, "website_rules_restored");
+  return pages;
+}
+
+/**
  * Adds a rule giving a website source's pages under a path to a receptionist
  * that isn't archived, and applies it to the pages already crawled. A 404 for
  * a source or receptionist the business doesn't have, a 400 for a source that

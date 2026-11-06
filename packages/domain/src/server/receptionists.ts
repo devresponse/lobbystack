@@ -581,8 +581,11 @@ export async function makeDefaultReceptionistInTransaction(
     .for("update");
   const now = new Date();
   // The default speaks the business's language (AI settings offers it no
-  // language of its own), so the new default gives up the one it had.
-  await tx.update(receptionistProfiles).set({ locale: null, updatedAt: now })
+  // language of its own), so the new default gives up the one it had. And
+  // whatever names no receptionist falls back to it, a paused or archived
+  // one's calls too, so it answers from every article until an owner limits it.
+  // The old default keeps the knowledge it had.
+  await tx.update(receptionistProfiles).set({ locale: null, knowledgeScope: "all", updatedAt: now })
     .where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.id, target.id)));
   if (previous) {
     const handle = previous.handle ?? availableReceptionistHandle(receptionistHandleFrom(previous.name), handlesOf(await liveOrder(tx, businessId), previous.id));

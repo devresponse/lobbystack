@@ -486,17 +486,21 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       await saveReceptionistProfileInTransaction(tx, { businessId, patch: { summary: "Coffee since 1999." } });
       const before = (await loadReceptionistView(tx, { businessId }))!;
       const store = await createReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionist: { name: "Flagship", listed: false, locale: "fr" } });
-      expect(store.locale).toBe("fr");
+      expect(store).toMatchObject({ locale: "fr", knowledgeScope: "audience" });
       await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "paused" });
       expect(await failure(tx, (inner) => makeDefaultReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: store.id }))).toMatchObject({ status: 409, code: "receptionist_paused" });
       await setReceptionistStatusInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id, status: "active" });
+      // The old default was limited by its owner, which stays its own choice.
+      await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: before.id, patch: { knowledgeScope: "audience" } });
 
       const made = await makeDefaultReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: store.id });
-      // It speaks the business's language from now on, as AI settings shows the default.
-      expect(made).toMatchObject({ id: store.id, isDefault: true, listed: true, summary: "Coffee since 1999.", locale: null });
+      // It speaks the business's language from now on, as AI settings shows the
+      // default, and answers from every article, since whatever falls back to
+      // the default relies on it.
+      expect(made).toMatchObject({ id: store.id, isDefault: true, listed: true, summary: "Coffee since 1999.", locale: null, knowledgeScope: "all" });
       await as(tx, null);
       const previous = (await tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.id, before.id)))[0];
-      expect(previous).toMatchObject({ isDefault: false, handle: "front-desk" });
+      expect(previous).toMatchObject({ isDefault: false, handle: "front-desk", knowledgeScope: "audience" });
       expect((await defaultRow(tx, businessId))).toMatchObject({ id: store.id, locale: null });
       // Nothing moved with it: a shared setting saved now reaches the new default and the old one alike.
       await asOwner(tx, { userId, businessId });

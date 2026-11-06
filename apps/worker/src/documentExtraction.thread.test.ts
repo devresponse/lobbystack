@@ -1,8 +1,23 @@
+import { readFileSync } from "node:fs";
 import { crc32, deflateRawSync } from "node:zlib";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { assertDocxInflatesWithin, extractDocumentTextInThread } from "./documentExtraction";
+
+const threads = vi.hoisted(() => ({ env: [] as unknown[] }));
+
+// Records each thread's environment, then starts the real thread.
+vi.mock("node:worker_threads", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:worker_threads")>();
+  class Worker extends actual.Worker {
+    constructor(...args: ConstructorParameters<typeof actual.Worker>) {
+      threads.env.push(args[1]?.env);
+      super(...args);
+    }
+  }
+  return { ...actual, Worker };
+});
 
 const docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
@@ -51,9 +66,35 @@ describe("extraction thread", () => {
     expect(() => assertDocxInflatesWithin(prefixed, 1_000)).toThrow("unpacks to more than 1000 bytes");
   });
 
+  it("reads a PDF in the thread with the improved reader", async () => {
+    const fees = new Uint8Array(readFileSync(new URL("./__fixtures__/fees.pdf", import.meta.url)));
+    const text = await extractDocumentTextInThread({ body: fees, contentType: "application/pdf" }, () => undefined);
+    expect(text).toMatch(/^\[Page 1 of 2\]$/mu);
+    expect(text).toContain("44 | 604 | 103 | $631.88 | $228.25 | $860.13");
+  });
+
+  it("reads a PDF the improved reader can't read again with the original reader, in a new thread", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    threads.env.length = 0;
+    try {
+      const broken = new TextEncoder().encode("%PDF-1.4\nbroken\n");
+      const error = await extractDocumentTextInThread({ body: broken, contentType: "application/pdf" }, () => undefined).catch((caught: unknown) => caught);
+
+      // Read in the improved reader's thread, pdf-parse's pdf.js 5 refuses pdf.js 6's worker code: "The API version ... does not match".
+      expect(String(error)).toContain("Invalid PDF structure.");
+      expect(String(error)).not.toContain("does not match");
+      expect(threads.env).toHaveLength(2);
+      expect((threads.env[1] as NodeJS.ProcessEnv).KNOWLEDGE_PDF_READER).toBe("original");
+      expect(warn).toHaveBeenCalledOnce();
+      expect(JSON.parse(String(warn.mock.calls[0]?.[0]))).toEqual({ event: "knowledge.pdf_reader_fallback", message: "Invalid PDF structure." });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("treats a PDF without a text layer as a scan", async () => {
-    const pages = Array.from({ length: 12 }, (_, index) => `${index + 3} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj`);
-    const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [${pages.map((_, index) => `${index + 3} 0 R`).join(" ")}] /Count 12 >> endobj\n${pages.join("\n")}\ntrailer << /Root 1 0 R >>\n%%EOF\n`;
-    await expect(extractDocumentTextInThread({ body: new TextEncoder().encode(pdf), contentType: "application/pdf" }, () => undefined)).rejects.toThrow("Scanned PDF OCR is limited to 10 pages.");
+    const pages = Array.from({ length: 26 }, (_, index) => `${index + 3} 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >> endobj`);
+    const pdf = `%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n2 0 obj << /Type /Pages /Kids [${pages.map((_, index) => `${index + 3} 0 R`).join(" ")}] /Count 26 >> endobj\n${pages.join("\n")}\ntrailer << /Root 1 0 R >>\n%%EOF\n`;
+    await expect(extractDocumentTextInThread({ body: new TextEncoder().encode(pdf), contentType: "application/pdf" }, () => undefined)).rejects.toThrow("Scanned PDF OCR is limited to 25 pages.");
   });
 });

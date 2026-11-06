@@ -28,7 +28,7 @@ import { AudienceField, audienceChoiceOf, EVERYONE, type AudienceChoice, type Au
 import type { ReceptionistOption } from "@/components/receptionists/receptionist-choices";
 import { uploadErrorMessage } from "@/lib/storage-upload";
 const ACCEPTED_FILE_TYPES = ".pdf,.docx,.txt,.md,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-const MAX_DOCUMENT_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_DOCUMENT_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 function parseTags(value: string): Array<string> {
   return value

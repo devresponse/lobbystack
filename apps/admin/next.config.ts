@@ -34,6 +34,11 @@ const nextConfig: NextConfig = {
   experimental: {
     preloadEntriesOnStart: false,
     requestInsights: process.env.NODE_ENV === "development",
+    // proxy.ts runs on every API route, so Next.js reads each request's body
+    // first and cuts it at 10 MB unless told more. On a server that keeps files
+    // on its disk, a document is uploaded through /api/storage/local, so this
+    // lets the largest one allowed (KNOWLEDGE_UPLOAD_MAX_BYTES) through whole.
+    proxyClientMaxBodySize: 25 * 1024 * 1024,
   },
   // Most admin routes are intentionally dynamic and the deployment has one
   // long-lived instance. Avoid retaining Next.js' default 50 MB response cache

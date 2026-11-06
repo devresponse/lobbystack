@@ -6,10 +6,18 @@ To add a row, put the pull request under its merge date with its title, any migr
 
 [History](history.md) covers what came before, including fork PRs #2 to #4.
 
+### 2026-11-04
+
+| PR | What changed | Migrations | Merge | More |
+| --- | --- | --- | --- | --- |
+| [#137](https://github.com/devresponse/lobbystack/pull/137) | Read uploaded PDFs with an improved reader built on pdfjs-dist: a table's cells stay apart, footnote marks don't fuse into the amounts beside them, each page starts with a page line, and each page without text is read by OCR. `KNOWLEDGE_PDF_READER=original` on the worker goes back to the original reader, which also reads, in a new thread, any PDF the improved one can't |  | `c587715` | [docs](../knowledge/architecture.md#read-uploaded-pdfs) |
+| [#136](https://github.com/devresponse/lobbystack/pull/136) | Add a command-line tool to test PDF readers, `devops/tools/pdf-parsing`: it reads a folder of PDFs with a byte-for-byte copy of the worker's reader or with pdfjs-dist, scores each reader's text, and uploads it to a test business to check the receptionist's search |  | `49181fa` | [docs](../knowledge/architecture.md#measure-how-pdfs-are-read) |
+
 ### 2026-11-03
 
 | PR | What changed | Migrations | Merge | More |
 | --- | --- | --- | --- | --- |
+| [#131](https://github.com/devresponse/lobbystack/pull/131) | Save each knowledge search's answer in a folder from the CLI: `lobbystack knowledge search --log-dir <folder>`, or `LOBBYSTACK_KNOWLEDGE_LOG_DIR`, writes the request and the API's answer as a JSON file of its own |  | `6bb1b3c` | [docs](../features/api-cli-integrations.md#save-each-answer-in-a-folder) |
 | [#130](https://github.com/devresponse/lobbystack/pull/130) | Search knowledge as the receptionist does through `POST /api/v1/knowledge/search` and `lobbystack knowledge search`, with every stage shown: the passages after ranking, the tool's result, what a call hears, and each search's scores |  | `bede2bc` | [docs](../features/api-cli-integrations.md#test-the-receptionists-knowledge-search) |
 
 ### 2026-11-02

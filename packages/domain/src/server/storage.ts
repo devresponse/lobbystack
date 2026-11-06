@@ -43,7 +43,7 @@ export async function createUpload(
 export function planUpload(input: { businessId: string; purpose: string; fileName: string; contentType: string; length: number; checksum?: string | undefined }): { objectId: string; key: string } {
   if (!isAllowedUploadContentType(input.purpose, input.contentType)) throw new Error(`Content type is not allowed for ${input.purpose} uploads.`);
   if (input.purpose === "knowledge" && !input.checksum) throw new Error("Knowledge uploads require a SHA-256 checksum.");
-  if (input.purpose === "knowledge" && input.length > KNOWLEDGE_UPLOAD_MAX_BYTES) throw new Error("Documents must be 10 MB or smaller.");
+  if (input.purpose === "knowledge" && input.length > KNOWLEDGE_UPLOAD_MAX_BYTES) throw new Error("Documents must be 25 MB or smaller.");
   const objectId = randomUUID();
   const name = input.fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
   // A name of only dots, such as "..", would be read as a path step rather than a file.

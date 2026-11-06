@@ -387,7 +387,7 @@ describe("knowledge sources", () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ data: upload });
     expect(domain.createKnowledgeUploadForApi).toHaveBeenCalledWith(expect.anything(), expect.anything(), body, storageProvider);
-    for (const bad of [{ ...body, content_type: "application/zip" }, { ...body, length: 10 * 1024 * 1024 + 1 }, { ...body, checksum_sha256: "nope" }, { ...body, file_name: ".." }]) {
+    for (const bad of [{ ...body, content_type: "application/zip" }, { ...body, length: 25 * 1024 * 1024 + 1 }, { ...body, checksum_sha256: "nope" }, { ...body, file_name: ".." }]) {
       expect((await v1.createKnowledgeUpload(call("/knowledge/uploads", { method: "POST", body: JSON.stringify(bad) }))).status).toBe(400);
     }
     expect(domain.createKnowledgeUploadForApi).toHaveBeenCalledTimes(1);

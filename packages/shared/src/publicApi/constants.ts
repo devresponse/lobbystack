@@ -112,7 +112,7 @@ export const PUBLIC_API_AVAILABILITY_MAX_DAYS = 7;
 /** The most contacts one request sets or generates keypad PINs for. Each PIN takes a deliberately slow hash. */
 export const CONTACT_PASSCODES_MAX_PER_REQUEST = 100;
 /** The largest document a knowledge upload may be, from the API or the dashboard. */
-export const KNOWLEDGE_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
+export const KNOWLEDGE_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
 
 /**
  * The pages a website's first crawl reads: enough of a site to make the agent

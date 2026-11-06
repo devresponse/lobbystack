@@ -18,7 +18,7 @@ export async function uploadKnowledgeDocument(input: { businessId: string; file:
 export function uploadErrorMessage(error: unknown, fallbackMessage: string): string {
   if (!(error instanceof Error) || !error.message) return fallbackMessage;
   if (
-    error.message === "Documents must be 10 MB or smaller." ||
+    error.message === "Documents must be 25 MB or smaller." ||
     error.message === "Supported document types are PDF, DOCX, TXT, and Markdown." ||
     error.message.startsWith("Knowledge storage limit reached.")
   ) return error.message;

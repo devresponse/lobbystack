@@ -95,7 +95,7 @@
       "headline": "Glissez-déposez ou cliquez pour téléverser",
       "formats": "PDF, DOCX, TXT, MD pris en charge",
       "remove": "Retirer",
-      "tooLarge": "Les documents doivent faire 10 Mo ou moins.",
+      "tooLarge": "Les documents doivent faire 25 Mo ou moins.",
       "unsupportedType": "Types pris en charge : PDF, DOCX, TXT, Markdown.",
       "failed": "Impossible de téléverser ce document. Réessayez."
     },

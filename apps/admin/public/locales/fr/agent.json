@@ -63,7 +63,7 @@
       "uploadValidation": {
         "fileRequired": "Choisissez un fichier à téléverser.",
         "unsupportedFile": "Les formats pris en charge sont PDF, DOCX, TXT et Markdown.",
-        "maxSize": "Les documents doivent faire 10 Mo ou moins.",
+        "maxSize": "Les documents doivent faire 25 Mo ou moins.",
         "uploadFailed": "Nous n'avons pas pu téléverser ce document. Réessayez."
       },
       "fields": {
@@ -211,7 +211,7 @@
       "uploadValidation": {
         "fileRequired": "Choisissez un fichier à téléverser.",
         "unsupportedFile": "Les formats pris en charge sont PDF, DOCX, TXT et Markdown.",
-        "maxSize": "Les documents doivent faire 10 Mo ou moins.",
+        "maxSize": "Les documents doivent faire 25 Mo ou moins.",
         "uploadFailed": "Nous n'avons pas pu téléverser ce document. Réessayez."
       },
       "fields": {
@@ -277,7 +277,7 @@
       "uploadValidation": {
         "fileRequired": "Choisissez un fichier à téléverser.",
         "unsupportedFile": "Les formats pris en charge sont PDF, DOCX, TXT et Markdown.",
-        "maxSize": "Les documents doivent faire 10 Mo ou moins.",
+        "maxSize": "Les documents doivent faire 25 Mo ou moins.",
         "uploadFailed": "Nous n'avons pas pu téléverser ce document. Réessayez."
       },
       "fields": {

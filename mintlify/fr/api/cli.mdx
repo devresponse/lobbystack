@@ -103,7 +103,7 @@ owner:
 | `rules` | Les champs de `POST /rules`. Une règle du même titre est mise à jour. |
 | `knowledge.websites` | Les sites que la réceptionniste lit. La première lecture prend un échantillon de chaque site. |
 | `knowledge.read_full_site` | `true` attend cet échantillon, puis lit le reste de chaque site. |
-| `knowledge.files` | Des fichiers PDF, Word, texte, Markdown, JPEG, PNG, WebP ou TIFF jusqu'à 10 Mo, sous forme de chemins dans le dossier du manifeste. Donnez à une entrée `path`, `title` et `tags` pour la nommer. |
+| `knowledge.files` | Des fichiers PDF, Word, texte, Markdown, JPEG, PNG, WebP ou TIFF jusqu'à 25 Mo, sous forme de chemins dans le dossier du manifeste. Donnez à une entrée `path`, `title` et `tags` pour la nommer. |
 | `knowledge.faqs` | Des questions et leurs réponses. Une FAQ avec la même question reçoit la nouvelle réponse. |
 | `knowledge.texts` | Des notes avec un `title` et un `content`. Une note du même titre reçoit le nouveau contenu. |
 | `public_profile` | Les champs de `PATCH /public-profile`, qui configure la [page publique](/fr/settings/public-profile) de l'entreprise à `/profile/<slug>` : `published`, `category`, `description`, `address`, `public_email`, `show_phone`, `show_hours`, `show_services`, `show_map` et `widget_key_id`. `published: true` publie la page. Les parties de l'adresse que le fichier omet gardent leur valeur. |

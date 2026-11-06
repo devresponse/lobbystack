@@ -63,7 +63,7 @@
       "uploadValidation": {
         "fileRequired": "Choose a file to upload.",
         "unsupportedFile": "Supported document types are PDF, DOCX, TXT, and Markdown.",
-        "maxSize": "Documents must be 10 MB or smaller.",
+        "maxSize": "Documents must be 25 MB or smaller.",
         "uploadFailed": "We couldn't upload this document. Please try again."
       },
       "fields": {
@@ -201,7 +201,7 @@
       "uploadValidation": {
         "fileRequired": "Choose a file to upload.",
         "unsupportedFile": "Supported document types are PDF, DOCX, TXT, and Markdown.",
-        "maxSize": "Documents must be 10 MB or smaller.",
+        "maxSize": "Documents must be 25 MB or smaller.",
         "uploadFailed": "We couldn't upload this document. Please try again."
       },
       "fields": {
@@ -267,7 +267,7 @@
       "uploadValidation": {
         "fileRequired": "Choose a file to upload.",
         "unsupportedFile": "Supported document types are PDF, DOCX, TXT, and Markdown.",
-        "maxSize": "Documents must be 10 MB or smaller.",
+        "maxSize": "Documents must be 25 MB or smaller.",
         "uploadFailed": "We couldn't upload this document. Please try again."
       },
       "fields": {

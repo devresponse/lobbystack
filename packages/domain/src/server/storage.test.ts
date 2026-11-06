@@ -195,6 +195,6 @@ describe("planUpload", () => {
 
   it("takes knowledge documents up to the shared size limit", () => {
     expect(planUpload({ ...request, fileName: "big.pdf", length: KNOWLEDGE_UPLOAD_MAX_BYTES }).objectId).toEqual(expect.any(String));
-    expect(() => planUpload({ ...request, fileName: "big.pdf", length: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 })).toThrow("Documents must be 10 MB or smaller.");
+    expect(() => planUpload({ ...request, fileName: "big.pdf", length: KNOWLEDGE_UPLOAD_MAX_BYTES + 1 })).toThrow("Documents must be 25 MB or smaller.");
   });
 });

@@ -4,6 +4,8 @@ import type { NextConfig } from "next";
 import { unstable_getResponseFromNextConfig } from "next/experimental/testing/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "@lobbystack/shared";
+
 const withPostHogConfig = vi.hoisted(() => vi.fn((config: NextConfig, options: unknown) => ({ config, options })));
 vi.mock("@posthog/nextjs-config", () => ({ withPostHogConfig }));
 
@@ -116,6 +118,13 @@ describe("admin security headers", () => {
     for (const path of ["/settings/qrcode", "/q", "/qr", "/"]) {
       expect((await headersOf(path)).get("referrer-policy"), path).toBe("strict-origin-when-cross-origin");
     }
+  });
+});
+
+describe("admin request bodies", () => {
+  it("lets the largest knowledge document through the proxy whole, for a server that keeps files on its disk", async () => {
+    const config = await loadConfig({}) as NextConfig;
+    expect(config.experimental?.proxyClientMaxBodySize).toBeGreaterThanOrEqual(KNOWLEDGE_UPLOAD_MAX_BYTES);
   });
 });
 

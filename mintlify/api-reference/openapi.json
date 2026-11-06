@@ -11426,7 +11426,7 @@
       "post": {
         "operationId": "createKnowledgeUpload",
         "summary": "Start a file upload",
-        "description": "Reserves an upload for a document up to 10 MB and returns where to send it. Send the file's bytes with PUT to upload_url, with exactly upload_headers, within about 15 minutes. Then call POST /knowledge/uploads/{upload_id}/complete. An unfinished upload expires after a day.",
+        "description": "Reserves an upload for a document up to 25 MB and returns where to send it. Send the file's bytes with PUT to upload_url, with exactly upload_headers, within about 15 minutes. Then call POST /knowledge/uploads/{upload_id}/complete. An unfinished upload expires after a day.",
         "tags": [
           "Knowledge"
         ],
@@ -21603,8 +21603,8 @@
           "length": {
             "type": "integer",
             "exclusiveMinimum": 0,
-            "maximum": 10485760,
-            "description": "The file's size in bytes, up to 10 MB."
+            "maximum": 26214400,
+            "description": "The file's size in bytes, up to 25 MB."
           },
           "checksum_sha256": {
             "type": "string",

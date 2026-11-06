@@ -48,7 +48,7 @@ export function OnboardingKnowledgeSurface() {
     if (!files) return;
     for (const file of Array.from(files)) {
       const id = crypto.randomUUID();
-      if (file.size > 10 * 1024 * 1024) { setUploads((items) => [...items, { id, fileName: file.name, status: "error", errorMessage: t("knowledge.upload.tooLarge") }]); continue; }
+      if (file.size > 25 * 1024 * 1024) { setUploads((items) => [...items, { id, fileName: file.name, status: "error", errorMessage: t("knowledge.upload.tooLarge") }]); continue; }
       setUploads((items) => [...items, { id, fileName: file.name, status: "uploading" }]);
       try { await upload.mutateAsync(file); if (business) telemetry.track("web.onboarding.knowledge_uploaded", { businessId: business.businessId }); setUploads((items) => items.map((item) => item.id === id ? { ...item, status: "completed" } : item)); await invalidate(); setUploads((items) => items.filter((item) => item.id !== id)); }
       catch (cause) { setUploads((items) => items.map((item) => item.id === id ? { ...item, status: "error", errorMessage: uploadErrorMessage(cause, t("knowledge.upload.failed")) } : item)); }

@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, outboxMessages, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import type { PublicProfileSettings } from "@lobbystack/shared";
 
 import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, savePublicProfileInTransaction, updateBusinessPublicProfile } from "./publicProfiles";
@@ -196,6 +196,25 @@ describe.skipIf(!client)("public profile pages", () => {
         { eventType: "public_profile.published", actorUserId: fixture.adminId, entityId: fixture.businessId },
         { eventType: "public_profile.unpublished", actorUserId: fixture.ownerId, entityId: fixture.businessId },
       ]);
+    });
+  });
+
+  it("refreshes the snapshot when the page is published or unpublished, since chats give its links only while it's public", async () => {
+    await rollbackTest(async (tx) => {
+      const fixture = await seed(tx);
+      const refreshes = async () => (await tx.select({ reason: sql<string>`${outboxMessages.payload}->>'reason'` }).from(outboxMessages)
+        .where(and(eq(outboxMessages.businessId, fixture.businessId), eq(outboxMessages.topic, "snapshot.refresh"), sql`${outboxMessages.payload}->>'reason' like 'public_profile_%'`))).map((row) => row.reason).sort();
+
+      // A first save that leaves the page private changes no link.
+      await fixture.save(fixture.ownerId, fixture.settings({ published: false }));
+      expect(await refreshes()).toEqual([]);
+      await fixture.save(fixture.ownerId, fixture.settings());
+      expect(await refreshes()).toEqual(["public_profile_published"]);
+      // Another save while it's public changes no link either.
+      await fixture.save(fixture.ownerId, fixture.settings({ category: "Dentist" }));
+      expect(await refreshes()).toEqual(["public_profile_published"]);
+      await fixture.save(fixture.ownerId, fixture.settings({ published: false }));
+      expect(await refreshes()).toEqual(["public_profile_published", "public_profile_unpublished"]);
     });
   });
 

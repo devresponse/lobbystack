@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { DateTime } from "luxon";
 
-import { auditLogs, businesses, businessHours, businessMemberships, businessPublicProfiles, closures, phoneNumbers, receptionistProfiles, services, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businesses, businessHours, businessMemberships, businessPublicProfiles, closures, enqueueOutbox, phoneNumbers, receptionistProfiles, services, widgetKeys, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { isReceptionistHandle, normalizeBookingMode, normalizeInterfaceLocale, normalizePageUrl, normalizeTransferMode, publicProfileDescriptionFrom, type BookingMode, type HoursWindow, type InterfaceLocale, type PublicProfileAddress, type PublicProfileSettings, type ServiceNameLocale } from "@lobbystack/shared";
 
 import { requireBusinessAdmin } from "../authz";
@@ -522,6 +522,9 @@ export async function savePublicProfileInTransaction(tx: DatabaseTransaction, in
   if (settings.published !== wasPublished) {
     const { actorUserId, payload } = input.audit;
     await tx.insert(auditLogs).values({ businessId: input.businessId, ...(actorUserId ? { actorUserId } : {}), eventType: settings.published ? "public_profile.published" : "public_profile.unpublished", entityType: "business", entityId: input.businessId, ...(payload ? { payload } : {}) });
+    // The snapshot holds the page's links, which chats give only while it's public (businessPageUrl).
+    const reason = settings.published ? "public_profile_published" : "public_profile_unpublished";
+    await enqueueOutbox(tx, { topic: "snapshot.refresh", businessId: input.businessId, aggregateType: "business", aggregateId: input.businessId, dedupeKey: `snapshot:${input.businessId}:${reason}:${now.getTime()}`, payload: { businessId: input.businessId, reason } });
   }
 }
 

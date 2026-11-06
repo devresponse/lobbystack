@@ -291,12 +291,16 @@ describe.skipIf(!testUrl)("receptionists against PostgreSQL under RLS", () => {
       expect(renamed).toMatchObject({ name: "Gastown (French)", handle: "gastown-fr", description: "En français", listed: true });
       const main = await loadReceptionistView(tx, { businessId });
       expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main!.id, patch: { listed: false } }))).toMatchObject({ status: 409, code: "default_receptionist" });
+      // The default speaks the business's language, so it can't be given its own, and clearing it changes nothing.
+      expect(await failure(tx, (inner) => updateReceptionistInTransaction(inner, { businessId, actorUserId: userId, receptionistId: main!.id, patch: { locale: "fr" } }))).toMatchObject({ status: 409, code: "default_receptionist" });
+      expect(await updateReceptionistInTransaction(tx, { businessId, actorUserId: userId, receptionistId: main!.id, patch: { locale: null } })).toMatchObject({ id: main!.id, locale: null });
 
       await as(tx, null);
       // Rows a transaction writes all take its start time as created_at, so the entries come in no set order.
       const events = await tx.select({ eventType: auditLogs.eventType, entityId: auditLogs.entityId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.entityType, "receptionist")));
-      expect(events.map((event) => event.eventType).sort()).toEqual(["receptionist.created", "receptionist.created", "receptionist.created", "receptionist.updated"]);
-      expect(events.find((event) => event.eventType === "receptionist.updated")?.payload).toEqual({ fields: ["description", "handle", "listed", "name"] });
+      expect(events.map((event) => event.eventType).sort()).toEqual(["receptionist.created", "receptionist.created", "receptionist.created", "receptionist.updated", "receptionist.updated"]);
+      expect(events.map((event) => event.eventType).filter((eventType) => eventType === "receptionist.updated")).toHaveLength(2);
+      expect(events.find((event) => event.eventType === "receptionist.updated" && event.entityId === second.id)?.payload).toEqual({ fields: ["description", "handle", "listed", "name"] });
     });
   });
 

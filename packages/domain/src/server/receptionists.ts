@@ -387,6 +387,9 @@ export async function updateReceptionistInTransaction(
   if (patch.handle !== undefined || patch.name !== undefined) await lockReceptionistsInTransaction(tx, businessId);
   const current = await lockReceptionist(tx, input);
   if (current.isDefault && patch.listed === false) throw failure("The default receptionist answers the business page, so it stays listed.", 409, "default_receptionist");
+  // AI settings changes the business's language instead, and clears a language
+  // the default brought along, which is why null passes.
+  if (current.isDefault && patch.locale) throw failure("The default receptionist speaks the business's language, so it has none of its own.", 409, "default_receptionist");
   const renamed = patch.name !== undefined && patch.name !== current.name;
   const newHandle = patch.handle !== undefined && patch.handle !== current.handle;
   const live = renamed || newHandle ? await liveOrder(tx, businessId) : [];

@@ -170,9 +170,16 @@ async function answerCall(client: LiveClient, input: { sessionId: string; busine
   const domain = createWorkerDomainContext();
   // The number's receptionist answers with its own view of the business's snapshot.
   const loading = getCachedBusinessSnapshot(domain, { businessId: input.businessId }).then((stored) => (stored ? snapshotForReceptionist(stored, input.receptionistId) : null));
+  // The call's record names the receptionist the caller hears: the snapshot's
+  // view, which answers as the default for one paused a moment ago, before
+  // the snapshot knew. Without a view, the number's receptionist.
+  const recording = loading.catch(() => null).then((snapshot) => {
+    const receptionistId = snapshot?.receptionist?.id ?? input.receptionistId;
+    return startLivePhoneCall(domain, { businessId: input.businessId, sessionId: input.sessionId, from: input.from, to: input.to, ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}), ...(receptionistId ? { receptionistId } : {}) });
+  });
   const [loaded, started, greeting] = await Promise.allSettled([
     loading,
-    startLivePhoneCall(domain, { businessId: input.businessId, sessionId: input.sessionId, from: input.from, to: input.to, ...(input.twilioCallSid ? { twilioCallSid: input.twilioCallSid } : {}), ...(input.receptionistId ? { receptionistId: input.receptionistId } : {}) }),
+    recording,
     loading.then(async (snapshot) => (snapshot ? await recordedGreetingFor(snapshot, { phone: true }) : undefined)),
   ]);
   input.timing.mark("record");

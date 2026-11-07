@@ -488,6 +488,8 @@ describe("POST /api/webhooks/openai/live", () => {
       mocks.snapshot.mockResolvedValue(stored({ status: "paused" }));
       await ring();
       expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, the shop.", receptionist: expect.objectContaining({ id: frontDeskId, isDefault: true }) }), expect.anything());
+      // The call's record names the receptionist the caller hears, as the worker does.
+      expect(mocks.startLivePhoneCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: frontDeskId }));
       // The worker answers as the receptionist the caller hears.
       await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: frontDeskId })));
     });
@@ -496,7 +498,8 @@ describe("POST /api/webhooks/openai/live", () => {
       mocks.execute.mockResolvedValue({ rows: [{ business_id: "biz_1", receptionist_id: null, position: 1 }] });
       mocks.snapshot.mockResolvedValue(stored());
       await ring();
-      expect(mocks.startLivePhoneCall.mock.calls[0]![1]).not.toHaveProperty("receptionistId");
+      // The record names the default receptionist, which the database would give it anyway.
+      expect(mocks.startLivePhoneCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: frontDeskId }));
       expect(mocks.sessionConfig).toHaveBeenCalledWith(expect.objectContaining({ greeting: "Hi, the shop.", receptionist: expect.objectContaining({ id: frontDeskId }) }), expect.anything());
       await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: frontDeskId })));
     });
@@ -508,6 +511,7 @@ describe("POST /api/webhooks/openai/live", () => {
       mocks.snapshot.mockResolvedValue(legacy);
       await ring();
       expect(mocks.sessionConfig).toHaveBeenCalledWith(legacy, expect.anything());
+      expect(mocks.startLivePhoneCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: kitsilanoId }));
       // The worker still learns which receptionist the number has, for the call's record.
       await vi.waitFor(() => expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: kitsilanoId })));
     });

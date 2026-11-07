@@ -149,4 +149,4 @@ Each answer logs `widget.chat_reply`, with `durationMs`, `timeToFirstTokenMs`, `
 - Left from the review's improvement list: stop the 45-second fallback poll and add jitter, measure time to the first word, cache the loader with an ETag, a panel-only layout, Turnstile, and a spending cap per website.
 - Left from the realtime work: hand back an overdue team request when the visitor writes, keep polling whenever live updates are down, link a website call to its widget visitor, and show who replied on Messages.
 - When only the reply fails, the widget still says "Your message couldn't be sent. Please try again.", though the message was saved and the team alerted, and sending it again saves it twice.
-- A real GPT-Live call through the widget, and `pnpm voice:eval --browser`, haven't been run since fork PRs #18, #52, #54 and #84.
+- A real GPT-Live call through the widget on a website hasn't been run since fork PRs #18, #52, #54 and #84. `pnpm voice:eval --browser --recorded-greeting` ran on 2026-11-07 and passed 23 of 24 ([calls](calls.md#know-what-hasnt-been-tried)).

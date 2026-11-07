@@ -60,7 +60,7 @@ Each field answers one question:
 
 The script exits with code 1 when any run fails.
 
-Over the API, GPT-Live once greeted on its own in 12 runs out of 12, while on real calls it often waited for the caller. On 2026-11-06, with a business of two receptionists, it greeted in 11 phone runs out of 17, and the other 6 got no greeting within 15 seconds, even after all 4 commands. Check greeting changes with real calls.
+Over the API, GPT-Live once greeted on its own in 12 runs out of 12, while on real calls it often waited for the caller. On 2026-11-07 the greeting command got a greeting in only 15 phone runs of 24 with a business of two receptionists, and 16 of 24 with the demo business, the others getting none within 15 seconds even after all 4 commands. A recording played in 48 runs of 48. Check greeting changes with real calls.
 
 ### Use a real business
 

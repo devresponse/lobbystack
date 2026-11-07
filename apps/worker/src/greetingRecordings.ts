@@ -25,11 +25,11 @@ const RECORD_TIMEOUT_MS = 90_000;
 // not speaking, which a later try mends, and until then calls open with the
 // greeting command, which GPT-Live often ignores.
 const FAILED_RETRY_SECONDS = 30 * 60;
-// A business gets at most this many new recordings a day, twice the most
-// receptionists a business can have, so saving greetings over and over can't
-// run up GPT-Live's bill or fill Redis. Past it, its calls open with the
-// greeting command until the next day.
-const DAILY_RECORDINGS_PER_BUSINESS = 100;
+// A business gets at most this many new recordings a day, the maintainer's
+// limit on greeting saves, so saving greetings over and over can't run up
+// GPT-Live's bill or fill Redis. Past it, a save still goes through, and the
+// business's calls open with the greeting command until the next day.
+const DAILY_RECORDINGS_PER_BUSINESS = 200;
 const DAY_SECONDS = 24 * 60 * 60;
 
 // The mark a worker sets while it records an opening, so another worker

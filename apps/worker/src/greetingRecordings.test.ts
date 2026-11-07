@@ -107,17 +107,17 @@ describe("greeting recordings", () => {
   });
 
   // Each failure was three GPT-Live sessions.
-  it("records at most 100 new openings a business a day, and logs the ones past that", async () => {
+  it("records at most 200 new openings a business a day, and logs the ones past that", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
     const day = new Date().toISOString().slice(0, 10);
-    const redis = store({ [`recording-count:business_1:${day}`]: "100" });
+    const redis = store({ [`recording-count:business_1:${day}`]: "200" });
     const recordings = createGreetingRecordings({ store: redis, client: {} as never });
     const owned = { ...(business as object), businessId: "business_1" } as never;
     await recordings.record("Thanks for calling.", owned);
     expect(mocks.recordGreeting).not.toHaveBeenCalled();
     expect(redis.keys.has("recording:marin:Thanks for calling.:recording")).toBe(false);
     expect(redis.expire).toHaveBeenCalledWith(`recording-count:business_1:${day}`, 172_800);
-    expect(logLines(info)).toContainEqual(expect.objectContaining({ message: "live.greeting_recording_capped", businessId: "business_1", recordingsToday: 101 }));
+    expect(logLines(info)).toContainEqual(expect.objectContaining({ message: "live.greeting_recording_capped", businessId: "business_1", recordingsToday: 201 }));
     // Another business, and this one the next day, record as before.
     await recordings.record("Thanks for calling.", { ...(business as object), businessId: "business_2" } as never);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);

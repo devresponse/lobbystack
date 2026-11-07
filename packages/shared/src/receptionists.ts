@@ -4,7 +4,7 @@
 // answers whatever names no receptionist, or one that is paused or archived.
 
 import type { BillingPlanLimits, BillingPlanSlug } from "./billing";
-import { normalizeRuntimeLocale, type InterfaceLocale, type RuntimeLocale } from "./locales";
+import { intlLocale, normalizeRuntimeLocale, type InterfaceLocale, type RuntimeLocale } from "./locales";
 import { publicProfilePath } from "./publicProfile";
 import { trimEndWhere } from "./text";
 
@@ -314,7 +314,8 @@ export function compareReceptionistNames(locale: string | null | undefined): (a:
   const options: Intl.CollatorOptions = { sensitivity: "base", numeric: true };
   let collator: Intl.Collator;
   try {
-    collator = new Intl.Collator(locale?.replace("_", "-") || undefined, options);
+    // intlLocale gives Serbian in Latin script, which a bare sr wouldn't sort in.
+    collator = new Intl.Collator(intlLocale(locale, "") || undefined, options);
   } catch {
     collator = new Intl.Collator(undefined, options);
   }

@@ -30,6 +30,7 @@ import {
   receptionistLocale,
   receptionistPagePath,
   receptionistUpgrade,
+  compareReceptionistNames,
 } from "./receptionists";
 
 describe("default receptionist names", () => {
@@ -351,6 +352,12 @@ describe("website rule paths", () => {
 });
 
 describe("the alphabetical order", () => {
+  it("sorts Serbian names in Latin script, as intlLocale gives Intl", () => {
+    const names = ["Čedo", "Cvetko", "Dušan"].map((name) => ({ name }));
+    expect([...names].sort(compareReceptionistNames("sr")).map((entry) => entry.name)).toEqual(["Cvetko", "Čedo", "Dušan"]);
+    expect([...names].sort(compareReceptionistNames("sr_RS")).map((entry) => entry.name)).toEqual(["Cvetko", "Čedo", "Dušan"]);
+  });
+
   const receptionist = (id: string, name: string, isDefault = false) => ({ id, name, isDefault });
   const front = receptionist("a0", "Front desk", true);
   const store10 = receptionist("b1", "Store 10");

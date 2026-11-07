@@ -27,6 +27,8 @@ export type WidgetSession = {
    * receptionist; null means the default receptionist.
    */
   receptionistId: string | null;
+  /** The receptionist the key names, null for the default one: the key's greeting is written for it. */
+  keyReceptionistId: string | null;
 };
 
 export type WidgetAccessSuccess = { ok: true; session: WidgetSession };
@@ -53,6 +55,7 @@ async function loadWidgetSession(businessId: string, widgetKeyId: string) {
         businessSlug: business?.slug ?? "",
         defaultLocale: normalizeRuntimeLocale(business?.defaultLocale) ?? "en",
         receptionistId: keyRow.key.receptionistId ?? null,
+        keyReceptionistId: keyRow.key.receptionistId ?? null,
       },
       profile: { published: keyRow.profilePublished, widgetKeyId: keyRow.profileWidgetKeyId },
     };

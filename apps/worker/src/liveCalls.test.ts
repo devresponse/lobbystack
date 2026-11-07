@@ -595,7 +595,7 @@ describe("what a call opens with", () => {
 describe("greeting recordings", () => {
   // Redis with the recording of "Thanks for calling." when `audio` is given.
   function recordingStore(audio?: string) {
-    return { get: vi.fn(async (_key: string): Promise<string | null> => audio ?? null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 1), exists: vi.fn(async () => (audio ? 1 : 0)) };
+    return { get: vi.fn(async (_key: string): Promise<string | null> => audio ?? null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 1), incr: vi.fn(async () => 1), exists: vi.fn(async () => (audio ? 1 : 0)) };
   }
 
   async function attach(body: Record<string, unknown>, store: ReturnType<typeof recordingStore>, reply = response()) {
@@ -669,7 +669,7 @@ describe("recording a test call's opening", () => {
   const businessId = "00000000-0000-4000-8000-0000000000c1";
   const second = "00000000-0000-4000-8000-0000000000c2";
   // Redis without any recording yet.
-  const emptyStore = () => ({ get: vi.fn(async (_key: string): Promise<string | null> => null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 0), exists: vi.fn(async () => 0) });
+  const emptyStore = () => ({ get: vi.fn(async (_key: string): Promise<string | null> => null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 0), exists: vi.fn(async () => 0), incr: vi.fn(async () => 1) });
   const business = {
     businessId, greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: {},
     receptionists: [

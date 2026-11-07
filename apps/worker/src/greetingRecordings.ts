@@ -11,6 +11,7 @@ export type GreetingRecordingStore = {
   set(key: string, value: string, mode: "EX", seconds: number, condition?: "NX"): Promise<unknown>;
   expire(key: string, seconds: number): Promise<unknown>;
   exists(key: string): Promise<number>;
+  incr(key: string): Promise<number>;
 };
 
 // A recording loads while the caller's browser connects. Past this, the call
@@ -24,6 +25,13 @@ const RECORD_TIMEOUT_MS = 90_000;
 // not speaking, which a later try mends, and until then calls open with the
 // greeting command, which GPT-Live often ignores.
 const FAILED_RETRY_SECONDS = 30 * 60;
+// A business gets at most this many new recordings a day, twice the most
+// receptionists a business can have, so saving greetings over and over can't
+// run up GPT-Live's bill or fill Redis. Past it, its calls open with the
+// greeting command until the next day.
+const DAILY_RECORDINGS_PER_BUSINESS = 100;
+const DAY_SECONDS = 24 * 60 * 60;
+
 // The mark a worker sets while it records an opening, so another worker
 // doesn't record it too, outlasts the recording's own time limit.
 const IN_PROGRESS_SECONDS = Math.ceil(RECORD_TIMEOUT_MS / 1_000) + 30;
@@ -48,6 +56,14 @@ export function createGreetingRecordings(input: { store: GreetingRecordingStore;
     recording.add(key);
     try {
       if (await input.store.exists(key) || await input.store.exists(failedKey)) return;
+      // Counted per UTC day, and kept a second day so a count read near midnight isn't lost.
+      const countKey = `recording-count:${snapshot.businessId}:${new Date().toISOString().slice(0, 10)}`;
+      const recordingsToday = await input.store.incr(countKey);
+      await input.store.expire(countKey, 2 * DAY_SECONDS);
+      if (recordingsToday > DAILY_RECORDINGS_PER_BUSINESS) {
+        logEvent("info", "live.greeting_recording_capped", { businessId: snapshot.businessId, recordingsToday });
+        return;
+      }
       // Another worker is recording it. The mark also tells the dashboard's
       // test call that the recording is coming.
       if (await input.store.set(greetingRecordingInProgressKey(key), "1", "EX", IN_PROGRESS_SECONDS, "NX") !== "OK") return;

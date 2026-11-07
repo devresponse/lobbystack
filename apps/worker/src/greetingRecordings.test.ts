@@ -35,6 +35,11 @@ function store(entries: Record<string, string> = {}) {
     }),
     expire: vi.fn(async (key: string, _seconds: number) => (keys.has(key) ? 1 : 0)),
     exists: vi.fn(async (key: string) => (keys.has(key) ? 1 : 0)),
+    incr: vi.fn(async (key: string) => {
+      const next = Number(keys.get(key) ?? 0) + 1;
+      keys.set(key, String(next));
+      return next;
+    }),
   };
 }
 
@@ -102,6 +107,23 @@ describe("greeting recordings", () => {
   });
 
   // Each failure was three GPT-Live sessions.
+  it("records at most 100 new openings a business a day, and logs the ones past that", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const day = new Date().toISOString().slice(0, 10);
+    const redis = store({ [`recording-count:business_1:${day}`]: "100" });
+    const recordings = createGreetingRecordings({ store: redis, client: {} as never });
+    const owned = { ...(business as object), businessId: "business_1" } as never;
+    await recordings.record("Thanks for calling.", owned);
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+    expect(redis.keys.has("recording:marin:Thanks for calling.:recording")).toBe(false);
+    expect(redis.expire).toHaveBeenCalledWith(`recording-count:business_1:${day}`, 172_800);
+    expect(logLines(info)).toContainEqual(expect.objectContaining({ message: "live.greeting_recording_capped", businessId: "business_1", recordingsToday: 101 }));
+    // Another business, and this one the next day, record as before.
+    await recordings.record("Thanks for calling.", { ...(business as object), businessId: "business_2" } as never);
+    expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);
+    expect(redis.keys.get(`recording-count:business_2:${day}`)).toBe("1");
+  });
+
   it("logs a recording that fails without failing the call, and doesn't try that opening again for 30 minutes", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.recordGreeting.mockRejectedValueOnce(new Error("GPT-Live didn't record the opening in 3 tries."));
@@ -185,7 +207,7 @@ describe("greeting recordings", () => {
       expect(mocks.recordGreeting.mock.calls.map(([, input]) => (input as { greeting: string }).greeting)).toEqual(["Thanks for calling.", "Thanks for calling Kitsilano.", "Thanks for calling Downtown."]);
       // Each in its receptionist's own view: Kitsilano's calls open in French.
       expect((mocks.recordGreeting.mock.calls[1]![1] as { snapshot: { defaultLocale: string; receptionist: { id: string } } }).snapshot).toMatchObject({ defaultLocale: "fr", receptionist: { id: kitsilano } });
-      expect([...redis.keys.keys()].filter((key) => !key.endsWith(":recording"))).toEqual(["recording:marin:Thanks for calling.", "recording:marin:Thanks for calling Kitsilano.", "recording:marin:Thanks for calling Downtown."]);
+      expect([...redis.keys.keys()].filter((key) => key.startsWith("recording:") && !key.endsWith(":recording"))).toEqual(["recording:marin:Thanks for calling.", "recording:marin:Thanks for calling Kitsilano.", "recording:marin:Thanks for calling Downtown."]);
     });
 
     it("records an opening two receptionists share once", async () => {

@@ -101,7 +101,7 @@ The `other-receptionist` scenario runs only by name. Its caller asks for a refer
 
 ## Place real test calls
 
-`pnpm voice:call` calls a receptionist's number with Twilio and plays the same scenarios with Amazon Polly's voices: Joanna for English, Mia for Spanish. After the scripted lines, the caller stays silent for 40 seconds. If the call ends before the script's silences add up, the receptionist hung up.
+`pnpm voice:call` calls a receptionist's number with Twilio and plays the same scenarios with Amazon Polly's voices: Joanna for English, Mia for Spanish. The caller waits 15 seconds before its first line, longer than most openings, since OpenAI drops what a caller says over a recording. With a longer opening that line is lost, so read the transcript. After the scripted lines, the caller stays silent for 40 seconds. If the call ends before the script's silences add up, the receptionist hung up.
 
 You need a Twilio number to call from and the auth token of the account that owns it. To test staging, call the staging number from a number on another account, such as the production toll-free number:
 

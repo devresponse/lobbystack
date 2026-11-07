@@ -13,7 +13,8 @@ import { findScenarios, OPENING } from "./scenarios";
 
 // A voice for each caller language. The shared opening is always English.
 const VOICES = { en: "Polly.Joanna-Neural", es: "Polly.Mia-Neural" } as const;
-const GREETING_WAIT_S = 6;
+// Longer than most openings, since OpenAI drops what a caller says over a recording.
+const GREETING_WAIT_S = 15;
 const ANSWER_WAIT_S = 12;
 const FINAL_SILENCE_S = 40;
 const DONE = new Set(["completed", "busy", "failed", "no-answer", "canceled"]);

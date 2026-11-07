@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn() }) }));
+vi.mock("next/navigation", async () => (await import("@/lib/navigation-testing")).nextNavigationMock);
 vi.mock("react-i18next", () => ({ useTranslation: () => ({
   i18n: { language: "en" },
   t: (key: string) => key,
@@ -12,6 +12,7 @@ vi.mock("@/components/audio/call-recording-player", () => ({ CallRecordingPlayer
 vi.mock("@/lib/locale", () => ({ formatDateTime: (value: string) => value, intlLocale: (value: string) => value }));
 
 import { LiveCallsSurface } from "./live-calls-surface";
+import { testNavigation } from "@/lib/navigation-testing";
 
 const businessId = "60d4ca3b-6984-4dfd-befb-f7e264e98c46";
 const sources: FakeEventSource[] = [];
@@ -35,7 +36,9 @@ afterEach(() => {
   cleanup();
   sources.length = 0;
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
+beforeEach(() => { testNavigation.reset("/calls"); });
 
 it("shows confirmed live sessions and updates via SSE instead of counting stale started rows", async () => {
   vi.stubGlobal("EventSource", FakeEventSource);
@@ -109,5 +112,59 @@ it("searches and pages calls on the server so calls older than the first page st
   expect(screen.getByText("pagination.nextPage")).toBeTruthy();
   await waitFor(() => expect(callUrls()).toContain("/api/calls?limit=10&offset=0&search=Jane"));
   expect(callUrls().filter((url) => /search=J/.test(url))).toEqual(["/api/calls?limit=10&offset=0&search=Jane"]);
+  client.clear();
+});
+
+it("says who answered each call and filters by receptionist, from the first page", async () => {
+  vi.stubGlobal("EventSource", FakeEventSource);
+  const frontDesk = { id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk", description: "", handle: null, isDefault: true, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: "all" };
+  const kitsilano = { ...frontDesk, id: "00000000-0000-4000-8000-0000000000a2", name: "Kitsilano clinic", isDefault: false, sortOrder: 1, knowledgeScope: "audience" };
+  const fetchMock = vi.fn(async (url: string) => {
+    if (url.startsWith("/api/calls/active")) return Response.json({ active: 0 });
+    if (url.startsWith("/api/receptionists/choices")) return Response.json({ receptionists: [frontDesk, kitsilano] });
+    if (url.startsWith("/api/calls?")) {
+      const kitsilanoOnly = url.includes(`receptionist=${kitsilano.id}`);
+      return Response.json({ calls: Array.from({ length: 10 }, (_, i) => ({
+        id: crypto.randomUUID(), status: "completed", startedAt: "2026-09-21T12:00:00.000Z",
+        contactName: `Caller ${i}`, contactPhone: null, reason: null, disposition: null,
+        transcriptPreview: null, outcome: { kind: "none" }, recordingState: "missing", providerDurationSeconds: null,
+        receptionist: kitsilanoOnly || i % 2 ? { id: kitsilano.id, name: kitsilano.name } : { id: frontDesk.id, name: frontDesk.name },
+      })), pagination: { total: kitsilanoOnly ? 10 : 40 } });
+    }
+    return Response.json({ businesses: [{ businessId, active: true }] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><LiveCallsSurface /></QueryClientProvider>);
+  const callUrls = () => fetchMock.mock.calls.map(([url]) => url).filter((url) => url.startsWith("/api/calls?"));
+
+  await waitFor(() => expect(screen.getByRole("columnheader", { name: "receptionists:record.receptionist" })).toBeTruthy());
+  const firstRow = screen.getByText("Caller 0").closest("tr")!;
+  expect(within(firstRow).getByText("Front desk")).toBeTruthy();
+  expect(within(screen.getByText("Caller 1").closest("tr")!).getByText("Kitsilano clinic")).toBeTruthy();
+
+  fireEvent.click(screen.getByText("pagination.nextPage").closest("button")!);
+  await waitFor(() => expect(callUrls()).toContain("/api/calls?limit=10&offset=10&search="));
+  fireEvent.click(screen.getByRole("combobox", { name: "filter.label filter.all" }));
+  fireEvent.click(screen.getByRole("option", { name: /Kitsilano clinic/ }));
+  expect(testNavigation.router.replace).toHaveBeenLastCalledWith(`/calls?receptionist=${kitsilano.id}`, { scroll: false });
+  await waitFor(() => expect(callUrls()).toContain(`/api/calls?limit=10&offset=0&search=&receptionist=${kitsilano.id}`));
+  client.clear();
+});
+
+it("shows no receptionist column or filter while the business has one", async () => {
+  vi.stubGlobal("EventSource", FakeEventSource);
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    if (url.startsWith("/api/calls/active")) return Response.json({ active: 0 });
+    if (url.startsWith("/api/receptionists/choices")) return Response.json({ receptionists: [{ id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk", description: "", handle: null, isDefault: true, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: "all" }] });
+    if (url.startsWith("/api/calls?")) return Response.json({ calls: [{ id: crypto.randomUUID(), status: "completed", startedAt: "2026-09-21T12:00:00.000Z", contactName: "Caller", contactPhone: null, reason: null, disposition: null, transcriptPreview: null, outcome: { kind: "none" }, recordingState: "missing", providerDurationSeconds: null, receptionist: { id: "00000000-0000-4000-8000-0000000000a1", name: "Front desk" } }], pagination: { total: 1 } });
+    return Response.json({ businesses: [{ businessId, active: true }] });
+  }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><LiveCallsSurface /></QueryClientProvider>);
+  await waitFor(() => expect(screen.getByText("Caller")).toBeTruthy());
+  expect(screen.queryByRole("columnheader", { name: "receptionists:record.receptionist" })).toBeNull();
+  expect(screen.queryByText("Front desk")).toBeNull();
+  expect(screen.queryByRole("combobox")).toBeNull();
   client.clear();
 });

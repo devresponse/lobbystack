@@ -46,6 +46,8 @@ export type CatalogStandardPlan = {
   chat_units: number | null;
   kb_bytes: number | null;
   numbers: number | null;
+  /** Receptionists active at once; null on a custom plan. */
+  receptionists: number | null;
   voice_rate: number | null;
   sms_rate: number | null;
   call_rate: number | null;
@@ -74,7 +76,7 @@ const numberOrNull = (value: unknown): number | null => (value === null || value
 
 /** The standard plans as the role running the transaction may read them. */
 async function readStandardPlans(tx: DatabaseTransaction): Promise<CatalogStandardPlan[]> {
-  const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
+  const rows = (await tx.execute<Row>(sql`select code, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, receptionists, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code = tier order by sort, code`)).rows;
   return rows.map(planRow);
 }
 
@@ -92,6 +94,7 @@ function planRow(row: Row): CatalogStandardPlan {
     // bigint arrives as text.
     kb_bytes: numberOrNull(row.kb_bytes),
     numbers: numberOrNull(row.numbers),
+    receptionists: numberOrNull(row.receptionists),
     voice_rate: numberOrNull(row.voice_rate),
     sms_rate: numberOrNull(row.sms_rate),
     call_rate: numberOrNull(row.call_rate),
@@ -241,7 +244,7 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
       slug,
       custom: row.custom,
       overagesBillable: row.overage,
-      included: { voiceSeconds: row.voice_sec, alertSmsSegments: row.sms_seg, outboundCallAttempts: row.calls_out, chatAiUnits: row.chat_units, knowledgeStorageBytes: row.kb_bytes, businessNumbers: row.numbers },
+      included: { voiceSeconds: row.voice_sec, alertSmsSegments: row.sms_seg, outboundCallAttempts: row.calls_out, chatAiUnits: row.chat_units, knowledgeStorageBytes: row.kb_bytes, businessNumbers: row.numbers, receptionists: planReceptionists(row, slug) },
       overageRates: { voiceMinuteCents: row.voice_rate, alertSmsSegmentCents: row.sms_rate, outboundCallAttemptCents: row.call_rate },
       sortOrder: row.sort,
       prices: !row.sold ? [] : billingIntervals.flatMap((interval) => {
@@ -253,8 +256,19 @@ export function billingPlanList(catalog: BillingCatalogSnapshot, options: { chec
   return { currency, source: shown === catalog ? "catalog" : "built_in", plans: plans.sort((a, b) => a.sortOrder - b.sortOrder) };
 }
 
+/**
+ * The receptionists a plan row includes: null on a custom plan, which gets the
+ * deployment's cap, and its tier's built-in number on a row from before
+ * migration 0134 filled the column.
+ */
+function planReceptionists(row: Pick<CatalogStandardPlan, "custom" | "receptionists">, tier: string): number | null {
+  if (row.custom) return null;
+  if (row.receptionists !== null) return row.receptionists;
+  return Object.hasOwn(builtInBillingPlanLimits, tier) ? builtInBillingPlanLimits[tier as BillingPlanSlug].includedReceptionists : null;
+}
+
 /** A plan row's terms, as limits enforce them. */
-function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
+function planLimits(row: Omit<CatalogStandardPlan, "code">, tier: string): BillingPlanLimits {
   return {
     knowledgeStorageBytes: row.kb_bytes,
     voiceSecondsIncluded: row.voice_sec,
@@ -262,6 +276,7 @@ function planLimits(row: Omit<CatalogStandardPlan, "code">): BillingPlanLimits {
     outboundCallAttemptsIncluded: row.calls_out,
     chatAiTokensIncluded: row.chat_units,
     includedBusinessNumbers: row.numbers,
+    includedReceptionists: planReceptionists(row, tier),
     overagesBillable: row.overage,
     voiceOverageRatePerMinuteCents: row.voice_rate,
     alertSmsOverageRatePerSegmentCents: row.sms_rate,
@@ -281,7 +296,7 @@ export function billingPlanLimits(plans: CatalogStandardPlan[], brandPlans: Cata
   const rows = catalogApplies(plans) ? plans : brandPlans;
   if (!rows) return builtInBillingPlanLimits;
   const table = { ...builtInBillingPlanLimits };
-  for (const row of rows) table[row.code] = planLimits(row);
+  for (const row of rows) table[row.code] = planLimits(row, row.code);
   return table;
 }
 
@@ -315,7 +330,7 @@ export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Ar
   const tiers = billingPlanLimits(standard, brandPlans);
   // Before the first apply, no other plan has a row.
   if (!catalogApplies(standard)) return { tiers, plans: {} };
-  return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row) }])) };
+  return { tiers, plans: Object.fromEntries(others.filter((row) => !row.custom).map((row) => [row.code, { tier: row.tier, limits: planLimits(row, row.tier) }])) };
 }
 
 /**
@@ -324,7 +339,7 @@ export function billingPlanLimitBook(standard: CatalogStandardPlan[], others: Ar
  * business is on and any its usage counted under.
  */
 export async function readBillingPlanLimitBook(tx: DatabaseTransaction, brandCatalog: BillingCatalogSnapshot | null = deploymentBrandCatalog()): Promise<BillingPlanLimitBook> {
-  const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
+  const others = (await tx.execute<Row>(sql`select code, tier, status, sold, custom, overage, voice_sec, sms_seg, calls_out, chat_units, kb_bytes, numbers, receptionists, voice_rate, sms_rate, call_rate, sort from public.billing_plans where code <> tier`)).rows;
   return billingPlanLimitBook(await readStandardPlans(tx), others.map((row) => ({ ...planRow(row), code: String(row.code), tier: String(row.tier) })), brandCatalog?.plans ?? null);
 }
 
@@ -363,6 +378,7 @@ export async function listBillingPlansForApi(context: DomainContext, env: Record
         chat_ai_units: plan.included.chatAiUnits,
         knowledge_storage_bytes: plan.included.knowledgeStorageBytes,
         business_numbers: plan.included.businessNumbers,
+        receptionists: plan.included.receptionists,
       },
       overage_rates: {
         voice_minute_cents: plan.overageRates.voiceMinuteCents,

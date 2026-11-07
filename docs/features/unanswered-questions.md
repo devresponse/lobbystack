@@ -24,6 +24,13 @@ The original project saved the receptionist's query when its `searchKnowledge` l
 
 Owners and admins answer and dismiss. Schedulers and viewers see the list on the Questions page without the buttons. If someone else answered or dismissed a question first, the page says so and shows the list as it is now.
 
+## Know who heard each question
+
+Since fork PR #129 a business can have several receptionists, and each question remembers which ones heard it (`unanswered_question_receptionists`, migration `0137`), so the same question asked at three stores is one row with three names ([receptionists](receptionists.md#know-who-answered)). With several receptionists:
+
+- **Each question says who heard it,** such as "Heard by Kitsilano, Gastown", with "(archived)" after a receptionist that's been archived. A receptionist filter keeps the questions one receptionist heard (`GET /api/knowledge/questions?receptionist=<id>`).
+- **An answer asks Who uses this answer:** **Every receptionist**, or **Only the receptionist that heard it** (or the ones that did), which saves the text entry for those receptionists only. `PATCH /api/knowledge/questions/{questionId}` takes `audience`: `everyone`, `asked`, or `chosen` with `receptionistIds`. When every receptionist that heard it is archived, the page asks to save the answer for every receptionist instead.
+
 ## Know what happens when it's asked again
 
 | The question was | Asked again, it |

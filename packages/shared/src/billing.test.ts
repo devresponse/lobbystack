@@ -169,7 +169,7 @@ describe("built-in plan list", () => {
     expect(list).toMatchObject({ currency: "usd", source: "built_in" });
     expect(list.plans.map((plan) => [plan.slug, plan.custom, plan.prices.length])).toEqual([["free_cloud", false, 0], ["starter", false, 2], ["pro", false, 2], ["enterprise", true, 0]]);
     const starter = list.plans[1]!;
-    expect(starter.included).toEqual({ voiceSeconds: 9_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 5 * 1024 * 1024, businessNumbers: 1 });
+    expect(starter.included).toEqual({ voiceSeconds: 9_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 5 * 1024 * 1024, businessNumbers: 1, receptionists: 1 });
     expect(starter.overageRates).toEqual({ voiceMinuteCents: 20, alertSmsSegmentCents: 2, outboundCallAttemptCents: 2 });
     expect(billingPlanPrice(starter, "annual")).toEqual({ interval: "annual", currency: "usd", amountCents: 28_800, monthlyAmountCents: 2_400, checkoutAvailable: false });
     expect(billingPlanPrice(list.plans[2], "annual")?.checkoutAvailable).toBe(true);

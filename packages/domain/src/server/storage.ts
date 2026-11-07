@@ -5,6 +5,7 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, ne, notInArray, or, 
 import { businesses, calls, enqueueOutbox, knowledgeDocuments, storageObjects, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { KNOWLEDGE_UPLOAD_MAX_BYTES } from "@lobbystack/shared";
 import { getKnowledgeStorageUsageBytes, KnowledgeStorageLimitError } from "./knowledge";
+import { setKnowledgeArticleAudienceInTransaction, type KnowledgeAudienceChoice } from "./knowledgeAudience";
 import { isAllowedUploadContentType } from "@lobbystack/contracts";
 
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
@@ -56,7 +57,7 @@ export async function insertPendingUploadInTransaction(tx: DatabaseTransaction, 
 
 export async function finalizeUpload(
   context: DomainContext,
-  input: { userId: string; businessId: string; objectId: string; length: number; contentType: string; title?: string | undefined; tags?: string[] | undefined; checksum?: string | undefined },
+  input: { userId: string; businessId: string; objectId: string; length: number; contentType: string; title?: string | undefined; tags?: string[] | undefined; checksum?: string | undefined; audience?: KnowledgeAudienceChoice | undefined },
   storage: StorageProvider,
 ): Promise<void> {
   const object = await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
@@ -67,6 +68,7 @@ export async function finalizeUpload(
     }
     return row;
   });
+  if (input.audience && object.purpose !== "knowledge") throw Object.assign(new Error("Only knowledge files are for chosen receptionists."), { status: 400, code: "invalid_audience" });
   const metadata = await storage.headObject({ key: object.objectKey });
   if (!isAllowedUploadContentType(object.purpose, input.contentType)) throw new Error(`Content type is not allowed for ${object.purpose} uploads.`);
   if (object.purpose === "knowledge" && (!input.checksum || !object.checksum)) throw new Error("Knowledge uploads require a SHA-256 checksum.");
@@ -75,7 +77,9 @@ export async function finalizeUpload(
   }
   await withBusinessTransaction(context.db, { ...input, actorType: "operator" }, async (tx) => {
     await requireBusinessAdmin(tx, input);
-    await completeUploadInTransaction(tx, { businessId: input.businessId, objectId: input.objectId, purpose: object.purpose, fileName: object.fileName, metadata, title: input.title, tags: input.tags });
+    const documentId = await completeUploadInTransaction(tx, { businessId: input.businessId, objectId: input.objectId, purpose: object.purpose, fileName: object.fileName, metadata, title: input.title, tags: input.tags });
+    // A file for chosen receptionists is never for everyone, not even while it's extracted.
+    if (documentId && input.audience?.audience === "chosen") await setKnowledgeArticleAudienceInTransaction(tx, { businessId: input.businessId, actorUserId: input.userId, kind: "document", articleId: documentId, choice: input.audience });
   });
 }
 

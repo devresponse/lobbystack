@@ -9,6 +9,10 @@
       "title": "Paramètres IA",
       "description": "Message d'accueil et paramètres de transfert de votre réceptionniste."
     },
+    "receptionists": {
+      "title": "Réceptionnistes",
+      "description": "Qui répond à vos appels, à vos chats et sur vos pages. Ajoutez-en une pour chaque lieu, équipe ou langue."
+    },
     "knowledge": {
       "title": "Connaissances",
       "description": "Informations et directives que votre réceptionniste utilise pour répondre aux questions.",
@@ -90,6 +94,88 @@
           "label": "Mots-clés (optionnel)",
           "placeholder": "Horaires, adresse",
           "hint": "Mots-clés séparés par des virgules pour catégoriser cette information."
+        }
+      },
+      "receptionists": {
+        "availableTo": "Disponible pour",
+        "rowAction": "Disponible pour",
+        "select": "Sélectionner {{title}}",
+        "selectPage": "Sélectionner les articles de cette page",
+        "selected_one": "{{count}} sélectionné",
+        "selected_many": "{{count}} sélectionnés",
+        "selected_other": "{{count}} sélectionnés",
+        "clear": "Effacer",
+        "showingAll": "Tous les articles sont affichés. Choisissez une réceptionniste pour voir exactement ce qu'elle peut utiliser.",
+        "showingEverything": "{{name}} répond à partir de tous les articles.",
+        "showingOne": "Ce que {{name}} peut utiliser : les articles pour toutes et ceux choisis pour elle.",
+        "bulk": {
+          "open": "Disponible pour",
+          "mode": "Modifier",
+          "add": "Ajouter",
+          "remove": "Retirer",
+          "replace": "Remplacer",
+          "addNote": "Les articles pour toutes incluent déjà chaque réceptionniste ; ils restent tels quels.",
+          "removeNote": "Les articles pour toutes deviennent disponibles pour chaque autre réceptionniste. Un article qui n'a plus de réceptionniste n'est utilisé que par la réceptionniste par défaut.",
+          "summary": {
+            "everyone_one": "Rend {{count}} article disponible pour toutes.",
+            "everyone_many": "Rend {{count}} articles disponibles pour toutes.",
+            "everyone_other": "Rend {{count}} articles disponibles pour toutes.",
+            "add_one": "Ajoute {{names}} à {{count}} article.",
+            "add_many": "Ajoute {{names}} à {{count}} articles.",
+            "add_other": "Ajoute {{names}} à {{count}} articles.",
+            "remove_one": "Retire {{names}} de {{count}} article.",
+            "remove_many": "Retire {{names}} de {{count}} articles.",
+            "remove_other": "Retire {{names}} de {{count}} articles.",
+            "replace_one": "Rend {{count}} article disponible pour {{names}} seulement.",
+            "replace_many": "Rend {{count}} articles disponibles pour {{names}} seulement.",
+            "replace_other": "Rend {{count}} articles disponibles pour {{names}} seulement."
+          },
+          "tooMany": "Sélectionnez au plus {{max}} articles pour les modifier en une fois.",
+          "apply_one": "Appliquer à {{count}} article",
+          "apply_many": "Appliquer à {{count}} articles",
+          "apply_other": "Appliquer à {{count}} articles",
+          "done_one": "Disponibilité modifiée pour {{count}} article.",
+          "done_many": "Disponibilité modifiée pour {{count}} articles.",
+          "done_other": "Disponibilité modifiée pour {{count}} articles."
+        },
+        "dialog": {
+          "description": "Qui peut utiliser « {{title}} ».",
+          "done": "Disponibilité enregistrée."
+        },
+        "rules": {
+          "open": "Règles du site web",
+          "rowAction": "Règles des pages",
+          "title": "Règles du site web",
+          "description": "Les pages dont l'adresse commence par le chemin d'une règle vont à sa réceptionniste, lors de cette exploration et de toutes les suivantes.",
+          "importLabel": "Règles des pages",
+          "listTitle": "Règles",
+          "empty": "Aucune règle pour le moment.",
+          "noSites": "Importez d'abord un site web. Une règle donne une section de ses pages à une réceptionniste.",
+          "site": "Site web",
+          "path": "Chemin",
+          "pathPlaceholder": "/stores/kitsilano/",
+          "pathOf": "Chemin de la règle {{number}}",
+          "goesTo": "Va à",
+          "goesToOf": "Réceptionniste de la règle {{number}}",
+          "goesToName": "Va à {{name}}",
+          "removeDraft": "Retirer la règle {{number}}",
+          "invalidDraft": "Donnez à la règle un chemin, par exemple /bikes/, et une réceptionniste, ou retirez-la.",
+          "chooseReceptionist": "Choisissez à qui vont les pages.",
+          "add": "Ajouter une règle",
+          "added_one": "Règle ajoutée. {{count}} page va à {{name}}.",
+          "added_many": "Règle ajoutée. {{count}} pages vont à {{name}}.",
+          "added_other": "Règle ajoutée. {{count}} pages vont à {{name}}.",
+          "removed": "Règle supprimée.",
+          "pages_one": "{{count}} page",
+          "pages_many": "{{count}} pages",
+          "pages_other": "{{count}} pages",
+          "showAll_one": "Afficher les {{count}} règles",
+          "showAll_many": "Afficher les {{count}} règles",
+          "showAll_other": "Afficher les {{count}} règles",
+          "delete": "Supprimer la règle pour {{path}}",
+          "deleteTitle": "Supprimer la règle pour {{path}} ?",
+          "deleteDescription": "Les pages qu'elle donnait à sa réceptionniste redeviennent disponibles pour toutes, sauf si une autre règle ou votre propre choix les donne aussi à quelqu'une.",
+          "deleteConfirm": "Supprimer la règle"
         }
       }
     },
@@ -406,5 +492,26 @@
     "edit": "Modifier",
     "cancel": "Annuler",
     "notSet": "Non définies"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Communs à toutes les réceptionnistes",
+      "description": "Le résumé de l'entreprise, ce que les appelants entendent sur l'IA et l'enregistrement, la langue et le fuseau horaire de l'entreprise, les heures d'ouverture et les règles de rendez-vous."
+    },
+    "own": {
+      "title": "Propres à chaque réceptionniste",
+      "description": "Son message d'accueil, sa langue, son numéro de transfert et la prise de rendez-vous. Choisissez la réceptionniste à modifier."
+    },
+    "picker": "Réceptionniste",
+    "businessLanguage": {
+      "label": "Langue de l'entreprise",
+      "hint": "La réceptionniste par défaut la parle, comme chaque réceptionniste sans langue propre. Les appels passent à la langue de l'appelant s'il en parle une autre, et les résumés d'appel y sont écrits."
+    },
+    "language": {
+      "label": "Langue",
+      "hint": "Ses appels commencent dans cette langue, puis passent à celle de l'appelant s'il en parle une autre.",
+      "defaultHint": "La réceptionniste par défaut parle la langue de l'entreprise, définie dans les paramètres communs ci-dessus.",
+      "business": "Langue de l'entreprise ({{language}})"
+    }
   }
 }

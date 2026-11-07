@@ -9,6 +9,7 @@ import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import type { DomainContext } from "./context";
 import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
+import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { polarProductLinks, readBillingCatalogSnapshot } from "./billingPlans";
@@ -291,6 +292,8 @@ export async function endManagedPlanInTransaction(tx: DatabaseTransaction, input
     .where(and(eq(billingAccounts.businessId, input.businessId), eq(billingAccounts.source, MANAGED_BILLING_SOURCE), inArray(billingAccounts.subscriptionState, [...liveSubscriptionStates])))
     .returning({ id: billingAccounts.id });
   if (!ended.length) return false;
+  // Free includes one receptionist: the newest others pause.
+  await enqueueReceptionistAllowanceCheck(tx, input.businessId, "managed_plan_ended");
   await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `billing:${input.businessId}:managed-ended:${now.getTime()}`, payload: { type: "billing.updated", entityId: input.businessId } });
   return true;
 }
@@ -998,6 +1001,9 @@ export async function reconcileBillingProviderEvent(
           updatedAt: new Date(),
         },
       });
+      // A plan with fewer receptionists pauses the newest ones past its number, in a job of its
+      // own so nothing about receptionists can hold up the payment.
+      if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
     }
 
     // Refunds arrive as order.refunded (refund.* payloads name no business, so the webhook route drops them).

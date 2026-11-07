@@ -292,7 +292,7 @@ export const apiBillingCatalogChangeSchema = z.object({
   key: z.string().describe("A plan's code, or code/period/currency for a price."),
   action: z.enum(["insert", "update", "retire", "restore"]),
   fields: z.record(z.string(), z.object({ from: z.unknown(), to: z.unknown() })).describe("For update and restore, each changed column with its old and new value. Empty otherwise."),
-  lowers_allowance: z.boolean().describe("An included amount, the storage limit or the number count goes down."),
+  lowers_allowance: z.boolean().describe("An included amount, the storage limit, the number count or the receptionist count goes down."),
   raises_price: z.boolean().describe("A price or an overage rate goes up."),
 }).describe("One row an apply writes.");
 
@@ -385,6 +385,7 @@ export const apiBillingCatalogPlanSchema = z.object({
   chat_units: nullableCount.describe("Website chat AI units included a month."),
   kb_bytes: nullableCount.describe("Knowledge storage limit in bytes."),
   numbers: nullableCount.describe("Business phone numbers included."),
+  receptionists: nullableCount.describe("Receptionists active at once, the default included. Null on a custom plan, which gets the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."),
   voice_rate: nullableCount.describe("Overage cents per voice minute."),
   sms_rate: nullableCount.describe("Overage cents per alert SMS segment."),
   call_rate: nullableCount.describe("Overage cents per outbound call attempt."),
@@ -441,6 +442,7 @@ export const apiBillingPlanSchema = z.object({
     chat_ai_units: nullableCount.describe("Website chat AI units included a month."),
     knowledge_storage_bytes: nullableCount.describe("Knowledge storage limit in bytes."),
     business_numbers: nullableCount.describe("Business phone numbers included."),
+    receptionists: nullableCount.describe("Receptionists active at once, the default included. Null means custom: the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."),
   }).describe("What the plan includes. Null means custom."),
   overage_rates: z.object({
     voice_minute_cents: nullableCount,

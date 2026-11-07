@@ -6,7 +6,9 @@ import { createInstance } from "i18next";
 import { I18nextProvider } from "react-i18next";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import en from "../../public/locales/en/calls.json";
+import enReceptionists from "../../public/locales/en/receptionists.json";
 import { LiveCallDetailSurface } from "./live-call-detail-surface";
+import { receptionistChoicesQueryKey, type ReceptionistOption } from "./receptionists/receptionist-choices";
 import { createRecordedBrowserTelemetry } from "@/lib/telemetry-testing";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -21,8 +23,12 @@ const clients: QueryClient[] = [];
 beforeEach(() => { vi.stubGlobal("localStorage", { getItem: () => "en", setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach((client) => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
+const choice = (id: string, name: string, isDefault = false): ReceptionistOption => ({ id, name, description: "", handle: null, isDefault, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: isDefault ? "all" : "audience" });
+const FRONT_DESK = choice("00000000-0000-4000-8000-0000000000a1", "Front desk", true);
+const KITSILANO = choice("00000000-0000-4000-8000-0000000000a2", "Kitsilano clinic");
+
 const detail = (archivedAt: string | null) => ({
-  call: { id: "call-1", legacyConvexId: null, providerCallId: "rtc_1", provider: "openai_live", transport: "web_voice", status: "completed", disposition: null, transferState: null, startedAt: "2026-10-29T23:09:00Z", endedAt: "2026-10-29T23:09:15Z", providerDurationSeconds: 15, gatewaySessionId: null, archivedAt },
+  call: { id: "call-1", legacyConvexId: null, providerCallId: "rtc_1", provider: "openai_live", transport: "web_voice", status: "completed", disposition: null, transferState: null, startedAt: "2026-10-29T23:09:00Z", endedAt: "2026-10-29T23:09:15Z", providerDurationSeconds: 15, gatewaySessionId: null, archivedAt, receptionist: { id: KITSILANO.id, name: KITSILANO.name } },
   contact: null,
   outcome: null,
   timeline: [],
@@ -32,12 +38,13 @@ const detail = (archivedAt: string | null) => ({
   followUpTasks: [],
 });
 
-async function setup({ role = "business_owner", archivedAt = null as string | null, response = undefined as Response | undefined } = {}) {
+async function setup({ role = "business_owner", archivedAt = null as string | null, response = undefined as Response | undefined, receptionists = [FRONT_DESK] } = {}) {
   const i18n = createInstance();
-  await i18n.init({ lng: "en", defaultNS: "calls", resources: { en: { calls: en } } });
+  await i18n.init({ lng: "en", defaultNS: "calls", resources: { en: { calls: en, receptionists: enReceptionists } } });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
   clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Clinic", slug: "clinic", role, active: true }] });
+  client.setQueryData(receptionistChoicesQueryKey("business"), { receptionists });
   // The Calls list as it was cached before the operator opened the call.
   client.setQueryData(["calls", "business", "", 0, 10], { calls: [{ id: "call-1" }, { id: "call-2" }], pagination: { total: 2 } });
   const invalidate = vi.spyOn(client, "invalidateQueries");
@@ -137,5 +144,19 @@ describe("an archived call", () => {
   it("keeps its transcript", async () => {
     await setup({ archivedAt: "2026-10-30T06:30:00Z" });
     expect(screen.getByText("Thank you for calling.")).toBeTruthy();
+  });
+});
+
+describe("the receptionist that answered", () => {
+  it("shows on the call when the business has several receptionists", async () => {
+    await setup({ receptionists: [FRONT_DESK, KITSILANO] });
+    expect(screen.getByText(enReceptionists.record.receptionist)).toBeTruthy();
+    expect(screen.getByText("Kitsilano clinic")).toBeTruthy();
+  });
+
+  it("stays out of the way while the business has one", async () => {
+    await setup();
+    expect(screen.queryByText(enReceptionists.record.receptionist)).toBeNull();
+    expect(screen.queryByText("Kitsilano clinic")).toBeNull();
   });
 });

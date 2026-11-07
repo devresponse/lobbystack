@@ -15,6 +15,7 @@ import { claimNumberProvisioning, completeNumberProvisioning, failNumberProvisio
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import { releaseBillingCheckoutRequest, releaseBillingSubscription, runDailyBillingVerify, sweepBillingWork } from "@lobbystack/domain";
 import { loadPromoEndWork, recordPromoEnd, type PromoEndWork } from "@lobbystack/domain";
+import { enforceReceptionistAllowance } from "@lobbystack/domain";
 
 // A test that names the deployment gives it the AlloPlace brand file. The
 // others show LobbyStack, as BRAND_PRESET=lobbystack picks it.
@@ -36,6 +37,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => {
     claimBillingUsageSync: vi.fn(),
     confirmBillingUsageSync: vi.fn(),
     expireProspectDemos: vi.fn(),
+    enforceReceptionistAllowance: vi.fn(),
     generateAffiliatePayoutRun: vi.fn(),
     runDailyBillingVerify: vi.fn(),
     sweepBillingWork: vi.fn(),
@@ -382,7 +384,7 @@ describe("worker handlers", () => {
   it("runs all tenant retention work from the hourly privacy job", async () => {
     const businessId = randomUUID();
     const domain = { db: undefined as never };
-    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedUnansweredQuestions: 2, deletedAiTraces: 0, queuedRecordings: 1 });
+    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedUnansweredQuestions: 2, deletedAiTraces: 0, deletedEntryLinkScanDays: 0, queuedRecordings: 1 });
     vi.mocked(deleteSentProductEventsBefore).mockResolvedValueOnce(1_000).mockResolvedValueOnce(7);
 
     const result = await handleJob({
@@ -397,7 +399,7 @@ describe("worker handlers", () => {
       recurring: true,
     }, { domain });
 
-    expect(result).toEqual({ status: "completed", entityId: JSON.stringify({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedUnansweredQuestions: 2, deletedAiTraces: 0, queuedRecordings: 1 }) });
+    expect(result).toEqual({ status: "completed", entityId: JSON.stringify({ scrubbedFollowUps: 1, scrubbedMessages: 2, scrubbedOperatorDeliveries: 1, deletedTranscripts: 3, deletedUnansweredQuestions: 2, deletedAiTraces: 0, deletedEntryLinkScanDays: 0, queuedRecordings: 1 }) });
     expect(runPrivacyRetentionSweep).toHaveBeenCalledWith(domain, { businessId });
     expect(deleteSentProductEventsBefore).toHaveBeenCalledWith(domain, {
       businessId,
@@ -436,7 +438,7 @@ describe("worker handlers", () => {
     const domain = { db: undefined as never };
     const enqueueProductEventRetentionContinuation = vi.fn().mockResolvedValue(undefined);
     const queuedAtMs = Date.parse("2026-09-21T12:00:00.000Z");
-    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 0, scrubbedMessages: 0, scrubbedOperatorDeliveries: 0, deletedTranscripts: 0, deletedUnansweredQuestions: 0, deletedAiTraces: 0, queuedRecordings: 0 });
+    vi.mocked(runPrivacyRetentionSweep).mockResolvedValue({ scrubbedFollowUps: 0, scrubbedMessages: 0, scrubbedOperatorDeliveries: 0, deletedTranscripts: 0, deletedUnansweredQuestions: 0, deletedAiTraces: 0, deletedEntryLinkScanDays: 0, queuedRecordings: 0 });
     vi.mocked(deleteSentProductEventsBefore).mockResolvedValue(1_000);
 
     await handleJob({
@@ -902,7 +904,7 @@ describe("worker handlers", () => {
     });
 
     it("sells through the catalog's linked products once a link made the plan active, and reads Polar's product through them", async () => {
-      const linked = (code: "starter" | "pro") => ({ code, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 0 });
+      const linked = (code: "starter" | "pro") => ({ code, status: "active" as const, sold: true, custom: false, overage: true, voice_sec: null, sms_seg: null, calls_out: null, chat_units: null, kb_bytes: null, numbers: null, receptionists: null, voice_rate: null, sms_rate: null, call_rate: null, sort: 0 });
       const price = (plan: "starter" | "pro", period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier: plan, status: "active", period, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired });
       const catalog = { plans: [linked("starter"), linked("pro")], prices: [price("starter", "monthly", "catalog-starter-monthly"), price("starter", "annual", "catalog-starter-annual"), price("pro", "annual", "catalog-pro-annual"), price("pro", "annual", "old-pro-annual", true)] };
       const links = async () => polarProductLinks(catalog, process.env);
@@ -1194,6 +1196,28 @@ describe("worker handlers", () => {
 
     expect(result).toEqual({ status: "completed", entityId: "2" });
     expect(expireProspectDemos).toHaveBeenCalledWith(domain);
+  });
+
+  describe("the plan check for receptionists", () => {
+    const allowanceJob = (businessId: string | null): JobEnvelope => ({ jobId: randomUUID(), type: "receptionists.enforceAllowance", queue: "default", businessId, payload: { businessId, reason: "billing_reconcile" }, trace: {}, idempotencyKey: `receptionists:${businessId}:allowance`, scheduled: false });
+
+    it("pauses through the domain and reports how many it paused", async () => {
+      const businessId = randomUUID(); const domain = { db: undefined as never };
+      vi.mocked(enforceReceptionistAllowance).mockResolvedValue([randomUUID(), randomUUID()]);
+      await expect(handleJob(allowanceJob(businessId), { domain })).resolves.toEqual({ status: "completed", entityId: "2" });
+      // The worker passes no env: the domain reads the deployment's cap itself.
+      expect(enforceReceptionistAllowance).toHaveBeenCalledWith(domain, { businessId });
+    });
+
+    it("skips when every active receptionist already fits the plan", async () => {
+      vi.mocked(enforceReceptionistAllowance).mockResolvedValue([]);
+      await expect(handleJob(allowanceJob(randomUUID()), { domain: { db: undefined as never } })).resolves.toEqual({ status: "skipped", entityId: "0" });
+    });
+
+    it("refuses a job without a business", async () => {
+      await expect(handleJob(allowanceJob(null), { domain: { db: undefined as never } })).rejects.toThrow("Job receptionists.enforceAllowance requires a business context.");
+      expect(enforceReceptionistAllowance).not.toHaveBeenCalled();
+    });
   });
 
   it("sends an appointment change OTP through the Twilio dependency", async () => {

@@ -106,7 +106,8 @@
       "rateLimited": "Se han iniciado demasiadas llamadas de prueba. Inténtelo de nuevo en unos minutos.",
       "unavailable": "Su recepcionista con IA no está disponible en este momento.",
       "generic": "Algo salió mal al iniciar la llamada."
-    }
+    },
+    "receptionist": "Recepcionista para llamadas de prueba"
   },
   "appointments": {
     "title": "Citas",

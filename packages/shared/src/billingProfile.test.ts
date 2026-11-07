@@ -223,6 +223,39 @@ describe("the profile hash", () => {
   });
 });
 
+describe("receptionists per plan", () => {
+  it("reads each standard plan's number from the file, and its tier's built-in number when the file has none", () => {
+    expect(["free_cloud", "starter", "pro", "enterprise"].map((code) => plan(alloplace(), code).receptionists)).toEqual([1, 1, 5, null]);
+    const older = alloplace();
+    for (const code of ["free_cloud", "starter", "pro"]) delete older.plans[code].limits.receptionists;
+    expect(["free_cloud", "starter", "pro", "enterprise"].map((code) => plan(older, code).receptionists)).toEqual([1, 1, 5, null]);
+    const chain = withPlans({}, (file) => { file.plans.pro.limits.receptionists = 12; });
+    expect(plan(chain, "pro").receptionists).toBe(12);
+  });
+
+  it("gives an additional plan its tier's number unless it sets its own", () => {
+    const file = withPlans({ inherits: extra(), sets: extra({ limits: { receptionists: 20 } }) });
+    expect(plan(file, "inherits").receptionists).toBe(5);
+    expect(plan(file, "sets").receptionists).toBe(20);
+  });
+
+  it("allows 1 to 50 receptionists in a plan", () => {
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 0; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 51; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 2.5; }))).toEqual([expect.stringContaining("plans.pro.limits.receptionists")]);
+    expect(problems(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 50; }))).toEqual([]);
+  });
+
+  it("leaves the number out of the terms hash, so plans with subscribers can change it", () => {
+    const base = termsHash(alloplace(), "pro");
+    expect(termsHash(withPlans({}, (file) => { file.plans.pro.limits.receptionists = 9; }), "pro")).toBe(base);
+    const older = alloplace();
+    delete older.plans.pro.limits.receptionists;
+    expect(termsHash(older, "pro")).toBe(base);
+    expect(planTermsJson(plan(alloplace(), "pro"))).not.toContain("receptionists");
+  });
+});
+
 describe("the terms hash", () => {
   it("ignores names, access, offerEndsAt and sort", () => {
     const base = termsHash(withPlans({ extra: extra() }), "extra");

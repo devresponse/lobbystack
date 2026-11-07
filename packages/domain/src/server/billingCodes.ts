@@ -8,6 +8,7 @@ import {
   BILLING_CODE_ALPHABET,
   billingCodePrefix,
   billingPlanIncluded,
+  builtInBillingPlanLimits,
   discountedCents,
   isBillingCode,
   isUuid,
@@ -96,6 +97,8 @@ export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string
       // bigint arrives as text.
       knowledgeStorageBytes: numberOrNull(first.kb_bytes),
       businessNumbers: numberOrNull(first.numbers),
+      // Null on a row from before migration 0134 filled it: the tier's number then.
+      receptionists: numberOrNull(first.receptionists) ?? builtInBillingPlanLimits[first.tier].includedReceptionists,
     },
   };
 }

@@ -22,7 +22,7 @@ Every plan other than the four standard ones is one more key under `plans`. Its 
 - For a seasonal offer, set `offerEndsAt`; those who took it keep it.
 - To stop offering a plan, remove its entry. Its row is retired, not deleted, so its subscribers keep it.
 
-A plan's code is never reused for other terms. Once someone has subscribed, its terms can't change: put new terms under a new code.
+A plan's code is never reused for other terms. Once someone has subscribed, its terms can't change and its `limits.receptionists` can't go down, directly or through its tier: put new terms or a lower number under a new code. It may include more receptionists.
 
 Nothing reads the file at run time. A deployment that has never applied one shows and enforces the four standard plans its build carries, and sells them only through the `POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID` variables; from the first apply on, its tables decide. After the change is merged and deployed, an operator's platform key writes it into those tables:
 

@@ -15,6 +15,7 @@ import { requestJson } from "@/lib/request-json";
 import { cn } from "@/lib/utils";
 
 import { PageSurface } from "./page-surface";
+import { BusinessPageReceptionists } from "./receptionists/business-page-receptionists";
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button, buttonVariants } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
@@ -122,7 +123,13 @@ export function LivePublicProfileSettingsSurface() {
     <PageSurface title={t("publicPage.title")}>
       {businesses.isLoading || profile.isLoading ? <p className="py-12 text-center text-sm text-muted-foreground">{t("publicPage.loading")}</p> : null}
       {businesses.isError || profile.isError ? <p className="py-12 text-center text-sm text-destructive">{t("publicPage.unavailable")}</p> : null}
-      {businessId && profile.data ? <PublicProfileForm businessId={businessId} key={businessId} view={profile.data} /> : null}
+      {businessId && profile.data ? (
+        <div className="flex flex-col gap-6 pb-12">
+          <PublicProfileForm businessId={businessId} key={businessId} view={profile.data} />
+          {/* Saves as it changes, so it sits apart from the form's Save. */}
+          <BusinessPageReceptionists businessId={businessId} businessLocale={business?.defaultLocale} canEdit={profile.data.canEdit} key={`receptionists-${businessId}`} />
+        </div>
+      ) : null}
     </PageSurface>
   );
 }
@@ -203,7 +210,7 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
   ];
 
   return (
-    <form className="flex flex-col gap-6 pb-12" noValidate onSubmit={submit}>
+    <form className="flex flex-col gap-6" noValidate onSubmit={submit}>
       {readOnly ? <Alert><AlertDescription>{t("publicPage.readOnly")}</AlertDescription></Alert> : null}
 
       <Card>

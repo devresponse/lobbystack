@@ -20,11 +20,21 @@ The website widget puts the receptionist on a business's own website: a chat, a 
 | `TRUSTED_CLIENT_IP_HEADER` | Admin | The header that holds the visitor's real IP, such as `x-real-ip` on Railway or `cf-connecting-ip` behind Cloudflare. Without it, no per-IP limit runs. |
 | `LIVE_PROTOTYPE_ENABLED=true`, `OPENAI_API_KEY` | Admin and worker | Needed for "Say Allo!". |
 | `WEB_CALL_MAX_DURATION_MS` | Admin | Shortens website calls below the 30-minute default. |
-| `LIVE_RECORDED_GREETING=true` | Admin | Opens browser calls, and phone calls, with a recording of the greeting ([calls](calls.md#open-calls-with-a-recorded-greeting)). |
+| `LIVE_RECORDED_GREETING` | Admin | Unset or anything but `false` (since fork PR #139; before, `true`): opens browser calls, and phone calls, with a recording of the greeting ([calls](calls.md#open-calls-with-a-recorded-greeting)). |
 
 Then, in the dashboard, open **Widget** in the menu, create a key, list the websites allowed to use it, set the look (colour, position, greeting) and copy the snippet. A key's **Live chat** setting is off until the business turns it on.
 
 The call button shows only when the business has an active voice number, the business's saved context snapshot names that number, `LIVE_PROTOTYPE_ENABLED=true` and `OPENAI_API_KEY` are set, and the plan has minutes left. Since fork PR #30, claiming or releasing a number refreshes the snapshot. Before it, the button stayed hidden until something else refreshed it.
+
+## Choose the widget's receptionist
+
+Since fork PR #129 a business can have several receptionists. Each widget key names the one that answers its chats and calls: **Receptionist** on the key in **Settings > Website widget**, which a new key sets to the default receptionist unless the form picks another. While that receptionist is paused or archived, the default one answers.
+
+- **On the business's own pages,** the page decides instead. `/profile/<slug>` and `/profile/<slug>/<handle>` sign a token naming their receptionist (`createReceptionistPageToken` in `apps/admin/src/lib/widget-keys.ts`, with a key derived from `WIDGET_SESSION_SECRET`), the page's script tag carries it as `data-receptionist-token`, the loader sends it with the session request as `receptionistToken`, and `/api/widget/session` checks it was signed for this business and this key before it puts the receptionist in the session token. A token that doesn't check out is logged as `widget.receptionist_token_rejected` and the key's receptionist answers.
+- **The chat and the call** answer with that receptionist's view of the business's snapshot, and `/api/widget/config` returns its name (`receptionist`), never what it helps with.
+- **A visitor's chat belongs to its receptionist.** On another receptionist's page, `/api/widget/history` shows no earlier chat and the next message starts one with this receptionist, unless the team has taken the earlier chat over, which stays the visitor's.
+
+The v1 API's widget key fields don't include the receptionist yet ([receptionists](receptionists.md#know-what-visitors-see)).
 
 ## Know what the receptionist says on the website
 

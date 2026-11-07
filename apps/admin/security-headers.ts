@@ -46,7 +46,7 @@ export function embeddableSecurityHeaders(env: Record<string, string | undefined
   };
 }
 
-/** A business's public page, /profile/<slug> (publicProfilePath in @lobbystack/shared). */
+/** A business's public page, /profile/<slug>, or one of its receptionists' pages, /profile/<slug>/<handle> (receptionistPagePath in @lobbystack/shared). */
 export function isPublicProfilePath(pathname: string): boolean {
   return pathname.startsWith("/profile/");
 }
@@ -63,6 +63,20 @@ export function publicProfileSecurityHeaders(env: Record<string, string | undefi
     ...base,
     "Content-Security-Policy": (base["Content-Security-Policy"] ?? "").replace("frame-src 'self' https://challenges.cloudflare.com", "frame-src 'self' https://challenges.cloudflare.com https://www.google.com"),
   };
+}
+
+/** A QR sign's short link, /q/<code> (entryLinkPath in @lobbystack/shared). */
+export function isEntryLinkPath(pathname: string): boolean {
+  return /^\/q\/[^/]+$/.test(pathname);
+}
+
+/**
+ * A QR link only redirects to a business's page, and passes no referrer on to
+ * it. The proxy and next.config.ts set their headers over the route's, so the
+ * policy lives here.
+ */
+export function entryLinkSecurityHeaders(env: Record<string, string | undefined> = process.env): Record<string, string> {
+  return { ...securityHeaders(env), "Referrer-Policy": "no-referrer" };
 }
 
 /**

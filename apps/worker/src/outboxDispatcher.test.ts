@@ -114,6 +114,57 @@ describe("OutboxDispatcher", () => {
     expect(mocks.histogramRecords).toContainEqual({ name: "lobbystack.outbox.publish_duration_ms", attributes: { topic: "notification.dispatch", outcome: "fenced" } });
   });
 
+  describe("snapshot refreshes in one batch", () => {
+    const clinic = "00000000-0000-4000-8000-0000000000c1";
+    const studio = "00000000-0000-4000-8000-0000000000c2";
+    let next = 10;
+    const refresh = (businessId: string, reason: string) => ({ ...row, id: `00000000-0000-4000-8000-0000000000${next++}`, topic: "snapshot.refresh", businessId, aggregateType: "business", dedupeKey: `refresh:${reason}`, payload: { businessId, reason } });
+    const queues = new Map(["critical", "default", "bulk", "maintenance"].map((name) => [name, {} as never]));
+
+    it("queues one rebuild per business and marks the rest published without a job", async () => {
+      // A text entry saved with its audience queues two, AI settings with a language three.
+      const rows = [refresh(clinic, "snippet_created"), refresh(clinic, "knowledge_audience_changed"), refresh(studio, "business_updated"), { ...row, topic: "business.generateSummary", businessId: clinic, dedupeKey: "summary" }, refresh(clinic, "receptionist_updated")];
+      mocks.claimOutboxBatch.mockResolvedValue(rows);
+      mocks.markOutboxPublished.mockResolvedValue(true);
+      const db = {} as Database;
+      await expect(new OutboxDispatcher(db, queues).dispatchOnce()).resolves.toBe(5);
+      expect(mocks.enqueueJob.mock.calls.map(([, input]) => [input.type, input.businessId, input.idempotencyKey])).toEqual([
+        ["snapshot.refresh", clinic, "refresh:snippet_created"],
+        ["snapshot.refresh", studio, "refresh:business_updated"],
+        ["business.generateSummary", clinic, "summary"],
+      ]);
+      expect(mocks.markOutboxPublished.mock.calls.map(([, claimed]) => claimed)).toEqual(rows);
+      expect(mocks.counterAdds.filter((entry) => entry.name === "lobbystack.outbox.coalesced")).toHaveLength(2);
+      expect(mocks.counterAdds.filter((entry) => entry.name === "lobbystack.outbox.published")).toHaveLength(5);
+      expect(mocks.histogramRecords.filter((entry) => entry.name === "lobbystack.outbox.publish_duration_ms").map((entry) => entry.attributes.outcome))
+        .toEqual(["success", "coalesced", "success", "success", "coalesced"]);
+    });
+
+    it("queues the next refresh itself when the business's first one failed to queue", async () => {
+      const rows = [refresh(clinic, "snippet_created"), refresh(clinic, "knowledge_audience_changed")];
+      mocks.claimOutboxBatch.mockResolvedValue(rows);
+      mocks.enqueueJob.mockRejectedValueOnce(new Error("queue unavailable"));
+      mocks.markOutboxPublished.mockResolvedValue(true);
+      mocks.markOutboxFailed.mockResolvedValue(false);
+      const db = {} as Database;
+      await new OutboxDispatcher(db, queues).dispatchOnce();
+      expect(mocks.enqueueJob).toHaveBeenCalledTimes(2);
+      expect(mocks.markOutboxFailed).toHaveBeenCalledWith(db, rows[0], expect.any(Error), expect.any(Date));
+      expect(mocks.markOutboxPublished).toHaveBeenCalledWith(db, rows[1]);
+      expect(mocks.counterAdds.some((entry) => entry.name === "lobbystack.outbox.coalesced")).toBe(false);
+    });
+
+    it("leaves a coalesced row unpublished when another dispatcher holds its claim", async () => {
+      const rows = [refresh(clinic, "snippet_created"), refresh(clinic, "knowledge_audience_changed")];
+      mocks.claimOutboxBatch.mockResolvedValue(rows);
+      mocks.markOutboxPublished.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+      await new OutboxDispatcher({} as Database, queues).dispatchOnce();
+      expect(mocks.enqueueJob).toHaveBeenCalledTimes(1);
+      expect(mocks.counterAdds.some((entry) => entry.name === "lobbystack.outbox.coalesced")).toBe(false);
+      expect(mocks.histogramRecords.filter((entry) => entry.name === "lobbystack.outbox.publish_duration_ms").map((entry) => entry.attributes.outcome)).toEqual(["success", "fenced"]);
+    });
+  });
+
   it("retries polling after a transient database failure", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const abort = new AbortController();

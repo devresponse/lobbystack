@@ -20,6 +20,7 @@ type UseWebVoiceCallOptions = {
   /** Defaults to the app's same-origin session endpoint. */
   endpoint?: string;
   widgetId?: string;
+  /** What the start request adds. Its wait comes before the request's timeout, and a call ended meanwhile starts no session. */
   getStartPayload?: () => Promise<Record<string, string>>;
   /** Extra request headers, such as the widget's session token. */
   getHeaders?: () => Record<string, string>;
@@ -556,6 +557,13 @@ export function useWebVoiceCall({
         stopAttemptResources();
         return;
       }
+      // The payload can take a while, as the dashboard's test call waits for
+      // its greeting's recording, and a call given up meanwhile starts no session.
+      const startPayload = getStartPayload ? await getStartPayload() : {};
+      if (attemptId !== startCallAttemptRef.current) {
+        stopAttemptResources();
+        return;
+      }
 
       const response = await fetchWithTimeout(endpoint, {
         method: "POST",
@@ -564,7 +572,7 @@ export function useWebVoiceCall({
           businessSlug,
           widgetId,
           visitorId,
-          ...(getStartPayload ? await getStartPayload() : {}),
+          ...startPayload,
           sdp: connection.localDescription?.sdp ?? offer.sdp,
           pageUrl: `${window.location.origin}${window.location.pathname}`,
         }),

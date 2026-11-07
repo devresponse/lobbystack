@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   lastLiveCallSequence: vi.fn(async (..._args: unknown[]) => 0),
   extendLiveCallReservation: vi.fn(async (..._args: unknown[]) => 300),
   recordGreeting: vi.fn(async (..._args: unknown[]) => ({ audio: "UklGRg==", tries: 1 })),
+  businessSnapshot: vi.fn(async (..._args: unknown[]): Promise<Record<string, unknown> | null> => null),
 }));
 
 vi.mock("@lobbystack/agent-core", () => ({
@@ -39,6 +40,9 @@ vi.mock("@lobbystack/agent-core", () => ({
   GREETING_RECORDING_TTL_SECONDS: 604_800,
   LIVE_VOICE: "marin",
   greetingRecordingKey: (greeting: string) => `recording:${greeting}`,
+  greetingRecordingFailedKey: (key: string) => `${key}:failed`,
+  greetingRecordingInProgressKey: (key: string) => `${key}:recording`,
+  recordedGreetingEnabled: () => process.env.LIVE_RECORDED_GREETING !== "false",
   recordingMs: () => 2_400,
   recordGreeting: mocks.recordGreeting,
   LiveCallController: class {
@@ -60,11 +64,13 @@ vi.mock("@lobbystack/agent-core", () => ({
 }));
 vi.mock("@lobbystack/domain", async (importOriginal) => ({
   orphanedLiveCallSeconds: (await importOriginal<typeof import("@lobbystack/domain")>()).orphanedLiveCallSeconds,
+  snapshotForReceptionist: (await importOriginal<typeof import("@lobbystack/domain")>()).snapshotForReceptionist,
+  getCachedBusinessSnapshot: mocks.businessSnapshot,
   saveLiveCallTurn: mocks.saveLiveCallTurn,
   lastLiveCallSequence: mocks.lastLiveCallSequence,
   extendLiveCallReservation: mocks.extendLiveCallReservation,
   blockLiveCaller: vi.fn(async () => undefined),
-  getCachedBusinessSnapshot: mocks.snapshot,
+  getCachedReceptionistSnapshot: mocks.snapshot,
   finishLiveCall: mocks.finishLiveCall,
   prepareLiveCallTransfer: mocks.prepareLiveCallTransfer,
   recordLiveCallTransferResult: mocks.recordLiveCallTransferResult,
@@ -115,6 +121,8 @@ afterEach(() => { vi.unstubAllEnvs(); });
 // What a call opens with for the snapshot most tests use: its greeting, then
 // the notice that the call is with an AI and recorded.
 const opening = "Hi You're speaking with an AI assistant, and this call is recorded and transcribed.";
+// The business's default receptionist, which a call names unless another receptionist answered it.
+const frontDesk = "00000000-0000-4000-8000-0000000000a1";
 
 describe("createLiveCallHandler", () => {
   it("opens one sideband when two attaches for a session overlap", async () => {
@@ -164,6 +172,25 @@ describe("createLiveCallHandler", () => {
     await handler.handle(attachRequest({ sessionId: "live_stalled", businessId: "biz_1", callId: "call_1", channel: "voice" }), reply);
     expect(mocks.controllers - before).toBe(1);
     expect(reply.writeHead).toHaveBeenCalledWith(202, expect.anything());
+  });
+
+  // The admin names the receptionist that answers the number or the widget;
+  // the agent works from that receptionist's view of the business.
+  it("works from the view of the receptionist the attach names", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    const view = { businessId: "biz_1", greeting: "Hi", receptionist: { id: kitsilano, name: "Kitsilano", description: "", isDefault: false } };
+    mocks.snapshot.mockResolvedValue(view);
+    const handler = createLiveCallHandler({ domain: { db: {} as never } });
+    await handler.handle(attachRequest({ sessionId: "live_kits", businessId: "biz_1", callId: "call_1", channel: "voice", receptionistId: kitsilano }), response());
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
+    await (mocks.controllers_.at(-1)!.options.setup as Promise<unknown>);
+    expect((mocks.createReceptionistAgent.mock.lastCall![0] as { context: { snapshot: unknown } }).context.snapshot).toBe(view);
+    // An attach that names none answers as the default receptionist.
+    await handler.handle(attachRequest({ sessionId: "live_default", businessId: "biz_1", callId: "call_2", channel: "voice" }), response());
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: undefined });
   });
 
   it("ends a browser session over the sideband it holds, or over a new one", async () => {
@@ -638,6 +665,90 @@ describe("greeting recordings", () => {
   });
 });
 
+describe("recording a test call's opening", () => {
+  const businessId = "00000000-0000-4000-8000-0000000000c1";
+  const second = "00000000-0000-4000-8000-0000000000c2";
+  // Redis without any recording yet.
+  const emptyStore = () => ({ get: vi.fn(async (_key: string): Promise<string | null> => null), set: vi.fn(async (..._args: unknown[]) => "OK"), expire: vi.fn(async () => 0), exists: vi.fn(async () => 0) });
+  const business = {
+    businessId, greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: {},
+    receptionists: [
+      { id: frontDesk, name: "Front desk", description: "", isDefault: true, status: "active", listed: true, order: 0, knowledgeScope: "all", greeting: "Thanks for calling.", voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [] },
+      { id: second, name: "Second desk", description: "", isDefault: false, status: "active", listed: true, order: 1, knowledgeScope: "all", greeting: "Hi, this is the second desk.", voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [] },
+    ],
+  };
+  const greetingRequest = (body: Record<string, unknown>) => attachRequest(body, "/internal/live/greeting");
+
+  function setUp(options: { redis?: boolean } = {}) {
+    const store = options.redis === false ? undefined : emptyStore();
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.stubEnv("INTERNAL_SERVICE_TOKEN", "token");
+    vi.stubEnv("OPENAI_API_KEY", "sk-test");
+    mocks.recordGreeting.mockClear();
+    mocks.businessSnapshot.mockReset().mockResolvedValue(business);
+    return { store, handler: createLiveCallHandler({ domain: { db: {} as never }, ...(store ? { greetingRecordings: store } : {}) }) };
+  }
+
+  it("starts recording the chosen receptionist's opening and answers at once", async () => {
+    const { store, handler } = setUp();
+    let finish: (value: { audio: string; tries: number }) => void = () => undefined;
+    mocks.recordGreeting.mockReturnValueOnce(new Promise((resolve) => { finish = resolve; }));
+    const reply = response();
+    await expect(handler.handle(greetingRequest({ businessId, receptionistId: second }), reply)).resolves.toBe(true);
+    expect(reply.writeHead).toHaveBeenCalledWith(202, expect.anything());
+    expect(reply.end).toHaveBeenCalledWith(JSON.stringify({ recording: true }));
+    await vi.waitFor(() => expect(mocks.recordGreeting).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ greeting: "Hi, this is the second desk.", snapshot: expect.objectContaining({ receptionist: expect.objectContaining({ id: second }) }) }), expect.anything()));
+    expect(store!.set).toHaveBeenCalledWith("recording:Hi, this is the second desk.:recording", "1", "EX", 120, "NX");
+    finish({ audio: "UklGRg==", tries: 1 });
+    await vi.waitFor(() => expect(store!.set).toHaveBeenCalledWith("recording:Hi, this is the second desk.", "UklGRg==", "EX", 604_800));
+    // Without a receptionist, the default one's.
+    await handler.handle(greetingRequest({ businessId }), response());
+    await vi.waitFor(() => expect(mocks.recordGreeting).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ greeting: "Thanks for calling." }), expect.anything()));
+  });
+
+  it("records nothing with LIVE_RECORDED_GREETING=false, without Redis, or for a business it can't load", async () => {
+    const { handler } = setUp();
+    vi.stubEnv("LIVE_RECORDED_GREETING", "false");
+    const off = response();
+    await handler.handle(greetingRequest({ businessId }), off);
+    expect(off.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    vi.stubEnv("LIVE_RECORDED_GREETING", undefined);
+    const withoutRedis = setUp({ redis: false }).handler;
+    const noRedis = response();
+    await withoutRedis.handle(greetingRequest({ businessId }), noRedis);
+    expect(noRedis.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    const missing = response();
+    mocks.businessSnapshot.mockResolvedValueOnce(null);
+    await handler.handle(greetingRequest({ businessId }), missing);
+    expect(missing.end).toHaveBeenCalledWith(JSON.stringify({ recording: false }));
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+  });
+
+  it("refuses a request without a business, with a receptionist that isn't an ID, or without the service token", async () => {
+    const { handler } = setUp();
+    for (const body of [{}, { businessId: "biz_1" }, { businessId, receptionistId: "front desk" }, { businessId, receptionistId: 7 }]) {
+      const reply = response();
+      await handler.handle(greetingRequest(body), reply);
+      expect(reply.writeHead).toHaveBeenCalledWith(400, expect.anything());
+    }
+    const unauthorized = response();
+    await handler.handle(Object.assign(greetingRequest({ businessId }), { headers: { "x-internal-service-token": "wrong" } }), unauthorized);
+    expect(unauthorized.writeHead).toHaveBeenCalledWith(401, expect.anything());
+    expect(mocks.businessSnapshot).not.toHaveBeenCalled();
+  });
+
+  // The drain waits for calls, not recordings, so the dashboard opens its call without waiting.
+  it("records nothing while the worker shuts down", async () => {
+    const { handler } = setUp();
+    await handler.drain(0);
+    const reply = response();
+    await handler.handle(greetingRequest({ businessId }), reply);
+    expect(reply.writeHead).toHaveBeenCalledWith(503, { "content-type": "application/json", connection: "close" });
+    expect(mocks.businessSnapshot).not.toHaveBeenCalled();
+    expect(mocks.recordGreeting).not.toHaveBeenCalled();
+  });
+});
+
 describe("worker shutdown drain", () => {
   const summary = (sessionId: string) => ({ sessionId, durationMs: 1_000, delegations: [], usageConfirmed: true, billedSeconds: 1, lateAttach: false, outputAudio: { deltas: 0, coveredMs: 0, payloadBytes: 0 }, inputAudio: { chunks: 0, coveredMs: 0, loudMs: 0, payloadBytes: 0 } });
 
@@ -736,7 +847,7 @@ describe("worker shutdown drain", () => {
     const handler = createLiveCallHandler({ domain: { db: {} as never }, attachLock: slowLock });
     const before = mocks.controllers;
     const now = Date.now();
-    const recovered = handler.recover({ businessId: "biz_1", callId: "call_drain_recover", sessionId: "live_drain_recover", channel: "voice", intakeOnly: false, startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 0 });
+    const recovered = handler.recover({ businessId: "biz_1", callId: "call_drain_recover", sessionId: "live_drain_recover", channel: "voice", intakeOnly: false, startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 0, receptionistId: frontDesk });
     await handler.drain(0);
     await expect(recovered).resolves.toBe("skipped");
     expect(mocks.controllers - before).toBe(0);
@@ -746,10 +857,10 @@ describe("worker shutdown drain", () => {
 
 describe("recovering a call whose worker died", () => {
   const now = Date.now();
-  // Started two minutes ago with ten minutes reserved; its last turn was saved a minute ago.
+  // Started two minutes ago with ten minutes reserved, answered by the default receptionist; its last turn was saved a minute ago.
   const orphan = (sessionId: string, overrides: Record<string, unknown> = {}) => ({
     businessId: "biz_1", callId: `call_${sessionId}`, sessionId, channel: "voice" as const, conversationId: "conv_1", callerPhone: "+14165550100", intakeOnly: false,
-    startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 7,
+    startedAt: new Date(now - 120_000), reservedSeconds: 600, slicedReservation: true, lastActivityAt: new Date(now - 60_000), lastSequence: 7, receptionistId: frontDesk,
     ...overrides,
   });
 
@@ -887,6 +998,14 @@ describe("recovering a call whose worker died", () => {
     expect(mocks.controllers - before).toBe(0);
     expect(mocks.finishLiveCall).not.toHaveBeenCalled();
     expect(mocks.hangup).not.toHaveBeenCalled();
+  });
+
+  it("re-attaches an orphan as the receptionist that answered it", async () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    await expect(recoveringWorker().recover(orphan("live_orphan_kits", { receptionistId: kitsilano }))).resolves.toBe("attached");
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: kitsilano });
+    await expect(recoveringWorker().recover(orphan("live_orphan_default"))).resolves.toBe("attached");
+    expect(mocks.snapshot).toHaveBeenLastCalledWith(expect.anything(), { businessId: "biz_1", receptionistId: frontDesk });
   });
 
   it("finishes an orphan whose session is gone with its best known length", async () => {
@@ -1231,6 +1350,14 @@ describe("parseAttachRequest", () => {
   it("keeps only the fields the worker trusts", () => {
     expect(parseAttachRequest(JSON.stringify({ sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "web_voice", intakeOnly: "yes", maxDurationMs: -1, resume: "yes" })))
       .toEqual({ sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "web_voice" });
+  });
+
+  it("keeps the receptionist answering only when it is an id", () => {
+    const call = { sessionId: "live_1", businessId: "biz_1", callId: "call_1", channel: "voice" };
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: kitsilano }))).toEqual({ ...call, receptionistId: kitsilano });
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: "kitsilano" }))).toEqual(call);
+    expect(parseAttachRequest(JSON.stringify({ ...call, receptionistId: 7 }))).toEqual(call);
   });
 
   it("marks a retried delivery's attach as a resume", () => {

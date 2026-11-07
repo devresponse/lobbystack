@@ -4,7 +4,7 @@ import { countKnowledgeTokens, type KnowledgePassage } from "../../knowledgeRank
 import { knowledgeToolResult, matchKnowledgeSnippets, type KnowledgeToolResult } from "../../receptionistKnowledge";
 import type { DomainContext } from "../context";
 import { traceKnowledgeSearch, type KnowledgeSearchTrace } from "../knowledge";
-import { getCachedBusinessSnapshot } from "../snapshotCache";
+import { getCachedReceptionistSnapshot } from "../snapshotCache";
 import type { ApiCaller } from "./operations";
 
 type RankedCandidate = KnowledgeSearchTrace["candidates"][number];
@@ -29,7 +29,9 @@ function passageFields(passage: KnowledgePassage, candidate: RankedCandidate) {
 /**
  * POST /knowledge/search: the receptionist's knowledge search, run as a call or chat
  * runs it (as the worker, over the business's active, indexed sources), with the
- * snapshot a new call or chat loads for its text entries and FAQs. callAnswer turns the
+ * snapshot a new call or chat loads for its text entries and FAQs. It searches as the
+ * default receptionist, with that receptionist's audiences and its view of the
+ * snapshot, as the v1 /receptionist endpoint describes it. callAnswer turns the
  * tool's result into what a phone call's voice model hears: agent-core's
  * knowledgeCallAnswer, which this package can't import.
  */
@@ -40,7 +42,7 @@ export async function searchKnowledgeForApi(
   options: { callAnswer: (query: string, result: KnowledgeToolResult) => string | undefined },
 ): Promise<ApiKnowledgeSearchResult> {
   const [snapshot, { result, trace }] = await Promise.all([
-    getCachedBusinessSnapshot(context, { businessId: caller.businessId }),
+    getCachedReceptionistSnapshot(context, { businessId: caller.businessId }),
     traceKnowledgeSearch(context, { businessId: caller.businessId, query: input.query, source: "api" }),
   ]);
   const receptionistResult = knowledgeToolResult(result, matchKnowledgeSnippets(snapshot?.knowledgeSnippets, input.query));

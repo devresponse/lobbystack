@@ -4,6 +4,7 @@ import {
   bigint,
   boolean,
   char,
+  date,
   doublePrecision,
   index,
   integer,
@@ -27,6 +28,12 @@ const timestamps = {
 const legacyId = {
   legacyConvexId: text("legacy_convex_id"),
 };
+
+// The receptionist that answered a call, conversation or inbox item: always
+// set (migration 0143). An insert that leaves it out sends DEFAULT, and the
+// database gives the row its business's default receptionist
+// (app.fill_default_receptionist).
+const answeringReceptionistId = () => uuid("receptionist_id").notNull().$defaultFn(() => sql`default`);
 
 const vector = customType<{ data: number[]; driverData: string }>({
   dataType() {
@@ -156,6 +163,19 @@ export const businesses = pgTable(
     // When and by whom an owner canceled the business (status "canceled"), which closes it to its team and deletes nothing. See migration 0130.
     canceledAt: timestamp("canceled_at", { withTimezone: true }),
     canceledByUserId: uuid("canceled_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    // Settings every receptionist shares (migration 0133): the business
+    // summary, the AI and recording notice and the appointment change rules.
+    summary: text("summary").default("").notNull(),
+    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
+    // from the articles for everyone) or "operator". Generation never replaces
+    // an operator's summary.
+    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
+    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
+    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
+    // Whether calls say, after the greeting, that the caller is speaking with
+    // an AI and the call is recorded and transcribed.
+    recordingNotice: boolean("recording_notice").default(true).notNull(),
+    appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     ...legacyId,
     ...timestamps,
   },
@@ -349,6 +369,9 @@ export const phoneNumbers = pgTable(
     smsWebhookTargetUrl: text("sms_webhook_target_url"),
     smsWebhookLastSyncedAt: timestamp("sms_webhook_last_synced_at", { withTimezone: true }),
     smsWebhookLastError: text("sms_webhook_last_error"),
+    // Who answers the number; null means the default receptionist. A paused or
+    // archived one's calls go to the default (app.effective_receptionist).
+    receptionistId: uuid("receptionist_id"),
     ...legacyId,
     ...timestamps,
   },
@@ -356,6 +379,7 @@ export const phoneNumbers = pgTable(
     uniqueIndex("phone_numbers_e164_unreclaimed_unique").on(table.e164).where(sql`${table.status} <> 'reclaimed'`),
     uniqueIndex("phone_numbers_provider_id_unique").on(table.providerPhoneId),
     index("phone_numbers_business_idx").on(table.businessId),
+    index("phone_numbers_business_receptionist_idx").on(table.businessId, table.receptionistId),
   ],
 );
 
@@ -374,27 +398,39 @@ export const receptionistProfiles = pgTable(
     businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
     greeting: text("greeting").notNull(),
     tone: text("tone").notNull(),
-    summary: text("summary").notNull(),
-    // Who wrote the summary: "placeholder" (sign-up default), "generated" (AI,
-    // from the knowledge sources) or "operator". Generation never replaces an
-    // operator's summary.
-    summarySource: varchar("summary_source", { length: 16 }).$type<"placeholder" | "generated" | "operator">().default("placeholder").notNull(),
-    summaryFingerprint: varchar("summary_fingerprint", { length: 64 }),
-    summaryGeneratedAt: timestamp("summary_generated_at", { withTimezone: true }),
     bookingPolicy: text("booking_policy").notNull(),
     voiceInstructions: text("voice_instructions"),
     smsInstructions: text("sms_instructions"),
     chatInstructions: text("chat_instructions"),
     transferMode: varchar("transfer_mode", { length: 32 }).notNull(),
     transferNumber: text("transfer_number"),
-    appointmentChangePolicy: jsonb("appointment_change_policy").$type<Record<string, unknown>>(),
     bookingMode: varchar("booking_mode", { length: 16 }).default("instant").notNull(),
-    // Whether calls say, after the greeting, that the caller is speaking with
-    // an AI and the call is recorded and transcribed. See migration 0118.
-    recordingNotice: boolean("recording_notice").default(true).notNull(),
+    // One row per receptionist since migration 0133. The settings every
+    // receptionist shares are on businesses, and a new business gets its
+    // default receptionist from the database (migration 0143).
+    name: varchar("name", { length: 80 }).default("Front desk").notNull(),
+    // "What it helps with": the picker shows it, and the other receptionists use it to send visitors here.
+    description: varchar("description", { length: 160 }).default("").notNull(),
+    // The page address /profile/<slug>/<handle>; null on the default receptionist.
+    handle: varchar("handle", { length: 60 }),
+    // Exactly one per business. A row inserted without saying is the default.
+    isDefault: boolean("is_default").default(true).notNull(),
+    knowledgeScope: varchar("knowledge_scope", { length: 16 }).$type<"all" | "audience">().default("all").notNull(),
+    // Shown in the business page's picker.
+    listed: boolean("listed").default(true).notNull(),
+    sortOrder: integer("sort_order").default(0).notNull(),
+    // The language its calls start in; null uses the business's.
+    locale: varchar("locale", { length: 8 }),
+    status: varchar("status", { length: 16 }).$type<"active" | "paused">().default("active").notNull(),
+    archivedAt: timestamp("archived_at", { withTimezone: true }),
     ...timestamps,
   },
-  (table) => [uniqueIndex("receptionist_profiles_business_unique").on(table.businessId)],
+  (table) => [
+    uniqueIndex("receptionist_profiles_business_default_unique").on(table.businessId).where(sql`${table.isDefault}`),
+    uniqueIndex("receptionist_profiles_business_handle_unique").on(table.businessId, table.handle).where(sql`${table.handle} is not null and ${table.archivedAt} is null`),
+    uniqueIndex("receptionist_profiles_business_id_unique").on(table.businessId, table.id),
+    index("receptionist_profiles_business_order_idx").on(table.businessId, table.sortOrder, table.name),
+  ],
 );
 
 export const contacts = pgTable(
@@ -448,11 +484,14 @@ export const widgetKeys = pgTable(
     allowedOrigins: jsonb("allowed_origins").$type<string[]>().notNull().default([]),
     config: jsonb("config").$type<Record<string, unknown>>().notNull().default({}),
     lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    // Who answers the widget; null means the default receptionist.
+    receptionistId: uuid("receptionist_id"),
     ...timestamps,
   },
   (table) => [
     uniqueIndex("widget_keys_key_hash_unique").on(table.keyHash),
     index("widget_keys_business_created_idx").on(table.businessId, table.createdAt),
+    index("widget_keys_business_receptionist_idx").on(table.businessId, table.receptionistId),
   ],
 );
 
@@ -479,6 +518,44 @@ export const businessPublicProfiles = pgTable("business_public_profiles", {
   widgetKeyId: uuid("widget_key_id").references(() => widgetKeys.id, { onDelete: "set null" }),
   ...timestamps,
 });
+
+// QR short links, /q/<code> (migration 0140). Each opens one receptionist's
+// page; a paused link, or one whose receptionist is paused or archived, opens
+// the default receptionist's, so a printed sign always reaches someone.
+export const entryLinks = pgTable(
+  "entry_links",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    receptionistId: uuid("receptionist_id").notNull(),
+    code: varchar("code", { length: 12 }).notNull(),
+    label: varchar("label", { length: 80 }).default("").notNull(),
+    status: varchar("status", { length: 16 }).$type<"active" | "paused">().default("active").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    ...timestamps,
+  },
+  (table) => [
+    uniqueIndex("entry_links_code_unique").on(table.code),
+    uniqueIndex("entry_links_business_id_unique").on(table.businessId, table.id),
+    index("entry_links_business_created_idx").on(table.businessId, table.createdAt.desc()),
+    index("entry_links_business_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
+);
+
+// Scans of each entry link per UTC day. Nothing about the visitor; kept 13 months.
+export const entryLinkDailyScans = pgTable(
+  "entry_link_daily_scans",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    entryLinkId: uuid("entry_link_id").notNull(),
+    day: date("day", { mode: "string" }).notNull(),
+    scans: integer("scans").default(0).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.entryLinkId, table.day] }),
+    index("entry_link_daily_scans_business_day_idx").on(table.businessId, table.day),
+  ],
+);
 
 export const widgetVisitors = pgTable(
   "widget_visitors",
@@ -539,11 +616,18 @@ export const conversations = pgTable(
     summary: text("summary"),
     currentIntent: text("current_intent"),
     locale: varchar("locale", { length: 8 }),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("conversations_business_status_idx").on(table.businessId, table.status), index("conversations_contact_idx").on(table.businessId, table.contactId), index("conversations_business_widget_visitor_idx").on(table.businessId, table.widgetVisitorId)],
+  (table) => [
+    index("conversations_business_status_idx").on(table.businessId, table.status),
+    index("conversations_contact_idx").on(table.businessId, table.contactId),
+    index("conversations_business_widget_visitor_idx").on(table.businessId, table.widgetVisitorId),
+    index("conversations_business_receptionist_updated_idx").on(table.businessId, table.receptionistId, table.updatedAt.desc()),
+  ],
 );
 
 export const conversationSessions = pgTable(
@@ -637,12 +721,15 @@ export const calls = pgTable(
     // Set when an owner or admin archives the call, which hides it from the
     // Calls list and Home's recent calls. Nothing is deleted.
     archivedAt: timestamp("archived_at", { withTimezone: true }),
+    // The receptionist that answered. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
   (table) => [
     uniqueIndex("calls_provider_call_unique").on(table.provider, table.providerCallId),
+    index("calls_business_receptionist_started_idx").on(table.businessId, table.receptionistId, table.startedAt.desc()),
     uniqueIndex("calls_gateway_session_unique").on(table.gatewaySessionId),
     index("calls_business_started_idx").on(table.businessId, table.startedAt),
     index("calls_business_recording_idx").on(table.businessId, table.recordingObjectId).where(sql`${table.recordingObjectId} is not null`),
@@ -663,6 +750,8 @@ export const inboxItems = pgTable(
     contentRetentionStatus: varchar("content_retention_status", { length: 32 }).default("active").notNull(),
     contentExpiresAt: timestamp("content_expires_at", { withTimezone: true }),
     metadata: jsonb("metadata").$type<Record<string, unknown>>(),
+    // The receptionist whose call or chat made the item. An insert may leave it out for the default one.
+    receptionistId: answeringReceptionistId(),
     ...legacyId,
     ...timestamps,
   },
@@ -810,15 +899,27 @@ export const knowledgeDocuments = pgTable(
     sourceUrl: text("source_url"),
     storageObjectId: uuid("storage_object_id"),
     mimeType: varchar("mime_type", { length: 255 }),
-    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    status: varchar("status", { length: 32 }).$type<"pending" | "processing" | "indexed" | "error" | "cancelled">().default("pending").notNull(),
     processingProgress: integer("processing_progress").default(0).notNull(),
     contentHash: varchar("content_hash", { length: 128 }),
     error: text("error"),
+    // "everyone", or "chosen": only the receptionists in knowledge_document_receptionists
+    // (and those that see every article) use it. Migration 0136.
+    audience: varchar("audience", { length: 16 }).$type<"everyone" | "chosen">().default("everyone").notNull(),
     revision: integer("revision").default(0).notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("knowledge_documents_business_status_idx").on(table.businessId, table.status), index("knowledge_documents_hash_idx").on(table.businessId, table.contentHash), uniqueIndex("knowledge_documents_business_url_unique").on(table.businessId, table.sourceUrl), index("knowledge_documents_title_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.title})`)],
+  (table) => [
+    index("knowledge_documents_business_status_idx").on(table.businessId, table.status),
+    index("knowledge_documents_hash_idx").on(table.businessId, table.contentHash),
+    uniqueIndex("knowledge_documents_business_url_unique").on(table.businessId, table.sourceUrl),
+    index("knowledge_documents_title_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.title})`),
+    uniqueIndex("knowledge_documents_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's documents (migration 0141).
+    index("knowledge_documents_business_ranked_idx").on(table.businessId, table.updatedAt.desc(), table.id).where(sql`${table.active} and ${table.status} = 'indexed'`),
+  ],
 );
 
 export const knowledgeChunks = pgTable(
@@ -832,7 +933,8 @@ export const knowledgeChunks = pgTable(
     contentHash: varchar("content_hash", { length: 128 }).notNull(),
     embedding: vector("embedding"),
     embeddingFingerprint: varchar("embedding_fingerprint", { length: 64 }),
-    embeddingStatus: varchar("embedding_status", { length: 16 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    embeddingStatus: varchar("embedding_status", { length: 16 }).$type<"pending" | "completed" | "failed">().default("pending").notNull(),
     embeddingError: text("embedding_error"),
     tokenCount: integer("token_count"),
     ...timestamps,
@@ -850,10 +952,74 @@ export const knowledgeSnippets = pgTable(
     tags: jsonb("tags").$type<string[]>().default([]).notNull(),
     priority: integer("priority").default(0).notNull(),
     active: boolean("active").default(true).notNull(),
+    // "everyone", or "chosen": see knowledge_snippet_receptionists. Migration 0136.
+    audience: varchar("audience", { length: 16 }).$type<"everyone" | "chosen">().default("everyone").notNull(),
     ...legacyId,
     ...timestamps,
   },
-  (table) => [index("knowledge_snippets_business_active_idx").on(table.businessId, table.active)],
+  (table) => [
+    index("knowledge_snippets_business_active_idx").on(table.businessId, table.active),
+    uniqueIndex("knowledge_snippets_business_id_unique").on(table.businessId, table.id),
+    // The snapshot's ranking of each receptionist's text entries (migration 0142).
+    index("knowledge_snippets_business_ranked_idx").on(table.businessId, table.priority.desc(), table.updatedAt.desc(), table.id).where(sql`${table.active}`),
+  ],
+);
+
+// Several receptionists per business (migrations 0136, 0137, 0140). Each row
+// names a receptionist of its own business: the composite foreign keys to
+// receptionist_profiles (business_id, id) live in the SQL migrations.
+
+// A website rule: pages imported under a path of a website source are for the
+// chosen receptionist, added after every crawl.
+export const knowledgeWebsiteRules = pgTable(
+  "knowledge_website_rules",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    rootDocumentId: uuid("root_document_id").notNull(),
+    // Starts and ends with "/", such as "/menu/".
+    pathPrefix: varchar("path_prefix", { length: 300 }).notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("knowledge_website_rules_unique").on(table.rootDocumentId, table.pathPrefix, table.receptionistId),
+    uniqueIndex("knowledge_website_rules_business_id_unique").on(table.businessId, table.id),
+    index("knowledge_website_rules_business_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
+);
+
+// Who a chosen document is for. A row a website rule added names the rule, and goes with it.
+export const knowledgeDocumentReceptionists = pgTable(
+  "knowledge_document_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    documentId: uuid("document_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    websiteRuleId: uuid("website_rule_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.documentId, table.receptionistId] }),
+    index("knowledge_document_receptionists_receptionist_idx").on(table.businessId, table.receptionistId),
+    index("knowledge_document_receptionists_rule_idx").on(table.businessId, table.websiteRuleId).where(sql`${table.websiteRuleId} is not null`),
+  ],
+);
+
+// Who a chosen text entry is for.
+export const knowledgeSnippetReceptionists = pgTable(
+  "knowledge_snippet_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    snippetId: uuid("snippet_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.snippetId, table.receptionistId] }),
+    index("knowledge_snippet_receptionists_receptionist_idx").on(table.businessId, table.receptionistId),
+  ],
 );
 
 // Questions the receptionist found no knowledge for (migration 0131). The same
@@ -883,6 +1049,24 @@ export const unansweredQuestions = pgTable(
     uniqueIndex("unanswered_questions_business_question_unique").on(table.businessId, table.normalizedQuestion).where(sql`${table.status} in ('open', 'dismissed')`),
     index("unanswered_questions_business_status_idx").on(table.businessId, table.status, table.timesAsked.desc(), table.lastAskedAt.desc()),
     index("unanswered_questions_business_expiry_idx").on(table.businessId, table.contentExpiresAt).where(sql`${table.contentExpiresAt} is not null`),
+    uniqueIndex("unanswered_questions_business_id_unique").on(table.businessId, table.id),
+  ],
+);
+
+// Which receptionists heard each unanswered question (migration 0137). The
+// question row keeps the one answer; these rows show who asked and filter the list.
+export const unansweredQuestionReceptionists = pgTable(
+  "unanswered_question_receptionists",
+  {
+    businessId: uuid("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+    questionId: uuid("question_id").notNull(),
+    receptionistId: uuid("receptionist_id").notNull(),
+    timesAsked: integer("times_asked").default(1).notNull(),
+    lastAskedAt: timestamp("last_asked_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.questionId, table.receptionistId] }),
+    index("unanswered_question_receptionists_receptionist_idx").on(table.businessId, table.receptionistId, table.lastAskedAt.desc()),
   ],
 );
 
@@ -1282,6 +1466,8 @@ export const billingPlans = pgTable(
     kbBytes: bigint("kb_bytes", { mode: "number" }),
     /** Business phone numbers included. */
     numbers: smallint("numbers"),
+    /** Receptionists included, the default one too; null on custom plans, which get the deployment's cap. Not part of terms_hash. */
+    receptionists: smallint("receptionists"),
     /** Overage cents per voice minute; null when overage isn't billed at fixed rates. */
     voiceRate: integer("voice_rate"),
     /** Overage cents per alert SMS segment. */
@@ -2079,6 +2265,8 @@ export const allTenantTables = [
   contacts,
   widgetKeys,
   businessPublicProfiles,
+  entryLinks,
+  entryLinkDailyScans,
   widgetVisitors,
   smsConsentEvents,
   conversations,
@@ -2093,7 +2281,11 @@ export const allTenantTables = [
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  knowledgeWebsiteRules,
+  knowledgeDocumentReceptionists,
+  knowledgeSnippetReceptionists,
   unansweredQuestions,
+  unansweredQuestionReceptionists,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,
@@ -2150,6 +2342,8 @@ export const schema = {
   contacts,
   widgetKeys,
   businessPublicProfiles,
+  entryLinks,
+  entryLinkDailyScans,
   widgetVisitors,
   smsConsentEvents,
   conversations,
@@ -2164,7 +2358,11 @@ export const schema = {
   knowledgeDocuments,
   knowledgeChunks,
   knowledgeSnippets,
+  knowledgeWebsiteRules,
+  knowledgeDocumentReceptionists,
+  knowledgeSnippetReceptionists,
   unansweredQuestions,
+  unansweredQuestionReceptionists,
   agentRules,
   websiteIngestionJobs,
   businessContextSnapshots,

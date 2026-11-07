@@ -118,9 +118,10 @@ import { completeUploadInTransaction, insertPendingUploadInTransaction, planUplo
 import { expireAbandonedNumberClaimsInTransaction, lockBusinessNumberClaims, NumberSelectionError, numberMarketInTransaction, offerBusinessNumbers, readNumberOffer, reserveApiNumberClaimInTransaction, type NumberInventoryProvider, type NumberOffer, type NumberSelection, type NumberSelectionRefusal } from "../phoneNumbers";
 import { getBusinessPublicProfileSettings, PUBLIC_PROFILE_WIDGET_UNAVAILABLE, savePublicProfileInTransaction } from "../publicProfiles";
 import { bookingFailureReason, candidateStartTimes, unavailableReasonOf } from "../receptionistActions";
+import { isUniqueViolation } from "../requestHelpers";
 import { isSharedSmsSender, resolveSmsSender } from "../smsSender";
 import { loadBillingContext } from "../usage";
-import { defaultReceptionistProfile, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch } from "../receptionistProfile";
+import { loadReceptionistView, saveReceptionistProfileInTransaction, type ReceptionistProfilePatch, type ReceptionistView } from "../receptionistProfile";
 import { deleteAgentRuleInTransaction, insertAgentRuleInTransaction, listAgentRulesInTransaction, lockAgentRulesInTransaction, reorderAgentRulesInTransaction, updateAgentRuleInTransaction } from "../rules";
 import { insertWidgetKeyInTransaction, updateWidgetKeyInTransaction, type WidgetKeyPatch } from "../widgetKeys";
 import { ianaTimeZone, insertBusinessInTransaction, insertInvitationInTransaction, invitationUrl, isSingleEmailAddress, lockBusinessTeam, removeMemberInTransaction, revokeInvitationInTransaction, updateBusinessInTransaction, updateMemberRoleInTransaction } from "../tenancy";
@@ -264,11 +265,6 @@ function apiChange(caller: ApiCaller) {
   return { source: "api" as const, audit: callerAudit(caller) };
 }
 
-function isUniqueViolation(error: unknown): boolean {
-  const cause = typeof error === "object" && error !== null && "cause" in error ? (error as { cause: unknown }).cause : undefined;
-  return [error, cause].some((value) => typeof value === "object" && value !== null && "code" in value && (value as { code: unknown }).code === "23505");
-}
-
 function assertTimeZone(value: string, field: string): void {
   if (!ianaTimeZone(value)) {
     throw invalidRequest(`${field} is not a valid IANA time zone.`, [{ path: field, message: "Use an IANA time zone such as America/Toronto." }]);
@@ -316,7 +312,7 @@ export async function updateBusinessForApi(context: DomainContext, caller: ApiCa
   const callEmails = { ...(input.call_transcript_recipients !== undefined ? { callTranscriptRecipients: input.call_transcript_recipients } : {}), ...(input.call_transcript_content !== undefined ? { callTranscriptContent: input.call_transcript_content } : {}) };
   if (!Object.keys(fields).length && input.hours === undefined && input.ai_traces_enabled === undefined && !Object.keys(callEmails).length) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields });
+    if (Object.keys(fields).length) await updateBusinessInTransaction(tx, { businessId: caller.businessId, ...fields, audit: callerAudit(caller) });
     // Read when each AI turn finishes, so no snapshot refresh is needed.
     if (input.ai_traces_enabled !== undefined) await tx.update(businesses).set({ aiTracesEnabled: input.ai_traces_enabled, updatedAt: new Date() }).where(eq(businesses.id, caller.businessId));
     // Read when each call's email is queued and again when it's sent.
@@ -677,7 +673,7 @@ const onboardingHints: Record<ApiOnboardingItem, string> = {
 async function loadOnboarding(tx: DatabaseTransaction, businessId: string): Promise<ApiOnboarding> {
   const [business] = await tx.select({ name: businesses.name, timezone: businesses.timezone, stage: businesses.onboardingStage }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  const [profile] = await tx.select({ greeting: receptionistProfiles.greeting }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   const [indexed] = await tx.select({ count: count() }).from(knowledgeDocuments).where(and(eq(knowledgeDocuments.businessId, businessId), eq(knowledgeDocuments.status, "indexed")));
   const [entries] = await tx.select({ count: count() }).from(knowledgeSnippets).where(and(eq(knowledgeSnippets.businessId, businessId), eq(knowledgeSnippets.active, true)));
   const { steps } = await loadSetupGuideInTransaction(tx, businessId);
@@ -1286,17 +1282,20 @@ const receptionistApiFields: Record<keyof ReceptionistProfilePatch, keyof ApiRec
   recordingNotice: "recording_notice",
 };
 
-/** The business's receptionist row, or the defaults it would be saved with when it has none yet. */
-async function loadReceptionistState(tx: DatabaseTransaction, businessId: string, lock: boolean) {
-  const [business] = await tx.select({ name: businesses.name, updatedAt: businesses.updatedAt }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  if (!business) throw notFound("Business");
-  const query = tx.select().from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
-  const [profile] = lock ? await query.for("update") : await query;
-  return { business, profile: profile ?? null, shown: profile ?? { ...defaultReceptionistProfile(business.name), updatedAt: business.updatedAt } };
+/**
+ * The business's default receptionist, which the v1 receptionist resource is,
+ * with the settings every receptionist shares. Every business has one from
+ * the moment it exists (migration 0143), so none means the business is out of
+ * sight.
+ */
+async function loadDefaultReceptionist(tx: DatabaseTransaction, businessId: string, lock: boolean): Promise<ReceptionistView> {
+  const receptionist = await loadReceptionistView(tx, { businessId, lock });
+  if (!receptionist) throw notFound("Business");
+  return receptionist;
 }
 
 export async function getReceptionistForApi(context: DomainContext, caller: ApiCaller): Promise<ApiReceptionist> {
-  return await inBusiness(context, caller, async (tx) => serializeReceptionist((await loadReceptionistState(tx, caller.businessId, false)).shown));
+  return await inBusiness(context, caller, async (tx) => serializeReceptionist(await loadDefaultReceptionist(tx, caller.businessId, false)));
 }
 
 /**
@@ -1308,7 +1307,7 @@ export async function getReceptionistForApi(context: DomainContext, caller: ApiC
 export async function updateReceptionistForApi(context: DomainContext, caller: ApiCaller, input: ApiReceptionistUpdate): Promise<ApiReceptionist> {
   if (Object.values(input).every((value) => value === undefined)) throw invalidRequest("Send at least one field to update.");
   return await inBusiness(context, caller, async (tx) => {
-    const { business, profile: current, shown } = await loadReceptionistState(tx, caller.businessId, true);
+    const current = await loadDefaultReceptionist(tx, caller.businessId, true);
     const policy = input.appointment_change_policy;
     const requested: ReceptionistProfilePatch = {
       ...(input.greeting !== undefined ? { greeting: input.greeting } : {}),
@@ -1325,15 +1324,14 @@ export async function updateReceptionistForApi(context: DomainContext, caller: A
       ...(policy ? { appointmentChangePolicy: { enabled: policy.enabled, allowCancel: policy.allow_cancel, allowReschedule: policy.allow_reschedule, verificationMode: policy.verification_mode } } : {}),
     };
     const unchanged = (field: keyof ReceptionistProfilePatch): boolean => {
-      if (!current) return false;
       if (field === "summary") return requested.summary === current.summary && current.summarySource === "operator";
       if (field === "appointmentChangePolicy") return JSON.stringify(requested.appointmentChangePolicy) === JSON.stringify(normalizeAppointmentChangePolicy(current.appointmentChangePolicy));
       return requested[field] === current[field];
     };
     const patch = Object.fromEntries(Object.entries(requested).filter(([field]) => !unchanged(field as keyof ReceptionistProfilePatch))) as ReceptionistProfilePatch;
     const regenerateSummary = input.regenerate_summary === true;
-    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(shown);
-    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, businessName: business.name, patch, regenerateSummary });
+    if (!Object.keys(patch).length && !regenerateSummary) return serializeReceptionist(current);
+    const profile = await saveReceptionistProfileInTransaction(tx, { businessId: caller.businessId, patch, regenerateSummary });
     if (!profile) throw new Error("The receptionist settings could not be saved.");
     const fields = [...(Object.keys(patch) as Array<keyof ReceptionistProfilePatch>).map((field) => receptionistApiFields[field]), ...(regenerateSummary ? ["regenerate_summary"] : [])];
     await audit(tx, caller, { eventType: "api.receptionist.updated", entityType: "receptionist_profile", entityId: profile.id, payload: { fields } });
@@ -1742,7 +1740,8 @@ export async function getAppointmentForApi(context: DomainContext, caller: ApiCa
 async function bookingContext(tx: DatabaseTransaction, businessId: string) {
   const [business] = await tx.select({ timezone: businesses.timezone }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   if (!business) throw notFound("Business");
-  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  // The API books as the default receptionist does.
+  const [profile] = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   return { timezone: business.timezone, bookingMode: normalizeBookingMode(profile?.bookingMode) };
 }
 

@@ -63,7 +63,7 @@ describe("main upgrade dialog", () => {
     const plans: BillingPlanList = builtInBillingPlanList();
     plans.currency = "cad";
     const starter = plans.plans.find(plan => plan.slug === "starter")!;
-    starter.included = { ...starter.included, voiceSeconds: 12_000, businessNumbers: 2, alertSmsSegments: 75 };
+    starter.included = { ...starter.included, voiceSeconds: 12_000, businessNumbers: 2, alertSmsSegments: 75, receptionists: 2 };
     starter.overageRates = { ...starter.overageRates, voiceMinuteCents: 25 };
     starter.prices = [{ interval: "monthly", currency: "cad", amountCents: 3500, monthlyAmountCents: 3500, checkoutAvailable: true }, { interval: "annual", currency: "cad", amountCents: 31_500, monthlyAmountCents: 2600, checkoutAvailable: true }];
     setup({ plans, billingInterval: "monthly" });
@@ -74,6 +74,11 @@ describe("main upgrade dialog", () => {
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.starter.highlights.voiceMinutes", { count: 200, rate: "CA$0.25" });
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.starter.highlights.dedicatedNumber", { count: 2 });
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.starter.highlights.phoneNumber", { count: 75 });
+    // Each card says how many receptionists its plan includes; Enterprise's are custom.
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.free_cloud.highlights.receptionists", { count: 1 });
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.starter.highlights.receptionists", { count: 2 });
+    expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.plans.pro.highlights.receptionists", { count: 5 });
+    expect(screen.getByText("billing.upgradeDialog.plans.enterprise.highlights.customReceptionists")).toBeTruthy();
     // Starter saves 25% a year and Pro 20%, so the badge promises the 20% every plan gets.
     expect(translate).toHaveBeenCalledWith("billing.upgradeDialog.annualDiscount", { percent: 20 });
     cleanup();

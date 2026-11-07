@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { APIError } from "openai";
 
 import { buildBrowserSessionConfig } from "@lobbystack/agent-core/live/session";
-import { finishLiveCall, getWebVoiceBillingAllowance, recordAiTrace, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, startLiveWebCall } from "@lobbystack/domain";
+import { finishLiveCall, getWebVoiceBillingAllowance, recordAiTrace, recordProspectDemoCallError, recordProspectDemoCallStarted, recordVoiceSnapshotLoaded, snapshotForReceptionist, startLiveWebCall } from "@lobbystack/domain";
 import type { BusinessContextSnapshot } from "@lobbystack/shared";
 import { addToCallContext, logEvent, withCallContext } from "@lobbystack/telemetry/node";
 import { asApiResponse, readJson } from "@/lib/api-helpers";
@@ -30,7 +30,7 @@ function parse(body: unknown): LiveWebCallRequest | undefined {
   const sdp = typeof value.sdp === "string" && value.sdp.trim() && value.sdp.length <= MAX_SDP_BYTES ? value.sdp : undefined;
   const widgetId = text("widgetId", 128);
   if (!sdp || !widgetId || !(LIVE_WEB_CALL_WIDGET_IDS as readonly string[]).includes(widgetId)) return undefined;
-  const optional = { businessSlug: text("businessSlug", 128), visitorId: text("visitorId", 128), pageUrl: text("pageUrl"), prospectDemoToken: text("prospectDemoToken", 512) };
+  const optional = { businessSlug: text("businessSlug", 128), visitorId: text("visitorId", 128), pageUrl: text("pageUrl"), prospectDemoToken: text("prospectDemoToken", 512), receptionistId: text("receptionistId", 64) };
   return { sdp, widgetId, ...Object.fromEntries(Object.entries(optional).filter(([, entry]) => entry !== undefined)) };
 }
 
@@ -117,13 +117,16 @@ async function startBrowserCall(request: Request) {
     // The rate limit shields the database, so only allowed callers reach it.
     // The caller hears nothing until this request returns, so these two
     // independent reads run together.
-    const [billing, snapshot] = await Promise.all([
+    const [billing, stored] = await Promise.all([
       access.prospectDemoId ? undefined : getWebVoiceBillingAllowance(domain, { businessId: access.businessId, ...(maxDurationMs ? { maxDurationMs } : {}) }),
       loadValidBusinessSnapshot(access.businessId) as Promise<BusinessContextSnapshot | null>,
     ]);
     timing.mark("checks");
     if (billing && !billing.allowed) return denied(402, billing.errorCode ?? "voice_limit_reached", cors);
-    if (!snapshot) return denied(409, "snapshot_missing", cors);
+    if (!stored) return denied(409, "snapshot_missing", cors);
+    // The receptionist the call is for answers with its own view, or the default one for a paused or archived one.
+    const snapshot = snapshotForReceptionist(stored, access.receptionistId);
+    const receptionistId = snapshot.receptionist?.id;
     // The widget offers voice only to businesses with a phone number.
     if (access.widgetId === "lobbystack-widget" && !snapshot.contactChannels?.phoneNumber) return denied(403, "voice_unavailable", cors);
     // Telemetry only; the call doesn't wait for it.
@@ -153,6 +156,7 @@ async function startBrowserCall(request: Request) {
         // Prospect demos keep no page URL.
         ...(body.pageUrl && !access.prospectDemoId ? { originUrl: body.pageUrl } : {}),
         ...(request.headers.get("user-agent") ? { userAgent: request.headers.get("user-agent")!.slice(0, 512) } : {}),
+        ...(receptionistId ? { receptionistId } : {}),
       });
       callId = call.callId;
       addToCallContext({ callId });
@@ -170,6 +174,7 @@ async function startBrowserCall(request: Request) {
           ...(call.maxDurationMs ? { maxDurationMs: call.maxDurationMs } : {}),
           ...(access.prospectDemoId ? { intakeOnly: true } : {}),
           ...(recordedGreeting ? { recordedGreeting } : {}),
+          ...(receptionistId ? { receptionistId } : {}),
         }),
       ]);
       timing.mark("attach");

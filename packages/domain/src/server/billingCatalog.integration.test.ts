@@ -251,6 +251,35 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     });
   });
 
+  it("keeps a frozen plan's receptionists from going down, directly or through its tier, and lets Pro's go down and the plan's go up", async () => {
+    await rollbackTest(async (tx) => {
+      const launch = (receptionists?: number) => (value: Record<string, any>) => {
+        withExamples("pro-launch")(value);
+        if (receptionists !== undefined) value.plans["pro-launch"].limits = { receptionists };
+      };
+      await apply(tx, file(launch()));
+      await byHand(tx, sql`update public.billing_plans set frozen_at = now(), status = 'active' where code = 'pro-launch'`);
+      const runs = await count(tx, "billing_runs");
+      const inherited = await refusal(apply(tx, file((value) => { launch()(value); value.plans.pro.limits.receptionists = 3; })));
+      expect(inherited).toMatchObject({ status: 409, code: "conflict", details: [{ code: "plan_frozen", path: "billing_file.plans.pro-launch" }] });
+      expect(inherited.details![0]!.message).toContain("can't go down, directly or through its tier, from 5 to 3");
+      const direct = await refusal(apply(tx, file(launch(4))));
+      expect(direct.details!.map((detail) => detail.code)).toEqual(["plan_frozen"]);
+      expect(await count(tx, "billing_runs")).toBe(runs);
+      expect((await plan(tx, "pro")).receptionists).toBe(5);
+      expect((await plan(tx, "pro-launch")).receptionists).toBe(5);
+
+      // Pro never freezes: with pro-launch's number in its entry, Pro's goes down alone.
+      const kept = await apply(tx, file((value) => { launch(5)(value); value.plans.pro.limits.receptionists = 3; }));
+      expect(kept.run.changes).toEqual([expect.objectContaining({ key: "pro", action: "update", lowers_allowance: true, fields: { receptionists: { from: 5, to: 3 } } })]);
+      expect((await plan(tx, "pro")).receptionists).toBe(3);
+      const more = await apply(tx, file((value) => { launch(8)(value); value.plans.pro.limits.receptionists = 3; }));
+      expect(actions(more.run)).toEqual(["update pro-launch"]);
+      expect(more.run.changes[0]).toMatchObject({ lowers_allowance: false, fields: { receptionists: { from: 5, to: 8 } } });
+      expect(await plan(tx, "pro-launch")).toMatchObject({ receptionists: 8, status: "active" });
+    });
+  });
+
   it("refuses a currency change while Polar sells a live price, and otherwise retires the old prices and inserts new ones", async () => {
     await rollbackTest(async (tx) => {
       await apply(tx, file());
@@ -470,7 +499,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
       expect({ ...applied, source: "built_in" }).toEqual(fromFile);
       expect(applied.plans.map((plan) => plan.slug)).toEqual(["free_cloud", "starter", "pro", "enterprise"]);
       const pro = applied.plans.find((plan) => plan.slug === "pro")!;
-      expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
+      expect(pro).toMatchObject({ custom: false, overage_billable: true, included: { voice_seconds: 30_000, alert_sms_segments: 200, business_numbers: 1, receptionists: 5, knowledge_storage_bytes: 20 * 1024 * 1024 }, overage_rates: { voice_minute_cents: 18 } });
       expect(pro.prices.map((price) => [price.interval, price.currency, price.amount_cents, price.monthly_amount_cents, price.checkout_available])).toEqual([["monthly", "cad", 8_700, 8_700, true], ["annual", "cad", 87_000, 7_300, false]]);
       expect(applied.plans.find((plan) => plan.slug === "enterprise")).toMatchObject({ custom: true, prices: [] });
 

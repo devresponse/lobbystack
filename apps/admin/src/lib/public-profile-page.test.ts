@@ -1,7 +1,7 @@
 import { DateTime } from "luxon";
 import { describe, expect, it } from "vitest";
 
-import type { PublicBusinessProfile } from "@lobbystack/domain";
+import type { PublicBusinessProfile, PublicProfileReceptionist } from "@lobbystack/domain";
 
 import type { SupportedLocale } from "./locale";
 import {
@@ -19,6 +19,10 @@ import {
   profileLanguages,
   profileTitle,
   publicProfileUrl,
+  receptionistPageDescription,
+  receptionistPageTitle,
+  receptionistPageUrl,
+  receptionistPicker,
   serviceName,
   statusLine,
   timeZoneLabel,
@@ -69,9 +73,15 @@ function profile(overrides: Partial<PublicBusinessProfile> = {}): PublicBusiness
     personRequests: "any_time",
     widgetKey: "pk_live_acme",
     nextOpening: null,
+    receptionist: FRONT_DESK,
+    receptionists: [FRONT_DESK],
     ...overrides,
   };
 }
+
+const FRONT_DESK: PublicProfileReceptionist = { name: "Front desk", description: "Bookings and general questions", handle: null, isDefault: true };
+const KITSILANO: PublicProfileReceptionist = { name: "Kitsilano clinic", description: " Our clinic on West 4th ", handle: "kitsilano", isDefault: false };
+const BILLING: PublicProfileReceptionist = { name: "Billing", description: "", handle: "billing", isDefault: false };
 
 describe("times", () => {
   it("writes English times the brand's way and other languages their own", () => {
@@ -251,5 +261,60 @@ describe("search engines", () => {
   it("puts the page on the deployment's address", () => {
     expect(publicProfileUrl("acme-dental", { APP_BASE_URL: "https://app.example.com/" })).toBe("https://app.example.com/profile/acme-dental");
     expect(publicProfileUrl("acme-dental", {})).toBe("http://localhost:3000/profile/acme-dental");
+  });
+});
+
+describe("receptionist pages", () => {
+  const t = serverTranslator("en", "profile");
+
+  it("puts a receptionist's page under the business page, and the default one's on it", () => {
+    expect(receptionistPageUrl("acme-dental", "kitsilano", { APP_BASE_URL: "https://app.example.com" })).toBe("https://app.example.com/profile/acme-dental/kitsilano");
+    expect(receptionistPageUrl("acme-dental", null, { APP_BASE_URL: "https://app.example.com" })).toBe("https://app.example.com/profile/acme-dental");
+  });
+
+  it("titles a receptionist's page with its name before the business's title", () => {
+    expect(receptionistPageTitle(profile({ receptionist: KITSILANO }), t)).toBe("Kitsilano clinic · Acme Dental · Dentist in Toronto");
+    expect(receptionistPageTitle(profile({ receptionist: KITSILANO, category: null, address: null }), t)).toBe("Kitsilano clinic · Acme Dental");
+    // The default receptionist's page is the business page, titled as one.
+    expect(receptionistPageTitle(profile(), t)).toBe("Acme Dental · Dentist in Toronto");
+    expect(receptionistPageTitle(profile({ receptionist: null }), t)).toBe("Acme Dental · Dentist in Toronto");
+  });
+
+  it("describes a receptionist's page by what it helps with, else as the business page", () => {
+    expect(receptionistPageDescription(profile({ receptionist: KITSILANO }), t)).toBe("Our clinic on West 4th");
+    expect(receptionistPageDescription(profile({ receptionist: BILLING }), t)).toBe("Family dentistry near the waterfront.");
+    expect(receptionistPageDescription(profile({ receptionist: BILLING, description: null }), t)).toBe("Hours, services and contact details for Acme Dental.");
+    expect(receptionistPageDescription(profile(), t)).toBe("Family dentistry near the waterfront.");
+  });
+});
+
+describe("the visitor's receptionist dropdown", () => {
+  it("shows nothing to choose with one receptionist, or none yet", () => {
+    expect(receptionistPicker(profile())).toBeNull();
+    expect(receptionistPicker(profile({ receptionist: null, receptionists: [] }))).toBeNull();
+  });
+
+  it("links each listed receptionist to its page, the default to the business page", () => {
+    expect(receptionistPicker(profile({ receptionists: [FRONT_DESK, KITSILANO] }))).toEqual({
+      current: { name: "Front desk", description: "Bookings and general questions", href: "/profile/acme-dental" },
+      choices: [
+        { name: "Front desk", description: "Bookings and general questions", href: "/profile/acme-dental" },
+        { name: "Kitsilano clinic", description: "Our clinic on West 4th", href: "/profile/acme-dental/kitsilano" },
+      ],
+    });
+  });
+
+  it("marks the receptionist whose page it is", () => {
+    expect(receptionistPicker(profile({ receptionist: KITSILANO, receptionists: [FRONT_DESK, KITSILANO] }))?.current.href).toBe("/profile/acme-dental/kitsilano");
+  });
+
+  it("puts an unlisted receptionist on its own page right after the default", () => {
+    const picker = receptionistPicker(profile({ receptionist: BILLING, receptionists: [FRONT_DESK, KITSILANO] }));
+    expect(picker?.current.href).toBe("/profile/acme-dental/billing");
+    expect(picker?.choices.map((choice) => choice.name)).toEqual(["Front desk", "Billing", "Kitsilano clinic"]);
+  });
+
+  it("still lets an unlisted receptionist's visitor reach the default one", () => {
+    expect(receptionistPicker(profile({ receptionist: BILLING, receptionists: [FRONT_DESK] }))?.choices.map((choice) => choice.href)).toEqual(["/profile/acme-dental", "/profile/acme-dental/billing"]);
   });
 });

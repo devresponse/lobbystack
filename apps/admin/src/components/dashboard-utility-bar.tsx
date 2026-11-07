@@ -21,7 +21,7 @@ export function DashboardUtilityBar() {
     <DashboardAbandonIntent businessId={business.businessId} />
     <div className="pointer-events-none absolute inset-x-0 top-4 z-40 hidden md:block">
       <div className="mx-auto flex w-full max-w-7xl items-center justify-end gap-0.5 px-6">
-        <DashboardTestCallWidget className="pointer-events-auto" businessId={business.businessId} businessSlug={business.slug} />
+        <DashboardTestCallWidget className="pointer-events-auto" businessId={business.businessId} businessSlug={business.slug} role={business.role} />
         <span aria-hidden="true" className="ml-3 mr-1.5 h-4 w-px bg-border" />
         <Tooltip>
           <TooltipTrigger

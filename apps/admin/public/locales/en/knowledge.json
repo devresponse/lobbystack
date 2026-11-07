@@ -34,17 +34,26 @@
     "timesAsked_other": "Asked {{count}} times",
     "lastAsked": "Last asked {{date}}",
     "askedSummary": "{{asked}} · {{lastAsked}}",
+    "heardBy": "Heard by {{names}}",
     "answer": "Answer",
     "answerLabel": "Answer to: {{question}}",
     "answerPlaceholder": "Write what your receptionist should say.",
     "answerTooLong": "Shorten your answer to {{max}} characters or fewer.",
+    "audience": {
+      "label": "Who uses this answer",
+      "everyone": "Every receptionist",
+      "heardOne": "Only the receptionist that heard it",
+      "heardMany_one": "Only the {{count}} receptionist that heard it",
+      "heardMany_other": "Only the {{count}} receptionists that heard it"
+    },
     "saveAnswer": "Save Answer",
     "cancel": "Cancel",
     "dismiss": "Dismiss",
     "toast": {
       "answered": "Answer added to your knowledge.",
       "dismissed": "Question dismissed.",
-      "alreadyHandled": "Someone already answered or dismissed this question."
+      "alreadyHandled": "Someone already answered or dismissed this question.",
+      "noneHeard": "Every receptionist that heard it is archived. Save the answer for every receptionist instead."
     },
     "emptyTitle": "No unanswered questions",
     "emptyDescription": "When your receptionist can't answer a question about your business, you'll see it here.",

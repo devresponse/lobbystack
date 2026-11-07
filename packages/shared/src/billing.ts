@@ -162,6 +162,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: null,
     chatAiTokensIncluded: null,
     includedBusinessNumbers: null,
+    includedReceptionists: null,
     overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
@@ -177,6 +178,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 2,
     chatAiTokensIncluded: 5,
     includedBusinessNumbers: 0,
+    includedReceptionists: 1,
     overagesBillable: false,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
@@ -192,6 +194,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 20,
     chatAiTokensIncluded: 50,
     includedBusinessNumbers: 1,
+    includedReceptionists: 1,
     overagesBillable: true,
     voiceOverageRatePerMinuteCents: 20,
     alertSmsOverageRatePerSegmentCents: 2,
@@ -207,6 +210,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: 100,
     chatAiTokensIncluded: 200,
     includedBusinessNumbers: 1,
+    includedReceptionists: 5,
     overagesBillable: true,
     voiceOverageRatePerMinuteCents: 18,
     alertSmsOverageRatePerSegmentCents: 2,
@@ -222,6 +226,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: null,
     chatAiTokensIncluded: null,
     includedBusinessNumbers: null,
+    includedReceptionists: null,
     overagesBillable: true,
     voiceOverageRatePerMinuteCents: null,
     alertSmsOverageRatePerSegmentCents: null,
@@ -239,6 +244,7 @@ export const billingPlanCatalog = {
     outboundCallAttemptsIncluded: number | null;
     chatAiTokensIncluded: number | null;
     includedBusinessNumbers: number | null;
+    includedReceptionists: number | null;
     overagesBillable: boolean;
     voiceOverageRatePerMinuteCents: number | null;
     alertSmsOverageRatePerSegmentCents: number | null;
@@ -254,6 +260,12 @@ export type BillingPlanLimits = {
   outboundCallAttemptsIncluded: number | null;
   chatAiTokensIncluded: number | null;
   includedBusinessNumbers: number | null;
+  /**
+   * Receptionists a business may have active at once. Null means the
+   * deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS (receptionistAllowance),
+   * as custom plans and self-hosting have.
+   */
+  includedReceptionists: number | null;
   /** Usage past the allowance is billed rather than blocked. */
   overagesBillable: boolean;
   voiceOverageRatePerMinuteCents: number | null;
@@ -270,6 +282,7 @@ const limitsOf = (plan: BillingPlanLimits): BillingPlanLimits => ({
   outboundCallAttemptsIncluded: plan.outboundCallAttemptsIncluded,
   chatAiTokensIncluded: plan.chatAiTokensIncluded,
   includedBusinessNumbers: plan.includedBusinessNumbers,
+  includedReceptionists: plan.includedReceptionists,
   overagesBillable: plan.overagesBillable,
   voiceOverageRatePerMinuteCents: plan.voiceOverageRatePerMinuteCents,
   alertSmsOverageRatePerSegmentCents: plan.alertSmsOverageRatePerSegmentCents,
@@ -306,6 +319,8 @@ export type BillingPlanOffer = {
     chatAiUnits: number | null;
     knowledgeStorageBytes: number | null;
     businessNumbers: number | null;
+    /** Receptionists active at once; null means the deployment's cap. */
+    receptionists: number | null;
   };
   /** Cents for each unit past the allowance. */
   overageRates: {
@@ -327,6 +342,7 @@ export function billingPlanIncluded(limits: BillingPlanLimits): BillingPlanOffer
     chatAiUnits: limits.chatAiTokensIncluded,
     knowledgeStorageBytes: limits.knowledgeStorageBytes,
     businessNumbers: limits.includedBusinessNumbers,
+    receptionists: limits.includedReceptionists,
   };
 }
 
@@ -367,6 +383,7 @@ export function builtInBillingPlanList(checkoutAvailable: (plan: HostedCheckoutP
           chatAiUnits: plan.chatAiTokensIncluded,
           knowledgeStorageBytes: plan.knowledgeStorageBytes,
           businessNumbers: plan.includedBusinessNumbers,
+          receptionists: plan.includedReceptionists,
         },
         overageRates: {
           voiceMinuteCents: plan.voiceOverageRatePerMinuteCents,

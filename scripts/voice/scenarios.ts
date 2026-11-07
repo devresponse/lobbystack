@@ -64,6 +64,14 @@ const PERSON_SCENARIOS: CallScenario[] = [
   { name: "ask-for-person", expect: "continues", lines: [{ text: "Okay, thanks. Can I speak to a real person, please?" }], mustNotSay: /\b(connecting you|transferring you|putting you through|(I'll|I will|let me) (connect|transfer) you)\b/i },
 ];
 
+// Scenarios for a business with several receptionists, so they run only by
+// name, with a snapshot where another receptionist handles referrals. The
+// receptionist should say which one and offer a message, since it can't
+// transfer the call to another receptionist.
+const RECEPTIONIST_SCENARIOS: CallScenario[] = [
+  { name: "other-receptionist", expect: "continues", lines: [{ text: "Okay, thanks. I actually need a referral to a specialist. Who can help me with that?" }], mustNotSay: /\b(connecting you|transferring you|putting you through|(I'll|I will|let me) (connect|transfer) you)\b/i },
+];
+
 // Scenarios that run into the call's time limit, so they take a few minutes
 // each and run only by name. The caller keeps asking questions past the
 // 3-minute limit: the receptionist should warn them a minute before its
@@ -92,7 +100,7 @@ const LIMIT_SCENARIOS: CallScenario[] = [
 
 export function findScenarios(names: string[]): CallScenario[] {
   if (!names.length) return SCENARIOS;
-  const all = [...SCENARIOS, ...BOOKING_SCENARIOS, ...PERSON_SCENARIOS, ...LIMIT_SCENARIOS];
+  const all = [...SCENARIOS, ...BOOKING_SCENARIOS, ...PERSON_SCENARIOS, ...RECEPTIONIST_SCENARIOS, ...LIMIT_SCENARIOS];
   return names.map((name) => {
     const scenario = all.find((item) => item.name === name);
     if (!scenario) throw new Error(`Unknown scenario "${name}". Scenarios: ${all.map((item) => item.name).join(", ")}.`);

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { JobEnvelope, JobType } from "@lobbystack/contracts";
 import { getCachedBusinessSnapshot, LIVE_RECORDING_ATTEMPTS, listBusinessesWithOpenLiveCalls, listOpenLiveCalls, liveCallHasRecording, persistCallRecording, refreshBusinessSnapshot, retryLiveCallRecording, type OpenLiveCall } from "@lobbystack/domain";
+import type { BusinessContextSnapshot } from "@lobbystack/shared";
 
 vi.mock("@lobbystack/domain", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lobbystack/domain")>()),
@@ -114,11 +115,17 @@ describe("live.recoverOrphans", () => {
 describe("call openings recorded ahead of calls", () => {
   const redis = (status: string) => ({ status }) as never;
   const sweepJob = (): JobEnvelope => ({ ...job("live.recordGreetings"), queue: "maintenance", businessId: null, recurring: true });
+  const businessJob = (): JobEnvelope => ({ ...job("live.recordGreetings"), queue: "maintenance" });
   // A business with a phone number, whose calls open with its greeting.
   const phoneBusiness = (greeting: string) => ({ greeting, defaultLocale: "en", recordingNotice: false, contactChannels: { phoneNumber: "+15551234567" } }) as never;
-  const recordings = () => ({ load: vi.fn(), record: vi.fn(), keep: vi.fn(async (_greeting: string) => undefined) });
+  const recordings = () => ({ load: vi.fn(), record: vi.fn(), keep: vi.fn(async (_greeting: string, _snapshot: BusinessContextSnapshot) => undefined) });
+  const receptionist = (id: string, greeting: string, overrides: Record<string, unknown> = {}) => ({
+    id, name: id, description: "", isDefault: false, status: "active", listed: true, order: 1, knowledgeScope: "all", greeting,
+    voiceInstructions: "", smsInstructions: "", chatInstructions: "", bookingPolicy: "", bookingMode: "instant", transferPolicy: { mode: "never" }, snippetIds: [],
+    ...overrides,
+  });
 
-  it("keeps the opening of every active business with a phone number recorded, one business at a time", async () => {
+  it("keeps the openings of every active business with a phone number recorded, one business at a time", async () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const [withPhone, browserOnly, dormant, failing, last] = [randomUUID(), randomUUID(), randomUUID(), randomUUID(), randomUUID()];
@@ -130,6 +137,7 @@ describe("call openings recorded ahead of calls", () => {
     const greetingRecordings = recordings();
     const listBusinesses = vi.fn(async () => [withPhone, browserOnly, dormant, failing, last].map((id) => ({ id, active: id !== dormant })));
     await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "completed", entityId: "2" });
+    // A business without a phone number has only the dashboard's test calls, which ask for their opening.
     expect(greetingRecordings.keep.mock.calls.map(([greeting]) => greeting)).toEqual(["Thanks for calling.", "Welcome."]);
     // A dormant business's next call records its opening, as before.
     expect(vi.mocked(getCachedBusinessSnapshot).mock.calls.map(([, input]) => input.businessId)).toEqual([withPhone, browserOnly, failing, last]);
@@ -138,36 +146,79 @@ describe("call openings recorded ahead of calls", () => {
     expect(reports).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/warning: connection reset$/), operation: "live.keep_greeting_recording", businessId: failing }));
   });
 
+  // A receptionist only on the website takes browser calls from its page, widget keys and QR links.
+  it("keeps every active receptionist's opening in the sweep, not only those that answer a number", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.mocked(getCachedBusinessSnapshot).mockResolvedValue({
+      ...(phoneBusiness("Thanks for calling.") as object),
+      receptionists: [
+        receptionist("downtown", "Thanks for calling Downtown.", { order: 2 }),
+        receptionist("front-desk", "Thanks for calling.", { isDefault: true, order: 0 }),
+        receptionist("paused", "Thanks for calling the old store.", { status: "paused" }),
+        receptionist("website", "Hi, you've reached our website desk."),
+      ],
+    } as never);
+    const greetingRecordings = recordings();
+    await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses: vi.fn(async () => [{ id: businessId, active: true }]) })).resolves.toEqual({ status: "completed", entityId: "1" });
+    // The default's first, then the Receptionists page's order. A paused one's calls go to the default.
+    expect(greetingRecordings.keep.mock.calls.map(([greeting]) => greeting)).toEqual(["Thanks for calling.", "Hi, you've reached our website desk.", "Thanks for calling Downtown."]);
+  });
+
+  // The job a snapshot refresh queues: a business without a phone number still has the dashboard's test calls.
+  it("keeps every active receptionist's opening for one business, with or without a phone number", async () => {
+    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+    vi.mocked(getCachedBusinessSnapshot).mockResolvedValue({
+      greeting: "Thanks for calling.", defaultLocale: "en", recordingNotice: false, contactChannels: {},
+      receptionists: [receptionist("front-desk", "Thanks for calling.", { isDefault: true, order: 0 }), receptionist("second", "Bonjour, ici le deuxième accueil.", { locale: "fr" })],
+    } as never);
+    const greetingRecordings = recordings();
+    const listBusinesses = vi.fn();
+    await expect(handleJob(businessJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "completed", entityId: businessId });
+    expect(vi.mocked(getCachedBusinessSnapshot)).toHaveBeenCalledWith(expect.anything(), { businessId });
+    expect(greetingRecordings.keep.mock.calls.map(([greeting]) => greeting)).toEqual(["Thanks for calling.", "Bonjour, ici le deuxième accueil."]);
+    // Each in its receptionist's own view: the second one's calls open in French.
+    expect(greetingRecordings.keep.mock.calls[1]![1]).toMatchObject({ defaultLocale: "fr", receptionist: { id: "second" } });
+    expect(listBusinesses).not.toHaveBeenCalled();
+    // A business whose calls open with nothing to say has nothing to keep.
+    vi.mocked(getCachedBusinessSnapshot).mockResolvedValue({ greeting: " ", defaultLocale: "en", recordingNotice: false, contactChannels: {} } as never);
+    await expect(handleJob(businessJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings })).resolves.toEqual({ status: "skipped", entityId: businessId });
+  });
+
   it("does nothing without recordings ahead, GPT-Live or Redis", async () => {
     const greetingRecordings = recordings();
     const listBusinesses = vi.fn(async () => [{ id: businessId, active: true }]);
-    await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "skipped" });
-    vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
-    await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("ready"), listBusinesses })).resolves.toEqual({ status: "skipped" });
-    await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("reconnecting"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "skipped" });
-    // The sweep covers every business, so a job for one would repeat it.
-    await expect(handleJob({ ...sweepJob(), businessId }, { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "skipped" });
+    for (const recordJob of [sweepJob(), businessJob()]) {
+      vi.unstubAllEnvs();
+      await expect(handleJob(recordJob, { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "skipped" });
+      vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
+      await expect(handleJob(recordJob, { domain: { db: {} as never }, realtime: redis("ready"), listBusinesses })).resolves.toEqual({ status: "skipped" });
+      await expect(handleJob(recordJob, { domain: { db: {} as never }, realtime: redis("reconnecting"), greetingRecordings, listBusinesses })).resolves.toEqual({ status: "skipped" });
+    }
     vi.mocked(getCachedBusinessSnapshot).mockResolvedValue(phoneBusiness("Thanks for calling."));
     await expect(handleJob(sweepJob(), { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, listBusinesses: vi.fn(async () => []) })).resolves.toEqual({ status: "skipped", entityId: "0" });
     expect(listBusinesses).not.toHaveBeenCalled();
     expect(greetingRecordings.keep).not.toHaveBeenCalled();
   });
 
-  it("records a business's changed opening once its snapshot is refreshed", async () => {
+  // Recording each opening takes GPT-Live 10 seconds or more, which the refresh doesn't wait for.
+  it("queues the recording of a business's openings once its snapshot is refreshed", async () => {
     vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
-    vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    vi.mocked(getCachedBusinessSnapshot).mockResolvedValue(phoneBusiness("Thanks for calling Ace Plumbing."));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const greetingRecordings = recordings();
-    const dependencies = { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings };
+    const queueOpeningRecordings = vi.fn(async (_input: { businessId: string; version: string }) => undefined);
+    const dependencies = { domain: { db: {} as never }, realtime: redis("ready"), greetingRecordings, queueOpeningRecordings };
     await expect(handleJob(job("snapshot.refresh"), dependencies)).resolves.toEqual({ status: "completed", entityId: "version_2" });
     expect(vi.mocked(refreshBusinessSnapshot)).toHaveBeenCalledWith(dependencies.domain, { businessId });
-    expect(greetingRecordings.keep).toHaveBeenCalledWith("Thanks for calling Ace Plumbing.", expect.objectContaining({ greeting: "Thanks for calling Ace Plumbing." }));
-    // A failure only means the next call opens with the greeting command.
-    vi.mocked(getCachedBusinessSnapshot).mockRejectedValueOnce(new Error("connection reset"));
+    expect(queueOpeningRecordings).toHaveBeenCalledWith({ businessId, version: "version_2" });
+    expect(greetingRecordings.keep).not.toHaveBeenCalled();
+    expect(getCachedBusinessSnapshot).not.toHaveBeenCalled();
+    // A failure to queue it only means the next call opens with the greeting command.
+    queueOpeningRecordings.mockRejectedValueOnce(new Error("Connection is closed."));
     await expect(handleJob(job("snapshot.refresh"), dependencies)).resolves.toEqual({ status: "completed", entityId: "version_2" });
-    expect(greetingRecordings.keep).toHaveBeenCalledTimes(1);
-    // Without recordings ahead, the refresh is all the job does.
-    await expect(handleJob(job("snapshot.refresh"), { domain: { db: {} as never }, realtime: redis("ready") })).resolves.toEqual({ status: "completed", entityId: "version_2" });
-    expect(getCachedBusinessSnapshot).toHaveBeenCalledTimes(2);
+    expect(warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toContainEqual(expect.objectContaining({ operation: "live.queue_greeting_recordings", businessId }));
+    // Without recordings ahead, or with Redis down, the refresh is all the job does.
+    await expect(handleJob(job("snapshot.refresh"), { domain: { db: {} as never }, realtime: redis("ready"), queueOpeningRecordings })).resolves.toEqual({ status: "completed", entityId: "version_2" });
+    await expect(handleJob(job("snapshot.refresh"), { ...dependencies, realtime: redis("reconnecting") })).resolves.toEqual({ status: "completed", entityId: "version_2" });
+    expect(queueOpeningRecordings).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createKnowledgeSnippet, listKnowledgeSnippets } from "@lobbystack/domain";
+import { createKnowledgeSnippet, listKnowledgeSnippets, readKnowledgeAudienceChoice } from "@lobbystack/domain";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, requireApiSession, requireOperatorBusiness } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -13,13 +13,18 @@ export async function GET(request: Request) {
   } catch (error) { return asApiResponse(error); }
 }
 
+/**
+ * Adds a text entry. audience "chosen" with receptionistIds makes it for
+ * those receptionists only, in the same save; without one it is for everyone.
+ */
 export async function POST(request: Request) {
   try {
     const session = await requireApiSession(request);
     const businessId = businessIdFromRequest(request);
-    const body = await readJson(request) as { title?: string; content?: string; tags?: string[]; priority?: number; active?: boolean };
+    const body = await readJson(request) as { title?: string; content?: string; tags?: string[]; priority?: number; active?: boolean; audience?: unknown };
     if (!businessId || !body.title?.trim() || !body.content?.trim()) return jsonError("businessId, title, and content are required.", 400);
-    const snippetId = await createKnowledgeSnippet(createDomainContext(), { userId: session.user.id, businessId, title: body.title, content: body.content, ...(body.tags ? { tags: body.tags } : {}), ...(body.priority === undefined ? {} : { priority: body.priority }), ...(body.active === undefined ? {} : { active: body.active }) });
+    const audience = body.audience === undefined ? undefined : readKnowledgeAudienceChoice(body);
+    const snippetId = await createKnowledgeSnippet(createDomainContext(), { userId: session.user.id, businessId, title: body.title, content: body.content, ...(body.tags ? { tags: body.tags } : {}), ...(body.priority === undefined ? {} : { priority: body.priority }), ...(body.active === undefined ? {} : { active: body.active }), ...(audience ? { audience } : {}) });
     return NextResponse.json({ snippetId }, { status: 201 });
   } catch (error) { return asApiResponse(error); }
 }

@@ -12,6 +12,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { LivePublicProfileSettingsSurface, type PublicProfileSettingsResponse } from "./live-public-profile-settings-surface";
+import { receptionistChoicesQueryKey, type ReceptionistOption } from "./receptionists/receptionist-choices";
 
 const clients: QueryClient[] = [];
 const KEY_ONE = "0b8f5f8e-3c55-4a43-9d6a-2f4f3f1c9a01";
@@ -157,5 +158,27 @@ describe("public profile settings", () => {
     expect((screen.getByLabelText("publicPage.details.category") as HTMLInputElement).disabled).toBe(true);
     expect(screen.getByRole("switch", { name: "publicPage.publish.label" }).getAttribute("aria-disabled") ?? String((screen.getByRole("switch", { name: "publicPage.publish.label" }) as HTMLButtonElement).disabled)).toBe("true");
     expect(screen.queryByRole("button", { name: "publicPage.save" })).toBeNull();
+  });
+
+  it("shows the receptionists on the page apart from the form, once the business has several", async () => {
+    const receptionist = (id: string, name: string, isDefault = false): ReceptionistOption => ({ id, name, description: "", handle: isDefault ? null : name.toLowerCase(), isDefault, status: "active", listed: true, sortOrder: 0, locale: null, knowledgeScope: isDefault ? "all" : "audience" });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } });
+    clients.push(client);
+    client.setQueryData(["businesses"], { businesses: [{ businessId: "business", name: "Acme Dental", active: true }] });
+    client.setQueryData(receptionistChoicesQueryKey("business"), { receptionists: [receptionist("00000000-0000-4000-8000-0000000000a1", "Front desk", true), receptionist("00000000-0000-4000-8000-0000000000a2", "Hygiene")] });
+    vi.stubGlobal("fetch", vi.fn(async () => Response.json(view())));
+    render(<QueryClientProvider client={client}><LivePublicProfileSettingsSurface /></QueryClientProvider>);
+    const title = await screen.findByText("pageList.title");
+    // Outside the form, so its changes never wait for the form's Save.
+    expect(title.closest("form")).toBeNull();
+    // Listed in the box and on the page's list.
+    expect(screen.getAllByText("Hygiene").length).toBeGreaterThan(0);
+    expect(screen.getByRole("list", { name: "pageList.onPage" }).textContent).toContain("Hygiene");
+  });
+
+  it("leaves the receptionists out while the business has one", async () => {
+    setup(view());
+    await screen.findByText("publicPage.save");
+    expect(screen.queryByText("pageList.title")).toBeNull();
   });
 });

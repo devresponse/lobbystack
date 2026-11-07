@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { businesses, staff } from "@lobbystack/db";
+import { auditLogs, businesses, receptionistProfiles, staff } from "@lobbystack/db";
 
 const mocks = vi.hoisted(() => ({ enqueueOutbox: vi.fn(), tx: undefined as unknown }));
 vi.mock("@lobbystack/db", async (original) => ({ ...(await original<typeof import("@lobbystack/db")>()), enqueueOutbox: mocks.enqueueOutbox, withBusinessTransaction: async (_db: unknown, _context: unknown, callback: (tx: unknown) => unknown) => await callback(mocks.tx) }));
@@ -19,10 +19,16 @@ it.each(["a@x.com, b@y.com", "a@x.com;b@y.com", "Ann <a@x.com>", "g:a@x.com", "a
 });
 
 describe("business timezone", () => {
+  // The business is in English until the change; its default receptionist's row is "front-desk".
   function useTransaction() {
     const updates: Array<{ table: unknown; values: Record<string, unknown> }> = [];
-    mocks.tx = { update: (table: unknown) => ({ set: (values: Record<string, unknown>) => { updates.push({ table, values }); return { where: () => ({ returning: async () => [{ id: "biz-1" }] }) }; } }) };
-    return { updates, tx: mocks.tx as never };
+    const inserts: Array<{ table: unknown; values: unknown }> = [];
+    mocks.tx = {
+      select: () => ({ from: () => ({ where: () => ({ limit: () => ({ for: async () => [{ defaultLocale: "en" }] }) }) }) }),
+      update: (table: unknown) => ({ set: (values: Record<string, unknown>) => { updates.push({ table, values }); return { where: () => ({ returning: async () => [{ id: table === receptionistProfiles ? "front-desk" : "biz-1" }] }) }; } }),
+      insert: (table: unknown) => ({ values: async (values: unknown) => { inserts.push({ table, values }); } }),
+    };
+    return { updates, inserts, tx: mocks.tx as never };
   }
 
   it.each(["America/Vancouver", "Asia/Kolkata", "America/Argentina/Buenos_Aires", "America/Port-au-Prince", "UTC"])("accepts the IANA zone %s", zone => {
@@ -60,8 +66,13 @@ describe("business timezone", () => {
 
   it("saves any language calls can open in, and refuses one they can't without saving anything", async () => {
     const saved = useTransaction();
-    await updateBusinessInTransaction(saved.tx, { businessId: "biz-1", defaultLocale: " ko " });
-    expect(saved.updates).toEqual([{ table: businesses, values: expect.objectContaining({ defaultLocale: "ko" }) }]);
+    await updateBusinessInTransaction(saved.tx, { businessId: "biz-1", defaultLocale: " ko ", audit: { actorUserId: "owner" } });
+    // The default receptionist takes the language's "Front desk" while it has English's, which the code gave it, and the audit log says so.
+    expect(saved.updates).toEqual([
+      { table: businesses, values: expect.objectContaining({ defaultLocale: "ko" }) },
+      { table: receptionistProfiles, values: { name: "안내 데스크", updatedAt: expect.any(Date) } },
+    ]);
+    expect(saved.inserts).toEqual([{ table: auditLogs, values: [{ businessId: "biz-1", actorUserId: "owner", eventType: "receptionist.updated", entityType: "receptionist", entityId: "front-desk", payload: { fields: ["name"], from: "Front desk", to: "안내 데스크", reason: "business_language" } }] }]);
 
     for (const locale of ["sr", "english", 5]) {
       vi.clearAllMocks();
@@ -70,6 +81,13 @@ describe("business timezone", () => {
       expect(refused.updates).toEqual([]);
       expect(mocks.enqueueOutbox).not.toHaveBeenCalled();
     }
+  });
+
+  it("leaves the default receptionist's name alone when the language stays the same", async () => {
+    const same = useTransaction();
+    await updateBusinessInTransaction(same.tx, { businessId: "biz-1", defaultLocale: "en" });
+    expect(same.updates).toEqual([{ table: businesses, values: expect.objectContaining({ defaultLocale: "en" }) }]);
+    expect(same.inserts).toEqual([]);
   });
 
   it("refreshes the receptionist's snapshot when the dashboard updates the business", async () => {

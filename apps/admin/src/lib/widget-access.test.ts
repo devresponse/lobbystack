@@ -27,10 +27,10 @@ import { createWidgetSessionToken } from "./widget-keys";
 
 const app = "https://app.alloplace.com";
 
-function keyRow(values: { status?: string; allowedOrigins?: string[]; profilePublished?: boolean | null; profileWidgetKeyId?: string | null } = {}) {
+function keyRow(values: { status?: string; allowedOrigins?: string[]; profilePublished?: boolean | null; profileWidgetKeyId?: string | null; receptionistId?: string | null } = {}) {
   const now = new Date("2026-10-16T12:00:00Z");
   return {
-    key: { id: "key_1", businessId: "biz_1", keyHash: "hash", keyValue: "wk_live_abc", label: null, status: values.status ?? "active", allowedOrigins: values.allowedOrigins ?? ["https://acmedental.example"], config: {}, lastUsedAt: null, createdAt: now, updatedAt: now },
+    key: { id: "key_1", businessId: "biz_1", keyHash: "hash", keyValue: "wk_live_abc", label: null, status: values.status ?? "active", allowedOrigins: values.allowedOrigins ?? ["https://acmedental.example"], config: {}, lastUsedAt: null, createdAt: now, updatedAt: now, receptionistId: values.receptionistId ?? null },
     profilePublished: values.profilePublished ?? null,
     profileWidgetKeyId: values.profileWidgetKeyId ?? null,
   };
@@ -42,8 +42,8 @@ function sessionRequest(origin: string) {
 }
 
 /** A chat request from the widget's frame, for the page the session was issued to. */
-function chatRequest(origin: string) {
-  const { token } = createWidgetSessionToken({ widgetKeyId: "key_1", businessId: "biz_1", visitorId: "visitor_1", origin });
+function chatRequest(origin: string, receptionistId?: string) {
+  const { token } = createWidgetSessionToken({ widgetKeyId: "key_1", businessId: "biz_1", visitorId: "visitor_1", origin, ...(receptionistId ? { receptionistId } : {}) });
   return new Request(`${app}/api/widget/chat`, { method: "POST", headers: { authorization: `Bearer ${token}`, "x-widget-parent-origin": origin } });
 }
 
@@ -102,5 +102,30 @@ describe("where a widget may run", () => {
     rows.key = [keyRow({ profilePublished: true, profileWidgetKeyId: "key_1" })];
     expect(await codeOf(await resolveWidgetAccess(sessionRequest("https://evil.example"), "wk_live_abc", { requireOrigin: true, strictOrigin: true }))).toBe("widget_origin_denied");
     expect(await codeOf(await resolveWidgetSessionAccess(chatRequest("https://evil.example")))).toBe("widget_origin_denied");
+  });
+});
+
+describe("the receptionist a chat is for", () => {
+  const FRONT_DESK = "00000000-0000-4000-8000-0000000000a1";
+  const KITSILANO = "00000000-0000-4000-8000-0000000000a2";
+
+  it("is the one the widget's key names on any website", async () => {
+    rows.key = [keyRow({ receptionistId: KITSILANO })];
+    const access = await resolveWidgetAccess(sessionRequest("https://acmedental.example"), "wk_live_abc", { requireOrigin: true, strictOrigin: true });
+    expect(access.ok && access.session.receptionistId).toBe(KITSILANO);
+    const chat = await resolveWidgetSessionAccess(chatRequest("https://acmedental.example"));
+    expect(chat.ok && chat.session.receptionistId).toBe(KITSILANO);
+  });
+
+  it("is the one the page named when its session started, whichever the key names", async () => {
+    rows.key = [keyRow({ profilePublished: true, profileWidgetKeyId: "key_1", receptionistId: FRONT_DESK })];
+    const chat = await resolveWidgetSessionAccess(chatRequest(app, KITSILANO));
+    expect(chat.ok && chat.session.receptionistId).toBe(KITSILANO);
+  });
+
+  it("is nobody in particular for a key from before receptionists, so the default one answers", async () => {
+    rows.key = [keyRow()];
+    const chat = await resolveWidgetSessionAccess(chatRequest("https://acmedental.example"));
+    expect(chat.ok && chat.session.receptionistId).toBeNull();
   });
 });

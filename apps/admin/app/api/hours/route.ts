@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { NextResponse } from "next/server";
 
 import { businesses, businessHours, receptionistProfiles, type DatabaseTransaction } from "@lobbystack/db";
@@ -15,7 +15,8 @@ export const dynamic = "force-dynamic";
 async function loadHours(tx: DatabaseTransaction, businessId: string) {
   const business = await tx.select({ timezone: businesses.timezone, hoursSource: businesses.hoursSource }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
   const hours = await tx.select({ dayOfWeek: businessHours.dayOfWeek, openMinutes: businessHours.openMinutes, closeMinutes: businessHours.closeMinutes }).from(businessHours).where(eq(businessHours.businessId, businessId)).orderBy(asc(businessHours.dayOfWeek), asc(businessHours.openMinutes));
-  const profile = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId)).limit(1);
+  // The default receptionist's booking mode, which the hours page explains.
+  const profile = await tx.select({ bookingMode: receptionistProfiles.bookingMode }).from(receptionistProfiles).where(and(eq(receptionistProfiles.businessId, businessId), eq(receptionistProfiles.isDefault, true))).limit(1);
   if (!business[0]) throw jsonError("Business not found.", 404);
   return { timezone: business[0].timezone, hoursSource: business[0].hoursSource, bookingMode: normalizeBookingMode(profile[0]?.bookingMode), hours };
 }

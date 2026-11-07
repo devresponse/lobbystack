@@ -56,7 +56,7 @@ describe("API keys", () => {
 
 describe("knowledge sources", () => {
   const at = new Date("2026-10-11T12:00:00.000Z");
-  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending", error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
+  const row = { id: "06d9c0dc-f18a-4cc6-a987-ac4963c87113", title: "Price list", sourceType: "upload", sourceUrl: null, mimeType: "application/pdf", tags: ["prices"], status: "pending" as const, error: null, active: true, createdAt: at, updatedAt: at, jobId: null, pageLimit: null };
 
   it("serializes files, websites and the pages their crawls read to the published schema", () => {
     const file = serializeKnowledgeSource(row);
@@ -82,9 +82,8 @@ describe("knowledge sources", () => {
     expect(serializeKnowledgeEntry({ ...snippet, tags: [] }).type).toBe("text");
   });
 
-  it("shows an error only for a failed source, and an unknown status as still processing", () => {
+  it("shows an error only for a failed source", () => {
     expect(serializeKnowledgeSource({ ...row, status: "cancelled", error: "Cancelled by operator." }).error).toBeNull();
-    expect(serializeKnowledgeSource({ ...row, status: "queued" }).status).toBe("processing");
   });
 
   it("gives the domain's status-carrying errors their v1 codes", () => {

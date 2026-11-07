@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getCachedBusinessSnapshot, getWebVoiceBillingAllowance, getWidgetChatAllowance } from "@lobbystack/domain";
+import { getCachedReceptionistSnapshot, getWebVoiceBillingAllowance, getWidgetChatAllowance } from "@lobbystack/domain";
 
 import { asApiResponse } from "@/lib/api-helpers";
 import { createWorkerDomainContext } from "@/lib/domain-context";
@@ -22,8 +22,9 @@ export async function GET(request: Request) {
 
     // The session request already saved the visitor and the key's last use.
     const context = createWorkerDomainContext();
+    // The widget's receptionist, or the default one when it is paused or archived.
     const [snapshot, chatBilling, voiceBilling] = await Promise.all([
-      getCachedBusinessSnapshot(context, { businessId: session.businessId }),
+      getCachedReceptionistSnapshot(context, { businessId: session.businessId, receptionistId: session.receptionistId }),
       getWidgetChatAllowance(context, { businessId: session.businessId }),
       getWebVoiceBillingAllowance(context, { businessId: session.businessId }),
     ]);
@@ -34,6 +35,8 @@ export async function GET(request: Request) {
       config: session.config,
       billing: { chatAllowed: chatBilling.allowed, plan: chatBilling.plan, voiceAllowed: voiceBilling.allowed },
       greeting: session.config.greeting ?? snapshot?.greeting ?? undefined,
+      // Who answers: the widget's receptionist, or the default one for a paused or archived one.
+      ...(snapshot?.receptionist ? { receptionist: { id: snapshot.receptionist.id, name: snapshot.receptionist.name, isDefault: snapshot.receptionist.isDefault } } : {}),
       snapshotPresent: snapshot !== null,
       businessSlug: session.businessSlug,
       // A call button shows only when a call can start: the business has a

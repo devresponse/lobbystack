@@ -8,6 +8,7 @@ import { createWorkerDomainContext } from "@/lib/domain-context";
 import { resolveWidgetSessionAccess } from "@/lib/widget-access";
 import { requestIpHash } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
+import { loadWidgetReceptionist } from "@/lib/widget-receptionist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +25,9 @@ export async function GET(request: Request) {
     const context = createWorkerDomainContext();
     if (!isUuid(visitorId)) return NextResponse.json({ messages: [] });
     // Reading never starts a chat: the visitor's first message does, so one who only looks leaves none behind.
-    const chat = await findCurrentWidgetChat(context, { businessId: session.businessId, widgetVisitorId: visitorId });
+    // Another receptionist's chat isn't this page's: the visitor's next message here starts one with this receptionist.
+    const { receptionistId } = await loadWidgetReceptionist(context, session);
+    const chat = await findCurrentWidgetChat(context, { businessId: session.businessId, widgetVisitorId: visitorId, ...(receptionistId ? { receptionistId } : {}) });
     if (!chat) return NextResponse.json({ messages: [] });
     const { conversationId } = chat;
     // A chat that went a day without messages stays only on a page left open,

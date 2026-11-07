@@ -23,11 +23,12 @@ One row per plan in `billing.json`, standard or not. The four standard plans are
 | `names` | Display names in `en`, `fr`, `es` and `sr`; null for the standard plans, whose names are translated in the app |
 | `voice_sec`, `sms_seg`, `calls_out`, `chat_units` | Included each month: voice seconds, alert text segments, call transfers, website chats |
 | `kb_bytes`, `numbers` | Knowledge storage limit and included phone numbers (at most one since fork PR #70) |
+| `receptionists` | Active receptionists included, from `limits.receptionists` (migration `0134`, fork PR #129); null on a custom plan, which gets the deployment's cap. It stays out of `terms_hash`, since Polar never sees it, so an apply checks it apart: on a plan with `frozen_at` it may only go up (fork PR #134) |
 | `voice_rate`, `sms_rate`, `call_rate` | Overage cents per voice minute, text segment and transfer; set exactly when `overage` is |
 | `months`, `ends` | How many months a promo plan lasts, and what follows: `tier`, `keep` or `cancel` |
 | `offer_end` | No new subscription after this moment |
 | `discount`, `polar_disc` | The plan's code-less Polar discount, and its Polar ID |
-| `terms_hash`, `frozen_at` | A hash of the terms subscribers depend on, and when the first business took the plan, after which a promo plan's terms can't change |
+| `terms_hash`, `frozen_at` | A hash of the terms subscribers depend on, and when the first business took the plan, after which a promo plan's terms can't change and its receptionists can't go down |
 | `sort`, `run_id`, `retired_at`, `created_at`, `updated_at` | Display order, the run that last changed the row, and its times |
 
 Checks keep the shapes apart: a standard plan has no names and no promo fields, a custom plan is never sold and has no allowances, and a plan has all three overage rates or none.
@@ -107,6 +108,7 @@ The columns the fork added to them:
 | `0115_billing_email` | #72 | `billing_checkout_requests.billing_email` |
 | `0116_billing_edges` | #75 | The subscription claim, the usage sync columns, and open checkouts counting toward a shared code's limit |
 | `0119_whole_annual_per_month` | #89 | `per_month` rounded to a whole unit, by adding the column again and making `billing_offers` again |
+| `0134_billing_receptionists` | #129 | `billing_plans.receptionists`, filled for the standard tiers from both brands' files, and the column at the end of `billing_offers` and `app.billing_code_offers` |
 
 They only add tables, columns, indexes and functions, and `0119` only changes what `per_month` holds, so rolling back one release leaves the database usable. `0113` fills `billing_code_redemptions` only when the migration signs in as a role that bypasses row-level security, such as `postgres`: its log says `Promo codes: <n> uses by a business recorded.`, or `Skipping the promo code redemption backfill` when it couldn't.
 

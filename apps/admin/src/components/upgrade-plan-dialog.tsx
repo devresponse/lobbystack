@@ -33,10 +33,10 @@ type UpgradePlanCard = {
 
 // Prices and allowances come from the plan list; the cards keep their order and words.
 const upgradePlanCards: UpgradePlanCard[] = [
-  { slug: "free_cloud", highlights: ["voiceMinutes", "allFeatures", "support"] },
-  { slug: "starter", highlights: ["voiceMinutes", "dedicatedNumber", "phoneNumber", "support"] },
-  { slug: "pro", highlights: ["voiceMinutes", "dedicatedNumber", "alertSms", "support"], highlighted: true },
-  { slug: "enterprise", highlights: ["phoneNumbers", "selfHosted", "support"] },
+  { slug: "free_cloud", highlights: ["voiceMinutes", "receptionists", "allFeatures", "support"] },
+  { slug: "starter", highlights: ["voiceMinutes", "receptionists", "dedicatedNumber", "phoneNumber", "support"] },
+  { slug: "pro", highlights: ["voiceMinutes", "receptionists", "dedicatedNumber", "alertSms", "support"], highlighted: true },
+  { slug: "enterprise", highlights: ["phoneNumbers", "customReceptionists", "selfHosted", "support"] },
 ];
 
 function isHostedUpgradePlan(slug: UpgradePlanCard["slug"]): slug is HostedUpgradePlan {

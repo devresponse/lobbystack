@@ -13,6 +13,10 @@ A released number keeps its row, marked released, and only numbers a business st
 
 The worker needs `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` and `TWILIO_SIP_TRUNK_SID`. Without them it ends the claim at once and its `job.failed` log line names the missing variable. Before fork PR #32, a claim stayed reserved for 15 minutes and refused the next pick.
 
+## Choose who answers the number
+
+Since fork PR #129 a business can have several receptionists, and each number names the one that answers its calls and texts ([receptionists](receptionists.md#choose-who-answers-each-number-widget-and-sign)). With more than one receptionist, **Settings > Phone number** shows **Answered by** under the number, and any other active number the business has under **Other numbers**, each with its own dropdown. A choice saves at once, for owners and admins, through `PATCH /api/phone-numbers/{phoneNumberId}`, and takes effect from the next call. A number names the default receptionist until someone picks another, and a paused or archived receptionist's number is answered by the default one. The incoming call webhook finds the number's receptionist with `app.resolve_receptionist_by_phone`, so the call opens with that receptionist's greeting, in its language. A business still holds one number at most; a number for each receptionist is on the [roadmap](../roadmap/receptionists-next.md).
+
 ## Know the limits
 
 | Limit | Value |

@@ -45,7 +45,7 @@ export type BrandDefinition = {
  * apply writes for it, under the columns' own names, with its prices. A
  * deployment shows and enforces these until its first catalog apply.
  */
-export type BrandBillingPlan = Pick<ResolvedBillingPlan, "sold" | "custom" | "overage" | "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "voice_rate" | "sms_rate" | "call_rate" | "sort" | "prices"> & { code: BillingPlanTier };
+export type BrandBillingPlan = Pick<ResolvedBillingPlan, "sold" | "custom" | "overage" | "voice_sec" | "sms_seg" | "calls_out" | "chat_units" | "kb_bytes" | "numbers" | "receptionists" | "voice_rate" | "sms_rate" | "call_rate" | "sort" | "prices"> & { code: BillingPlanTier };
 
 export type BrandIndex = {
   /**

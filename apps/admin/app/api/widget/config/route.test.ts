@@ -8,12 +8,14 @@ const mocks = vi.hoisted(() => ({
   touchWidgetKeyLastUsed: vi.fn(),
   voiceAllowed: true,
   recordingNotice: undefined as boolean | undefined,
+  receptionistId: null as string | null,
+  snapshot: vi.fn(),
 }));
 
 vi.mock("@/lib/widget-access", () => ({
   resolveWidgetSessionAccess: async () => ({
     ok: true,
-    session: { businessId, widgetKeyId: "key-1", visitorId, origin: "https://business.test", businessName: "Acme Dental", businessSlug: "acme-dental", defaultLocale: "en", config: { title: "Acme Dental" } },
+    session: { businessId, widgetKeyId: "key-1", visitorId, origin: "https://business.test", businessName: "Acme Dental", businessSlug: "acme-dental", defaultLocale: "en", config: { title: "Acme Dental" }, receptionistId: mocks.receptionistId },
   }),
 }));
 vi.mock("@/lib/widget-policy", () => ({ enforceWidgetRateLimits: async () => ({ allowed: true }) }));
@@ -21,7 +23,7 @@ vi.mock("@/lib/widget-keys", () => ({ requestIpHash: () => "ip-hash", touchWidge
 vi.mock("@/lib/domain-context", () => ({ createWorkerDomainContext: () => ({}) }));
 vi.mock("@/lib/api-helpers", () => ({ asApiResponse: (error: unknown) => { throw error; } }));
 vi.mock("@lobbystack/domain", () => ({
-  getCachedBusinessSnapshot: async () => ({ greeting: "Hi! How can we help?", contactChannels: { phoneNumber: "+15145550100" }, ...(mocks.recordingNotice !== undefined ? { recordingNotice: mocks.recordingNotice } : {}) }),
+  getCachedReceptionistSnapshot: mocks.snapshot,
   getWidgetChatAllowance: async () => ({ allowed: true, plan: "scale" }),
   getWebVoiceBillingAllowance: async () => ({ allowed: mocks.voiceAllowed }),
   registerWidgetVisitor: mocks.registerWidgetVisitor,
@@ -34,6 +36,9 @@ beforeEach(() => {
   mocks.touchWidgetKeyLastUsed.mockReset();
   mocks.voiceAllowed = true;
   mocks.recordingNotice = undefined;
+  mocks.receptionistId = null;
+  mocks.snapshot.mockReset();
+  mocks.snapshot.mockImplementation(async () => ({ greeting: "Hi! How can we help?", contactChannels: { phoneNumber: "+15145550100" }, ...(mocks.recordingNotice !== undefined ? { recordingNotice: mocks.recordingNotice } : {}) }));
   vi.stubEnv("LIVE_PROTOTYPE_ENABLED", "true");
   vi.stubEnv("OPENAI_API_KEY", "sk-test");
 });
@@ -61,6 +66,19 @@ describe("GET /api/widget/config", () => {
     });
     expect(mocks.registerWidgetVisitor).not.toHaveBeenCalled();
     expect(mocks.touchWidgetKeyLastUsed).not.toHaveBeenCalled();
+    // A key from before receptionists is answered by the default one.
+    expect(mocks.snapshot).toHaveBeenCalledWith({}, { businessId, receptionistId: null });
+  });
+
+  it("answers with the receptionist the widget's key names, in its view of the business", async () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    mocks.receptionistId = kitsilano;
+    mocks.snapshot.mockResolvedValueOnce({ greeting: "Hi, Kitsilano store!", contactChannels: {}, receptionist: { id: kitsilano, name: "Kitsilano", description: "The Kitsilano store.", isDefault: false } });
+    const body = await (await GET(new Request("http://localhost/api/widget/config", { headers: { authorization: "Bearer token" } }))).json();
+    expect(mocks.snapshot).toHaveBeenCalledWith({}, { businessId, receptionistId: kitsilano });
+    expect(body).toMatchObject({ greeting: "Hi, Kitsilano store!", receptionist: { id: kitsilano, name: "Kitsilano", isDefault: false }, voiceEnabled: false });
+    // Only what the widget shows: what it helps with stays out.
+    expect(body.receptionist).not.toHaveProperty("description");
   });
 
   it("offers a call only when one can start", async () => {

@@ -29,6 +29,8 @@ describe("original billing overview behavior", () => {
     setup({ plan: "enterprise" });
     expect(screen.getByText("billing.currentPlan.includedVoiceCustom")).toBeTruthy();
     expect(screen.getByText("billing.currentPlan.includedSmsCustom")).toBeTruthy();
+    // Enterprise gets the deployment's cap of receptionists, which reads as custom too.
+    expect(screen.getByText("billing.currentPlan.includedReceptionistsCustom")).toBeTruthy();
     expect(screen.queryByText(/Unlimited/)).toBeNull();
   });
   it("shows what the plan costs from the deployment's plan list, in its currency, and what it includes as the server enforces it", () => {
@@ -43,13 +45,18 @@ describe("original billing overview behavior", () => {
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedSms", { count: 1 });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedOutbound", { count: 100 });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedStorage", { amount: "2", unit: "GB" });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedReceptionists", { count: 5 });
+    // Receptionists come right after the voice minutes.
+    const lines = translate.mock.calls.map(([key]) => key).filter((key) => /^billing\.currentPlan\.included(Voice|Receptionists|Outbound)$/.test(key));
+    expect(lines.slice(0, 3)).toEqual(["billing.currentPlan.includedVoice", "billing.currentPlan.includedReceptionists", "billing.currentPlan.includedOutbound"]);
   });
   it("shows a promo plan by its name and price with its own allowances", () => {
     const promoPlan: BillingPromoPlanView = { plan: "salons-plus", tier: "starter", names: { en: "Salons Plus" }, discount: null, currency: "usd", ends: null, endsWith: null, prices: [{ interval: "monthly", cents: 2_500, perMonth: 2_500 }] };
-    setup({ plan: "starter", promoPlan, limits: { ...builtInBillingPlanLimits.starter, voiceSecondsIncluded: 18_000, knowledgeStorageBytes: 10 * 1024 ** 2 } });
+    setup({ plan: "starter", promoPlan, limits: { ...builtInBillingPlanLimits.starter, voiceSecondsIncluded: 18_000, knowledgeStorageBytes: 10 * 1024 ** 2, includedReceptionists: 3 } });
     expect(screen.getByText("Salons Plus")).toBeTruthy();
     expect(screen.getByText("$25")).toBeTruthy();
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedVoice", { count: 300 });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedReceptionists", { count: 3 });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedStorage", { amount: "10", unit: "MB" });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.includedSms", { count: 50 });
   });

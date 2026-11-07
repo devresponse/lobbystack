@@ -62,7 +62,9 @@
       "requirePhone": "Obavezan telefon",
       "showBeforeChat": "Pitaj pre ćaskanja",
       "liveChat": "Dozvolite posetiocima da razgovaraju sa Vašim timom",
-      "liveChatHint": "Tokom radnog vremena, posetilac koji traži osobu dobija nekoga iz Vašeg tima u razgovoru. Vaš tim dobija upozorenje i odgovara iz Poruka. Ako niko ne odgovori u roku od 3 minuta, recepcioner nudi da primi poruku."
+      "liveChatHint": "Tokom radnog vremena, posetilac koji traži osobu dobija nekoga iz Vašeg tima u razgovoru. Vaš tim dobija upozorenje i odgovara iz Poruka. Ako niko ne odgovori u roku od 3 minuta, recepcioner nudi da primi poruku.",
+      "receptionist": "Recepcioner",
+      "receptionistHint": "Razgovori i pozivi iz ovog vidžeta idu recepcioneru kog izaberete. Dok je pauziran, na njih odgovara {{name}}."
     },
     "positions": {
       "bottomRight": "Dole desno",
@@ -181,9 +183,88 @@
     "title": "QR kod",
     "loading": "Učitava se Vaš QR kod…",
     "unavailable": "Vaš QR kod trenutno ne može da se učita.",
-    "card": {
-      "title": "Vaš QR kod",
-      "description": "Stavite ga na vrata, pult ili stolove. Svako ko ga skenira stiže na Vaš javni profil."
+    "links": {
+      "title": "Vaši QR kodovi",
+      "description": "Stavite ih na vrata, pult ili stolove. Svaki kod otvara Vašu stranicu sa recepcionerom koga izaberete.",
+      "descriptionOne": "Stavite ih na vrata, pult ili stolove. Svaki kod otvara Vašu stranicu i broji sopstvena skeniranja.",
+      "new": "Novi link",
+      "searchLabel": "Pretražite linkove",
+      "search_one": "Pretražite {{total}} link",
+      "search_few": "Pretražite {{total}} linka",
+      "search_other": "Pretražite {{total}} linkova",
+      "columns": {
+        "link": "Link",
+        "answeredBy": "Odgovara",
+        "opens": "Otvara",
+        "scans": "Skeniranja, 30 dana",
+        "actions": "Radnje"
+      },
+      "businessPage": "Stranica firme",
+      "notCounted": "Ne broje se",
+      "untitled": "Link {{code}}",
+      "paused": "Pauziran",
+      "answersNow": "Za sada odgovara {{name}}",
+      "archivedReceptionist": "Arhiviran recepcioner",
+      "loading": "Učitavaju se Vaši QR linkovi…",
+      "unavailable": "Vaši QR linkovi trenutno ne mogu da se učitaju.",
+      "retry": "Pokušajte ponovo",
+      "empty": "Još nema linkova. Napravite po jedan za svaki natpis da biste videli koji se skenira.",
+      "emptyViewer": "Još nema linkova. Vlasnik ili administrator može da napravi po jedan za svaki natpis.",
+      "noMatches": "Nijedan link se ne poklapa.",
+      "range": "{{from}}–{{to}} od {{total}}",
+      "previous": "Prethodna stranica",
+      "next": "Sledeća stranica",
+      "menuNote": "Meni svakog reda menja njegovog recepcionera, pauzira ga ili kopira njegovu adresu.",
+      "menuNoteOne": "Meni svakog reda ga preimenuje, pauzira ili kopira njegovu adresu.",
+      "menuNoteViewer": "Meni svakog reda kopira njegovu adresu.",
+      "routingNote": "Pauziran link otvara stranicu Vaše firme, a na link čiji je recepcioner pauziran ili arhiviran odgovara {{name}}.",
+      "routingNoteOne": "Pauziran link otvara stranicu Vaše firme.",
+      "menu": {
+        "label": "Još opcija za {{name}}",
+        "edit": "Izmeni",
+        "copy": "Kopiraj adresu",
+        "pause": "Pauziraj",
+        "resume": "Nastavi"
+      },
+      "toast": {
+        "created": "Link „{{name}}” je spreman. Njegov natpis je ispod.",
+        "saved": "Link „{{name}}” je sačuvan.",
+        "paused": "Link „{{name}}” je pauziran. Njegov natpis otvara stranicu Vaše firme dok ga ne nastavite.",
+        "resumed": "Link „{{name}}” je ponovo aktivan.",
+        "copied": "Adresa je kopirana.",
+        "copyFailed": "Adresa nije mogla da se kopira. Ona glasi: {{url}}"
+      },
+      "dialog": {
+        "newTitle": "Novi link",
+        "editTitle": "Izmena linka",
+        "newDescription": "Napravite QR kod koji otvara Vašu stranicu na kojoj odgovara jedan recepcioner.",
+        "newDescriptionOne": "Napravite QR kod koji otvara Vašu stranicu.",
+        "editDescription": "Njegov kod ostaje isti, pa natpisi koje ste već odštampali i dalje rade.",
+        "label": "Naziv",
+        "labelPlaceholder": "Izlog",
+        "labelHint": "Vidi ga samo Vaš tim, ovde i u broju skeniranja.",
+        "labelMissing": "Dajte linku naziv, na primer gde mu stoji natpis.",
+        "answeredBy": "Odgovara",
+        "answeredByHint": "Skeniranja otvaraju stranicu recepcionera koga izaberete. Dok je pauziran, odgovara {{name}}.",
+        "address": "Adresa",
+        "addressNewHint": "Pravi se za Vas kada napravite link.",
+        "addressHint": "Kod se nikada ne menja.",
+        "cancel": "Otkaži",
+        "create": "Napravi link",
+        "save": "Sačuvaj"
+      },
+      "errors": {
+        "limit": "Vaša firma ima {{max}} QR linkova, najviše koliko može da ima. Umesto toga izmenite neki pauziran link.",
+        "codeUnavailable": "Novi kod trenutno ne može da se napravi. Pokušajte ponovo.",
+        "invalidLabel": "Naziv može imati najviše {{max}} znakova."
+      }
+    },
+    "signCard": {
+      "pageTitle": "Natpis za stranicu firme",
+      "linkTitle": "Natpis „{{name}}”",
+      "description": "Odštampajte ga ili preuzmite kod za sopstveni dizajn.",
+      "link": "Link",
+      "linkPaused": "Ovaj link je pauziran, pa njegov natpis otvara stranicu Vaše firme dok ga ne nastavite."
     },
     "opens": "Otvara",
     "open": "Otvori stranicu",
@@ -238,9 +319,28 @@
     "noCode": "Od ove adrese ne može da se napravi QR kod.",
     "sign": {
       "defaultMessage": "Imate pitanja?\nPitajte nas bilo kada.",
+      "defaultMessageFor": "Imate pitanja?\nObratite se: {{name}}.",
       "scanChat": "Skenirajte i pišite nam",
+      "scanChatWith": "Skenirajte i pišite: {{name}}",
       "scanPage": "Skenirajte i posetite našu stranicu",
       "answeredBy": "Odgovara <brand>{{appName}}</brand>"
+    },
+    "chart": {
+      "title": "Skeniranja po danu",
+      "summary_one": "{{total}} skeniranje, {{range}}.",
+      "summary_few": "{{total}} skeniranja, {{range}}.",
+      "summary_other": "{{total}} skeniranja, {{range}}.",
+      "busiest_one": "Najviše: {{day}}, {{scans}} skeniranje.",
+      "busiest_few": "Najviše: {{day}}, {{scans}} skeniranja.",
+      "busiest_other": "Najviše: {{day}}, {{scans}} skeniranja.",
+      "none": "Nema skeniranja, {{range}}.",
+      "day_one": "{{day}}: {{scans}} skeniranje",
+      "day_few": "{{day}}: {{scans}} skeniranja",
+      "day_other": "{{day}}: {{scans}} skeniranja",
+      "tableCaption": "Skeniranja po danu, {{range}}",
+      "dayColumn": "Dan",
+      "scansColumn": "Skeniranja",
+      "notCounted": "Skeniranja natpisa za stranicu firme se ne broje. Napravite link za natpis da biste brojali njegova skeniranja."
     }
   },
   "billing": {
@@ -330,6 +430,9 @@
       "includedVoice_one": "{{count}} minut razgovora",
       "includedVoice_few": "{{count}} minuta razgovora",
       "includedVoice_other": "{{count}} minuta razgovora",
+      "includedReceptionists_one": "{{count}} recepcioner",
+      "includedReceptionists_few": "{{count}} recepcionera",
+      "includedReceptionists_other": "{{count}} recepcionera",
       "includedSms_one": "{{count}} SMS upozorenje",
       "includedSms_few": "{{count}} SMS upozorenja",
       "includedSms_other": "{{count}} SMS upozorenja",
@@ -338,6 +441,7 @@
       "includedOutbound_other": "{{count}} pokušaja preusmeravanja",
       "includedStorageCustom": "Prilagođen skladišni prostor",
       "includedVoiceCustom": "Prilagođen broj minuta razgovora",
+      "includedReceptionistsCustom": "Prilagođen broj recepcionera",
       "includedSmsCustom": "Prilagođen broj SMS poruka",
       "includedOutboundCustom": "Prilagođen broj preusmeravanja",
       "includedStorage": "{{amount}} {{unit}} skladišnog prostora"
@@ -376,6 +480,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora u pregledaču",
             "voiceMinutes_few": "{{count}} minuta razgovora u pregledaču",
             "voiceMinutes_other": "{{count}} minuta razgovora u pregledaču",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "allFeatures": "Bez broja telefona",
             "support": "Podrška zajednice"
           }
@@ -390,6 +497,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
             "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
             "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "dedicatedNumber_one": "{{count}} namenski poslovni broj",
             "dedicatedNumber_few": "{{count}} namenska poslovna broja",
             "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -409,6 +519,9 @@
             "voiceMinutes_one": "{{count}} minut razgovora uključen\nZatim {{rate}}/min",
             "voiceMinutes_few": "{{count}} minuta razgovora uključena\nZatim {{rate}}/min",
             "voiceMinutes_other": "{{count}} minuta razgovora uključeno\nZatim {{rate}}/min",
+            "receptionists_one": "{{count}} recepcioner",
+            "receptionists_few": "{{count}} recepcionera",
+            "receptionists_other": "{{count}} recepcionera",
             "dedicatedNumber_one": "{{count}} namenski poslovni broj",
             "dedicatedNumber_few": "{{count}} namenska poslovna broja",
             "dedicatedNumber_other": "{{count}} namenskih poslovnih brojeva",
@@ -426,6 +539,7 @@
           },
           "highlights": {
             "phoneNumbers": "Više namenskih brojeva",
+            "customReceptionists": "Broj recepcionera po dogovoru",
             "selfHosted": "Mogućnost samostalnog hostovanja",
             "support": "Namenska podrška pri uvođenju"
           }
@@ -639,6 +753,13 @@
     "toast": {
       "changed": "Broj telefona je promenjen. Prethodni broj ostaje aktivan još 30 dana.",
       "added": "Broj telefona je dodat."
+    },
+    "answeredBy": {
+      "label": "Odgovara",
+      "hint": "Pozivi i SMS poruke na ovaj broj idu recepcioneru kog izaberete. Dok je pauziran, na njih odgovara {{name}}.",
+      "saved": "Pozivi i SMS poruke na {{number}} sada idu recepcioneru {{name}}.",
+      "otherNumbers": "Ostali brojevi",
+      "otherNumbersDescription": "Pozivi i SMS poruke na svaki broj idu recepcioneru kog izaberete."
     }
   },
   "appearance": {

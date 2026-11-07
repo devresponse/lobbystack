@@ -9,6 +9,7 @@ import { reportServerError } from "@/lib/error-reporting";
 import { createWidgetSessionToken, requestIpHash, touchWidgetKeyLastUsed } from "@/lib/widget-keys";
 import { enforceWidgetRateLimits } from "@/lib/widget-policy";
 import { resolveWidgetAccess } from "@/lib/widget-access";
+import { receptionistFromPageToken } from "@/lib/widget-receptionist";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,7 +42,7 @@ export async function POST(request: Request) {
     const parsed = widgetSessionRequestSchema.safeParse(await readJson(request));
     if (!parsed.success) return NextResponse.json({ error: "widgetKey and visitorId are required.", code: "widget_session_input_invalid" }, { status: 400, headers: corsHeaders(request) });
     if (!request.headers.get("origin")) return NextResponse.json({ error: "A browser origin is required to create a widget session.", code: "widget_origin_required" }, { status: 403 });
-    const { widgetKey, visitorId } = parsed.data;
+    const { widgetKey, visitorId, receptionistToken } = parsed.data;
     const access = await resolveWidgetAccess(request, widgetKey, { requireOrigin: true, strictOrigin: true });
     if (!access.ok) return withCors(access.response, request);
     const allowance = await enforceWidgetRateLimits({ businessId: access.session.businessId, widgetKeyId: access.session.widgetKeyId, visitorId, ipHash: requestIpHash(request), operation: "session" });
@@ -52,13 +53,16 @@ export async function POST(request: Request) {
     // rather than by each request the chat makes with it. Those requests need
     // the visitor; the last use only shows on the dashboard, so failing to
     // save it doesn't stop the chat.
-    await Promise.all([
+    // A business or receptionist page names the receptionist its chat is for
+    // with a token it signed; on any other website the key decides.
+    const [receptionistId] = await Promise.all([
+      receptionistToken ? receptionistFromPageToken(receptionistToken, { businessId, widgetKeyId }) : undefined,
       registerWidgetVisitor(createWorkerDomainContext(), { businessId, visitorId, metadata: { userAgent: request.headers.get("user-agent") ?? undefined, pageUrl: origin } }),
       touchWidgetKeyLastUsed({ businessId, widgetKeyId }).catch((error: unknown) => {
         runAfterResponse(() => reportServerError(error, { operation: "widget_key_last_used", route: ROUTE }));
       }),
     ]);
-    const token = createWidgetSessionToken({ widgetKeyId, businessId, visitorId, origin });
+    const token = createWidgetSessionToken({ widgetKeyId, businessId, visitorId, origin, ...(receptionistId ? { receptionistId } : {}) });
     return NextResponse.json(widgetSessionResponseSchema.parse({ token: token.token, expiresAt: token.expiresAt, visitorId }), { headers: corsHeaders(request) });
   } catch (error) {
     if (error instanceof Response) {

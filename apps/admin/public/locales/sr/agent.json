@@ -9,6 +9,10 @@
       "title": "AI podešavanja",
       "description": "Pozdrav i podešavanja preusmeravanja za Vašeg recepcionera."
     },
+    "receptionists": {
+      "title": "Recepcioneri",
+      "description": "Ko odgovara na Vaše pozive, četove i stranice. Dodajte po jednog za svaku lokaciju, tim ili jezik."
+    },
     "knowledge": {
       "title": "Znanje",
       "description": "Informacije i smernice koje recepcioner koristi da odgovara na pitanja.",
@@ -90,6 +94,88 @@
           "label": "Oznake (opciono)",
           "placeholder": "Radno vreme, lokacija",
           "hint": "Ključne reči odvojene zarezima koje pomažu da se ovo znanje razvrsta."
+        }
+      },
+      "receptionists": {
+        "availableTo": "Dostupno za",
+        "rowAction": "Dostupno za",
+        "select": "Izaberi: {{title}}",
+        "selectPage": "Izaberi članke na ovoj stranici",
+        "selected_one": "Izabrano: {{count}}",
+        "selected_few": "Izabrano: {{count}}",
+        "selected_other": "Izabrano: {{count}}",
+        "clear": "Obriši",
+        "showingAll": "Prikazani su svi članci. Izaberite recepcionera da vidite tačno šta može da koristi.",
+        "showingEverything": "{{name}} odgovara na osnovu svih članaka.",
+        "showingOne": "Šta {{name}} može da koristi: članci za sve i oni izabrani za njega.",
+        "bulk": {
+          "open": "Dostupno za",
+          "mode": "Promena",
+          "add": "Dodaj",
+          "remove": "Ukloni",
+          "replace": "Zameni",
+          "addNote": "Članci za sve već uključuju svakog recepcionera, pa ostaju kakvi jesu.",
+          "removeNote": "Članci za sve postaju dostupni svim ostalim recepcionerima. Članak koji ostane bez recepcionera koristi samo podrazumevani recepcioner.",
+          "summary": {
+            "everyone_one": "Čini {{count}} članak dostupnim svima.",
+            "everyone_few": "Čini {{count}} članka dostupnim svima.",
+            "everyone_other": "Čini {{count}} članaka dostupnim svima.",
+            "add_one": "Dodaje {{names}} u {{count}} članak.",
+            "add_few": "Dodaje {{names}} u {{count}} članka.",
+            "add_other": "Dodaje {{names}} u {{count}} članaka.",
+            "remove_one": "Uklanja {{names}} iz {{count}} članka.",
+            "remove_few": "Uklanja {{names}} iz {{count}} članka.",
+            "remove_other": "Uklanja {{names}} iz {{count}} članaka.",
+            "replace_one": "Čini {{count}} članak dostupnim samo za {{names}}.",
+            "replace_few": "Čini {{count}} članka dostupnim samo za {{names}}.",
+            "replace_other": "Čini {{count}} članaka dostupnim samo za {{names}}."
+          },
+          "tooMany": "Izaberite najviše {{max}} članaka da biste ih promenili odjednom.",
+          "apply_one": "Primeni na {{count}} članak",
+          "apply_few": "Primeni na {{count}} članka",
+          "apply_other": "Primeni na {{count}} članaka",
+          "done_one": "Dostupnost je promenjena za {{count}} članak.",
+          "done_few": "Dostupnost je promenjena za {{count}} članka.",
+          "done_other": "Dostupnost je promenjena za {{count}} članaka."
+        },
+        "dialog": {
+          "description": "Ko može da koristi „{{title}}”.",
+          "done": "Dostupnost je sačuvana."
+        },
+        "rules": {
+          "open": "Pravila sajta",
+          "rowAction": "Pravila stranica",
+          "title": "Pravila sajta",
+          "description": "Stranice čija adresa počinje putanjom pravila idu njegovom recepcioneru, pri ovom učitavanju i svakom sledećem.",
+          "importLabel": "Pravila stranica",
+          "listTitle": "Pravila",
+          "empty": "Još nema pravila.",
+          "noSites": "Najpre uvezite sajt. Pravilo daje jedan deo njegovih stranica jednom recepcioneru.",
+          "site": "Sajt",
+          "path": "Putanja",
+          "pathPlaceholder": "/stores/kitsilano/",
+          "pathOf": "Putanja pravila {{number}}",
+          "goesTo": "Ide recepcioneru",
+          "goesToOf": "Recepcioner pravila {{number}}",
+          "goesToName": "Ide recepcioneru: {{name}}",
+          "removeDraft": "Ukloni pravilo {{number}}",
+          "invalidDraft": "Dajte pravilu putanju, na primer /bikes/, i recepcionera, ili ga uklonite.",
+          "chooseReceptionist": "Izaberite kome idu stranice.",
+          "add": "Dodaj pravilo",
+          "added_one": "Pravilo je dodato. {{count}} stranica ide recepcioneru {{name}}.",
+          "added_few": "Pravilo je dodato. {{count}} stranice idu recepcioneru {{name}}.",
+          "added_other": "Pravilo je dodato. {{count}} stranica ide recepcioneru {{name}}.",
+          "removed": "Pravilo je obrisano.",
+          "pages_one": "{{count}} stranica",
+          "pages_few": "{{count}} stranice",
+          "pages_other": "{{count}} stranica",
+          "showAll_one": "Prikaži sva pravila ({{count}})",
+          "showAll_few": "Prikaži sva pravila ({{count}})",
+          "showAll_other": "Prikaži sva pravila ({{count}})",
+          "delete": "Obriši pravilo za {{path}}",
+          "deleteTitle": "Obrisati pravilo za {{path}}?",
+          "deleteDescription": "Stranice koje je davalo svom recepcioneru ponovo su dostupne svima, osim ako ih neko drugo pravilo ili Vaš izbor takođe ne daje nekom recepcioneru.",
+          "deleteConfirm": "Obriši pravilo"
         }
       }
     },
@@ -406,5 +492,26 @@
     "edit": "Izmeni",
     "cancel": "Otkaži",
     "notSet": "Nije podešeno"
+  },
+  "receptionists": {
+    "shared": {
+      "title": "Zajedničko za sve recepcionere",
+      "description": "Opis firme, šta pozivaoci čuju o AI i snimanju, jezik i vremenska zona firme, radno vreme i pravila za termine."
+    },
+    "own": {
+      "title": "Podešavanja svakog recepcionera",
+      "description": "Njegov pozdrav, jezik, broj za preusmeravanje i zakazivanje. Izaberite recepcionera kog menjate."
+    },
+    "picker": "Recepcioner",
+    "businessLanguage": {
+      "label": "Jezik firme",
+      "hint": "Njime govori podrazumevani recepcioner, kao i svaki recepcioner bez sopstvenog jezika. Pozivi prelaze na jezik pozivaoca ako govori neki drugi, a rezimei poziva se pišu na njemu."
+    },
+    "language": {
+      "label": "Jezik",
+      "hint": "Njegovi pozivi počinju na ovom jeziku i prelaze na jezik pozivaoca ako govori neki drugi.",
+      "defaultHint": "Podrazumevani recepcioner govori jezikom firme, koji se podešava u zajedničkim podešavanjima iznad.",
+      "business": "Jezik firme ({{language}})"
+    }
   }
 }

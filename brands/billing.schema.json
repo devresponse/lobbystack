@@ -103,6 +103,11 @@
                   "type": "integer",
                   "minimum": 0,
                   "maximum": 1
+                },
+                "receptionists": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
                 }
               },
               "required": [
@@ -188,6 +193,11 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 1
+                    },
+                    "receptionists": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
                     }
                   },
                   "required": [
@@ -283,6 +293,11 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 1
+                    },
+                    "receptionists": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
                     }
                   },
                   "required": [
@@ -397,6 +412,11 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 1
+                    },
+                    "receptionists": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
                     }
                   },
                   "required": [
@@ -492,6 +512,11 @@
                       "type": "integer",
                       "minimum": 0,
                       "maximum": 1
+                    },
+                    "receptionists": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 50
                     }
                   },
                   "required": [
@@ -670,6 +695,11 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 1
+              },
+              "receptionists": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 50
               }
             },
             "additionalProperties": false

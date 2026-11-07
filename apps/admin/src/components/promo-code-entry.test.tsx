@@ -21,7 +21,7 @@ const view: BillingCodeView = {
   currency: "cad",
   current: false,
   prices: [{ interval: "monthly", cents: 2900, discountedCents: 1450, checkoutAvailable: true }, { interval: "annual", cents: 29000, discountedCents: 14500, checkoutAvailable: false }],
-  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1 },
+  included: { voiceSeconds: 18_000, alertSmsSegments: 50, outboundCallAttempts: 20, chatAiUnits: 50, knowledgeStorageBytes: 10 * 1024 ** 2, businessNumbers: 1, receptionists: 1 },
   moreThanTier: ["voiceSeconds", "knowledgeStorageBytes"],
 };
 let store: Record<string, string> = {};
@@ -64,12 +64,23 @@ describe("Have a promo code?", () => {
     expect(voice.textContent).toContain("billing.promo.moreThanTier");
     expect(screen.getByText('billing.currentPlan.includedStorage {"amount":"10","unit":"MB"}').closest("li")!.textContent).toContain("billing.promo.moreThanTier");
     expect(screen.getByText('billing.currentPlan.includedSms {"count":50}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedReceptionists {"count":1}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
     expect(body(fetchMock.mock.calls[0]![1])).toEqual({ code: "salons-2026" });
     expect(screen.getByRole("button", { name: "billing.promo.unavailable" }).hasAttribute("disabled")).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "billing.promo.subscribe.monthly" }));
     await waitFor(() => expect(assign).toHaveBeenCalledWith("https://checkout.example/promo"), { timeout: 3_000 });
     const checkout = fetchMock.mock.calls.find(([url, init]) => url === "/api/billing/checkout" && init?.method === "POST");
     expect(body(checkout![1])).toEqual({ businessId: "business", target: "starter", billingInterval: "monthly", promoCode: "SALONS-2026" });
+  });
+
+  it("says when a promo plan includes more receptionists than its tier", async () => {
+    setup((url) => url.startsWith("/api/billing/promo?") ? Response.json({ ...view, included: { ...view.included, receptionists: 3 }, moreThanTier: ["receptionists"] }) : Response.json({}));
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.link" }));
+    await userEvent.type(screen.getByLabelText("billing.promo.label"), "salons-2026");
+    await userEvent.click(screen.getByRole("button", { name: "billing.promo.apply" }));
+    const receptionists = (await screen.findByText('billing.currentPlan.includedReceptionists {"count":3}')).closest("li")!;
+    expect(receptionists.textContent).toContain("billing.promo.moreThanTier");
+    expect(screen.getByText('billing.currentPlan.includedVoice {"count":300}').closest("li")!.textContent).not.toContain("billing.promo.moreThanTier");
   });
 
   it("checks a promo link's code at once and forgets it when it doesn't work", async () => {

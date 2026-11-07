@@ -6,7 +6,11 @@ vi.mock("@/lib/api-helpers", async (original) => ({
   requireOperatorBusiness: async () => ({ session: { user: { id: "user_1" } }, businessId: "business_1" }),
 }));
 vi.mock("@/lib/domain-context", () => ({ createDomainContext: () => ({ db: "app" }) }));
-vi.mock("@lobbystack/domain", () => ({ answerUnansweredQuestion: fixture.answer, dismissUnansweredQuestion: fixture.dismiss }));
+vi.mock("@lobbystack/domain", async (importOriginal) => ({
+  readUnansweredAnswerAudience: (await importOriginal<typeof import("@lobbystack/domain")>()).readUnansweredAnswerAudience,
+  answerUnansweredQuestion: fixture.answer,
+  dismissUnansweredQuestion: fixture.dismiss,
+}));
 
 import { PATCH } from "./route";
 
@@ -23,7 +27,25 @@ describe("unanswered question API", () => {
     const response = await patch({ action: "answer", answer: "Two hours free.", userId: "owner", businessId: "business_2", questionId: "question_2" });
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ snippetId: "snippet_1" });
-    expect(fixture.answer).toHaveBeenCalledWith({ db: "app" }, { userId: "user_1", businessId: "business_1", questionId: "question_1", answer: "Two hours free." });
+    expect(fixture.answer).toHaveBeenCalledWith({ db: "app" }, { userId: "user_1", businessId: "business_1", questionId: "question_1", answer: "Two hours free.", audience: { audience: "everyone" } });
+  });
+
+  it("answers for only the receptionists that asked, or for the ones chosen", async () => {
+    const kitsilano = "00000000-0000-4000-8000-0000000000a2";
+    fixture.answer.mockResolvedValue({ snippetId: "snippet_1", audience: "chosen", receptionistIds: [kitsilano] });
+    expect((await patch({ action: "answer", answer: "Day rentals are $45.", audience: "asked" })).status).toBe(200);
+    expect(fixture.answer).toHaveBeenLastCalledWith({ db: "app" }, expect.objectContaining({ audience: { audience: "asked" } }));
+    expect((await patch({ action: "answer", answer: "Day rentals are $45.", audience: "chosen", receptionistIds: [kitsilano, kitsilano] })).status).toBe(200);
+    expect(fixture.answer).toHaveBeenLastCalledWith({ db: "app" }, expect.objectContaining({ audience: { audience: "chosen", receptionistIds: [kitsilano] } }));
+  });
+
+  it("refuses an audience it can't use before saving anything", async () => {
+    for (const body of [{ audience: "some" }, { audience: "chosen" }, { audience: "chosen", receptionistIds: ["kitsilano"] }]) {
+      const response = await patch({ action: "answer", answer: "Yes.", ...body });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "invalid_audience" });
+    }
+    expect(fixture.answer).not.toHaveBeenCalled();
   });
 
   it("dismisses", async () => {

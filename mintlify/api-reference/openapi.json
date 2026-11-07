@@ -11811,7 +11811,7 @@
       "post": {
         "operationId": "searchKnowledge",
         "summary": "Search knowledge as the receptionist does",
-        "description": "Runs the receptionist's knowledge search for a query, with the same code a call or website chat runs, and shows every stage. evidence is what the search returned from the database after ranking: the passages the receptionist's searchKnowledge tool gets. receptionist_result is what its model receives, with the business's text entries and FAQs added, and call_answer what a phone call's voice model hears. trace has the keyword and semantic searches' results with their scores, and every candidate with what became of it. Nothing in the business changes, so the same query can be compared before and after a change to the knowledge.",
+        "description": "Runs the receptionist's knowledge search for a query, with the same code a call or website chat runs, and shows every stage. It searches as the business's default receptionist, with the articles, text entries and FAQs that receptionist may use. evidence is what the search returned from the database after ranking: the passages the receptionist's searchKnowledge tool gets. receptionist_result is what its model receives, with the business's text entries and FAQs added, and call_answer what a phone call's voice model hears. trace has the keyword and semantic searches' results with their scores, and every candidate with what became of it. Nothing in the business changes, so the same query can be compared before and after a change to the knowledge.",
         "tags": [
           "Knowledge"
         ],
@@ -15829,7 +15829,7 @@
                         },
                         "lowers_allowance": {
                           "type": "boolean",
-                          "description": "An included amount, the storage limit or the number count goes down."
+                          "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                         },
                         "raises_price": {
                           "type": "boolean",
@@ -16212,6 +16212,19 @@
                   ],
                   "description": "Business phone numbers included."
                 },
+                "receptionists": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "Receptionists active at once, the default included. Null on a custom plan, which gets the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."
+                },
                 "voice_rate": {
                   "anyOf": [
                     {
@@ -16450,6 +16463,7 @@
                 "chat_units",
                 "kb_bytes",
                 "numbers",
+                "receptionists",
                 "voice_rate",
                 "sms_rate",
                 "call_rate",
@@ -16639,7 +16653,7 @@
                             },
                             "lowers_allowance": {
                               "type": "boolean",
-                              "description": "An included amount, the storage limit or the number count goes down."
+                              "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                             },
                             "raises_price": {
                               "type": "boolean",
@@ -16992,6 +17006,11 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 1
+                          },
+                          "receptionists": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 50
                           }
                         },
                         "required": [
@@ -17077,6 +17096,11 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 1
+                              },
+                              "receptionists": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
                               }
                             },
                             "required": [
@@ -17172,6 +17196,11 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 1
+                              },
+                              "receptionists": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
                               }
                             },
                             "required": [
@@ -17286,6 +17315,11 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 1
+                              },
+                              "receptionists": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
                               }
                             },
                             "required": [
@@ -17381,6 +17415,11 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 1
+                              },
+                              "receptionists": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50
                               }
                             },
                             "required": [
@@ -17559,6 +17598,11 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 1
+                        },
+                        "receptionists": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 50
                         }
                       },
                       "additionalProperties": false
@@ -17964,7 +18008,7 @@
                 },
                 "lowers_allowance": {
                   "type": "boolean",
-                  "description": "An included amount, the storage limit or the number count goes down."
+                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
                 },
                 "raises_price": {
                   "type": "boolean",
@@ -18463,6 +18507,19 @@
                         }
                       ],
                       "description": "Business phone numbers included."
+                    },
+                    "receptionists": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Receptionists active at once, the default included. Null means custom: the deployment's cap, MAX_RECEPTIONISTS_PER_BUSINESS."
                     }
                   },
                   "required": [
@@ -18471,7 +18528,8 @@
                     "outbound_call_attempts",
                     "chat_ai_units",
                     "knowledge_storage_bytes",
-                    "business_numbers"
+                    "business_numbers",
+                    "receptionists"
                   ],
                   "additionalProperties": false,
                   "description": "What the plan includes. Null means custom."

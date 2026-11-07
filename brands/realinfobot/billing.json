@@ -12,20 +12,20 @@
     "free_cloud": {
       "sold": false,
       "included": { "voiceMinutes": 30, "alertSmsSegments": 10, "outboundCallAttempts": 2, "chatAiUnits": 5 },
-      "limits": { "knowledgeStorageMb": 1, "businessNumbers": 0 }
+      "limits": { "knowledgeStorageMb": 1, "businessNumbers": 0, "receptionists": 1 }
     },
     "starter": {
       "sold": true,
       "prices": { "monthlyCents": 3700, "annualCents": 37000 },
       "included": { "voiceMinutes": 150, "alertSmsSegments": 50, "outboundCallAttempts": 20, "chatAiUnits": 50 },
-      "limits": { "knowledgeStorageMb": 5, "businessNumbers": 1 },
+      "limits": { "knowledgeStorageMb": 5, "businessNumbers": 1, "receptionists": 1 },
       "overageCents": { "voiceMinute": 20, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
     },
     "pro": {
       "sold": true,
       "prices": { "monthlyCents": 8700, "annualCents": 87000 },
       "included": { "voiceMinutes": 500, "alertSmsSegments": 200, "outboundCallAttempts": 100, "chatAiUnits": 200 },
-      "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1 },
+      "limits": { "knowledgeStorageMb": 20, "businessNumbers": 1, "receptionists": 5 },
       "overageCents": { "voiceMinute": 18, "alertSmsSegment": 2, "outboundCallAttempt": 2 }
     },
     "enterprise": { "sold": false, "custom": true }

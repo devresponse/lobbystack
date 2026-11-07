@@ -201,11 +201,12 @@ function planTable(data: Row): string {
       alert_sms: count(included.alert_sms_segments),
       transfers: count(included.outbound_call_attempts),
       numbers: count(included.business_numbers),
+      receptionists: count(included.receptionists),
       overage_per_minute: plan.overage_billable && rates.voice_minute_cents !== null ? amount(rates.voice_minute_cents) : "",
       prices: plan.custom ? "custom" : prices.length ? prices.map((price) => `${amount(price.amount_cents)} ${price.interval === "annual" ? "a year" : "a month"}${price.checkout_available ? "" : " (not sold here)"}`).join(", ") : "free",
     };
   });
-  return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
+  return `${formatTable(plans, columns("slug", "voice_minutes", "alert_sms", "transfers", "numbers", "receptionists", "overage_per_minute", "prices"))}\n\nPrices in ${currency}, ${data.source === "catalog" ? "from the billing catalog" : "built into the running code until a billing.json is applied"}.`;
 }
 
 const plural = (count: number, one: string, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;

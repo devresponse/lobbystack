@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { auditLogs, businessHours, businessMemberships, businessPublicProfiles, businesses, closures, createDatabaseClient, outboxMessages, phoneNumbers, receptionistProfiles, services, staff, users, widgetKeys, withBusinessTransaction, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import type { PublicProfileSettings } from "@lobbystack/shared";
 
 import { getBusinessPublicProfileSettings, getPublicBusinessProfile, resolvePublicProfileBusiness, savePublicProfileInTransaction, updateBusinessPublicProfile } from "./publicProfiles";
@@ -83,7 +83,8 @@ async function seed(tx: DatabaseTransaction) {
     { businessId, userId: adminId!, role: "business_admin" },
     { businessId, userId: schedulerId!, role: "scheduler" },
   ]);
-  await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "A family dental clinic.", summarySource: "generated", bookingPolicy: "Book", transferMode: "on_request", transferNumber: "+16045550199", bookingMode: "instant" });
+  await tx.update(businesses).set({ summary: "A family dental clinic.", summarySource: "generated" }).where(eq(businesses.id, businessId));
+  await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "on_request", transferNumber: "+16045550199", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   await tx.insert(staff).values({ businessId, name: "Dr. Lee", timezone: "UTC" });
   const [service] = await tx.insert(services).values({ businessId, name: "Check-up", slug: "check-up", durationMinutes: 30 }).returning({ id: services.id });
   await tx.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 0, closeMinutes: 1440 })));
@@ -195,6 +196,25 @@ describe.skipIf(!client)("public profile pages", () => {
         { eventType: "public_profile.published", actorUserId: fixture.adminId, entityId: fixture.businessId },
         { eventType: "public_profile.unpublished", actorUserId: fixture.ownerId, entityId: fixture.businessId },
       ]);
+    });
+  });
+
+  it("refreshes the snapshot when the page is published or unpublished, since chats give its links only while it's public", async () => {
+    await rollbackTest(async (tx) => {
+      const fixture = await seed(tx);
+      const refreshes = async () => (await tx.select({ reason: sql<string>`${outboxMessages.payload}->>'reason'` }).from(outboxMessages)
+        .where(and(eq(outboxMessages.businessId, fixture.businessId), eq(outboxMessages.topic, "snapshot.refresh"), sql`${outboxMessages.payload}->>'reason' like 'public_profile_%'`))).map((row) => row.reason).sort();
+
+      // A first save that leaves the page private changes no link.
+      await fixture.save(fixture.ownerId, fixture.settings({ published: false }));
+      expect(await refreshes()).toEqual([]);
+      await fixture.save(fixture.ownerId, fixture.settings());
+      expect(await refreshes()).toEqual(["public_profile_published"]);
+      // Another save while it's public changes no link either.
+      await fixture.save(fixture.ownerId, fixture.settings({ category: "Dentist" }));
+      expect(await refreshes()).toEqual(["public_profile_published"]);
+      await fixture.save(fixture.ownerId, fixture.settings({ published: false }));
+      expect(await refreshes()).toEqual(["public_profile_published", "public_profile_unpublished"]);
     });
   });
 

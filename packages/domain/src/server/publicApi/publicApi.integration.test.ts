@@ -53,7 +53,8 @@ let ownerId: string;
 async function createFixture(label: string): Promise<Fixture> {
   const businessId = randomUUID();
   await admin!.db.insert(businesses).values({ id: businessId, slug: `api-${label}-${businessId}`, name: `API ${label}`, timezone: "UTC", businessType: "test" });
-  await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: label, bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+  await admin!.db.update(businesses).set({ summary: label }).where(eq(businesses.id, businessId));
+  await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
   const [member] = await admin!.db.insert(staff).values({ businessId, name: "Sam", timezone: "UTC" }).returning({ id: staff.id });
   const [service] = await admin!.db.insert(services).values({ businessId, name: "Cut", slug: "cut", durationMinutes: 30 }).returning({ id: services.id });
   await admin!.db.insert(businessHours).values(Array.from({ length: 7 }, (_, dayOfWeek) => ({ businessId, dayOfWeek, openMinutes: 8 * 60, closeMinutes: 20 * 60 })));
@@ -688,7 +689,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(await updateReceptionistForApi(context, a.caller, { voice_instructions: null, transfer_number: null })).toMatchObject({ voice_instructions: null, transfer_number: null });
 
     // Sending the summary it already has still makes it the business's own, so AI won't replace it.
-    await admin!.db.update(receptionistProfiles).set({ summary: "Maple cuts hair.", summarySource: "generated" }).where(eq(receptionistProfiles.id, profile!.id));
+    await admin!.db.update(businesses).set({ summary: "Maple cuts hair.", summarySource: "generated" }).where(eq(businesses.id, a.businessId));
     expect(await updateReceptionistForApi(context, a.caller, { summary: "Maple cuts hair." })).toMatchObject({ summary: "Maple cuts hair.", summary_source: "operator" });
     // Asking for a new summary hands it back to AI and queues the rewrite.
     expect(await updateReceptionistForApi(context, a.caller, { regenerate_summary: true })).toMatchObject({ summary_source: "generated" });
@@ -704,17 +705,17 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(await getReceptionistForApi(context, b.caller)).toMatchObject({ greeting: "Hi", recording_notice: true });
   });
 
-  it("shows a business with no receptionist row the defaults, and saves them with its first change", async () => {
+  it("shows the default receptionist the database gives a business made outside sign-up, and saves on it", async () => {
     const businessId = randomUUID();
     await admin!.db.insert(businesses).values({ id: businessId, slug: `api-bare-${businessId}`, name: "Bare Clinic", timezone: "UTC", businessType: "test" });
     const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
-    const rows = async () => await admin!.db.select({ greeting: receptionistProfiles.greeting, tone: receptionistProfiles.tone }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
+    const rows = async () => await admin!.db.select({ isDefault: receptionistProfiles.isDefault, greeting: receptionistProfiles.greeting, tone: receptionistProfiles.tone }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
     try {
       const context = { db: worker!.db };
-      expect(await getReceptionistForApi(context, caller)).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", summary: "Bare Clinic", summary_source: "placeholder", transfer_mode: "on_request", booking_mode: "instant", recording_notice: true });
-      expect(await rows()).toEqual([]);
+      expect(await rows()).toEqual([{ isDefault: true, greeting: "Thank you for calling Bare Clinic.", tone: "professional" }]);
+      expect(await getReceptionistForApi(context, caller)).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", tone: "professional", summary_source: "placeholder", transfer_mode: "on_request", booking_mode: "instant", recording_notice: true });
       expect(await updateReceptionistForApi(context, caller, { tone: "warm" })).toMatchObject({ greeting: "Thank you for calling Bare Clinic.", tone: "warm", summary_source: "placeholder" });
-      expect(await rows()).toEqual([{ greeting: "Thank you for calling Bare Clinic.", tone: "warm" }]);
+      expect(await rows()).toEqual([{ isDefault: true, greeting: "Thank you for calling Bare Clinic.", tone: "warm" }]);
     } finally {
       await admin!.db.delete(outboxMessages).where(eq(outboxMessages.businessId, businessId));
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
@@ -771,12 +772,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const website = await createKnowledgeSourceForApi(context, b.caller, { type: "website", url: "https://cedar-api.example" });
     const [page] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "website", title: "Menu", sourceUrl: "https://cedar-api.example/menu", status: "indexed" }).returning({ id: knowledgeDocuments.id });
     const [file] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Prices", status: "error", error: "Unreadable." }).returning({ id: knowledgeDocuments.id });
-    // A status the API doesn't know reads, and filters, as processing.
-    const [queued] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Hours", status: "queued" }).returning({ id: knowledgeDocuments.id });
     await admin!.db.insert(knowledgeChunks).values({ businessId: b.businessId, documentId: page!.id, sequence: 0, content: "Soup of the day.", contentHash: "menu-0" });
     type Filter = { type?: "website" | "page" | "file"; status?: "pending" | "processing" | "indexed" | "error" | "cancelled" };
     const ids = async (filter: Filter, caller: ApiKeyCaller = b.caller) => (await listKnowledgeSourcesForApi(context, caller, filter)).data.map((source) => source.id);
-    expect(await ids({})).toEqual(expect.arrayContaining([website.id, page!.id, file!.id, queued!.id]));
+    expect(await ids({})).toEqual(expect.arrayContaining([website.id, page!.id, file!.id]));
     expect(await ids({}, a.caller)).not.toContain(page!.id);
     expect(await ids({ type: "website" })).toContain(website.id);
     expect(await ids({ type: "website" })).not.toContain(page!.id);
@@ -784,8 +783,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(await ids({ type: "page" })).not.toContain(website.id);
     expect(await ids({ type: "file", status: "error" })).toContain(file!.id);
     expect(await ids({ type: "file", status: "indexed" })).not.toContain(file!.id);
-    expect(await ids({ status: "processing" })).toEqual(expect.arrayContaining([website.id, queued!.id]));
-    expect(await getKnowledgeSourceForApi(context, b.caller, queued!.id)).toMatchObject({ type: "file", status: "processing" });
+    expect(await ids({ status: "processing" })).toContain(website.id);
     // One page at a time, with no source on two pages.
     const first = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2 });
     const second = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2, cursor: first.next_cursor! });
@@ -838,7 +836,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       ]).returning({ id: knowledgeDocuments.id });
       const chunk = (documentId: string, sequence: number, content: string, embedding?: number[]) => ({
         businessId: search.businessId, documentId, sequence, content, contentHash: `${documentId}-${sequence}`,
-        ...(embedding ? { embedding, embeddingFingerprint: "search-test", embeddingStatus: "completed" } : {}),
+        ...(embedding ? { embedding, embeddingFingerprint: "search-test", embeddingStatus: "completed" as const } : {}),
       });
       const [lot, evening, fees] = await admin!.db.insert(knowledgeChunks).values([
         chunk(parking!.id, 0, "Parking is free behind the building.", across),
@@ -1455,7 +1453,8 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const businessId = randomUUID();
     const slug = `api-profile-${businessId}`;
     await admin!.db.insert(businesses).values({ id: businessId, slug, name: "Profile test", timezone: "UTC", businessType: "test" });
-    await admin!.db.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Maple cuts hair.", summarySource: "generated", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" });
+    await admin!.db.update(businesses).set({ summary: "Maple cuts hair.", summarySource: "generated" }).where(eq(businesses.id, businessId));
+    await admin!.db.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Book", transferMode: "never", bookingMode: "instant" }).where(eq(receptionistProfiles.businessId, businessId));
     const caller: ApiKeyCaller = { businessId, apiKeyId: randomUUID() };
     const options = { appOrigin: "https://app.lobbystack.example" };
     const audited = async (eventType: string) => await admin!.db.select({ actorUserId: auditLogs.actorUserId, payload: auditLogs.payload }).from(auditLogs).where(and(eq(auditLogs.businessId, businessId), eq(auditLogs.eventType, eventType))).orderBy(auditLogs.createdAt);

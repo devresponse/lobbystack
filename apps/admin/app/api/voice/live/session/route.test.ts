@@ -19,13 +19,15 @@ const mocks = vi.hoisted(() => ({
   recordedGreeting: vi.fn(async (..._args: unknown[]): Promise<{ text: string; play: boolean } | undefined> => undefined),
 }));
 
-vi.mock("@lobbystack/domain", () => ({
+vi.mock("@lobbystack/domain", async () => ({
   finishLiveCall: mocks.finishLiveCall,
   recordAiTrace: vi.fn(async () => null),
   getWebVoiceBillingAllowance: mocks.allowance,
   recordProspectDemoCallError: mocks.recordProspectDemoCallError,
   recordProspectDemoCallStarted: mocks.recordProspectDemoCallStarted,
   recordVoiceSnapshotLoaded: mocks.recordVoiceSnapshotLoaded,
+  // The cut of the business's snapshot for one receptionist is the domain's own.
+  snapshotForReceptionist: (await import("../../../../../../../packages/domain/src/snapshot")).snapshotForReceptionist,
   startLiveWebCall: mocks.startLiveWebCall,
 }));
 vi.mock("@/lib/live-web-call", async (original) => ({ ...(await original<typeof import("@/lib/live-web-call")>()), resolveLiveWebCallAccess: mocks.access, liveSessionEndToken: (sessionId: string) => `token-for-${sessionId}` }));
@@ -200,7 +202,7 @@ describe("POST /api/voice/live/session", () => {
     await expect(response.json()).resolves.toMatchObject({ sessionId: "live_1", greeting: "Hi" });
   });
 
-  it("opens the call as before when LIVE_RECORDED_GREETING is off or the recording isn't made yet", async () => {
+  it("opens the call as before when LIVE_RECORDED_GREETING is false or the recording isn't made yet", async () => {
     mocks.access.mockResolvedValue(widget);
     const off = await start("lobbystack-widget");
     expect(mocks.sessionConfig).toHaveBeenLastCalledWith(snapshot, { greetingRecorded: false });
@@ -226,6 +228,63 @@ describe("POST /api/voice/live/session", () => {
     expect(lines).toContainEqual(expect.objectContaining({ message: "live.browser_start", businessId: "biz_1", sessionId: "live_1", callId: "call_1", widgetId: "lobbystack-widget", accessMs: stage, checksMs: stage, greetingMs: stage, openaiMs: stage, recordMs: stage, attachMs: stage, greetingRecording: true }));
     expect(response.headers.get("server-timing")).toMatch(/^access;dur=[\d.]+, checks;dur=[\d.]+, greeting;dur=[\d.]+, openai;dur=[\d.]+, record;dur=[\d.]+, attach;dur=[\d.]+$/);
     info.mockRestore();
+  });
+
+  describe("a call for one receptionist", () => {
+    const frontDeskId = "00000000-0000-4000-8000-0000000000a1";
+    const kitsilanoId = "00000000-0000-4000-8000-0000000000a2";
+    const receptionist = (id: string, overrides: Record<string, unknown> = {}) => ({
+      id, name: id === frontDeskId ? "Front desk" : "Kitsilano", description: id === frontDeskId ? "Everything about the shop." : "The Kitsilano store.",
+      isDefault: id === frontDeskId, status: "active", listed: true, order: id === frontDeskId ? 0 : 1, knowledgeScope: "all",
+      greeting: id === frontDeskId ? "Hi, the shop." : "Hi, Kitsilano store.", voiceInstructions: "", smsInstructions: "", chatInstructions: "",
+      bookingPolicy: "", bookingMode: "direct", transferPolicy: { mode: "never" }, snippetIds: [], ...overrides,
+    });
+    const stored = (kitsilano: Record<string, unknown> = {}) => ({ ...snapshot, greeting: "Hi, the shop.", knowledgeSnippets: [], receptionists: [receptionist(frontDeskId), receptionist(kitsilanoId, kitsilano)] });
+
+    it("answers as the receptionist the call is for, in its view of the business", async () => {
+      mocks.access.mockResolvedValue({ ...widget, receptionistId: kitsilanoId });
+      mocks.snapshot.mockResolvedValue(stored());
+      expect((await start("lobbystack-widget")).status).toBe(201);
+      const view = mocks.sessionConfig.mock.calls[0]![0] as Record<string, unknown>;
+      expect(view).toMatchObject({ greeting: "Hi, Kitsilano store.", receptionist: { id: kitsilanoId, name: "Kitsilano", isDefault: false } });
+      expect(view).not.toHaveProperty("receptionists");
+      expect(mocks.recordedGreeting).toHaveBeenCalledWith(view);
+      expect(mocks.startLiveWebCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: kitsilanoId }));
+      expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ callId: "call_1", receptionistId: kitsilanoId }));
+    });
+
+    it("answers a paused receptionist's call as the default one, and records it as the default's", async () => {
+      mocks.access.mockResolvedValue({ businessId: "biz_1", origin: "https://admin.lobbystack.test", widgetId: "lobbystack-dashboard-test-call", dashboardTestCall: true, receptionistId: kitsilanoId });
+      mocks.snapshot.mockResolvedValue(stored({ status: "paused" }));
+      expect((await start("lobbystack-dashboard-test-call", { receptionistId: kitsilanoId })).status).toBe(201);
+      expect(mocks.sessionConfig.mock.calls[0]![0]).toMatchObject({ greeting: "Hi, the shop.", receptionist: { id: frontDeskId, isDefault: true } });
+      expect(mocks.startLiveWebCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: frontDeskId }));
+      expect(mocks.attach).toHaveBeenCalledWith(expect.objectContaining({ receptionistId: frontDeskId }));
+    });
+
+    it("answers as the default receptionist when the call names none", async () => {
+      mocks.access.mockResolvedValue(widget);
+      mocks.snapshot.mockResolvedValue(stored());
+      await start("lobbystack-widget");
+      expect(mocks.startLiveWebCall).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: frontDeskId }));
+    });
+
+    it("answers as before with a snapshot from before receptionists", async () => {
+      mocks.access.mockResolvedValue({ ...widget, receptionistId: kitsilanoId });
+      await start("lobbystack-widget");
+      expect(mocks.sessionConfig).toHaveBeenCalledWith(snapshot, { greetingRecorded: false });
+      // The record fills in the default receptionist itself.
+      expect(mocks.startLiveWebCall.mock.calls[0]![1]).not.toHaveProperty("receptionistId");
+      expect(mocks.attach.mock.calls[0]![0]).not.toHaveProperty("receptionistId");
+    });
+
+    it("passes the receptionist a test call names on to the access check", async () => {
+      mocks.access.mockResolvedValue({ status: 400, code: "invalid_receptionist" });
+      const response = await start("lobbystack-dashboard-test-call", { receptionistId: "kitsilano" });
+      expect(mocks.access).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ receptionistId: "kitsilano" }));
+      expect(response.status).toBe(400);
+      expect(mocks.create).not.toHaveBeenCalled();
+    });
   });
 
   it("rejects unknown callers", async () => {

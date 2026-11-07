@@ -317,7 +317,8 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
     await rollbackTest(async (tx) => {
       const businessId = randomUUID();
       await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Maple Family Clinic", timezone: "UTC", businessType: "test", deploymentMode: "cloud" });
-      await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Maple Family Clinic uses LobbyStack to answer calls.", bookingPolicy: "Confirm first.", transferMode: "never" });
+      await tx.update(businesses).set({ summary: "Maple Family Clinic uses LobbyStack to answer calls." }).where(eq(businesses.id, businessId));
+      await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Confirm first.", transferMode: "never" }).where(eq(receptionistProfiles.businessId, businessId));
       const [indexed, pending] = [randomUUID(), randomUUID()];
       await tx.insert(knowledgeDocuments).values([
         { id: indexed, businessId, sourceType: "website", title: "Home", status: "indexed" },
@@ -341,12 +342,12 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       expect(reloaded).toMatchObject({ summarySource: "generated", currentFingerprint: input!.fingerprint });
 
       await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
-        await workerTx.update(receptionistProfiles).set({ summary: "Written by the owner.", summarySource: "operator" }).where(eq(receptionistProfiles.businessId, businessId));
+        await workerTx.update(businesses).set({ summary: "Written by the owner.", summarySource: "operator" }).where(eq(businesses.id, businessId));
       });
       expect(await saveGeneratedBusinessSummary({ db }, { businessId, summary: "An AI rewrite.", fingerprint: "other" })).toBe(false);
       await withBusinessTransaction(db, { businessId, actorType: "worker" }, async (workerTx) => {
-        const [profile] = await workerTx.select({ summary: receptionistProfiles.summary }).from(receptionistProfiles).where(eq(receptionistProfiles.businessId, businessId));
-        expect(profile?.summary).toBe("Written by the owner.");
+        const [business] = await workerTx.select({ summary: businesses.summary }).from(businesses).where(eq(businesses.id, businessId));
+        expect(business?.summary).toBe("Written by the owner.");
       });
     });
   });
@@ -599,15 +600,16 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       const business = async (input: { summarySource?: "placeholder" | "generated" } = {}) => {
         const businessId = randomUUID();
         await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Backfill listing", timezone: "UTC", businessType: "test" });
-        await tx.insert(receptionistProfiles).values({ businessId, greeting: "Hi", tone: "warm", summary: "Backfill listing", summarySource: input.summarySource ?? "placeholder", bookingPolicy: "Confirm first.", transferMode: "never" });
+        await tx.update(businesses).set({ summary: "Backfill listing", summarySource: input.summarySource ?? "placeholder" }).where(eq(businesses.id, businessId));
+        await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Confirm first.", transferMode: "never" }).where(eq(receptionistProfiles.businessId, businessId));
         return businessId;
       };
-      const document = async (businessId: string, input: { status: string; active?: boolean }) => {
+      const document = async (businessId: string, input: { status: "indexed" | "processing"; active?: boolean }) => {
         const [row] = await tx.insert(knowledgeDocuments).values({ businessId, sourceType: "upload", title: "Menu", status: input.status, active: input.active ?? true }).returning({ id: knowledgeDocuments.id });
         return row!.id;
       };
       const vector = Array.from({ length: 1536 }, () => 0.01);
-      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: string }) => {
+      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: "pending" | "completed" | "failed" }) => {
         await tx.insert(knowledgeChunks).values({ businessId, documentId: await document(businessId, { status: "indexed" }), sequence: 0, content: "Open 9 to 5.", contentHash: randomUUID(), embedding: input.embedded ? vector : null, embeddingFingerprint: input.fingerprint, embeddingStatus: input.status });
       };
 

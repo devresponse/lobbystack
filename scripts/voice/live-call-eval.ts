@@ -118,6 +118,10 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
   let callerSpoke = false;
   let reply = "";
   let replyEndMs = -1;
+  // OpenAI mutes the caller while a recording plays and GPT-Live's timeline
+  // leaves that time out, so after one its times run behind the audio sent by
+  // the recording's length. Without this, the caller talks over the replies.
+  let timelineLagMs = 0;
   const replies: string[] = [];
   const checks: boolean[] = [];
   // Each hand-over during the scenario, by the tools the agent used.
@@ -128,14 +132,16 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
     reply = "";
   };
   ws.on("session.output_transcript.delta", (event) => {
-    lastReplyEndMs = Math.max(lastReplyEndMs, event.end_ms);
+    const startMs = event.start_ms + timelineLagMs;
+    const endMs = event.end_ms + timelineLagMs;
+    lastReplyEndMs = Math.max(lastReplyEndMs, endMs);
     replied = true;
     if (!callerSpoke && greetedAfterMs === undefined && event.delta.trim()) greetedAfterMs = sessionMs;
     if (!callerSpoke && recordingPlayed) afterRecording += event.delta;
-    if (event.start_ms < scenarioStartMs) return;
-    if (replyEndMs >= 0 && event.start_ms - replyEndMs > 700) flushReply();
+    if (startMs < scenarioStartMs) return;
+    if (replyEndMs >= 0 && startMs - replyEndMs > 700) flushReply();
     reply += event.delta;
-    replyEndMs = event.end_ms;
+    replyEndMs = endMs;
   });
 
   let controller!: LiveCallController;
@@ -160,12 +166,13 @@ async function run(scenario: CallScenario, audio: Map<string, Buffer>, agentMode
       connect: () => ws as unknown as SidebandWS,
       // As the worker does, the time limit ends the call with a goodbye.
       ...(scenario.limitMs ? { maxDurationMs: scenario.limitMs, onTimeout: (reason) => void controller.wrapUp(reason) } : {}),
-      onDelegation: (timing) => { if (timing.offsetMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
+      onDelegation: (timing) => { if (timing.offsetMs + timelineLagMs >= scenarioStartMs) handOvers.push(timing.tools.join("+") || "reply"); },
       onGreeting: (event) => {
         if (event.step === "sent" && event.trigger !== "recording") greetingCommands += 1;
         // A recording writes no transcript, so the greeting counts from when OpenAI started it.
         if (event.step === "spoken" && event.trigger === "recording" && greetingRecording) {
           recordingPlayed = true;
+          timelineLagMs = recordingMs(greetingRecording);
           greetedAfterMs ??= sessionMs;
           replied = true;
           lastReplyEndMs = Math.max(lastReplyEndMs, sessionMs + recordingMs(greetingRecording));

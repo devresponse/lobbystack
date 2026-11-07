@@ -15,6 +15,13 @@ LobbyStack separates authoritative business facts from retrieved long-form knowl
 
 Embedding vectors are stored at the fixed `vector(1536)` dimension together with a fingerprint of the configured endpoint, model, provider name, dimensions, and revision. Semantic retrieval only compares matching fingerprints; keyword retrieval fills gaps while `knowledge.reembedBusiness` regenerates existing chunk text after a provider change.
 
+Since migration `0144` the database refuses any status but these, with a check constraint on each column, which stay `varchar`:
+
+- `knowledge_documents.status`: `pending` (a file waits its turn), `processing` (it's being read), `indexed` (receptionists can use it), `error` (reading failed, and the owner can retry) or `cancelled` (the owner stopped it). Search and the snapshot take only `indexed` documents.
+- `knowledge_chunks.embedding_status`: `pending` (waits for its embedding), `completed` (search can use its embedding) or `failed` (the last try failed, and the next `knowledge.reembedBusiness` takes it again).
+
+A new status needs the check changed in a migration, with the column's type in `packages/db/src/schema/index.ts` and, for a document, `apiKnowledgeSourceSchema` in `packages/shared/src/publicApi/schemas.ts`. `packages/domain/src/server/knowledgeStatus.integration.test.ts` compares the document list with that schema.
+
 ## Use knowledge during voice calls
 
 The admin loads one snapshot when a call starts. Structured facts stay authoritative; retrieval augments documents and FAQs. The worker answers booking and other state-changing requests through the agent core and `packages/domain`.

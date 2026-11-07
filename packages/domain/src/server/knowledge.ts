@@ -387,7 +387,7 @@ async function indexDocumentTextInTransaction(tx: DatabaseTransaction, input: In
         contentHash: hashContent(content),
         embedding: input.embeddings[sequence]!,
         ...(input.embeddingFingerprint ? { embeddingFingerprint: input.embeddingFingerprint } : {}),
-        embeddingStatus: input.embeddingFingerprint ? "completed" : "pending",
+        embeddingStatus: input.embeddingFingerprint ? "completed" as const : "pending" as const,
         embeddingError: null,
       })));
     }

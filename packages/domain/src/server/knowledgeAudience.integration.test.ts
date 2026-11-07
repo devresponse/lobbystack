@@ -105,7 +105,7 @@ async function seedStores(tx: DatabaseTransaction) {
   return { ...seeded, gastown, kitsilano };
 }
 
-async function addDocument(tx: DatabaseTransaction, businessId: string, values: { title: string; sourceType?: "upload" | "website"; sourceUrl?: string; status?: string; updatedAt?: Date; content?: string }) {
+async function addDocument(tx: DatabaseTransaction, businessId: string, values: { title: string; sourceType?: "upload" | "website"; sourceUrl?: string; status?: "pending" | "processing" | "indexed" | "error" | "cancelled"; updatedAt?: Date; content?: string }) {
   await as(tx, null);
   const [document] = await tx.insert(knowledgeDocuments).values({
     businessId,

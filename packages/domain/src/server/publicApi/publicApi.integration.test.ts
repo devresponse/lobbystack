@@ -772,12 +772,10 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     const website = await createKnowledgeSourceForApi(context, b.caller, { type: "website", url: "https://cedar-api.example" });
     const [page] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "website", title: "Menu", sourceUrl: "https://cedar-api.example/menu", status: "indexed" }).returning({ id: knowledgeDocuments.id });
     const [file] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Prices", status: "error", error: "Unreadable." }).returning({ id: knowledgeDocuments.id });
-    // A status the API doesn't know reads, and filters, as processing.
-    const [queued] = await admin!.db.insert(knowledgeDocuments).values({ businessId: b.businessId, sourceType: "upload", title: "Hours", status: "queued" }).returning({ id: knowledgeDocuments.id });
     await admin!.db.insert(knowledgeChunks).values({ businessId: b.businessId, documentId: page!.id, sequence: 0, content: "Soup of the day.", contentHash: "menu-0" });
     type Filter = { type?: "website" | "page" | "file"; status?: "pending" | "processing" | "indexed" | "error" | "cancelled" };
     const ids = async (filter: Filter, caller: ApiKeyCaller = b.caller) => (await listKnowledgeSourcesForApi(context, caller, filter)).data.map((source) => source.id);
-    expect(await ids({})).toEqual(expect.arrayContaining([website.id, page!.id, file!.id, queued!.id]));
+    expect(await ids({})).toEqual(expect.arrayContaining([website.id, page!.id, file!.id]));
     expect(await ids({}, a.caller)).not.toContain(page!.id);
     expect(await ids({ type: "website" })).toContain(website.id);
     expect(await ids({ type: "website" })).not.toContain(page!.id);
@@ -785,8 +783,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
     expect(await ids({ type: "page" })).not.toContain(website.id);
     expect(await ids({ type: "file", status: "error" })).toContain(file!.id);
     expect(await ids({ type: "file", status: "indexed" })).not.toContain(file!.id);
-    expect(await ids({ status: "processing" })).toEqual(expect.arrayContaining([website.id, queued!.id]));
-    expect(await getKnowledgeSourceForApi(context, b.caller, queued!.id)).toMatchObject({ type: "file", status: "processing" });
+    expect(await ids({ status: "processing" })).toContain(website.id);
     // One page at a time, with no source on two pages.
     const first = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2 });
     const second = await listKnowledgeSourcesForApi(context, b.caller, { limit: 2, cursor: first.next_cursor! });
@@ -839,7 +836,7 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       ]).returning({ id: knowledgeDocuments.id });
       const chunk = (documentId: string, sequence: number, content: string, embedding?: number[]) => ({
         businessId: search.businessId, documentId, sequence, content, contentHash: `${documentId}-${sequence}`,
-        ...(embedding ? { embedding, embeddingFingerprint: "search-test", embeddingStatus: "completed" } : {}),
+        ...(embedding ? { embedding, embeddingFingerprint: "search-test", embeddingStatus: "completed" as const } : {}),
       });
       const [lot, evening, fees] = await admin!.db.insert(knowledgeChunks).values([
         chunk(parking!.id, 0, "Parking is free behind the building.", across),

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, notInArray, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, ne, not, or, sql, type SQL } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 
 import { agentRules, appointments, businessHours, businesses, calls, contactPasscodes, contacts, conversations, conversationSessions, inboxItems, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, phoneNumbers, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, transcripts, webhookEndpoints, websiteIngestionJobs, type DatabaseTransaction } from "@lobbystack/db";
@@ -517,8 +517,6 @@ export async function loadKnowledgeEntryResource(tx: DatabaseTransaction, busine
 
 type KnowledgeSourceRow = Pick<typeof knowledgeDocuments.$inferSelect, "id" | "title" | "sourceType" | "sourceUrl" | "mimeType" | "tags" | "status" | "error" | "active" | "createdAt" | "updatedAt"> & { jobId: string | null; pageLimit: number | null };
 
-const knowledgeSourceStatuses = ["pending", "processing", "indexed", "error", "cancelled"] as const;
-
 /** A website added as a source has a crawl job; a page its crawl read has none. Anything else is a file. */
 export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" | "jobId">): ApiKnowledgeSource["type"] {
   if (row.sourceType !== "website") return "file";
@@ -527,10 +525,8 @@ export function knowledgeSourceType(row: Pick<KnowledgeSourceRow, "sourceType" |
 
 export function serializeKnowledgeSource(row: KnowledgeSourceRow): ApiKnowledgeSource {
   const type = knowledgeSourceType(row);
-  // A status this API does not know yet reads as still processing.
-  const status = (knowledgeSourceStatuses as readonly string[]).includes(row.status) ? row.status as ApiKnowledgeSource["status"] : "processing";
   const tags = Array.isArray(row.tags) ? row.tags.filter((tag): tag is string => typeof tag === "string") : [];
-  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status, error: status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
+  return { id: row.id, type, title: row.title, url: type === "file" ? null : row.sourceUrl, status: row.status, error: row.status === "error" ? row.error : null, active: row.active, page_limit: type === "website" ? row.pageLimit : null, content_type: type === "file" ? row.mimeType : null, tags, created_at: iso(row.createdAt), updated_at: iso(row.updatedAt) };
 }
 
 function selectKnowledgeSourceRows(tx: DatabaseTransaction, businessId: string) {
@@ -552,11 +548,8 @@ function knowledgeSourceTypeCondition(type: ApiKnowledgeSource["type"] | undefin
   return undefined;
 }
 
-// Matches serializeKnowledgeSource: a status the API doesn't know reads as processing.
 function knowledgeSourceStatusCondition(status: ApiKnowledgeSource["status"] | undefined): SQL | undefined {
-  if (!status) return undefined;
-  if (status === "processing") return or(eq(knowledgeDocuments.status, "processing"), notInArray(knowledgeDocuments.status, [...knowledgeSourceStatuses]));
-  return eq(knowledgeDocuments.status, status);
+  return status ? eq(knowledgeDocuments.status, status) : undefined;
 }
 
 export async function listKnowledgeSourceResources(tx: DatabaseTransaction, businessId: string, request: PageRequest & { type?: ApiKnowledgeSource["type"] | undefined; status?: ApiKnowledgeSource["status"] | undefined }): Promise<Page<ApiKnowledgeSource>> {

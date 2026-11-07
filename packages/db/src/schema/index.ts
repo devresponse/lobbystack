@@ -899,7 +899,8 @@ export const knowledgeDocuments = pgTable(
     sourceUrl: text("source_url"),
     storageObjectId: uuid("storage_object_id"),
     mimeType: varchar("mime_type", { length: 255 }),
-    status: varchar("status", { length: 32 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    status: varchar("status", { length: 32 }).$type<"pending" | "processing" | "indexed" | "error" | "cancelled">().default("pending").notNull(),
     processingProgress: integer("processing_progress").default(0).notNull(),
     contentHash: varchar("content_hash", { length: 128 }),
     error: text("error"),
@@ -932,7 +933,8 @@ export const knowledgeChunks = pgTable(
     contentHash: varchar("content_hash", { length: 128 }).notNull(),
     embedding: vector("embedding"),
     embeddingFingerprint: varchar("embedding_fingerprint", { length: 64 }),
-    embeddingStatus: varchar("embedding_status", { length: 16 }).default("pending").notNull(),
+    // The database refuses any other status (migration 0144).
+    embeddingStatus: varchar("embedding_status", { length: 16 }).$type<"pending" | "completed" | "failed">().default("pending").notNull(),
     embeddingError: text("embedding_error"),
     tokenCount: integer("token_count"),
     ...timestamps,

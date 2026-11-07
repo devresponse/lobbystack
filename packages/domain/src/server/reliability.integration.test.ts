@@ -604,12 +604,12 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
         await tx.update(receptionistProfiles).set({ greeting: "Hi", tone: "warm", bookingPolicy: "Confirm first.", transferMode: "never" }).where(eq(receptionistProfiles.businessId, businessId));
         return businessId;
       };
-      const document = async (businessId: string, input: { status: string; active?: boolean }) => {
+      const document = async (businessId: string, input: { status: "indexed" | "processing"; active?: boolean }) => {
         const [row] = await tx.insert(knowledgeDocuments).values({ businessId, sourceType: "upload", title: "Menu", status: input.status, active: input.active ?? true }).returning({ id: knowledgeDocuments.id });
         return row!.id;
       };
       const vector = Array.from({ length: 1536 }, () => 0.01);
-      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: string }) => {
+      const chunk = async (businessId: string, input: { fingerprint: string | null; embedded: boolean; status: "pending" | "completed" | "failed" }) => {
         await tx.insert(knowledgeChunks).values({ businessId, documentId: await document(businessId, { status: "indexed" }), sequence: 0, content: "Open 9 to 5.", contentHash: randomUUID(), embedding: input.embedded ? vector : null, embeddingFingerprint: input.fingerprint, embeddingStatus: input.status });
       };
 

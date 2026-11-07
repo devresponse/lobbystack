@@ -20,8 +20,10 @@ const LOAD_TIMEOUT_MS = 1_000;
 const RECORD_TIMEOUT_MS = 90_000;
 // After every try failed, the same opening isn't tried again for this long,
 // so the calls of a business whose opening GPT-Live won't say don't each
-// start three more sessions.
-const FAILED_RETRY_SECONDS = 6 * 60 * 60;
+// start three more sessions. It's short because a failure is usually GPT-Live
+// not speaking, which a later try mends, and until then calls open with the
+// greeting command, which GPT-Live often ignores.
+const FAILED_RETRY_SECONDS = 30 * 60;
 // The mark a worker sets while it records an opening, so another worker
 // doesn't record it too, outlasts the recording's own time limit.
 const IN_PROGRESS_SECONDS = Math.ceil(RECORD_TIMEOUT_MS / 1_000) + 30;
@@ -135,7 +137,7 @@ export async function keepOpeningsRecorded(recordings: GreetingRecordings, domai
 
 /**
  * Starts recording one receptionist's opening, unless it's recorded, being
- * recorded or failed in the last 6 hours, for the dashboard's test call,
+ * recorded or failed in the last 30 minutes, for the dashboard's test call,
  * which asks as the dashboard opens and waits a little for it. Doesn't wait
  * for the recording. False when the business can't be loaded or its calls
  * open with nothing to say.

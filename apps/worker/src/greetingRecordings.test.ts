@@ -102,13 +102,13 @@ describe("greeting recordings", () => {
   });
 
   // Each failure was three GPT-Live sessions.
-  it("logs a recording that fails without failing the call, and doesn't try that opening again for 6 hours", async () => {
+  it("logs a recording that fails without failing the call, and doesn't try that opening again for 30 minutes", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     mocks.recordGreeting.mockRejectedValueOnce(new Error("GPT-Live didn't record the opening in 3 tries."));
     const redis = store();
     const recordings = createGreetingRecordings({ store: redis, client: {} as never });
     await expect(recordings.record("Thanks for calling.", business)).resolves.toBeUndefined();
-    expect(redis.set.mock.calls).toEqual([["recording:marin:Thanks for calling.:recording", "1", "EX", 120, "NX"], ["recording:marin:Thanks for calling.:failed", "1", "EX", 21_600]]);
+    expect(redis.set.mock.calls).toEqual([["recording:marin:Thanks for calling.:recording", "1", "EX", 120, "NX"], ["recording:marin:Thanks for calling.:failed", "1", "EX", 1_800]]);
     expect(logLines(warn)).toEqual([expect.objectContaining({ message: "live.greeting_recording_failed", error: expect.stringContaining("in 3 tries") })]);
     await recordings.record("Thanks for calling.", business);
     expect(mocks.recordGreeting).toHaveBeenCalledTimes(1);

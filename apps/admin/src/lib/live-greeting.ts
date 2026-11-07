@@ -51,7 +51,7 @@ export async function recordedGreetingFor(snapshot: OpeningSnapshot, options: { 
  * - `ready`: recorded, so the call opens with it
  * - `recording`: a worker is recording it now
  * - `missing`: nobody is recording it
- * - `failed`: every try at recording it failed in the last 6 hours
+ * - `failed`: every try at recording it failed in the last 30 minutes
  * - `off`: no recording will play, because LIVE_RECORDED_GREETING is false,
  *   the call opens with nothing to say, or Redis isn't set up or doesn't
  *   answer within a second

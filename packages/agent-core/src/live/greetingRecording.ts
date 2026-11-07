@@ -42,7 +42,7 @@ export function greetingRecordingKey(greeting: string, voice: string): string {
 }
 
 /**
- * Next to a recording's key: set for 6 hours once every try at recording the
+ * Next to a recording's key: set for 30 minutes once every try at recording the
  * opening failed, so it isn't tried again meanwhile.
  */
 export function greetingRecordingFailedKey(key: string): string {

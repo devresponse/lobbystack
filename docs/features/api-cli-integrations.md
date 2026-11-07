@@ -57,7 +57,7 @@ The command prints the passages the search handed over in full, the candidates i
 - **Which receptionist.** Since fork PR #129 it searches as the business's default receptionist: the articles the default may use, its text entries and FAQs, and `trace.index` counts only those sources and chunks. A business without other receptionists gets every article, as before. Searching as another receptionist waits on the API's receptionist resources ([API gaps](../reference/api-gaps.md)).
 - **Which query.** The receptionist's model writes its own query. A call's or chat's AI trace (`lobbystack calls trace <trace_id>`) shows it in the `searchKnowledge` tool call, so that search can be repeated.
 - **Comparing runs.** Reading a source again replaces its chunks, so chunk IDs change: compare titles, text and ranks.
-- **Telemetry.** `duration_ms` is the search's own time; the score reads come after it. Each search counts in the `rag.search.*` metrics and the `knowledge.search_executed` event with `source: "api"`, so dashboards can leave these out. It never logs or sends passage text.
+- **Telemetry.** `duration_ms` is the search's own time; the score reads come after it. Each search counts in the `rag.search.*` metrics and the `knowledge.search_executed` event with `source: "api"`, so dashboards can leave these out, and both say how each half ended (`keyword` and `meaning` on the metrics, `keywordHalf` and `meaningHalf` on the event). It never logs or sends passage text.
 
 ### Save each answer in a folder
 

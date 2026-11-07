@@ -3,8 +3,9 @@ import { PgDialect } from "drizzle-orm/pg-core";
 import type { DomainContext } from "./context";
 import type { KnowledgePassage } from "../knowledgeRanking";
 
-const mocks = vi.hoisted(() => ({ transaction: vi.fn() }));
+const mocks = vi.hoisted(() => ({ transaction: vi.fn(), productEvent: vi.fn(async (..._args: unknown[]) => undefined) }));
 vi.mock("@lobbystack/db", async original => ({ ...(await original<typeof import("@lobbystack/db")>()), withBusinessTransaction: mocks.transaction }));
+vi.mock("./productEvents", async original => ({ ...(await original<typeof import("./productEvents")>()), recordProductEventBestEffort: mocks.productEvent }));
 import { chunkText, searchKnowledgeEvidence, traceKnowledgeSearch } from "./knowledge";
 import { searchKnowledgeForApi } from "./publicApi/knowledgeSearch";
 
@@ -16,10 +17,14 @@ let lexical: KnowledgePassage[];
 let semantic: KnowledgePassage[];
 let current: KnowledgePassage[];
 let failAll: boolean;
+// The keyword half's query runs out of its 2 seconds.
+let keywordTimesOut: boolean;
+const statementTimeout = () => Object.assign(new Error("Failed query: canceling statement due to statement timeout"), { cause: Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" }) });
 
 beforeEach(() => {
   statements.length = 0;
-  lexical = [primary]; semantic = [primary]; current = [primary, adjacent]; failAll = false;
+  lexical = [primary]; semantic = [primary]; current = [primary, adjacent]; failAll = false; keywordTimesOut = false;
+  mocks.productEvent.mockClear();
   mocks.transaction.mockImplementation(async (_db, actor, callback) => {
     expect(actor.businessId).toBe("tenant-a");
     return callback({ execute: async (statement: Parameters<typeof dialect.sqlToQuery>[0]) => {
@@ -30,6 +35,7 @@ beforeEach(() => {
       expect(query.params).toContain("tenant-a");
       expect(query.sql).toContain("d.active = true AND d.status = 'indexed'");
       if (query.sql.includes("BETWEEN")) return { rows: current };
+      if (keywordTimesOut && query.sql.includes("search_words @@")) throw statementTimeout();
       return { rows: query.sql.includes("<=>") ? semantic : lexical };
     } });
   });
@@ -88,6 +94,36 @@ describe("knowledge evidence", () => {
   it("distinguishes database failure from no evidence", async () => {
     failAll = true;
     expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" })).toMatchObject({ matches: [], outcome: "unavailable", failure: "search_unavailable" });
+  });
+  it("matches the stored words, and picks the closest passages before reading their text", async () => {
+    await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" });
+    const keyword = statements.find(value => value.includes("to_tsquery") && value.includes("LIMIT 12"))!;
+    // Migration 0145's words, checked instead of rebuilt for every passage.
+    expect(keyword).toContain("c.search_words @@ to_tsquery('simple', $");
+    expect(keyword).not.toContain("to_tsvector");
+    const meaning = statements.find(value => value.includes("<=>"))!;
+    // The 12 closest from ids and embeddings alone, then their text.
+    expect(meaning).toContain("nearest AS (SELECT c.id FROM knowledge_chunks c");
+    expect(meaning).not.toContain("MATERIALIZED");
+  });
+  it("records which half ran out of its 2 seconds", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    keywordTimesOut = true;
+    // The meaning half still answers, so the search finds something.
+    expect(await searchKnowledgeEvidence(context(), { businessId: "tenant-a", query: "management" })).toMatchObject({ mode: "hybrid", outcome: "found" });
+    const lines = warn.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>);
+    expect(lines).toContainEqual(expect.objectContaining({ message: "knowledge.search_timed_out", businessId: "tenant-a", keyword: "timed_out", meaning: "ok" }));
+    expect(mocks.productEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ name: "knowledge.search_executed", properties: expect.objectContaining({ keywordHalf: "timed_out", meaningHalf: "ok", outcome: "found" }) }));
+    // Neither half out of time: no line, and both halves answered.
+    warn.mockClear();
+    keywordTimesOut = false;
+    await searchKnowledgeEvidence(context(vi.fn().mockRejectedValue(new Error("provider down"))), { businessId: "tenant-a", query: "management" });
+    expect(warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("knowledge.search_timed_out"))).toEqual([]);
+    expect(mocks.productEvent).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ properties: expect.objectContaining({ keywordHalf: "ok", meaningHalf: "failed" }) }));
+    // Only words a search leaves out: nothing to match.
+    await searchKnowledgeEvidence({ db: {} as never }, { businessId: "tenant-a", query: "are you on" });
+    expect(mocks.productEvent).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ properties: expect.objectContaining({ keywordHalf: "skipped", meaningHalf: "skipped" }) }));
+    warn.mockRestore();
   });
   it("returns empty when both indexes have no matches", async () => {
     lexical = []; semantic = [];

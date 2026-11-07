@@ -148,6 +148,7 @@ export const SCHEMA_MIGRATIONS = [
   "0142_knowledge_snippets_ranking_index.sql",
   "0143_receptionists_cleanup.sql",
   "0144_knowledge_status_checks.sql",
+  "0145_knowledge_search_words.sql",
 ] as const;
 
 const CONCURRENT_INDEX_DIRECTIVE = /^-- lobbystack:concurrent-index ([a-z][a-z0-9_]*)$/m;

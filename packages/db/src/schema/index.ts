@@ -48,6 +48,12 @@ const vector = customType<{ data: number[]; driverData: string }>({
   },
 });
 
+const tsvector = customType<{ data: string; driverData: string }>({
+  dataType() {
+    return "tsvector";
+  },
+});
+
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
     return "bytea";
@@ -937,6 +943,8 @@ export const knowledgeChunks = pgTable(
     embeddingStatus: varchar("embedding_status", { length: 16 }).$type<"pending" | "completed" | "failed">().default("pending").notNull(),
     embeddingError: text("embedding_error"),
     tokenCount: integer("token_count"),
+    // The passage's words with its document's title, kept by triggers (migration 0145).
+    searchWords: tsvector("search_words"),
     ...timestamps,
   },
   (table) => [uniqueIndex("knowledge_chunks_document_sequence_unique").on(table.documentId, table.sequence), index("knowledge_chunks_business_embedding_fingerprint_idx").on(table.businessId, table.embeddingFingerprint), index("knowledge_chunks_reembed_pending_idx").on(table.businessId).where(sql`${table.embedding} is null or ${table.embeddingStatus} in ('pending', 'failed')`), index("knowledge_chunks_keyword_idx").using("gin", sql`to_tsvector('simple', ${table.content})`)],

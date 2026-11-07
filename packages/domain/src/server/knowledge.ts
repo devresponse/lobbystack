@@ -10,7 +10,7 @@ import { countKnowledgeTokens, KNOWLEDGE_SEARCH_TOKEN_BUDGET, knowledgeLexicalQu
 import { requireBusinessAdmin, requireBusinessMembership } from "../authz";
 import type { DomainContext } from "./context";
 import { normalizeWebsiteSourceUrl } from "./knowledgeUrl";
-import { getMeter } from "@lobbystack/telemetry/node";
+import { getMeter, logEvent } from "@lobbystack/telemetry/node";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { moveOnboardingStageInTransaction } from "./onboarding";
 import { recordProductEventBestEffort } from "./productEvents";
@@ -568,11 +568,13 @@ async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearch
   });
   const lexicalQueries = knowledgeLexicalQueries(terms);
   const { any: lexicalQuery, all: allTermsQuery } = lexicalQueries;
+  // Each passage's words, its document's title included, are stored with it
+  // (migration 0145). Row security keeps the match off any index, so this still
+  // reads every passage the receptionist may use, but no longer rebuilds their words.
   const lexical = terms.length ? execute(sql`${select} WHERE ${filters}
-    AND (to_tsvector('simple', c.content) @@ to_tsquery('simple', ${lexicalQuery})
-      OR to_tsvector('simple', d.title) @@ to_tsquery('simple', ${lexicalQuery}))
-    ORDER BY ts_rank_cd(to_tsvector('simple', d.title || ' ' || c.content), to_tsquery('simple', ${allTermsQuery})) DESC,
-      ts_rank_cd(to_tsvector('simple', d.title || ' ' || c.content), to_tsquery('simple', ${lexicalQuery})) DESC, c.id LIMIT 12`) : Promise.resolve([]);
+    AND c.search_words @@ to_tsquery('simple', ${lexicalQuery})
+    ORDER BY ts_rank_cd(c.search_words, to_tsquery('simple', ${allTermsQuery})) DESC,
+      ts_rank_cd(c.search_words, to_tsquery('simple', ${lexicalQuery})) DESC, c.id LIMIT 12`) : Promise.resolve([]);
   let queryEmbedding: number[] | null = null;
   const semantic = (async () => {
     if (!query || !context.embeddings) throw new Error("embedding_unavailable");
@@ -584,11 +586,15 @@ async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearch
       ]);
       if (!embedding?.length || embedding.some(value => !Number.isFinite(value))) throw new Error("invalid_embedding");
       queryEmbedding = embedding;
-      return await execute(sql`WITH ${reader}, eligible AS MATERIALIZED (SELECT ${fields}, c.embedding ${from} WHERE ${filters} AND c.embedding IS NOT NULL
+      // The 12 closest from ids and embeddings alone, then the text of just
+      // those, instead of copying every passage's text before comparing.
+      const vector = JSON.stringify(embedding);
+      return await execute(sql`WITH ${reader}, nearest AS (SELECT c.id ${from} WHERE ${filters} AND c.embedding IS NOT NULL
         AND c.embedding_status = 'completed'
-        ${context.embeddings.fingerprint ? sql`AND c.embedding_fingerprint = ${context.embeddings.fingerprint}` : sql``})
-        SELECT "chunkId", "documentId", title, content, "sourceUrl", "sourceRevision", sequence FROM eligible
-        ORDER BY embedding <=> ${JSON.stringify(embedding)}::vector, "chunkId" LIMIT 12`);
+        ${context.embeddings.fingerprint ? sql`AND c.embedding_fingerprint = ${context.embeddings.fingerprint}` : sql``}
+        ORDER BY c.embedding <=> ${vector}::vector, c.id LIMIT 12)
+        SELECT ${fields} FROM nearest n JOIN knowledge_chunks c ON c.id = n.id JOIN knowledge_documents d ON d.id = c.document_id
+        ORDER BY c.embedding <=> ${vector}::vector, c.id`);
     } finally { if (timer) clearTimeout(timer); }
   })();
   const [lexicalResult, semanticResult] = await Promise.allSettled([lexical, semantic]);
@@ -620,13 +626,21 @@ async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearch
   const outcome = matches.length ? "found" as const : failed ? "unavailable" as const : "empty" as const;
   const durationMs = performance.now() - startedAt;
   const source = input.source ? { source: input.source } : {};
-  searchDuration.record(durationMs, { operation: "knowledge.search", mode, outcome, ...source });
-  searchResultCount.record(matches.length, { operation: "knowledge.search", mode, outcome, ...source });
+  // How each half ended. When only one runs out of its 2 seconds the search
+  // still finds something, so this is the sign a business's knowledge has
+  // outgrown it (docs/operations/alerts.md).
+  const keyword = !terms.length ? "skipped" : searchHalfOutcome(lexicalResult, true);
+  const meaning = searchHalfOutcome(semanticResult, queryEmbedding !== null);
+  searchDuration.record(durationMs, { operation: "knowledge.search", mode, outcome, keyword, meaning, ...source });
+  searchResultCount.record(matches.length, { operation: "knowledge.search", mode, outcome, keyword, meaning, ...source });
+  if (keyword === "timed_out" || meaning === "timed_out") {
+    logEvent("warn", "knowledge.search_timed_out", { businessId: input.businessId, keyword, meaning, durationMs: Math.round(durationMs), ...source });
+  }
   await recordProductEventBestEffort(context, {
     name: "knowledge.search_executed",
     businessId: input.businessId,
     distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
-    properties: { mode, outcome, resultCount: matches.length, durationMs, fallbackUsed: mode === "keyword", ...source, ...(input.callId ? { callId: input.callId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) },
+    properties: { mode, outcome, resultCount: matches.length, durationMs, fallbackUsed: mode === "keyword", keywordHalf: keyword, meaningHalf: meaning, ...source, ...(input.callId ? { callId: input.callId } : {}), ...(input.turnId ? { turnId: input.turnId } : {}) },
   });
   return {
     result: { matches, mode, outcome, durationMs, ...(failed ? { failure: "search_unavailable" as const } : semanticResult.status === "rejected" ? { failure: "embedding_unavailable" as const } : {}) },
@@ -644,6 +658,19 @@ async function runKnowledgeSearch(context: DomainContext, input: KnowledgeSearch
       kept,
     },
   };
+}
+
+/**
+ * How one half of a search ended: it answered, had nothing to search with
+ * (no words left, or no embeddings), ran out of its 2 seconds, or failed
+ * another way, the embedding provider's errors included.
+ */
+export type KnowledgeSearchHalfOutcome = "ok" | "skipped" | "timed_out" | "failed";
+
+function searchHalfOutcome(result: PromiseSettledResult<unknown>, queried: boolean): KnowledgeSearchHalfOutcome {
+  if (result.status === "fulfilled") return "ok";
+  const error = searchStageError(result.reason, queried);
+  return error === "statement_timeout" ? "timed_out" : error === "embedding_unavailable" ? "skipped" : "failed";
 }
 
 /** What became of a candidate the fusion ranked. */
@@ -699,7 +726,7 @@ export async function traceKnowledgeSearch(context: DomainContext, input: { busi
   const lexicalRows = stages.lexical.status === "fulfilled" ? stages.lexical.value : [];
   const semanticRows = stages.semantic.status === "fulfilled" ? stages.semantic.value : [];
   const chunkIds = (rows: KnowledgePassage[]) => sql.join(rows.map(row => sql`${row.chunkId}`), sql`, `);
-  const searchedText = sql`to_tsvector('simple', d.title || ' ' || c.content)`;
+  const searchedText = sql`c.search_words`;
   const fingerprint = context.embeddings?.fingerprint;
   const [scores, distances, index] = await Promise.all([
     // The lexical search's two ORDER BY values: rank for every term, then for any term.

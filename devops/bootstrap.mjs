@@ -721,7 +721,11 @@ let byHandSkipped = false;
 function openByHand(run, command) {
   const open = Object.entries(run.state.byHand ?? {}).filter(([id]) => !run.state.done[id]);
   if (!open.length) return "";
-  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${command} again without --yes and press Enter at each.`;
+  // Each step is finished by the command that runs it, which isn't always the one that just ended: up's steps,
+  // such as openai.limits, are still open when connect ends, and running connect again wouldn't close them.
+  const owner = (id) => (command === "template" ? "template" : id.startsWith("connect.") ? "connect" : "up");
+  const commands = ["up", "connect", "template"].filter((name) => open.some(([id]) => owner(id) === name));
+  return `\n\nStill to do by hand (--yes didn't wait for these, so they aren't recorded as done):\n${open.map(([id, title]) => `  - ${id}: ${title}`).join("\n")}\nDo them, then run ${commands.join(", then ")} again without --yes and press Enter at each.`;
 }
 
 let currentStep = null;

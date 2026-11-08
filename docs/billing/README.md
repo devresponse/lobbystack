@@ -187,6 +187,8 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `ops.billing.webhook_refused` | Warning log line from the admin | A Polar delivery was refused (`unconfigured`, `missing_headers` or `bad_signature`). Polar turns the webhook off after 10 failures in a row | 3 or more in an hour |
 | `ops.billing.webhook_unresolved` | Error log line from the admin | A Polar event matched no business, so a subscription may never have applied | Any |
 | `ops.billing.webhook_customer_mismatch` | Warning log line from the admin | A subscription came on another business's Polar customer; it still goes to the business that bought it | Any |
+| `ops.billing.webhook_wrong_provider` | Warning log line from the admin, at most once a minute | A delivery reached the route of the provider the deployment doesn't bill through, such as from an endpoint left in that provider's dashboard; answered 404 | Any in a day |
+| `ops.billing.meter_error` | Warning log line from the admin | Stripe couldn't use a meter event, so that usage isn't billed until the daily totals check corrects it (Stripe billing's step 16) | Any |
 | `ops.billing.sweep` | Log line from the worker | What each sweep that found work queued again | None |
 
 Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set ([observability](../features/observability.md)). The daily checks' history is also on the deployment: `pnpm lobbystack --profile ops billing catalog-runs --kind verify`.

@@ -119,6 +119,10 @@ export interface BillingProvider {
   createPortalSession(input: { customer: CustomerRef; returnUrl: string; locale: string | null }): Promise<{ url: string }>;
   /** The refusal to tell the business for a provider's error, or undefined when trying again may work. */
   refusalFor(error: unknown): BillingRefusal | undefined;
+  /** The business a customer's metadata names, for an event that names only the customer (Stripe's charges). Null when it names none. */
+  businessOfCustomer?(customerId: string): Promise<string | null>;
+  /** The invoice a payment paid, for a refund that names only the payment (Stripe's charges). Null when there's none. */
+  invoiceOfPayment?(paymentRef: string): Promise<string | null>;
 }
 
 /** A webhook delivery whose signature checked out. */

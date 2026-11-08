@@ -7,6 +7,7 @@ import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingA
 import { generateAffiliatePayoutRun } from "./affiliates";
 import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
+import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
 import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
 import { currentWebsiteIngestion } from "./activation";
 import { createBusiness } from "./tenancy";
@@ -798,6 +799,61 @@ describe.skipIf(!testUrl)("reliability against dedicated PostgreSQL roles", () =
       // Its own older snapshot doesn't.
       await reconcile("subscription.updated", { plan: "pro", subscriptionId: "sub_new", subscriptionState: "active", subscriptionModifiedAt: "2026-09-01T06:00:00.000Z" });
       expect(await account()).toEqual({ plan: "starter", state: "active", subscriptionId: "sub_new" });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+it("applies a Stripe subscription as its read-back says, in any order of its events, and orders read-backs by their time", async () => {
+    // The plan prices as the catalog's links name them, here through the product variables.
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month", POLAR_PRO_MONTHLY_PRODUCT_ID: "price_pro_month" };
+    const read = (seconds: number, priceRef: string, state: ProviderSubscription["state"] = "active"): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state, priceRef, interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds)) });
+    for (const order of [[0, 1, 2], [2, 0, 1], [1, 2, 0]]) {
+      const businessId = randomUUID();
+      await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe read-back test", timezone: "UTC", businessType: "test" });
+      // What each event said when it was sent: created, paid, then moved to Pro.
+      const sent = [
+        { subscriptionState: "incomplete", priceRef: "price_starter_month", subscriptionModifiedAt: "2026-11-08T11:00:00.000Z" },
+        { subscriptionState: "active", priceRef: "price_starter_month", subscriptionModifiedAt: "2026-11-08T11:01:00.000Z" },
+        { subscriptionState: "active", priceRef: "price_pro_month", subscriptionModifiedAt: "2026-11-08T11:02:00.000Z" },
+      ];
+      const events = await client!.db.insert(providerEvents).values(sent.map((payload) => ({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType: "customer.subscription.updated", businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1", ...payload } }))).returning({ id: providerEvents.id });
+      try {
+        // Each reconcile reads the subscription back first, and Stripe says it's on Pro now.
+        let seconds = 0;
+        for (const index of order) await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: events[index]!.id, fresh: read(seconds++, "price_pro_month") }, env);
+        const [account] = await client!.db.select({ plan: billingAccounts.plan, state: billingAccounts.subscriptionState, subscriptionId: billingAccounts.subscriptionId, customerId: billingAccounts.customerId, source: billingAccounts.source }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId));
+        expect(account).toEqual({ plan: "pro", state: "active", subscriptionId: "sub_1", customerId: "cus_1", source: "stripe" });
+        // A read-back older than one already applied, as from a slow worker, changes nothing.
+        const [late] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType: "customer.subscription.updated", businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1", subscriptionState: "active", priceRef: "price_starter_month" } }).returning({ id: providerEvents.id });
+        await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: late!.id, fresh: { ...read(0, "price_starter_month"), readAt: new Date(Date.UTC(2026, 10, 8, 11, 59, 0)) } }, env);
+        expect((await client!.db.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.plan).toBe("pro");
+        const [stored] = await client!.db.select({ payload: providerEvents.payload, status: providerEvents.status }).from(providerEvents).where(eq(providerEvents.id, events[order[0]!]!.id));
+        expect(stored).toMatchObject({ status: "processed", payload: { subscriptionModifiedAt: "2026-11-08T12:00:00.000Z" } });
+      } finally {
+        await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      }
+    }
+  });
+
+  it("stores Stripe invoices as orders, an uncollectible one paid later as paid, and a refund before its payment as refunded", async () => {
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe invoice test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>, refundInvoice?: string) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { customerId: "cus_1", currency: "cad", occurredAt: "2026-11-08T00:00:00.000Z", ...payload } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent({ db: client!.db as unknown as Database }, { businessId, providerEventId: event!.id, ...(refundInvoice ? { refundInvoice } : {}) });
+    };
+    const order = async (id: string) => (await client!.db.select({ status: billingTransactions.status, amount: billingTransactions.amountCents, refunded: billingTransactions.refundedAmountCents }).from(billingTransactions).where(and(eq(billingTransactions.businessId, businessId), eq(billingTransactions.sourceId, id))))[0];
+    const invoice = (id: string, status: string) => ({ kind: "payment", id, orderId: id, status, amountCents: 8_700 });
+    try {
+      await reconcile("invoice.finalized", invoice("in_1", "pending"));
+      await reconcile("invoice.payment_failed", invoice("in_1", "uncollectible"));
+      await reconcile("invoice.paid", invoice("in_1", "paid"));
+      expect(await order("in_1")).toEqual({ status: "paid", amount: 8_700, refunded: 0 });
+      // The refund's read-back named its invoice before Stripe's paid event was applied.
+      await reconcile("charge.refunded", { kind: "refund", amount: 8_700, refundedAmount: 8_700, paymentRef: "pi_2", status: "refunded" }, "in_2");
+      await reconcile("invoice.paid", invoice("in_2", "paid"));
+      expect(await order("in_2")).toEqual({ status: "refunded", amount: 8_700, refunded: 8_700 });
     } finally {
       await client!.db.delete(businesses).where(eq(businesses.id, businessId));
     }

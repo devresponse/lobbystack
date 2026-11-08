@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 11 are done: phases 1 and 2, and steps 9 to 11 of phase 3.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 12 are done: phases 1 and 2, and steps 9 to 12 of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -166,3 +166,14 @@ A deployment set to `BILLING_PROVIDER=stripe`, with the preview's test keys, can
 - **Tests:** the client and the fake's catalog objects (`stripe/catalog.test.ts`), `pnpm billing --stripe` end to end on the fake (`scripts/billing.stripe.test.ts`: a full run, a second run with nothing to do, a run cut off halfway, the refusals and verify), and a Stripe deployment's links and daily check on PostgreSQL.
 
 The check for this step, on a Stripe sandbox of Yuri's: `apply` makes every object, a second `apply` plans nothing, and `verify` reports in sync once the admin has `STRIPE_WEBHOOK_SECRET`.
+
+## Step 12: the webhook and read-back reconcile
+
+- **`StripeWebhook`** (`packages/providers/src/stripe/events.ts`): the `Stripe-Signature` header checked with `STRIPE_WEBHOOK_SECRET`, or either of its two secrets during a rotation, and refused when it's more than 300 seconds off or the event's mode isn't that of the admin's `STRIPE_API_KEY` (`wrong_mode`). The event envelope is `stripeEventSchema` in `packages/contracts/src/stripeEvents.ts`. It keeps the events of `STRIPE_WEBHOOK_EVENTS` and drops the rest with 202.
+- **Events in reconcile's terms:** a subscription's plan item, status, period, end and, once read back, its waiting change; the overage subscription's events move no plan. An invoice is a payment: an open one is pending, and only the plan's invoices name its subscription. A checkout session names its request and outcome, for step 13. `charge.refunded` names its payment, and `charge.dispute.created` is stored only when its metadata names the business. The business comes from the subscription's metadata, which Stripe copies onto its invoices, or the session's; a charge names only its customer, whose metadata (`businessOfCustomer`, with the admin's key) names the business.
+- **Routes:** `POST /api/webhooks/stripe` uses the shared handler, and `POST /api/webhooks/stripe/meter-errors` checks the destination's thin events with `STRIPE_METER_WEBHOOK_SECRET` and logs `ops.billing.meter_error`. The route of the provider a deployment doesn't bill through answers 404 and logs `ops.billing.webhook_wrong_provider` at most once a minute, Polar's on a Stripe deployment too.
+- **Read-back:** for a provider that reads back, the worker reads the event's subscription (`getSubscription`), and a refund's invoice (`invoiceOfPayment`, through Stripe's invoice payments), before reconcile opens its transaction. The read-back wins over the event, and its read time becomes `subscriptionModifiedAt` on the stored event, so two reconciles of one subscription, run in either order, end on the later read.
+- **Payments:** invoices are order rows (`source_id` and `order_id` the `in_` ID, with the hosted invoice URL and the customer), so affiliate commissions and the finance export need no change; `uncollectible` ranks with pending, so a later payment still lands. A refund adds to its invoice's row, made first when the refund comes before the payment, and cuts the commission.
+- **Tests:** signatures (good, bad, rotated, old, the wrong mode), each event type normalized, the routes (a duplicate, an unresolved business, the customer read back, the other provider's route), the worker's read-backs, any order of one subscription's events with read-backs, invoices with an uncollectible one, refunds before and after their payment, and a commission on a paid invoice cut by its refund.
+
+The check for this step: sandbox events forwarded by the Stripe CLI reconcile on a local stack.

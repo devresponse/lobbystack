@@ -12,6 +12,8 @@ export type FakeStripeState = {
   schedules: Map<string, Stripe.SubscriptionSchedule>;
   invoices: Map<string, Stripe.Invoice>;
   portalSessions: Stripe.BillingPortal.Session[];
+  /** Which invoice each payment intent paid. */
+  invoicePayments: Array<{ invoice: string; paymentIntent: string }>;
   /** Products, prices, meters, coupons, portal configurations, endpoints and Stripe Tax: what pnpm billing makes. */
   catalog: FakeCatalogState;
 };
@@ -27,7 +29,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], catalog: emptyFakeCatalog() };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], invoicePayments: [], catalog: emptyFakeCatalog() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

@@ -5,6 +5,7 @@ import { PolarBillingProvider } from "../polar/polarBilling";
 import { PolarCatalogClient } from "../polar/polarCatalog";
 import { StripeBilling } from "../stripe/adapter";
 import { createStripeCatalogClient, type StripeCatalogClient } from "../stripe/catalog";
+import { StripeWebhook, stripeWebhookSecrets } from "../stripe/events";
 import { createStripeClient, stripeKeyEnv } from "../stripe/client";
 import type { BillingEnv, BillingProvider, BillingProviderId, BillingWebhook } from "./types";
 
@@ -64,9 +65,13 @@ function createStripeBilling(env: Env): StripeBilling | undefined {
   return new StripeBilling(createStripeClient(key), { accountId, env: keyEnv, deployment: env.APP_BASE_URL?.trim() || null });
 }
 
-/** The deployment's webhook: its signature check with POLAR_WEBHOOK_SECRET, and its events in LobbyStack's terms. */
+/**
+ * The deployment's webhook: its signature check with POLAR_WEBHOOK_SECRET, or
+ * STRIPE_WEBHOOK_SECRET's one or two secrets and the mode of STRIPE_API_KEY,
+ * and its events in LobbyStack's terms.
+ */
 export function createBillingWebhook(env: Env): BillingWebhook {
-  if (readBillingProviderId(env) === "stripe") throw new Error("Stripe's webhook isn't available yet: step 12 of the Stripe plan adds it.");
+  if (readBillingProviderId(env) === "stripe") return new StripeWebhook({ secrets: stripeWebhookSecrets(env.STRIPE_WEBHOOK_SECRET), env: stripeKeyEnv(env.STRIPE_API_KEY ?? "") ?? "sandbox" });
   return new PolarWebhook(env.POLAR_WEBHOOK_SECRET);
 }
 

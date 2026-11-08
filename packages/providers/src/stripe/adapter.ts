@@ -1,5 +1,7 @@
 import type Stripe from "stripe";
 
+import { isUuid } from "@lobbystack/shared";
+
 import { BillingProviderError } from "../billing/errors";
 import type { BillingEnv, BillingProvider, BillingRefusal, CustomerRef, OverageKind, PlanChangeProration, PlanChangeResult, PriceRef, ProviderSubscription } from "../billing/types";
 import { cancelStripePlan, keepStripePlan, resumeStripePlan } from "./cancel";
@@ -160,6 +162,27 @@ export class StripeBilling implements BillingProvider {
       ...(locale ? { locale } : {}),
     });
     return { url: session.url };
+  }
+
+  /** The business the customer's metadata names, as findOrCreateCustomer writes it; null for a customer Stripe no longer has. */
+  async businessOfCustomer(customerId: string): Promise<string | null> {
+    try {
+      const customer = await this.api.customers.retrieve(customerId);
+      if ("deleted" in customer && customer.deleted) return null;
+      const business = customer.metadata?.lobbystack_business;
+      return business && isUuid(business) ? business : null;
+    } catch (error) {
+      if (isStripeMissing(error)) return null;
+      throw error;
+    }
+  }
+
+  /** The invoice a payment intent paid, through its invoice payment. */
+  async invoiceOfPayment(paymentRef: string): Promise<string | null> {
+    if (!paymentRef.startsWith("pi_")) return null;
+    const page = await this.api.invoicePayments.list({ payment: { type: "payment_intent", payment_intent: paymentRef }, limit: 1 });
+    const invoice = page.data[0]?.invoice;
+    return (typeof invoice === "string" ? invoice : invoice?.id) ?? null;
   }
 
   refusalFor(error: unknown): BillingRefusal | undefined {

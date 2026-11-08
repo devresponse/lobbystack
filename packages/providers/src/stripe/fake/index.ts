@@ -27,6 +27,8 @@ export type FakeStripe = StripeApi & StripeCatalogApi & {
   addSubscription(input: FakeSubscriptionInput): void;
   addSchedule(input: { id: string; subscription: string; phases: Array<{ start: number; end: number | null; price: string }> }): void;
   addInvoice(input: { id: string; customer: string; subscription: string | null; hostedInvoiceUrl?: string | null }): void;
+  /** A payment intent that paid an invoice. */
+  addInvoicePayment(input: { invoice: string; paymentIntent: string }): void;
   /** Puts a snapshot's catalog objects into the account. */
   loadCatalog(snapshot: Partial<Pick<StripeSnapshot, "products" | "prices" | "meters" | "coupons" | "portalConfigurations" | "webhooks" | "eventDestinations" | "tax">>): void;
   /** Lets this many catalog writes through, then drops the connection on each one after, as for a run cut off halfway. Null lets every one through. */
@@ -42,6 +44,13 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
     customers: fakeCustomers(fake),
     subscriptions: fakeSubscriptions(fake),
     billingPortal: { ...fakeBillingPortal(fake), ...catalog.billingPortal },
+    invoicePayments: {
+      list: async (params: { payment?: { payment_intent?: string } }) => await fake.call("invoicePayments.list", params, null, () => ({
+        object: "list",
+        data: fake.state.invoicePayments.filter((entry) => entry.paymentIntent === params.payment?.payment_intent).map((entry) => ({ object: "invoice_payment", invoice: entry.invoice, payment: { type: "payment_intent", payment_intent: entry.paymentIntent } })),
+        has_more: false,
+      })),
+    } as unknown as FakeStripe["invoicePayments"],
     state: fake.state,
     requests: fake.requests,
     clock: fake.clock,
@@ -54,6 +63,9 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
     },
     addInvoice: (input) => {
       fake.state.invoices.set(input.id, stripeInvoiceObject(input));
+    },
+    addInvoicePayment: (input) => {
+      fake.state.invoicePayments.push({ ...input });
     },
     loadCatalog: (snapshot) => loadFakeCatalog(fake.state.catalog, snapshot),
     cutAfterWrites: (writes) => {

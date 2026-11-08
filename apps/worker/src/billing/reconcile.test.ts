@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { reconcileBillingProviderEvent } from "@lobbystack/domain";
+import { loadBillingEventSubject, reconcileBillingProviderEvent } from "@lobbystack/domain";
+import type { BillingProvider, ProviderSubscription } from "@lobbystack/providers/billing/types";
 import { sweepBillingWork } from "@lobbystack/domain";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -35,6 +36,33 @@ describe("billing jobs: reconcile and the sweep", () => {
 
     expect(result).toEqual({ status: "completed", entityId: providerEventId });
     expect(reconcileBillingProviderEvent).toHaveBeenCalledWith({ db: undefined as never }, { businessId, providerEventId });
+  });
+
+  it("reads a Stripe event's subscription, and a refund's invoice, before reconcile opens its transaction", async () => {
+    const businessId = randomUUID();
+    const providerEventId = randomUUID();
+    const domain = { db: undefined as never };
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.reconcile", queue: "default", businessId, payload: { providerEventId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+    const fresh = { id: "sub_1", state: "active", priceRef: "price_pro_month", readAt: new Date() } as ProviderSubscription;
+    const stripe = { id: "stripe", can: { readBack: true }, getSubscription: vi.fn(async () => fresh), invoiceOfPayment: vi.fn(async () => "in_1") };
+    const billing = stripe as unknown as BillingProvider;
+    vi.mocked(reconcileBillingProviderEvent).mockResolvedValue("processed");
+    vi.mocked(loadBillingEventSubject)
+      .mockResolvedValueOnce({ provider: "stripe", kind: "subscription", subscriptionId: "sub_1", paymentRef: null })
+      .mockResolvedValueOnce({ provider: "stripe", kind: "refund", subscriptionId: null, paymentRef: "pi_1" })
+      .mockResolvedValueOnce(null);
+    expect(await handleJob(job, { domain, billing })).toEqual({ status: "completed", entityId: providerEventId });
+    expect(stripe.getSubscription).toHaveBeenCalledExactlyOnceWith("sub_1");
+    expect(reconcileBillingProviderEvent).toHaveBeenLastCalledWith(domain, { businessId, providerEventId, fresh });
+    await handleJob(job, { domain, billing });
+    expect(stripe.invoiceOfPayment).toHaveBeenCalledExactlyOnceWith("pi_1");
+    expect(reconcileBillingProviderEvent).toHaveBeenLastCalledWith(domain, { businessId, providerEventId, refundInvoice: "in_1" });
+    // An event already processed reads nothing back.
+    await handleJob(job, { domain, billing });
+    expect(reconcileBillingProviderEvent).toHaveBeenLastCalledWith(domain, { businessId, providerEventId });
+    // Polar reads nothing back at all.
+    await handleJob(job, { domain, billing: { ...stripe, id: "polar", can: { readBack: false } } as unknown as BillingProvider });
+    expect(loadBillingEventSubject).toHaveBeenCalledTimes(3);
   });
 
   it("leaves a held Polar event for the sweep to run again", async () => {

@@ -873,6 +873,9 @@ importers:
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.1146.0
         version: 3.1146.0
+      '@lobbystack/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@lobbystack/shared':
         specifier: workspace:*
         version: link:../shared

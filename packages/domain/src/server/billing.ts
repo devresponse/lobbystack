@@ -6,6 +6,8 @@ import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedempt
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 
+import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
+
 import type { DomainContext } from "./context";
 import { recordAffiliateCommissionInTransaction } from "./affiliates";
 import { recordProductEventInTransaction } from "./productEvents";
@@ -773,11 +775,12 @@ export function orderRefundedCents(order: Record<string, unknown>, payload: Reco
 /**
  * How far an order has gone: draft, pending, paid, then partly and fully
  * refunded. Polar moves an order only forward, but for a void one, which it
- * can put back to pending, so it ranks with pending. A status not listed has
- * no rank.
+ * can put back to pending, so it ranks with pending, and so does a Stripe
+ * invoice marked uncollectible, which can still be paid. A status not listed
+ * has no rank.
  */
 function orderStatusRank(status: SQLWrapper): SQL {
-  return sql`array_position(array['draft', 'pending', 'paid', 'partially_refunded', 'refunded']::text[], (case when ${status} = 'void' then 'pending' else ${status} end)::text)`;
+  return sql`array_position(array['draft', 'pending', 'paid', 'partially_refunded', 'refunded']::text[], (case when ${status} in ('void', 'uncollectible') then 'pending' else ${status} end)::text)`;
 }
 
 function dateField(source: Record<string, unknown>, ...keys: string[]): Date | undefined {
@@ -908,9 +911,55 @@ function billingEventKindOf(eventType: string): string {
   return "other";
 }
 
+/** What a stored event is about, which the worker reads back before reconcile opens its transaction. Null once it's processed. */
+export type BillingEventSubject = { provider: string; kind: string; subscriptionId: string | null; paymentRef: string | null };
+
+export async function loadBillingEventSubject(context: DomainContext, input: { businessId: string; providerEventId: string }): Promise<BillingEventSubject | null> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const [event] = await tx.select({ provider: providerEvents.provider, eventType: providerEvents.eventType, status: providerEvents.status, payload: providerEvents.payload })
+      .from(providerEvents)
+      .where(and(eq(providerEvents.id, input.providerEventId), eq(providerEvents.businessId, input.businessId)))
+      .limit(1);
+    if (!event || event.status === "processed") return null;
+    const payload = recordObject(event.payload);
+    return { provider: event.provider, kind: stringField(payload, "kind") ?? billingEventKindOf(event.eventType), subscriptionId: stringField(payload, "subscriptionId") ?? null, paymentRef: stringField(payload, "paymentRef") ?? null };
+  }, { accessMode: "read only" });
+}
+
+/**
+ * A subscription read back from the provider, in the stored payload's names:
+ * what it is now, whatever the event said, with the read time ordering it.
+ * A price no plan maps to names no plan, so a live one waits as held.
+ */
+async function freshPayload(tx: DatabaseTransaction, fresh: ProviderSubscription, env: Record<string, string | undefined>): Promise<Record<string, unknown>> {
+  const links = polarProductLinks(await readBillingCatalogSnapshot(tx), env);
+  const match = links.planFor(fresh.priceRef);
+  const next = fresh.next ? links.planFor(fresh.next.priceRef) : null;
+  return {
+    subscriptionState: fresh.state,
+    ...(fresh.customerId ? { customerId: fresh.customerId } : {}),
+    priceRef: fresh.priceRef ?? undefined,
+    plan: match?.plan,
+    planCode: match?.code,
+    billingInterval: match?.interval ?? fresh.interval ?? undefined,
+    currentPeriodStart: fresh.periodStart?.toISOString(),
+    currentPeriodEnd: fresh.periodEnd?.toISOString(),
+    discountId: fresh.discountRef ?? undefined,
+    cancelAt: fresh.cancelAt?.toISOString() ?? null,
+    nextChange: fresh.next && next ? { planCode: next.code, billingInterval: next.interval, at: fresh.next.at.toISOString() } : null,
+    subscriptionModifiedAt: fresh.readAt.toISOString(),
+  };
+}
+
+/**
+ * Applies a stored provider event to the business's account. fresh is the
+ * event's subscription as a provider that reads back (Stripe) read it just
+ * before, and wins over the event; refundInvoice the invoice a refunded
+ * payment paid.
+ */
 export async function reconcileBillingProviderEvent(
   context: DomainContext,
-  input: { businessId: string; providerEventId: string },
+  input: { businessId: string; providerEventId: string; fresh?: ProviderSubscription | null; refundInvoice?: string | null },
   env: Record<string, string | undefined> = process.env,
 ): Promise<BillingReconcileResult> {
   const outcome = await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx): Promise<{ result: BillingReconcileResult; started: SubscriptionStart | null }> => {
@@ -927,7 +976,11 @@ export async function reconcileBillingProviderEvent(
     if (!event) return { result: "missing", started: null };
     if (event.status === "processed") return { result: "processed", started: null };
 
-    const payload = recordObject(event.payload);
+    const stored = recordObject(event.payload);
+    // A read-back of the event's own subscription replaces what the event said about it.
+    const fresh = input.fresh && input.fresh.id === stringField(stored, "subscriptionId") ? input.fresh : undefined;
+    const freshFields = fresh ? await freshPayload(tx, fresh, env) : {};
+    const payload = { ...stored, ...freshFields };
     // What the event is about: the kind the webhook stored, or for an event stored before it, the event's name.
     const kind = stringField(payload, "kind") ?? billingEventKindOf(event.eventType);
     const transactionPayload = recordObject(payload.order ?? payload);
@@ -959,7 +1012,8 @@ export async function reconcileBillingProviderEvent(
       const subscriptionId = eventSubscriptionId ?? existing?.subscriptionId;
       // The webhook names the plan of a product the catalog linked when the event arrived, a retired
       // price's product too. One linked while the event waited names its plan now.
-      const productId = stringField(payload, "productId") ?? stringField(subscription, "product_id") ?? stringField(payload, "product_id");
+      // The price or Polar product the subscription sells: priceRef since the provider seam, productId before.
+      const productId = stringField(payload, "priceRef") ?? stringField(payload, "productId") ?? stringField(subscription, "product_id") ?? stringField(payload, "product_id");
       const named = stringField(transactionPayload, "plan") ?? stringField(payload, "plan");
       const linked = named || !productId ? null : polarProductLinks(await readBillingCatalogSnapshot(tx), env).planFor(productId);
       const plan = named ?? linked?.plan;
@@ -1045,7 +1099,40 @@ export async function reconcileBillingProviderEvent(
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
     }
 
-    // Refunds arrive as order.refunded (refund.* payloads name no business, so the webhook route drops them).
+    // A Stripe refund names its payment, and the worker read back the invoice it paid: the invoice's order row
+    // gets the refund, which only adds up, made first when the refund came before the payment.
+    if (kind === "refund" && input.refundInvoice) {
+      const refunded = numberField(payload, "refundedAmount") ?? 0;
+      const chargeCents = numberField(payload, "amount") ?? refunded;
+      const refundCurrency = (stringField(payload, "currency") ?? "").toLowerCase();
+      const refundedAt = dateField(payload, "occurredAt") ?? event.createdAt;
+      const providerCustomerId = stringField(payload, "customerId");
+      const [order] = await tx.insert(billingTransactions).values({
+        businessId: input.businessId,
+        kind: "order",
+        sourceId: input.refundInvoice,
+        orderId: input.refundInvoice,
+        status: refunded >= chargeCents ? "refunded" : "partially_refunded",
+        amountCents: chargeCents,
+        refundedAmountCents: refunded,
+        currency: refundCurrency,
+        ...(providerCustomerId ? { providerCustomerId } : {}),
+        occurredAt: refundedAt,
+        lastSyncedAt: new Date(),
+      }).onConflictDoUpdate({
+        target: [billingTransactions.kind, billingTransactions.sourceId],
+        set: {
+          refundedAmountCents: sql`greatest(${billingTransactions.refundedAmountCents}, excluded.refunded_amount_cents)`,
+          status: sql`case when greatest(${billingTransactions.refundedAmountCents}, excluded.refunded_amount_cents) >= ${billingTransactions.amountCents} then 'refunded' else 'partially_refunded' end`,
+          lastSyncedAt: new Date(),
+          updatedAt: new Date(),
+        },
+      }).returning({ id: billingTransactions.id, status: billingTransactions.status, amountCents: billingTransactions.amountCents, refundedAmountCents: billingTransactions.refundedAmountCents, currency: billingTransactions.currency, occurredAt: billingTransactions.occurredAt });
+      if (!order) throw new Error("Billing transaction could not be persisted.");
+      await recordAffiliateCommissionInTransaction(tx, { businessId: input.businessId, billingTransactionId: order.id, kind: "order", sourceId: input.refundInvoice, status: order.status, amountCents: order.amountCents - order.refundedAmountCents, currency: order.currency, occurredAt: order.occurredAt });
+    }
+
+    // Polar's refunds arrive as order.refunded (refund.* payloads name no business, so the webhook route drops them).
     const transactionKind = kind === "payment" ? "order" : undefined;
     const sourceId = stringField(transactionPayload, "id", "orderId") ?? stringField(payload, "id", "orderId") ?? event.providerEventId;
     const amountCents = numberField(transactionPayload, "totalAmount", "total_amount", "amountCents", "amount") ?? numberField(payload, "totalAmount", "total_amount", "amountCents", "amount");
@@ -1127,7 +1214,12 @@ export async function reconcileBillingProviderEvent(
       });
     }
 
-    await tx.update(providerEvents).set({ status: billingKey ? "processed" : "ignored", updatedAt: new Date() }).where(eq(providerEvents.id, event.id));
+    // A read-back's time joins the stored event, so a later reconcile of the subscription orders by it.
+    await tx.update(providerEvents).set({
+      status: billingKey ? "processed" : "ignored",
+      ...(fresh ? { payload: sql`${providerEvents.payload} || ${JSON.stringify({ subscriptionModifiedAt: fresh.readAt.toISOString() })}::jsonb` } : {}),
+      updatedAt: new Date(),
+    }).where(eq(providerEvents.id, event.id));
     return { result: billingKey ? "processed" : "ignored", started: startedSubscription };
   });
 

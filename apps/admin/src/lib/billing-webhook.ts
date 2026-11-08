@@ -4,6 +4,7 @@ import { eq } from "drizzle-orm";
 import { businesses, withBusinessTransaction, withDispatcherTransaction } from "@lobbystack/db";
 import { polarProductLinks, readBillingCatalogSnapshot, storeBillingWebhookEvent } from "@lobbystack/domain";
 import { BillingWebhookRefusal, type BillingWebhookRefusalReason } from "@lobbystack/providers/billing/errors";
+import { createBillingProvider, readBillingProviderId } from "@lobbystack/providers/billing/factory";
 import type { BillingProviderId, BillingWebhook } from "@lobbystack/providers/billing/types";
 import { logEvent } from "@lobbystack/telemetry/node";
 import { runAfterResponse } from "@/lib/after-response";
@@ -17,9 +18,25 @@ import { reportServerError } from "@/lib/error-reporting";
 // and its billing events stop arriving, so each refusal leaves a line: a run of
 // unconfigured or bad_signature means the webhook secret is missing or isn't
 // the endpoint's. It carries the provider's delivery ID, never the body.
-function recordRefusedWebhook(provider: BillingProviderId, reason: BillingWebhookRefusalReason, headers: Headers): void {
+export function recordRefusedWebhook(provider: BillingProviderId, reason: BillingWebhookRefusalReason, headers: Headers): void {
   const webhookId = headers.get("webhook-id")?.slice(0, 64);
   logEvent("warn", "ops.billing.webhook_refused", { provider, reason, ...(webhookId ? { webhookId } : {}) });
+}
+
+let wrongProviderLoggedAt = 0;
+
+/**
+ * A delivery to the route of a provider this deployment doesn't bill
+ * through, such as from an endpoint left in that provider's dashboard: 404,
+ * and a log line at most once a minute, so it's visible but harmless.
+ */
+export function wrongProviderWebhook(options: { provider: BillingProviderId; route: string }): NextResponse {
+  const now = Date.now();
+  if (now - wrongProviderLoggedAt >= 60_000) {
+    wrongProviderLoggedAt = now;
+    logEvent("warn", "ops.billing.webhook_wrong_provider", { provider: options.provider, route: options.route });
+  }
+  return NextResponse.json({ error: "Not found." }, { status: 404 });
 }
 
 // A webhook we cannot attribute to a business is dropped with a 200, which is
@@ -37,9 +54,10 @@ function recordUnresolvedWebhook(input: { provider: BillingProviderId; eventType
 }
 
 /** Handles one delivery to a billing provider's webhook route, such as /api/webhooks/polar. */
-export async function handleBillingWebhook(request: Request, webhookFor: () => BillingWebhook, options: { route: string }): Promise<NextResponse> {
+export async function handleBillingWebhook(request: Request, webhookFor: () => BillingWebhook, options: { route: string; provider: BillingProviderId }): Promise<NextResponse> {
   let eventType: string | undefined;
   try {
+    if (readBillingProviderId(process.env) !== options.provider) return wrongProviderWebhook(options);
     const webhook = webhookFor();
     const body = await request.text();
     let delivery;
@@ -60,8 +78,11 @@ export async function handleBillingWebhook(request: Request, webhookFor: () => B
     // everywhere; legacy Convex references are resolved only during production
     // cutover when the environment explicitly enables compatibility routing.
     const allowLegacyReference = webhook.provider === "polar" && process.env.POLAR_ACCEPT_LEGACY_BUSINESS_IDS === "true";
-    const condition = normalized.businessId
-      ? eq(businesses.id, normalized.businessId)
+    // A Stripe charge names only its customer, whose metadata names the business: the provider reads it back.
+    const customerId = normalized.fields.customerId;
+    const resolvedBusinessId = normalized.businessId ?? (customerId ? await createBillingProvider(process.env)?.businessOfCustomer?.(customerId) : null) ?? null;
+    const condition = resolvedBusinessId
+      ? eq(businesses.id, resolvedBusinessId)
       : allowLegacyReference && normalized.businessReference
         ? eq(businesses.legacyConvexId, normalized.businessReference)
         : undefined;

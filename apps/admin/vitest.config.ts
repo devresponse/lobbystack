@@ -19,6 +19,8 @@ export default defineConfig({
       "@lobbystack/providers/billing/factory": `${root}/packages/providers/src/billing/factory.ts`,
       "@lobbystack/providers/polar/polarCatalog": `${root}/packages/providers/src/polar/polarCatalog.ts`,
       "@lobbystack/providers/polar/events": `${root}/packages/providers/src/polar/events.ts`,
+      "@lobbystack/providers/stripe/client": `${root}/packages/providers/src/stripe/client.ts`,
+      "@lobbystack/providers/stripe/events": `${root}/packages/providers/src/stripe/events.ts`,
       "@lobbystack/providers/storage/local": `${root}/packages/providers/src/storage/local.ts`,
       "@lobbystack/providers/crawling/urlSafety": `${root}/packages/providers/src/crawling/urlSafety.ts`,
       "@lobbystack/providers/storage/provider": `${root}/packages/providers/src/storage/provider.ts`,

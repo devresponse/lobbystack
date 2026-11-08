@@ -15,6 +15,7 @@ export type StripeApi = {
   customers: Pick<Stripe["customers"], "create" | "retrieve">;
   subscriptions: Pick<Stripe["subscriptions"], "retrieve" | "cancel">;
   billingPortal: { sessions: Pick<Stripe["billingPortal"]["sessions"], "create"> };
+  invoicePayments: Pick<Stripe["invoicePayments"], "list">;
 };
 
 // The languages Stripe's checkout and billing portal pages come in, which its

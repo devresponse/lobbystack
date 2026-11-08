@@ -1,6 +1,6 @@
-// Applying stored Polar events, and the hourly sweep that queues overdue billing work again.
+// Applying stored billing events, and the hourly sweep that queues overdue billing work again.
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { reconcileBillingProviderEvent } from "@lobbystack/domain";
+import { loadBillingEventSubject, reconcileBillingProviderEvent } from "@lobbystack/domain";
 import { sweepBillingWork, type BillingSweepOutcome } from "@lobbystack/domain";
 import { getMeter, logEvent, reportError } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
@@ -10,12 +10,25 @@ export const overdueBillingWork = getMeter("lobbystack-worker").createCounter("l
 /** One PostHog issue for all overdue billing work; its operation and counts say which. */
 export const OVERDUE_BILLING_WORK = "Billing work waited longer than it should.";
 
-/** billing.reconcile: applies a stored Polar event to the business's account. */
+/**
+ * billing.reconcile: applies a stored billing event to the business's
+ * account. A provider that reads back (Stripe) has the event's subscription,
+ * and a refund's invoice, read first, outside the account's lock.
+ */
 export async function reconcileBillingEvent(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
   const providerEventId = String(job.payload.providerEventId ?? "");
   if (!providerEventId) return { status: "skipped" };
   const businessId = businessIdOrThrow(job);
-  const result = await reconcileBillingProviderEvent(dependencies.domain, { businessId, providerEventId });
+  const billing = dependencies.billing;
+  const readBack: { fresh?: Awaited<ReturnType<NonNullable<typeof billing>["getSubscription"]>>; refundInvoice?: string | null } = {};
+  if (billing?.can.readBack) {
+    const subject = await loadBillingEventSubject(dependencies.domain, { businessId, providerEventId });
+    if (subject?.provider === billing.id) {
+      if (subject.subscriptionId) readBack.fresh = await billing.getSubscription(subject.subscriptionId);
+      if (subject.kind === "refund" && subject.paymentRef && billing.invoiceOfPayment) readBack.refundInvoice = await billing.invoiceOfPayment(subject.paymentRef);
+    }
+  }
+  const result = await reconcileBillingProviderEvent(dependencies.domain, { businessId, providerEventId, ...readBack });
   // The event waits, and the billing sweep runs it again each hour until someone links the product.
   if (result === "held") await reportError(new Error("A live Polar subscription is for a product no plan maps to, so the business's plan waits. Link the product with pnpm billing apply, or move the subscription in Polar to a product the catalog sells."), { operation: "job.billing.reconcile", businessId, providerEventId });
   return { status: result === "processed" ? "completed" : "skipped", entityId: providerEventId };

@@ -37,6 +37,7 @@ export async function mockDomain(importOriginal: <T>() => Promise<T>): Promise<R
     recordDeletedBusinessPlanEnded: vi.fn(),
     loadAppointmentChangeOtpTarget: vi.fn(),
     loadBillingCheckoutRequest: vi.fn(),
+    loadBillingEventSubject: vi.fn(),
     loadBillingUsageEvent: vi.fn(),
     loadPendingProductEvents: vi.fn(),
     loadPlanChangeProration: vi.fn(),

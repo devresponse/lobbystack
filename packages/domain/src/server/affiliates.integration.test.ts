@@ -281,6 +281,26 @@ describe.skipIf(!testUrl)("affiliate program against dedicated PostgreSQL roles"
     });
   });
 
+it("pays commission on a paid Stripe invoice, and cuts it for a refund read back to the invoice", async () => {
+    await rollbackTest(async (tx) => {
+      const { businessId } = await referredBusiness(tx, "stripe");
+      // As the Stripe webhook's normalizer (packages/providers/src/stripe/events.ts) stores an invoice and a refund.
+      const invoiceId = `in_${randomUUID().replaceAll("-", "")}`;
+      const reconcileStripe = async (eventType: string, payload: Record<string, unknown>, refundInvoice?: string) => {
+        const [event] = await tx.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { customerId: "cus_1", currency: "usd", ...payload } }).returning({ id: providerEvents.id });
+        await asRole(tx, "lobbystack_worker", (db) => reconcileBillingProviderEvent({ db }, { businessId, providerEventId: event!.id, ...(refundInvoice ? { refundInvoice } : {}) }));
+      };
+      await reconcileStripe("invoice.paid", { kind: "payment", id: invoiceId, orderId: invoiceId, status: "paid", amountCents: 60_000, occurredAt: new Date(Date.now() + 60_000).toISOString(), invoiceUrl: "https://invoice.stripe.com/i/acct_1/test" });
+      const [paid] = await tx.select().from(affiliateCommissions).where(eq(affiliateCommissions.sourceKey, `order:${invoiceId}`));
+      expect(paid).toMatchObject({ amountCents: 60_000, commissionCents: 12_000, status: "pending" });
+      await reconcileStripe("charge.refunded", { kind: "refund", amount: 60_000, refundedAmount: 15_000, paymentRef: "pi_1", status: "partially_refunded", occurredAt: new Date().toISOString() }, invoiceId);
+      const [cut] = await tx.select().from(affiliateCommissions).where(eq(affiliateCommissions.sourceKey, `order:${invoiceId}`));
+      expect(cut).toMatchObject({ amountCents: 45_000, commissionCents: 9_000 });
+      const [transaction] = await tx.select().from(billingTransactions).where(eq(billingTransactions.sourceId, invoiceId));
+      expect(transaction).toMatchObject({ kind: "order", orderId: invoiceId, status: "partially_refunded", amountCents: 60_000, refundedAmountCents: 15_000, invoiceUrl: "https://invoice.stripe.com/i/acct_1/test", providerCustomerId: "cus_1" });
+    });
+  });
+
   it("keeps a refund that is reconciled before the order's paid event", async () => {
     await rollbackTest(async (tx) => {
       const { businessId, profileId } = await referredBusiness(tx, "late-paid");

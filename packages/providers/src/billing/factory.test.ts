@@ -4,6 +4,7 @@ import { PolarBilling } from "../polar/adapter";
 import { PolarCatalogClient } from "../polar/polarCatalog";
 import { StripeBilling } from "../stripe/adapter";
 import { StripeCatalogClient } from "../stripe/catalog";
+import { StripeWebhook } from "../stripe/events";
 import { createBillingCatalogClient, createBillingProvider, createBillingWebhook, readBillingProviderId } from "./factory";
 
 const polar = { POLAR_ACCESS_TOKEN: "token", POLAR_ORGANIZATION_ID: "org-1" };
@@ -28,7 +29,7 @@ describe("the billing provider factory", () => {
     expect(() => createBillingProvider({ ...polar, BILLING_PROVIDER: "stripe" })).toThrow("isn't available yet");
   });
 
-  it("builds Stripe behind BILLING_STRIPE_PREVIEW, with test keys only, its catalog client, and not its webhook yet", () => {
+  it("builds Stripe behind BILLING_STRIPE_PREVIEW, with test keys only, its catalog client and its webhook", () => {
     const stripe = { BILLING_PROVIDER: "stripe", BILLING_STRIPE_PREVIEW: "true", STRIPE_ACCOUNT_ID: "acct_1" };
     expect(createBillingProvider(stripe)).toBeUndefined();
     const sandbox = createBillingProvider({ ...stripe, STRIPE_API_KEY: "rk_test_abc123" });
@@ -37,7 +38,7 @@ describe("the billing provider factory", () => {
     expect(() => createBillingProvider({ ...stripe, STRIPE_API_KEY: "rk_live_abc123" })).toThrow("test keys only");
     expect(() => createBillingProvider({ ...stripe, STRIPE_API_KEY: "pk_test_abc123" })).toThrow("secret or restricted key");
     expect(() => createBillingProvider({ BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: "acct_1", STRIPE_API_KEY: "rk_test_abc123" })).toThrow("isn't available yet");
-    expect(() => createBillingWebhook(stripe)).toThrow("step 12");
+    expect(createBillingWebhook(stripe)).toBeInstanceOf(StripeWebhook);
     // The daily check reads with the worker's key, a test one in the preview.
     expect(createBillingCatalogClient(stripe)).toBeUndefined();
     expect(createBillingCatalogClient({ ...stripe, STRIPE_API_KEY: "rk_test_abc123" })).toBeInstanceOf(StripeCatalogClient);

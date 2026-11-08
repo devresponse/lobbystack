@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 9 are done: phases 1 and 2, and the first step of phase 3.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 10 are done: phases 1 and 2, and steps 9 and 10 of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -124,3 +124,32 @@ No app path calls Stripe yet: a deployment only reaches it with `BILLING_PROVIDE
 - **The fake** (`stripe/fake/`): an in-memory Stripe answering the calls the adapter makes, with Stripe's own error classes and idempotency, and builders for subscriptions, schedules, invoices and test cards.
 - **The factory** takes `stripe` behind `BILLING_STRIPE_PREVIEW=true`, building the adapter from `STRIPE_API_KEY` and `STRIPE_ACCOUNT_ID` and refusing a live key; Stripe's webhook stays refused until step 12, and a preview worker has no catalog client until step 11, so it starts and skips the daily check.
 - **Tests:** the contract files for the customer, a subscription, the billing portal and refusals run on both adapters; Stripe's statuses, items and errors each have a test, and so do the certification guard and the factory's refusals.
+
+## Step 10: the catalog planner and the `stripe` block
+
+Nothing runs it yet: `pnpm billing` and the daily check run Stripe's planner from step 11, and no brand's `billing.json` has a `stripe` block until its first Stripe deployment (step 18), since adding one changes the file's hash.
+
+- **The `stripe` block** (`packages/shared/src/billingProfile.ts`, and `brands/billing.schema.json` from `pnpm brands:build`): `upgrade` (`invoice`, `prorate` or `reset`) and `downgrade` (`next_period`, `invoice` or `prorate`) in Polar's words; `portalPlanChanges` and `portalCancel` for Stripe's billing portal; `tax` (`exclusive`, and a Stripe product tax code such as `txcd_10103001`); `usageGraceHours`, the Dashboard rule for finalizing a metered invoice, which the API can't read; `overage` (`separate` or `checkout`); and `managedPayments`. The block holds the answers to decisions 1 and 3, so another answer changes the block, not the code: with `managedPayments` the overage must be `checkout`, and with `checkout` no plan can be annual. Step 10 went ahead on the recommended answers, Stripe Tax and a second subscription.
+- **The `polar` block is optional.** An apply refuses a file without the block of its deployment's provider (`provider_block_missing`), so a Polar deployment still needs one.
+- **The planner** (`packages/domain/src/server/billingStripe.ts`, `stripePlanner`): the objects a file needs, the calls that get a Stripe account there, the link body and verify, pure as Polar's are. The snapshot, step and call types are in `packages/providers/src/stripe/catalog.ts`, for the client of step 11.
+  - A product per sold plan, tagged with the brand and the plan; a promo plan gets its own, since the portal can't hold two prices of one product with the same interval.
+  - A price per live price, under the lookup key `ls_<brand>_<plan>_<period>_<currency>_<terms8>`, before tax. Stripe never changes a price, so new terms make a new price under a new key, and the old one is archived only with `--allow-archive`; its subscribers keep it. A price that holds the key but can't sell what's wanted is replaced only with `--allow-replace`, which moves the key to a new price. The brand is in the key, so another brand's prices in a shared account never collide, and one tagged for another brand is never replaced.
+  - Three meters (`ls_overage_voice`, `ls_overage_sms` and `ls_overage_transfers`, a sum of dollars by `stripe_customer_id`), and an overage product and a metered price for each (`ls_overage_<kind>_<currency>`, a dollar a unit). They are the account's, shared by every brand on it, and never archived.
+  - A coupon per discounted plan, under the ID `ls-<brand>-<plan>-<terms8>`, for that plan's product only; one Stripe can't change is refused, and a leftover is deleted only with `--allow-archive`.
+  - The billing portal's configuration: invoices, cards, email, address and tax ID; plan changes between the public standard plans, an upgrade charged as `upgrade` says (`reset` starts a new cycle) and a downgrade at the period's end for `next_period`; cancelling as `portalCancel` says; the brand's terms and privacy pages; Settings > Plan to return to.
+  - The webhook endpoint at `/api/webhooks/stripe`, with the 14 events of the proposal (`STRIPE_WEBHOOK_EVENTS`) in `STRIPE_API_VERSION`, and the meter error destination under it, with the two thin events. An endpoint in another version is replaced only with `--allow-replace`.
+- **The link** records each plan's price and coupon IDs, and the meters, the overage prices, the portal configuration, the endpoint and the destination; pnpm billing adds the webhook secret's SHA-256 in step 11.
+- **Verify** shares the file and Postgres checks with Polar, compares the file with Stripe through the planner, checks Stripe Tax (active, an origin address and a registration; drift on a live account, a warning in a sandbox, nothing with Managed Payments), and compares the rows and the latest link with Stripe: the linked prices, the account, the key's mode, the overage prices, the portal configuration and the webhook secret's hash.
+- **Tests** (`billingStripe.test.ts`, on the stand-in in `billingStripe.testing.ts`): both brands' files with a test block, an empty account, a run cut off halfway, new terms, another brand in the same account, a renamed meter, objects Stripe can't change, coupons, the portal's settings, the webhook, the link body and verify against drifted accounts.
+
+On an empty account, RealInfoBot's file with the recommended block makes:
+
+| Object | What |
+| --- | --- |
+| 3 meters | Voice, alert SMS and call transfer overage in dollars |
+| 3 overage products and prices | `ls_overage_voice_cad`, `ls_overage_sms_cad` and `ls_overage_transfers_cad`, 1.00 CAD a unit, invoiced monthly |
+| 2 products | Starter and Pro, tax code `txcd_10103001` |
+| 4 prices | Starter 37.00 CAD a month and 370.00 a year, Pro 87.00 a month and 870.00 a year, before tax |
+| No coupon | The file has no discounted plan |
+| The billing portal | Plan changes between Starter and Pro; Settings > Plan cancels |
+| The webhook endpoint and the meter error destination | 14 events in `2026-10-28.endive`, and the two meter error events |

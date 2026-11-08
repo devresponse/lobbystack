@@ -514,6 +514,9 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
     const latestHash = (current.latest?.hash ?? null) as string | null;
     const refusals: ApiBillingCatalogRefusal[] = [];
     if (body.brand !== deployment.brand) refusals.push({ code: "brand_mismatch", message: `This deployment shows the ${deployment.brand} brand, so it takes brands/${deployment.brand}/billing.json, not ${body.brand}'s.`, path: "brand" });
+    // The provider's block says how it sells: proration, the portal and, on Stripe, tax.
+    const own = deploymentProvider(deployment);
+    if (!profile[own.id]) refusals.push({ code: "provider_block_missing", message: `This deployment bills through ${billingProviderNames[own.id]}, and the file has no ${own.id} block. Add one in a pull request.`, path: `billing_file.${own.id}` });
     if (codeHash !== hash && !allowUndeployed) {
       refusals.push({ code: "file_not_deployed", message: codeHash === null ? `The running code has no billing.json for ${body.brand}. Deploy it first, or send allow_undeployed: true to try the file on a sandbox.` : `This file isn't the one the running code was built with (${codeHash.slice(0, 12)}). Deploy the merged file first, or send allow_undeployed: true to try it on a sandbox.`, path: "billing_file" });
     }

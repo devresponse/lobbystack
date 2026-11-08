@@ -39,7 +39,7 @@ describe("the catalog seam", () => {
   it("has a planner for Polar, and none for Stripe yet", () => {
     expect(plannerFor("polar")).toBe(polarPlanner);
     expect(polarPlanner.provider).toBe("polar");
-    expect(() => plannerFor("stripe")).toThrow("isn't available yet");
+    expect(() => plannerFor("stripe")).toThrow("from step 11 of the Stripe plan");
   });
 
   it("reads the deployment's provider and its sandbox or live account from its variables", () => {

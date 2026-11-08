@@ -167,6 +167,37 @@ export const POLAR_API_VERSION = "2026-10";
  */
 export const STRIPE_API_VERSION = "2026-10-28.endive";
 
+/**
+ * The events LobbyStack's Stripe webhook endpoint subscribes to: pnpm billing
+ * makes the endpoint with them, and the webhook route takes no others.
+ */
+export const STRIPE_WEBHOOK_EVENTS = [
+  "checkout.session.completed",
+  "checkout.session.expired",
+  "customer.subscription.created",
+  "customer.subscription.updated",
+  "customer.subscription.deleted",
+  "customer.subscription.paused",
+  "customer.subscription.resumed",
+  "customer.subscription.pending_update_applied",
+  "customer.subscription.pending_update_expired",
+  "invoice.paid",
+  "invoice.payment_failed",
+  "invoice.finalized",
+  "charge.refunded",
+  "charge.dispute.created",
+] as const;
+
+/** The thin events Stripe sends when it can't use a meter event, to a destination of their own. */
+export const STRIPE_METER_ERROR_EVENTS = ["v1.billing.meter.error_report_triggered", "v1.billing.meter.no_meter_found"] as const;
+
+/**
+ * The event names of Stripe's three overage meters, by usage kind. Each meter
+ * sums the dollars of overage its events carry, and a meter's event name
+ * never changes.
+ */
+export const stripeOverageMeterEvents = { voice: "ls_overage_voice", alert_sms: "ls_overage_sms", transfer: "ls_overage_transfers" } as const;
+
 /** The server a POLAR_API_BASE_URL names: sandbox for sandbox-api.polar.sh, else production, as an unset one means api.polar.sh. */
 export function polarEnvForBaseUrl(baseUrl: string | null | undefined): PolarEnv {
   if (!baseUrl) return "production";

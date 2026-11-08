@@ -9,6 +9,7 @@ export * from "./billingCodes";
 export * from "./billingPlans";
 export * from "./billingPolar";
 export * from "./billingPromoEnd";
+export * from "./billingStripe";
 export * from "./billingSweep";
 export * from "./billingVerify";
 export * from "./branding";

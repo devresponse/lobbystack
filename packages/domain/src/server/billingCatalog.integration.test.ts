@@ -332,6 +332,15 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
     });
   });
 
+  it("refuses a file without the block of the deployment's provider, and takes one with another provider's block too", async () => {
+    await rollbackTest(async (tx) => {
+      const blocked = await apply(tx, file((value) => { delete value.polar; }), { dryRun: true, key: null });
+      expect(blocked.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["provider_block_missing", "billing_file.polar"]]);
+      const stripe = { upgrade: "invoice", downgrade: "next_period", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false };
+      expect((await apply(tx, file((value) => { value.stripe = stripe; }), { dryRun: true, key: null })).run.blocked_by).toEqual([]);
+    });
+  });
+
   it("shows in a dry run the changes and refusals an apply would make, writing nothing", async () => {
     await rollbackTest(async (tx) => {
       const empty = await apply(tx, file(), { dryRun: true, key: null });

@@ -49,6 +49,77 @@
       ],
       "additionalProperties": false
     },
+    "stripe": {
+      "type": "object",
+      "properties": {
+        "upgrade": {
+          "type": "string",
+          "enum": [
+            "invoice",
+            "prorate",
+            "reset"
+          ]
+        },
+        "downgrade": {
+          "type": "string",
+          "enum": [
+            "next_period",
+            "invoice",
+            "prorate"
+          ]
+        },
+        "portalPlanChanges": {
+          "type": "boolean"
+        },
+        "portalCancel": {
+          "type": "boolean"
+        },
+        "tax": {
+          "type": "object",
+          "properties": {
+            "behavior": {
+              "type": "string",
+              "const": "exclusive"
+            },
+            "code": {
+              "type": "string",
+              "pattern": "^txcd_\\d{8}$"
+            }
+          },
+          "required": [
+            "behavior",
+            "code"
+          ],
+          "additionalProperties": false
+        },
+        "usageGraceHours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 72
+        },
+        "overage": {
+          "type": "string",
+          "enum": [
+            "separate",
+            "checkout"
+          ]
+        },
+        "managedPayments": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "upgrade",
+        "downgrade",
+        "portalPlanChanges",
+        "portalCancel",
+        "tax",
+        "usageGraceHours",
+        "overage",
+        "managedPayments"
+      ],
+      "additionalProperties": false
+    },
     "plans": {
       "type": "object",
       "properties": {
@@ -828,7 +899,6 @@
   "required": [
     "version",
     "currency",
-    "polar",
     "plans"
   ],
   "additionalProperties": false

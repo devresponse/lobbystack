@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
-import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type PolarEnv } from "@lobbystack/shared";
 
 import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -52,15 +52,18 @@ function stepCode(step: Pick<PolarStep, "object" | "action" | "leftover">): Bill
   return stepCodes[step.object];
 }
 
-/** Every check of section 7.1 of the step 2 design, ok ones included. Pure. */
-export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyResult {
+export type AddBillingCheck = (code: BillingCheckCode, pair: BillingCheckPair, level: BillingCheckLevel, subject: string, message: string) => void;
+
+/** How the file and Postgres checks name a provider and what links a price to it. */
+export type BillingLinkWords = { provider: string; object: string; linkOf(price: ApiBillingCatalogPrice): string | null };
+
+const polarLinkWords: BillingLinkWords = { provider: "Polar", object: "product", linkOf: (price) => price.polar_id };
+
+/** File and Postgres, the same for every provider but for its words: the hashes, the rows an apply would write, and the links. */
+export function fileAndPostgresChecks(input: { file: Pick<BillingVerifyInput["file"], "hash" | "plans"> & { brand: string; profile: Pick<BillingProfile, "currency"> }; catalog: ApiBillingCatalog; now?: string }, add: AddBillingCheck, words: BillingLinkWords): void {
   const { file, catalog } = input;
-  const checks: BillingCheckResult[] = [];
-  const add = (code: BillingCheckCode, pair: BillingCheckPair, level: BillingCheckLevel, subject: string, message: string) => checks.push({ code, pair, level, subject, message });
   const rows = storedRows(catalog);
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
-
-  // File and Postgres.
   if (catalog.hash === file.hash) add("catalog_hash", "file_postgres", "ok", "catalog", `catalog ${short(file.hash)} applied`);
   else add("catalog_hash", "file_postgres", "drift", "catalog", `The latest catalog run is ${short(catalog.hash)} and the file is ${short(file.hash)}. Run pnpm billing apply.`);
   if (catalog.code_hash === file.hash) add("code_hash", "file_postgres", "ok", "code", "the deployed code was built with this file");
@@ -75,14 +78,23 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
     if (!row) continue;
     if (row.status !== "active") {
       unlinked += 1;
-      add("not_linked", "file_postgres", "drift", plan.code, `${plan.code} is ${row.status}${row.status === "draft" ? ", so Polar doesn't sell it as the file says yet" : ""}. Run pnpm billing apply.`);
+      add("not_linked", "file_postgres", "drift", plan.code, `${plan.code} is ${row.status}${row.status === "draft" ? `, so ${words.provider} doesn't sell it as the file says yet` : ""}. Run pnpm billing apply.`);
     }
-    for (const price of row.prices.filter((entry) => entry.retired_at === null && entry.polar_id === null)) {
+    for (const price of row.prices.filter((entry) => entry.retired_at === null && words.linkOf(entry) === null)) {
       unlinked += 1;
-      add("not_linked", "file_postgres", "drift", `${plan.code}/${price.period}`, `${plan.code} ${price.period} has no Polar product. Run pnpm billing apply.`);
+      add("not_linked", "file_postgres", "drift", `${plan.code}/${price.period}`, `${plan.code} ${price.period} has no ${words.provider} ${words.object}. Run pnpm billing apply.`);
     }
   }
   if (!unlinked) add("not_linked", "file_postgres", "ok", "links", `${sold.length} sold plans active and linked`);
+}
+
+/** Every check of section 7.1 of the step 2 design, ok ones included. Pure. */
+export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyResult {
+  const { file, catalog } = input;
+  const checks: BillingCheckResult[] = [];
+  const add: AddBillingCheck = (code, pair, level, subject, message) => checks.push({ code, pair, level, subject, message });
+
+  fileAndPostgresChecks({ file, catalog, ...(input.now ? { now: input.now } : {}) }, add, polarLinkWords);
 
   if ("error" in input.polar) {
     add("unreadable", "file_polar", "drift", "Polar", input.polar.error);

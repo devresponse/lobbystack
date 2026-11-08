@@ -87,7 +87,8 @@ const periodWords: Record<BillingInterval, string> = { monthly: "monthly", annua
 /** "starter/monthly": how a product is named among the plan's prices. */
 export const productKey = (plan: string, period: string) => `${plan}/${period}`;
 
-function planLabel(plan: DesiredBillingPlan): string {
+/** A plan's name on the provider's products: Starter and Pro, else its English name, else its code. */
+export function billingPlanLabel(plan: Pick<DesiredBillingPlan, "code" | "names">): string {
   // Own keys only: a plan coded constructor isn't Object's.
   return (Object.hasOwn(standardLabels, plan.code) ? standardLabels[plan.code] : undefined) ?? plan.names?.en ?? plan.code;
 }
@@ -101,11 +102,14 @@ function planLabel(plan: DesiredBillingPlan): string {
  * month, on a meter cycle of its own, rather than a year of it at renewal.
  */
 export function desiredPolarCatalog(input: { brand: string; profile: Pick<BillingProfile, "currency" | "polar">; plans: readonly DesiredBillingPlan[]; webhookUrl: string | null }): DesiredPolarCatalog {
+  const polar = input.profile.polar;
+  // The apply refuses such a file on a Polar deployment (provider_block_missing).
+  if (!polar) throw new Error(`brands/${input.brand}/billing.json has no polar block, which a Polar deployment needs.`);
   const products: DesiredPolarProduct[] = [];
   const discounts: DesiredPolarDiscount[] = [];
   for (const plan of input.plans) {
     if (!plan.sold || !plan.prices.length) continue;
-    const label = planLabel(plan);
+    const label = billingPlanLabel(plan);
     for (const price of plan.prices) {
       products.push({
         plan: plan.code,
@@ -125,7 +129,7 @@ export function desiredPolarCatalog(input: { brand: string; profile: Pick<Billin
   return {
     brand: input.brand,
     currency: input.profile.currency,
-    settings: { allowMultipleSubscriptions: input.profile.polar.allowMultipleSubscriptions, portalPlanChanges: input.profile.polar.portalPlanChanges },
+    settings: { allowMultipleSubscriptions: polar.allowMultipleSubscriptions, portalPlanChanges: polar.portalPlanChanges },
     meters: polarMeterSpecs.map((meter) => ({ key: meter.key, name: meter.name, event: meter.event })),
     products,
     discounts,

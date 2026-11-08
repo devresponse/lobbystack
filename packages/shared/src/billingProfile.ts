@@ -84,11 +84,37 @@ const additionalPlan = z.strictObject({
   discount: discount.optional(),
 });
 
+// A deployment sells through the block of its billing provider (ADR 0010):
+// a file holds the block of each provider its brand's deployments use, and
+// an apply refuses a file without its deployment's (provider_block_missing).
+const polarBlock = z.strictObject({ allowMultipleSubscriptions: z.boolean(), portalPlanChanges: z.boolean(), upgradeProration: proration, downgradeProration: proration });
+
+/** A Stripe product tax code, such as txcd_10103001 (software as a service for business use). */
+export const STRIPE_TAX_CODE_PATTERN = /^txcd_\d{8}$/;
+
+const stripeBlock = z.strictObject({
+  // How a plan change charges, in Polar's words, as the Polar adapter maps them.
+  upgrade: z.enum(["invoice", "prorate", "reset"]),
+  downgrade: z.enum(["next_period", "invoice", "prorate"]),
+  // Whether Stripe's billing portal may switch between the standard plans, and cancel; Settings > Plan does both either way.
+  portalPlanChanges: z.boolean(),
+  portalCancel: z.boolean(),
+  // Prices before tax, and the product tax code Stripe Tax computes with.
+  tax: z.strictObject({ behavior: z.literal("exclusive"), code: z.string().regex(STRIPE_TAX_CODE_PATTERN, "a Stripe product tax code, such as txcd_10103001") }),
+  // Hours Stripe waits after a month before finalizing its metered invoice: a Dashboard rule the API can't read.
+  usageGraceHours: z.number().int().min(1).max(72),
+  // separate: overage on a second, monthly subscription. checkout: its prices on the plan's own checkout, as Managed Payments needs.
+  overage: z.enum(["separate", "checkout"]),
+  // Stripe as the merchant of record (Managed Payments), instead of the operator with Stripe Tax.
+  managedPayments: z.boolean(),
+});
+
 const billingProfileShape = z.strictObject({
   $schema: z.string().optional(),
   version: z.literal(BILLING_PROFILE_VERSION),
   currency: z.string().regex(/^[a-z]{3}$/, "three lowercase letters, such as cad"),
-  polar: z.strictObject({ allowMultipleSubscriptions: z.boolean(), portalPlanChanges: z.boolean(), upgradeProration: proration, downgradeProration: proration }),
+  polar: polarBlock.optional(),
+  stripe: stripeBlock.optional(),
   // catchall makes every key but the four standard ones an additional plan.
   plans: z.object({ free_cloud: freePlan, starter: tierPlan, pro: tierPlan, enterprise: customPlan }).catchall(additionalPlan),
 });
@@ -114,8 +140,9 @@ function planPrices(plan: unknown): PlanPrices | undefined {
 }
 
 /**
- * The checks that need more than one field (C1 to C7 of the design), which the
- * JSON Schema can't carry. Each issue's path names the field to fix.
+ * The checks that need more than one field (C1 to C7 of the design, C8 and C9
+ * of the Stripe plan), which the JSON Schema can't carry. Each issue's path
+ * names the field to fix.
  */
 export function checkBillingProfile(profile: ProfileShape, context: z.RefinementCtx): void {
   const issue = (path: Array<string>, message: string) => context.addIssue({ code: "custom", path: ["plans", ...path], message });
@@ -148,6 +175,16 @@ export function checkBillingProfile(profile: ProfileShape, context: z.Refinement
       // C7: a fixed discount never takes a price below zero.
       const lowest = Math.min(...[plan.prices.monthlyCents, plan.prices.annualCents].filter((value): value is number => value !== undefined));
       if (plan.discount.type === "fixed" && Number.isFinite(lowest) && plan.discount.amountCents > lowest) issue([code, "discount", "amountCents"], `the discount is more than the plan's lowest price (${lowest})`);
+    }
+  }
+  if (profile.stripe) {
+    // C8: Managed Payments sells through Checkout alone, so overage can't be a subscription of its own.
+    if (profile.stripe.managedPayments && profile.stripe.overage !== "checkout") context.addIssue({ code: "custom", path: ["stripe", "overage"], message: "with managedPayments, overage is checkout: Managed Payments sells only through Checkout" });
+    // C9: overage on the plan's checkout is invoiced with the plan, which fits monthly plans only.
+    if (profile.stripe.overage === "checkout") {
+      for (const [code, plan] of Object.entries(profile.plans)) {
+        if (planPrices(plan)?.annualCents !== undefined) issue([code, "prices", "annualCents"], "with stripe.overage checkout, overage is invoiced with the plan, so a plan can't be annual");
+      }
     }
   }
 }

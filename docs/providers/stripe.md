@@ -12,7 +12,7 @@ meta:
 
 Use this page to bill a new deployment's businesses through Stripe instead of Polar. A deployment bills through one provider, chosen with `BILLING_PROVIDER` when it's set up, and stays with it ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)). With Stripe the operator is the seller: Stripe runs the checkout page, the billing portal, the subscriptions and the invoices, and Stripe Tax works out the taxes, which the operator registers for and files.
 
-**Status:** a preview, built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)). A deployment bills through Stripe only with `BILLING_PROVIDER=stripe` and `BILLING_STRIPE_PREVIEW=true`, and only with Stripe test keys, until step 18 of that plan has run its sandbox scenarios and switched Stripe on. Nothing here has been tried against a real Stripe sandbox yet. Written on 2026-11-08 from the code of step 17.
+**Status:** a preview, built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)). A deployment bills through Stripe only with `BILLING_PROVIDER=stripe` and `BILLING_STRIPE_PREVIEW=true`, and only with Stripe test keys, until step 18 of that plan has run its sandbox scenarios and switched Stripe on. Nothing here has been tried against a real Stripe sandbox yet. Written on 2026-11-08 from the code of step 17, with step 18's scenarios.
 
 ## Know what Stripe does here
 
@@ -98,12 +98,44 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
 - The other signals are in [billing's table](../billing/README.md#watch-billing).
 - Certification: `pnpm replacement:webhooks` sends a signed Stripe event to a Stripe deployment, and `pnpm replacement:billing` runs the usage checks on Stripe accounts, with `BILLING_PROVIDER=stripe`, `STRIPE_WEBHOOK_SECRET` and a test `STRIPE_API_KEY` in its environment.
 
+## Run the sandbox scenarios
+
+`pnpm billing:scenarios` (`scripts/billing-scenarios.ts`) runs the scenarios that must pass before live payments against a Stripe sandbox, through LobbyStack's own Stripe adapter, each on a test clock of its own, so a scenario lives through renewals and the 1st's overage invoices in minutes. `--list` lists them:
+
+| Scenario | Checks |
+| --- | --- |
+| `checkout` | A monthly Starter and a yearly Pro go live, each with its overage subscription anchored on the 1st at 00:00 UTC, and a second try finds the same one |
+| `usage` | Usage past the allowance, a resend of one event and a negative correction: the meters hold what was sent, and the 1st's overage invoice comes to it, to the cent before tax |
+| `upgrade-paid`, `upgrade-declined`, `upgrade-3ds` | An upgrade with a good card changes the plan at once; a declined card is refused as `payment_failed` and leaves no pending update; a 3-D Secure card waits on the invoice's page |
+| `downgrade` | A downgrade waits for the renewal, **Keep my plan** drops it, and a second one takes effect at the renewal |
+| `cancel-resume` | Cancel and resume, then a cancelled plan ends at its renewal, and its overage subscription with its month |
+| `promo-endings` | A promo plan ends on its tier's price or cancelled at the renewal, and a discount comes off |
+| `deletion` | A deleted business's two subscriptions end at once, each with its last invoice, and a retried revoke counts as ended |
+| `refund` | A refund of the plan's first payment leads back to its invoice |
+| `totals` | A usage event Stripe never got shows as a gap, a numbered correction sent twice closes it once, and a balance credit counts once |
+| `events` | Every webhook event of the scenarios' customers normalizes, each to its own business |
+
+1. **A sandbox of its own,** not a deployment's: the run adds the brand's catalog to it, without the webhook endpoint. In it, set Stripe Tax's origin address (**Settings > Tax**) *(name not confirmed)*: every subscription uses automatic tax, and the run stops without it.
+2. **Its test secret key** in `STRIPE_SCENARIOS_KEY`. The run refuses a live key and never prints the key.
+3. **Run it** from the code folder, after `pnpm install`:
+
+   ```sh
+   pnpm billing:scenarios
+   pnpm billing:scenarios --only usage,refund
+   ```
+
+   It sets the sandbox up from `brands/realinfobot/billing.json`, or the brand `--brand` names, with the recommended `stripe` block while the file has none. Four scenarios run at once (`--parallel`), most of their time a test clock advancing; the whole run takes about 15 minutes *(estimated)*. It ends `All 12 scenarios passed.` (exit 0), or with a `FAIL` line for each that didn't (exit 1); exit 2 means it couldn't start. Each scenario's test clock is deleted at the end, with its customers and subscriptions, unless `--keep`.
+
+The `Billing scenarios` workflow (`.github/workflows/billing-scenarios.yml`) runs the same by hand from GitHub, with the key in the repository secret `STRIPE_SCENARIOS_KEY`, once its file is on the default branch: GitHub lists a manual workflow only from there.
+
+Two limits: the plan subscription is made through the API with Stripe's test cards, not through the Checkout page, which Stripe asks integrations not to script, so the page itself is a check by hand; and deliveries twice and out of order are checked against PostgreSQL in CI (`billing.reconcile`'s order tests), since the run has no deployment to deliver to.
+
 ## Reset a test deployment
 
 `devops/reset-database.mjs` refuses a database linked to Stripe's live mode unless given `--allow-live-payments`. With `STRIPE_READ_KEY` set, it lists the subscriptions Stripe still bills the deployment's customers for, overage subscriptions included, so you can cancel them in the Dashboard first.
 
 ## Know what's left
 
-- The sandbox scenarios of step 18, which run every flow above against a real sandbox, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed.
+- [The sandbox scenarios](#run-the-sandbox-scenarios), passing twice in a row against a real sandbox, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. Then step 18 of the plan takes away `BILLING_STRIPE_PREVIEW` and adds the `stripe` block to the brand of the first Stripe deployment.
 - Stripe's names for each key's permissions, from that run.
 - The legal pages: with Stripe the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments.

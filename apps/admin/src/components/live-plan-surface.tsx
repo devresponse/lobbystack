@@ -24,6 +24,8 @@ import { formatDateTime } from "@/lib/locale";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 
 type Billing = {
+  /** The deployment's billing provider, by name. */
+  providerName: string;
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: { starter: string[]; pro: string[] };
   plans: BillingPlanList;
@@ -192,19 +194,19 @@ export function LivePlanSurface() {
         </div>
       </Surface>
     </SectionBlock>
-    {plan !== "self_host" ? <><SpendingCapSection key={business.businessId} businessId={business.businessId} locale={i18n.language} t={(key, options) => t(key, options ?? {})} status={{ plan, currency, overageSpendingCapCents: account?.overageSpendingCapCents ?? null, overageSpendCents: billing.data?.usageStatus?.overageSpendCents ?? 0, overageSpendCentsComplete: billing.data?.usageStatus?.usageComplete ?? true, overageSpendingCapReached: billing.data?.usageStatus?.overageSpendingCapReached ?? false, hasBillingManagementAccess: permissions?.hasBillingManagementAccess === true }} /><Transactions locale={i18n.language} transactions={billing.data?.transactions ?? []} t={t} /></> : null}
+    {plan !== "self_host" ? <><SpendingCapSection key={business.businessId} businessId={business.businessId} locale={i18n.language} t={(key, options) => t(key, options ?? {})} status={{ plan, currency, overageSpendingCapCents: account?.overageSpendingCapCents ?? null, overageSpendCents: billing.data?.usageStatus?.overageSpendCents ?? 0, overageSpendCentsComplete: billing.data?.usageStatus?.usageComplete ?? true, overageSpendingCapReached: billing.data?.usageStatus?.overageSpendingCapReached ?? false, hasBillingManagementAccess: permissions?.hasBillingManagementAccess === true }} /><Transactions locale={i18n.language} transactions={billing.data?.transactions ?? []} t={t} providerName={billing.data?.providerName ?? ""} /></> : null}
     </div>
   </PageSurface>;
 }
 
 type Translate = ReturnType<typeof useTranslation>["t"];
-function Transactions({ transactions, t, locale }: { transactions: Billing["transactions"]; t: Translate; locale: string }) {
+function Transactions({ transactions, t, locale, providerName }: { transactions: Billing["transactions"]; t: Translate; locale: string; providerName: string }) {
   if (!transactions || transactions.length === 0) return null;
 
   return (
     <SectionBlock
       title={t("billing.transactions.title")}
-      description={t("billing.transactions.description")}
+      description={t("billing.transactions.description", { provider: providerName })}
     >
       <TableCard>
         <Table className="min-w-[42rem]">
@@ -333,10 +335,10 @@ function TransactionsSectionSkeleton({
 }: {
   t: Translate;
 }) {
+  // The provider's name arrives with the billing answer, so the loading state shows the title alone.
   return (
     <SectionBlock
       title={t("billing.transactions.title")}
-      description={t("billing.transactions.description")}
     >
       <TableCard>
         <Table className="min-w-[42rem]">

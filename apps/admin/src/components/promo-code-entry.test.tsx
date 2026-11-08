@@ -123,10 +123,10 @@ describe("Have a promo code?", () => {
     const { assign } = setup((url, init) => {
       if (url.startsWith("/api/billing/promo?")) return Response.json(view);
       if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "promo-change" });
-      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: true, refusal: null });
+      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: true, refusal: null, providerName: "Polar" });
     }, { changesPlan: true });
     await userEvent.click(await screen.findByRole("button", { name: "billing.promo.change.monthly" }));
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged {\"provider\":\"Polar\"}"));
     await screen.findByRole("button", { name: "billing.promo.link" });
     expect(assign).not.toHaveBeenCalled();
     expect(store["lobbystack.billing.promoCode"]).toBeUndefined();
@@ -137,13 +137,13 @@ describe("Have a promo code?", () => {
     setup((url, init) => {
       if (url.startsWith("/api/billing/promo?")) return Response.json(view);
       if (url === "/api/billing/checkout" && init?.method === "POST") return Response.json({ requestId: "promo-change" });
-      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: false, refusal: null });
+      return Response.json({ status: "changed", checkoutUrl: null, error: null, synced: false, refusal: null, providerName: "Polar" });
     }, { changesPlan: true });
     const change = await screen.findByRole("button", { name: "billing.promo.change.monthly" });
     expect(isUpgradeInProgress()).toBe(false);
     setUpgradeInProgress(true);
     await userEvent.click(change);
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("billing.toast.planChanged {\"provider\":\"Polar\"}"));
     setUpgradeInProgress(false);
     expect(isUpgradeInProgress()).toBe(true);
     cleanup();

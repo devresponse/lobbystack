@@ -15560,7 +15560,7 @@
           },
           "managed": {
             "type": "boolean",
-            "description": "true when the deployment's operator runs the plan outside Polar and bills the business directly."
+            "description": "true when the deployment's operator runs the plan outside the billing provider and bills the business directly."
           },
           "subscription_state": {
             "description": "The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription.",
@@ -15619,6 +15619,18 @@
           "spending_cap_reached": {
             "type": "boolean",
             "description": "true once this month's overage reached the cap, which stops further billable usage."
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "polar",
+              "stripe"
+            ],
+            "description": "The deployment's billing provider, which sells its plans: polar or stripe."
+          },
+          "provider_name": {
+            "type": "string",
+            "description": "How to name the provider to the business, such as Polar."
           }
         },
         "required": [
@@ -15632,7 +15644,9 @@
           "current_period_end",
           "spending_cap_cents",
           "overage_spend_cents",
-          "spending_cap_reached"
+          "spending_cap_reached",
+          "provider",
+          "provider_name"
         ],
         "additionalProperties": false,
         "description": "The business's plan and what it spends."
@@ -15690,7 +15704,7 @@
               "changed",
               "error"
             ],
-            "description": "pending or processing: Polar is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so Polar moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once Polar confirms it. error: Polar made no page or change; error says why, and another checkout can be started."
+            "description": "pending or processing: the billing provider is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so the provider moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once the provider confirms it. error: the provider made no page or change; error says why, and another checkout can be started."
           },
           "promo_plan": {
             "description": "The plan a promo code unlocked, whose tier plan names. Null for a standard plan.",
@@ -15700,7 +15714,7 @@
             ]
           },
           "checkout_url": {
-            "description": "The Polar page where the customer pays. Send it to them. Null unless status is ready.",
+            "description": "The billing provider's page where the customer pays. Send it to them. Null unless status is ready.",
             "type": [
               "string",
               "null"
@@ -15740,7 +15754,7 @@
           "updated_at"
         ],
         "additionalProperties": false,
-        "description": "A Polar checkout for a plan."
+        "description": "A checkout for a plan, through the billing provider."
       },
       "CheckoutCreate": {
         "type": "object",
@@ -15768,7 +15782,7 @@
             "maxLength": 64
           },
           "billing_email": {
-            "description": "The email Polar gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here.",
+            "description": "The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here.",
             "type": "string",
             "maxLength": 320,
             "format": "email"

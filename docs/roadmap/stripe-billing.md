@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 6 are done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 7 are done.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -91,3 +91,14 @@ Its first commit, on the code as it was, records what `GET /billing/catalog` and
 - **Refusals:** a link for another provider than the deployment's is `provider_mismatch`, and one for another provider than the first link's `billing_provider_changed`. A Polar deployment still answers `polar_org_mismatch` and `polar_org_changed`; any other provider `billing_account_mismatch` and `billing_account_changed`. `provider_block_missing` is for step 10's `stripe` block. Verify's check codes and pairs add the ones a Stripe deployment reports (`file_provider` and `postgres_provider`).
 - **The route:** `POST /billing/catalog/links` serves the link, and `POST /billing/catalog/polar-links` stays as its alias, documented beside it in the OpenAPI file. The runs list takes `kind=link` for every provider's links, and `polar` for Polar's.
 - **Callers:** `pnpm billing apply` sends the neutral body. The CLI's `billing catalog` shows a `provider` column and names the provider's account, `catalog-runs` shows `provider_account`, and `catalog-link` takes either body. The managed-plan 409 names the deployment's provider (`paid_through_provider`), and the billing operations' descriptions say the billing provider, with Polar's one customer per email marked as Polar's. `mintlify/api-reference/openapi.json` is regenerated.
+
+## Step 7: provider-neutral wording
+
+Sentences name the deployment's billing provider, so a Polar deployment reads exactly as before and a Stripe one never says Polar.
+
+- **Refusals:** `planChangeRefusalSentences` in `packages/shared/src/billing.ts` holds each plan change refusal in each provider's words. Polar's read word for word as before, so requests stored earlier still match. Stripe's are new: its `subscription_ending` sends the business to **Settings > Plan** to resume the plan, and its `token_scope` names `STRIPE_API_KEY`. The worker stores its provider's sentence, and `planChangeRefusalOf` reads any provider's back.
+- **Screens:** the plan change toast and the transactions' description take `{{provider}}`, from `provider` and `providerName`, which the dashboard's `GET /api/billing` and the checkout status now carry. The billing email strings keep Polar's name, since only Polar deployments show that form. The v1 `GET /billing` adds `provider` and `provider_name`.
+- **Strings for later steps,** in all four languages, so those steps edit no locale file: `planEndsOn` and `planChangesOn` (step 8), `completePayment` and its hint (step 14), and `cancelPlan`, `resume`, `keepPlan`, their toasts, `resumeFirst` and the overage note (step 15).
+- **Other messages:** the cancellation emails name the provider the business paid through; the integrations list's billing row, the operator-key 403 and the promo checkout's 409 name the deployment's provider; the CLI's `onboard` and its waits, its docs in three languages and the API's checkout and billing descriptions say the billing provider, with Polar's one customer per email kept as Polar's. `billingProviderOf` in `packages/shared` reads `BILLING_PROVIDER` for these names; the services check its value when they start.
+
+A search of the locale files finds Polar only in the billing email strings.

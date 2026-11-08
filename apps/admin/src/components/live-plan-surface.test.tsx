@@ -16,7 +16,7 @@ afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.
 function setup({ synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  const billing = { permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
+  const billing = { provider: "polar", providerName: "Polar", permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
   if (!billingFails) client.setQueryData(["billing", "business"], billing);
   const fetchMock = vi.fn(async (url: string) => url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
@@ -93,6 +93,10 @@ describe("original billing overview behavior", () => {
     expect(screen.getByRole("link", { name: "billing.transactions.invoice" }).getAttribute("href")).toBe("https://example.invalid/invoice");
     expect(screen.getByRole("link", { name: "billing.transactions.invoice" }).getAttribute("target")).toBe("_blank");
     expect(screen.getByRole("link", { name: "billing.transactions.invoice" }).getAttribute("rel")).toContain("noopener");
+  });
+  it("says the transactions come from the deployment's billing provider, Polar here", () => {
+    setup({ transactions: true });
+    expect(translate).toHaveBeenCalledWith("billing.transactions.description", { provider: "Polar" });
   });
   it("shows how much of a refunded order went back, in the active locale", () => {
     setup({ transactions: true });

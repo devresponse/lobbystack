@@ -1,6 +1,6 @@
 // A promo plan's end at its renewal, and dropping its discount.
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { planChangeRefusals } from "@lobbystack/shared";
+import { billingProviderNames, planChangeRefusalSentence } from "@lobbystack/shared";
 import { claimBillingSubscription, readPolarProductLinks } from "@lobbystack/domain";
 import { isLiveSubscriptionState, loadPromoEndWork, recordPromoEnd } from "@lobbystack/domain";
 import { reportWarning } from "@lobbystack/telemetry/node";
@@ -75,7 +75,7 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
       const refusal = planChangeRefusalFor(billing, error);
       if (!refusal) throw error;
       // The next daily run tries again; these two are the operator's to fix.
-      if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`Polar refused to end a promo plan: ${planChangeRefusals[refusal]}`), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
+      if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`${billingProviderNames[billing.id]} refused to end a promo plan: ${planChangeRefusalSentence(billing.id, refusal)}`), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
       return { status: "skipped", entityId: businessId };
     } finally {
       await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });
@@ -113,7 +113,7 @@ async function dropPromoDiscount(dependencies: WorkerDependencies, input: { busi
   } catch (error) {
     const refusal = planChangeRefusalFor(billing, error);
     if (!refusal || refusal === "change_pending") throw error;
-    if (refusal === "token_scope") await reportWarning(new Error(`Polar refused to remove a promo plan's discount: ${planChangeRefusals[refusal]}`), { operation: "job.billing.endPromoPlan", businessId });
+    if (refusal === "token_scope") await reportWarning(new Error(`${billingProviderNames[billing.id]} refused to remove a promo plan's discount: ${planChangeRefusalSentence(billing.id, refusal)}`), { operation: "job.billing.endPromoPlan", businessId });
     return { status: "skipped", entityId: businessId };
   } finally {
     await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });

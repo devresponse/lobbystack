@@ -70,27 +70,53 @@ export function planChangeDirection(
 }
 
 /**
- * Why Polar didn't move a paying business to the plan it picked, or make the
- * customer a new checkout is for. The worker stores the sentence as the
- * checkout request's error, which API callers read; the dashboard turns it
- * back into the code to say it in the viewer's language. The two billing email
- * ones ask for a billing email, which a new checkout request carries.
+ * Why the billing provider didn't move a paying business to the plan it
+ * picked, or make the customer a new checkout is for, in each provider's
+ * words. The worker stores its provider's sentence as the checkout request's
+ * error, which API callers read; the dashboard turns it back into the code to
+ * say it in the viewer's language. Polar's read word for word as they did
+ * before other providers, so the requests stored then still match. The two
+ * billing email ones ask for a billing email, which a new checkout request
+ * carries: only Polar, which keeps one customer per email, refuses that way.
  */
-export const planChangeRefusals = {
-  payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
-  subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
-  change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
-  subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
-  product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
-  token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
-  billing_email_taken: "Polar already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
-  billing_email_invalid: "Polar didn't accept the billing email. Start the checkout again with another one.",
-} as const;
-export type PlanChangeRefusal = keyof typeof planChangeRefusals;
+export const planChangeRefusalSentences = {
+  polar: {
+    payment_failed: "Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
+    subscription_ending: "The subscription is set to end, so its plan can't change. Resume it in the billing portal first.",
+    change_pending: "Polar is still applying an earlier change to this subscription. Try again in a minute.",
+    subscription_unavailable: "Polar can't change this subscription right now. Check it in the billing portal.",
+    product_unavailable: "Polar refused the new plan's product. Run pnpm billing verify to check that the plan is linked to a live recurring product.",
+    token_scope: "Polar refused the worker's token. Give the worker's POLAR_ACCESS_TOKEN the subscriptions:write scope.",
+    billing_email_taken: "Polar already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
+    billing_email_invalid: "Polar didn't accept the billing email. Start the checkout again with another one.",
+  },
+  stripe: {
+    payment_failed: "Stripe couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.",
+    subscription_ending: "The subscription is set to end, so its plan can't change. Resume the plan in Settings > Plan first.",
+    change_pending: "Stripe is still applying an earlier change to this subscription. Try again in a minute.",
+    subscription_unavailable: "Stripe can't change this subscription right now. Check it in the billing portal.",
+    product_unavailable: "Stripe refused the new plan's price. Run pnpm billing verify to check that the plan is linked to a live recurring price.",
+    token_scope: "Stripe refused the worker's key. Give the worker's STRIPE_API_KEY write access to subscriptions.",
+    billing_email_taken: "Stripe already has a customer with this email for another business. Start the checkout again with a billing email for this business.",
+    billing_email_invalid: "Stripe didn't accept the billing email. Start the checkout again with another one.",
+  },
+} as const satisfies Record<BillingProvider, Record<string, string>>;
+export type PlanChangeRefusal = keyof typeof planChangeRefusalSentences.polar;
+/** Polar's sentences: what a Polar deployment stores. */
+export const planChangeRefusals = planChangeRefusalSentences.polar;
 
-/** The refusal a checkout request's error states, or null for any other error. */
+/** The sentence the worker stores for a refusal, in its provider's words. */
+export function planChangeRefusalSentence(provider: BillingProvider, refusal: PlanChangeRefusal): string {
+  return planChangeRefusalSentences[provider][refusal];
+}
+
+/** The refusal a checkout request's error states in any provider's words, or null for any other error. */
 export function planChangeRefusalOf(error: string | null | undefined): PlanChangeRefusal | null {
-  return (Object.keys(planChangeRefusals) as PlanChangeRefusal[]).find((code) => planChangeRefusals[code] === error) ?? null;
+  for (const sentences of Object.values(planChangeRefusalSentences)) {
+    const code = (Object.keys(sentences) as PlanChangeRefusal[]).find((key) => sentences[key] === error);
+    if (code) return code;
+  }
+  return null;
 }
 
 export const billingTransactionKinds = ["order", "refund"] as const;
@@ -115,6 +141,11 @@ export const billingProviderEnvs = ["sandbox", "live"] as const;
 export type BillingProviderEnv = (typeof billingProviderEnvs)[number];
 /** How screens, messages and the CLI name each provider. */
 export const billingProviderNames: Record<BillingProvider, string> = { polar: "Polar", stripe: "Stripe" };
+
+/** The deployment's billing provider, as BILLING_PROVIDER names it: Polar when it's unset. The services check the value when they start. */
+export function billingProviderOf(env: Record<string, string | undefined>): BillingProvider {
+  return env.BILLING_PROVIDER?.trim().toLowerCase() === "stripe" ? "stripe" : "polar";
+}
 
 /** The two Polar servers: sandbox for test payments, production for real ones. Each has its own organizations, ids and tokens. */
 export const polarBaseUrls = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;

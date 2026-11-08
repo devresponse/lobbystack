@@ -663,7 +663,7 @@ async function syncCheckout(run: Run, billing: Billing): Promise<void> {
   if (!checkoutNeeded(run.manifest, billing)) {
     // Only the billing portal changes a paid plan, and no rerun can, so this doesn't hold up the rest.
     run.log({ step: "plan", action: "differs", detail: `${current} is in force` });
-    run.notes.push(`The business pays for ${current}, and the manifest asks for ${label}. Change it in Polar's billing portal, or change plan in the manifest.`);
+    run.notes.push(`The business pays for ${current}, and the manifest asks for ${label}. Change it in the billing portal, or change plan in the manifest.`);
     return;
   }
   // A Starter business already pays, so its move to Pro changes that subscription, with no page.
@@ -679,7 +679,7 @@ async function syncCheckout(run: Run, billing: Billing): Promise<void> {
   let checkout = run.state.checkout_id ? (await run.client.call("getCheckout", { params: { checkout_id: run.state.checkout_id } })).data as Row : undefined;
   let stale = false;
   if (!checkout || checkout.status === "error" || checkout.plan !== plan || checkout.interval !== interval) {
-    if (changesPlan) await needsYes(run, `Move ${run.manifest.business.name} from ${current} to ${label}? Polar charges the difference to the saved payment method.`, "A plan change charges the business, so it needs a yes.");
+    if (changesPlan) await needsYes(run, `Move ${run.manifest.business.name} from ${current} to ${label}? The billing provider charges the difference to the saved payment method.`, "A plan change charges the business, so it needs a yes.");
     else await needsYes(run, `Start a ${label} checkout for ${run.manifest.business.name}?`, "A checkout asks someone to pay, so it needs a yes.");
     checkout = await startCheckout(run, plan, interval);
   } else if (Date.now() - Date.parse(String(checkout.created_at)) >= 60 * 60_000) {

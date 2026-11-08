@@ -27,7 +27,7 @@ type CheckoutInput = { businessId: string; target: HostedUpgradePlan; billingInt
 type Checkout = { businessId: string; requestId: string; target: HostedUpgradePlan; billingInterval: BillingInterval; billingEmail: string | null };
 /** A checkout Polar couldn't make this business's customer for, which starts again with a billing email. */
 type EmailPrompt = { refusal: BillingEmailRefusal; email: string | null; target: HostedUpgradePlan; billingInterval: BillingInterval };
-type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
+type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null; providerName: string };
 
 export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
   const { i18n, t } = useTranslation("settings");
@@ -107,7 +107,7 @@ export function LiveUpgradePlanProvider({ children }: { children: ReactNode }) {
     if (announcedRequestId.current !== checkout.requestId) {
       announcedRequestId.current = checkout.requestId;
       setOpen(false);
-      toast.success(t("billing.toast.planChanged"));
+      toast.success(t("billing.toast.planChanged", { provider: result.data.providerName }));
     }
     const finish = () => {
       void client.invalidateQueries({ queryKey: ["billing", checkout.businessId] });

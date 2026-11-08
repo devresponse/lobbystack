@@ -94,6 +94,7 @@ import {
   type ApiWidgetKeyUpdate,
   type PublicProfileSettings,
   billingProviderNames,
+  billingProviderOf,
   promoPlanEnding,
 } from "@lobbystack/shared";
 
@@ -104,7 +105,6 @@ import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
-import { readBillingDeployment } from "../billingProvider";
 import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -361,6 +361,8 @@ async function loadBilling(tx: DatabaseTransaction, businessId: string): Promise
     spending_cap_cents: cap,
     overage_spend_cents: spend,
     spending_cap_reached: cap !== null && spend > 0 && spend >= cap,
+    provider: billingProviderOf(process.env),
+    provider_name: billingProviderNames[billingProviderOf(process.env)],
   };
 }
 
@@ -446,7 +448,7 @@ const promoRefusals: Record<BillingCodeRefusal, () => PublicApiError> = {
  * one; checkLimit runs only before a new one is made.
  */
 export async function createCheckoutForApi(context: DomainContext, caller: ApiCaller, input: ApiCheckoutCreate, options: { available: boolean; checkPromoCode?: () => Promise<void>; checkLimit?: BillingCheckoutLimit }): Promise<ApiCheckout> {
-  if (!options.available) throw conflict(input.plan === "promo" ? "This deployment doesn't sell plans through Polar." : "This deployment doesn't sell that plan and interval.");
+  if (!options.available) throw conflict(input.plan === "promo" ? `This deployment doesn't sell plans through ${billingProviderNames[billingProviderOf(process.env)]}.` : "This deployment doesn't sell that plan and interval.");
   const userId = await checkoutPayerId(context, caller);
   return await inBusiness(context, caller, async (tx) => {
     const [account] = await tx.select({ source: billingAccounts.source, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, caller.businessId)).limit(1);
@@ -474,7 +476,7 @@ export async function getCheckoutForApi(context: DomainContext, caller: ApiCalle
 export async function setManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
   return await inBusiness(context, caller, async (tx) => {
     const outcome = await setManagedPlanInTransaction(tx, { businessId: caller.businessId });
-    if (outcome === "paid_through_provider") throw conflict(`This business pays through ${billingProviderNames[readBillingDeployment(process.env, { withSecret: false }).provider]}. Cancel that subscription before giving it a managed plan.`);
+    if (outcome === "paid_through_provider") throw conflict(`This business pays through ${billingProviderNames[billingProviderOf(process.env)]}. Cancel that subscription before giving it a managed plan.`);
     if (outcome === "set") await audit(tx, caller, { eventType: "api.billing.managed_plan_set", entityType: "billing_account", entityId: caller.businessId, payload: { plan: "enterprise" } });
     return await loadBilling(tx, caller.businessId);
   });

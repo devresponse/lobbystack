@@ -1,4 +1,4 @@
-import { intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
+import { billingProviderNames, intlLocale, normalizeInterfaceLocale, withoutCardAndIdNumbers, type BrandImage, type InterfaceLocale } from "@lobbystack/shared";
 
 export type TemplateName = "existing_account" | "account_setup" | "verify_email" | "password_reset" | "invitation" | "operator_alert" | "feedback_submission" | "onboarding_followup" | "promo_ending" | "call_transcript" | "cancellation_confirm" | "cancellation_request" | "cancellation_completed";
 
@@ -627,14 +627,17 @@ function cancellationRequest(app: string, to: string, variables: Record<string, 
     blocks: [
       { kind: "paragraph", text: `${requesterLabel(variables)} asked to cancel ${business} on ${app}. They were emailed a link to confirm, which works until ${variables.expiresAt ?? "24 hours from now"}. Nothing changes unless they confirm, and this inbox gets another email if they do.` },
       businessFacts(variables, [{ label: "Requested by", value: requesterLabel(variables) }, { label: "Requested at", value: variables.requestedAt }, { label: "Link works until", value: variables.expiresAt }]),
-      { kind: "paragraph", text: "Once confirmed, nobody on the team can open the business, its numbers stop answering and go back to Twilio 30 days later, and a plan paid through Polar is canceled. Nothing is deleted." },
+      { kind: "paragraph", text: `Once confirmed, nobody on the team can open the business, its numbers stop answering and go back to Twilio 30 days later, and a plan paid through ${variables.providerName || "Polar"} is canceled. Nothing is deleted.` },
     ],
     reason: inboxReason(app, to),
   };
 }
 
+// polar and stripe name the provider the plan is paid through; emails queued before Stripe say polar.
+const providerOutcome = (name: string) => `Its paid plan is being canceled in ${name} now. If ${name} still shows the subscription as active in an hour, cancel it there by hand.`;
 const PLAN_OUTCOMES: Record<string, string> = {
-  polar: "Its paid plan is being canceled in Polar now. If Polar still shows the subscription as active in an hour, cancel it there by hand.",
+  polar: providerOutcome(billingProviderNames.polar),
+  stripe: providerOutcome(billingProviderNames.stripe),
   managed: "Its plan is billed outside the app, so end it by hand.",
   free: "It was on the free plan, so there's no plan to cancel.",
 };
@@ -650,7 +653,7 @@ function cancellationCompleted(app: string, to: string, variables: Record<string
     heading: cancellationSubject("cancellation_completed", variables),
     blocks: [
       { kind: "paragraph", text: `${requesterLabel(variables)} confirmed the cancellation of ${business} on ${app}${variables.canceledAt ? ` at ${variables.canceledAt}` : ""}. Nothing was deleted: the business is now inactive, nobody on its team can open it, and its receptionist no longer answers calls or texts.` },
-      { kind: "paragraph", text: PLAN_OUTCOMES[variables.planOutcome ?? ""] ?? "Check its plan in Polar, and cancel it there by hand if it's still active." },
+      { kind: "paragraph", text: PLAN_OUTCOMES[variables.planOutcome ?? ""] ?? `Check its plan in ${variables.providerName || "Polar"}, and cancel it there by hand if it's still active.` },
       { kind: "paragraph", text: numbers },
       businessFacts(variables, [{ label: "Canceled by", value: requesterLabel(variables) }, { label: "Canceled at", value: variables.canceledAt }]),
       { kind: "paragraph", text: "To reactivate it, see 7.27, \"Reactivate a canceled business\", in the deployment guide. Its plan stays canceled." },

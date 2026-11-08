@@ -1,6 +1,6 @@
 // The checkout job: a checkout page for a new plan, or a paying business's plan change (planChange.ts).
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { planChangeRefusals } from "@lobbystack/shared";
+import { planChangeRefusalSentence } from "@lobbystack/shared";
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, readPolarProductLinks, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed } from "@lobbystack/domain";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
@@ -75,7 +75,7 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
     const refusal = billing.refusalFor(error);
     if (refusal === "billing_email_taken" || refusal === "billing_email_invalid") {
       // Polar answers the same email the same way, so the person is asked for another.
-      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals[refusal] });
+      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusalSentence(billing.id, refusal) });
       return { status: "skipped", entityId: requestId };
     }
     await failBillingCheckoutTry(dependencies, { businessId, requestId, error: "Polar checkout creation failed.", retrying });

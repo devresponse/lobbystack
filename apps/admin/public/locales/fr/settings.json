@@ -349,7 +349,11 @@
       "checkoutFailed": "Impossible d'ouvrir le paiement.",
       "portalFailed": "Impossible d'ouvrir le portail client.",
       "rateLimited": "Trop de tentatives. Réessayez plus tard.",
-      "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que Polar l'aura confirmé.",
+      "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que {{provider}} l'aura confirmé.",
+      "planResumed": "Votre forfait continuera de se renouveler.",
+      "planKept": "Vous gardez votre forfait actuel.",
+      "planActionFailed": "Ça n'a pas fonctionné. Réessayez dans une minute.",
+      "resumeFirst": "Votre abonnement doit prendre fin, son forfait ne peut donc pas changer. Réactivez d'abord votre forfait sur cette page.",
       "planChangeFailed": "Impossible de changer votre forfait.",
       "planChangeRefused": {
         "payment_failed": "Votre moyen de paiement enregistré n'a pas pu être débité pour le nouveau forfait. Mettez-le à jour dans Gérer l'abonnement, puis réessayez.",
@@ -403,6 +407,10 @@
       "changingPlan": "Changement de forfait...",
       "openingPortal": "Ouverture du portail...",
       "viewInvoice": "Voir la facture",
+      "completePayment": "Finaliser le paiement",
+      "cancelPlan": "Annuler le forfait",
+      "resume": "Reprendre",
+      "keepPlan": "Garder mon forfait",
       "retry": "Réessayer"
     },
     "currentPlan": {
@@ -419,6 +427,10 @@
       "billingContactMissing": "Aucun contact de facturation pour le moment.",
       "subscriptionStateTitle": "État de l'abonnement",
       "billingPeriod": "La période en cours se réinitialise le {{resetAt}}",
+      "planEndsOn": "Votre forfait prend fin le {{date}}.",
+      "planChangesOn": "Votre forfait passe à {{plan}} le {{date}}.",
+      "overageNote": "L'utilisation au-delà de ce qui est inclus est facturée sur une facture distincte, le 1er de chaque mois.",
+      "completePaymentHint": "Votre banque demande de confirmer le paiement du nouveau forfait.",
       "selfHostNotice": "Les espaces auto-hébergés utilisent vos propres fournisseurs. Aucune limite d'utilisation ni facturation ne s'applique.",
       "enterpriseNotice": "L'utilisation et les limites sont régies par votre entente entreprise.",
       "proNotice": "L'utilisation incluse se réinitialise chaque mois. L'utilisation supplémentaire est facturée au tarif de dépassement.",
@@ -608,7 +620,7 @@
     },
     "transactions": {
       "title": "Historique des transactions",
-      "description": "Commandes, remboursements et frais d'activation synchronisés depuis Polar.",
+      "description": "Commandes, remboursements et frais d'activation synchronisés depuis {{provider}}.",
       "empty": "Aucune transaction pour le moment.",
       "columns": {
         "date": "Date",

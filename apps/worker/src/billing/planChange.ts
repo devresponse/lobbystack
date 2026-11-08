@@ -1,5 +1,5 @@
 // Moving a paying business's subscription to another plan, and what checkout and promo endings share with it.
-import { planChangeDirection, planChangeRefusals, type PlanChangeRefusal } from "@lobbystack/shared";
+import { billingProviderNames, planChangeDirection, planChangeRefusalSentence, type PlanChangeRefusal } from "@lobbystack/shared";
 import { claimBillingSubscription, loadPlanChangeProration, releaseBillingCheckoutRequest, releaseBillingSubscription, type PolarProductLinks, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
 import { isLiveSubscriptionState } from "@lobbystack/domain";
 import { reportWarning } from "@lobbystack/telemetry/node";
@@ -66,7 +66,7 @@ export async function changeBillingPlan(
       return { status: "completed", entityId: requestId };
     }
     if (subscription.cancelAt) {
-      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals.subscription_ending });
+      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusalSentence(billing.id, "subscription_ending") });
       return { status: "skipped", entityId: requestId };
     }
     // Polar's own product says what the business pays for now; the account can lag a webhook behind it.
@@ -83,9 +83,9 @@ export async function changeBillingPlan(
     const refusal = planChangeRefusalFor(billing, error);
     if (refusal) {
       // Asking again gets the same answer, so the business hears why instead of a retry.
-      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals[refusal] });
+      await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusalSentence(billing.id, refusal) });
       // These two are the operator's to fix, not the business's.
-      if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`Polar refused a plan change: ${planChangeRefusals[refusal]}`), { operation: "job.billing.createCheckout", businessId, requestId });
+      if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`${billingProviderNames[billing.id]} refused a plan change: ${planChangeRefusalSentence(billing.id, refusal)}`), { operation: "job.billing.createCheckout", businessId, requestId });
       return { status: "skipped", entityId: requestId };
     }
     await failBillingCheckoutTry(dependencies, { businessId, requestId, error: "Polar plan change failed.", retrying: input.retrying });

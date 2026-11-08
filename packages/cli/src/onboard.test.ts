@@ -534,7 +534,7 @@ describe("lobbystack onboard", () => {
     world.numbers.push({ id: "number", phone_number: "+14165550199", status: "active" });
     const questions: string[] = [];
     const moved = await onboard([], fetch, { confirm: async (question) => { questions.push(question); return true; } });
-    expect(questions).toContain("Move Acme Plumbing from starter monthly to pro monthly? Polar charges the difference to the saved payment method.");
+    expect(questions).toContain("Move Acme Plumbing from starter monthly to pro monthly? The billing provider charges the difference to the saved payment method.");
     expect(world.writes).toContain("POST /billing/checkout");
     expect(moved.out).toContain("plan           changed      starter monthly to pro monthly");
     expect(moved.out).not.toContain("isn't paid yet");
@@ -545,7 +545,7 @@ describe("lobbystack onboard", () => {
     const differs = await onboard(["--yes"], fetch);
     expect(differs.code).toBe(exitCodes.ok);
     expect(differs.out).toContain("plan           differs      pro annual is in force");
-    expect(differs.out).toContain("The business matches the manifest, except:\n- The business pays for pro annual, and the manifest asks for pro monthly. Change it in Polar's billing portal");
+    expect(differs.out).toContain("The business matches the manifest, except:\n- The business pays for pro annual, and the manifest asks for pro monthly. Change it in the billing portal");
     expect(count(world.writes, /^POST \/billing\/checkout$/)).toBe(1);
   });
 

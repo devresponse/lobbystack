@@ -194,13 +194,15 @@ export const apiBillingSchema = z.object({
   promo_plan: z.string().nullable().describe("The code of the promo plan in force, which behaves as plan with its own allowances, limits and overage rates. Null on a standard plan."),
   plan_ends: nullableTimestamp.describe("When a promo plan that lasts a set number of months ends: it ends at the subscription's first renewal from then on. Null otherwise."),
   plan_ends_with: z.enum(["tier", "cancel"]).nullable().describe("What that renewal does: tier moves the subscription to the plan's tier at its standard price, cancel ends it. Null when plan_ends is."),
-  managed: z.boolean().describe("true when the deployment's operator runs the plan outside Polar and bills the business directly."),
+  managed: z.boolean().describe("true when the deployment's operator runs the plan outside the billing provider and bills the business directly."),
   subscription_state: z.string().nullable().describe("The subscription's state, such as active, trialing, past_due or canceled. Null without a subscription."),
   billing_interval: z.enum(billingIntervals).nullable().describe("Null unless the plan is Starter or Pro."),
   current_period_end: nullableTimestamp.describe("When the paid period ends. Null unless the plan is Starter or Pro."),
   spending_cap_cents: z.number().int().nullable().describe("The most a Starter or Pro plan spends on usage over its allowance each month. Null means no cap, and is always null on other plans."),
   overage_spend_cents: z.number().int().describe("Usage over the allowance this month."),
   spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),
+  provider: z.enum(billingProviders).describe("The deployment's billing provider, which sells its plans: polar or stripe."),
+  provider_name: z.string().describe("How to name the provider to the business, such as Polar."),
 }).describe("The business's plan and what it spends.");
 
 export const apiBillingUpdateSchema = z.strictObject({
@@ -211,7 +213,7 @@ export const apiCheckoutCreateSchema = z.strictObject({
   plan: z.enum([...checkoutPlans, "promo"]).describe("starter or pro, or promo for the plan promo_code unlocks."),
   interval: z.enum(billingIntervals),
   promo_code: z.string().min(1).max(64).optional().describe("A promo code the deployment's operator issued, compared regardless of case and spaces. Required with plan promo, and only allowed with it."),
-  billing_email: z.email().max(320).optional().describe("The email Polar gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
+  billing_email: z.email().max(320).optional().describe("The email the billing provider gives the business's customer on its first checkout and sends receipts to. Left out, it is the payer's own. Polar keeps one customer per email, so a payer who already pays for another business needs a separate one here."),
 }).superRefine((value, context) => {
   if ((value.plan === "promo") === (value.promo_code !== undefined)) return;
   context.addIssue({ code: "custom", path: ["promo_code"], message: value.plan === "promo" ? "Required when plan is promo." : "Only allowed when plan is promo." });
@@ -221,14 +223,14 @@ export const apiCheckoutSchema = z.object({
   id,
   plan: z.enum(checkoutPlans),
   interval: z.enum(billingIntervals),
-  status: z.enum(["pending", "processing", "ready", "changed", "error"]).describe("pending or processing: Polar is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so Polar moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once Polar confirms it. error: Polar made no page or change; error says why, and another checkout can be started."),
+  status: z.enum(["pending", "processing", "ready", "changed", "error"]).describe("pending or processing: the billing provider is making the page. ready: checkout_url is set. changed: the business already paid for a plan, so the provider moved that subscription to this plan with no page, charging any difference to the saved payment method; paid turns true once the provider confirms it. error: the provider made no page or change; error says why, and another checkout can be started."),
   promo_plan: z.string().nullable().describe("The plan a promo code unlocked, whose tier plan names. Null for a standard plan."),
-  checkout_url: z.string().nullable().describe("The Polar page where the customer pays. Send it to them. Null unless status is ready."),
+  checkout_url: z.string().nullable().describe("The billing provider's page where the customer pays. Send it to them. Null unless status is ready."),
   error: z.string().nullable(),
   paid: z.boolean().describe("true once the business is on the plan bought here."),
   created_at: timestamp,
   updated_at: timestamp,
-}).describe("A Polar checkout for a plan.");
+}).describe("A checkout for a plan, through the billing provider.");
 
 export const apiManagedPlanCreateSchema = z.strictObject({
   plan: z.literal("enterprise"),

@@ -14,7 +14,10 @@ import {
   contentRetentionDaysForPlan,
   getPolarMeteredUsagePayload,
   planChangeDirection,
+  billingProviderOf,
   planChangeRefusalOf,
+  planChangeRefusalSentence,
+  planChangeRefusalSentences,
   planChangeRefusals,
   perMonthCents,
 } from "./billing";
@@ -160,6 +163,24 @@ describe("plan changes", () => {
     expect(planChangeRefusalOf(planChangeRefusals.payment_failed)).toBe("payment_failed");
     expect(planChangeRefusalOf("Polar checkout creation failed.")).toBeNull();
     expect(planChangeRefusalOf(null)).toBeNull();
+  });
+
+  it("reads back each provider's sentences, and one a Polar deployment stored before other providers", () => {
+    for (const provider of ["polar", "stripe"] as const) {
+      for (const refusal of Object.keys(planChangeRefusals) as Array<keyof typeof planChangeRefusals>) expect(planChangeRefusalOf(planChangeRefusalSentence(provider, refusal))).toBe(refusal);
+    }
+    expect(planChangeRefusalOf("Polar couldn't charge the saved payment method for the new plan. Update it in the billing portal, then try again.")).toBe("payment_failed");
+    // Polar's read as before; Stripe's never name Polar, and send a resumed plan to Settings > Plan.
+    expect(planChangeRefusalSentences.polar).toBe(planChangeRefusals);
+    expect(Object.values(planChangeRefusalSentences.stripe).some((sentence) => sentence.includes("Polar"))).toBe(false);
+    expect(planChangeRefusalSentence("stripe", "subscription_ending")).toContain("Settings > Plan");
+    expect(planChangeRefusalSentence("stripe", "token_scope")).toContain("STRIPE_API_KEY");
+  });
+
+  it("reads the deployment's billing provider, Polar when BILLING_PROVIDER is unset", () => {
+    expect(billingProviderOf({})).toBe("polar");
+    expect(billingProviderOf({ BILLING_PROVIDER: " Stripe " })).toBe("stripe");
+    expect(billingProviderOf({ BILLING_PROVIDER: "polar" })).toBe("polar");
   });
 });
 

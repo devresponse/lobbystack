@@ -18,7 +18,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 
 type Translate = ReturnType<typeof useTranslation>["t"];
-type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null };
+type CheckoutStatus = { status: string; checkoutUrl: string | null; error: string | null; synced: boolean; refusal: PlanChangeRefusal | null; providerName: string };
 type Checkout = { requestId: string; interval: BillingInterval; billingEmail: string | null };
 
 const errorKeys: Record<string, string> = {
@@ -123,7 +123,7 @@ export function PromoCodeEntry({ businessId, changesPlan = false }: { businessId
     if (announced.current !== checkout.requestId) {
       announced.current = checkout.requestId;
       clearStoredPromoCode();
-      toast.success(t("billing.toast.planChanged"));
+      toast.success(t("billing.toast.planChanged", { provider: status.data.providerName }));
     }
     const finish = () => {
       void client.invalidateQueries({ queryKey: ["billing", businessId] });

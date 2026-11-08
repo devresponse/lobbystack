@@ -345,7 +345,11 @@
       "checkoutFailed": "Unable to open checkout.",
       "portalFailed": "Unable to open the customer portal.",
       "rateLimited": "Too many tries. Try again later.",
-      "planChanged": "Your plan is changing. It shows here as soon as Polar confirms it.",
+      "planChanged": "Your plan is changing. It shows here as soon as {{provider}} confirms it.",
+      "planResumed": "Your plan will keep renewing.",
+      "planKept": "You're staying on your current plan.",
+      "planActionFailed": "That didn't go through. Try again in a minute.",
+      "resumeFirst": "Your subscription is set to end, so its plan can't change. Resume your plan on this page first.",
       "planChangeFailed": "Unable to change your plan.",
       "planChangeRefused": {
         "payment_failed": "Your saved payment method couldn't be charged for the new plan. Update it under Manage subscription, then try again.",
@@ -399,6 +403,10 @@
       "changingPlan": "Changing plan...",
       "openingPortal": "Opening portal...",
       "viewInvoice": "View invoice",
+      "completePayment": "Complete payment",
+      "cancelPlan": "Cancel plan",
+      "resume": "Resume",
+      "keepPlan": "Keep my plan",
       "retry": "Try again"
     },
     "currentPlan": {
@@ -415,6 +423,10 @@
       "billingContactMissing": "No billing contact on file yet.",
       "subscriptionStateTitle": "Subscription",
       "billingPeriod": "Current period resets {{resetAt}}",
+      "planEndsOn": "Your plan ends on {{date}}.",
+      "planChangesOn": "Your plan changes to {{plan}} on {{date}}.",
+      "overageNote": "Usage over your allowance is billed on its own invoice on the 1st of each month.",
+      "completePaymentHint": "Your bank asks you to confirm the payment for the new plan.",
       "selfHostNotice": "Self-hosted workspaces use your own providers. No usage limits or billing apply.",
       "enterpriseNotice": "Usage and limits are governed by your enterprise agreement.",
       "proNotice": "Included usage resets monthly. Additional usage is billed at the overage rate.",
@@ -589,7 +601,7 @@
     },
     "transactions": {
       "title": "Transaction history",
-      "description": "Orders, refunds, and setup fees synced from Polar.",
+      "description": "Orders, refunds, and setup fees synced from {{provider}}.",
       "empty": "No transactions yet.",
       "columns": {
         "date": "Date",

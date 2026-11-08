@@ -1,4 +1,4 @@
-import { billingIntervals, billingPlanPrice, hostedCheckoutPlanSlugs, isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
+import { billingIntervals, billingPlanPrice, billingProviderNames, billingProviderOf, hostedCheckoutPlanSlugs, isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -35,7 +35,9 @@ export async function GET(request: Request) {
       const availableCheckoutPlans = hostedCheckoutPlanSlugs.filter(plan => availableCheckoutIntervals[plan].length > 0);
       // A promo plan the business took with a code, shown by its own name and price.
       const promoPlan = await loadBusinessPromoPlan(tx, businessId);
-      return { availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      // The deployment's billing provider, which the plan screens name.
+      const provider = billingProviderOf(process.env);
+      return { provider, providerName: billingProviderNames[provider], availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

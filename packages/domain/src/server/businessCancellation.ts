@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, businessCancellationRequests, businessMemberships, businesses, enqueueOutbox, phoneNumbers, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { brandLinks, type InterfaceLocale } from "@lobbystack/shared";
+import { billingProviderNames, billingProviderOf, brandLinks, type InterfaceLocale } from "@lobbystack/shared";
 
 import { isManagedBillingAccount, lockBillingAccount } from "./billing";
 import { subscriptionToEnd, workUnderWay } from "./businessDeletion";
@@ -89,10 +89,12 @@ async function businessDetails(tx: DatabaseTransaction, businessId: string): Pro
   const [account] = await tx.select({ source: billingAccounts.source, plan: billingAccounts.plan, planCode: billingAccounts.planCode, billingInterval: billingAccounts.billingInterval, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const numbers = await tx.select({ e164: phoneNumbers.e164 }).from(phoneNumbers).where(and(eq(phoneNumbers.businessId, businessId), eq(phoneNumbers.status, "active")));
   const planName = account?.planCode ?? account?.plan ?? "paid";
+  // The provider the business paid through, else the deployment's.
+  const providerName = billingProviderNames[account?.source === "stripe" || account?.source === "polar" ? account.source : billingProviderOf(process.env)];
   const plan = isManagedBillingAccount(account)
     ? `${planName} plan, billed outside the app`
     : subscriptionToEnd(account)
-      ? `${planName} plan${account?.billingInterval ? ` (${account.billingInterval})` : ""}, paid through Polar (${account?.subscriptionState ?? "unknown"})`
+      ? `${planName} plan${account?.billingInterval ? ` (${account.billingInterval})` : ""}, paid through ${providerName} (${account?.subscriptionState ?? "unknown"})`
       : "Free plan";
   const owners = members.filter((member) => member.role === "business_owner").map((member) => member.name ? `${member.name} <${member.email}>` : member.email);
   return {
@@ -106,6 +108,7 @@ async function businessDetails(tx: DatabaseTransaction, businessId: string): Pro
     owners: owners.join(", "),
     teamSize: String(members.length),
     plan,
+    providerName,
     phoneNumbers: numbers.map((number) => number.e164).join(", "),
     ...(process.env.APP_BASE_URL ? { appUrl: process.env.APP_BASE_URL } : {}),
   };
@@ -272,7 +275,7 @@ export async function confirmBusinessCancellation(context: DomainContext, input:
               requesterName: owner?.name ?? "",
               requesterEmail: owner?.email ?? request.email,
               canceledAt: utc(now),
-              planOutcome: subscriptionId ? "polar" : isManagedBillingAccount(account) ? "managed" : "free",
+              planOutcome: subscriptionId ? (account?.source === "stripe" ? "stripe" : "polar") : isManagedBillingAccount(account) ? "managed" : "free",
               ...(numbersReleasedOn ? { numbersReleasedOn: utc(numbersReleasedOn).slice(0, 10) } : {}),
             },
           },

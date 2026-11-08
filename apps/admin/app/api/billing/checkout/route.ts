@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { billingAccounts, billingCheckoutRequests } from "@lobbystack/db";
 import { createBillingCheckoutRequest, type BillingCheckoutTarget, type BillingInterval } from "@lobbystack/domain";
-import { planChangeRefusalOf } from "@lobbystack/shared";
+import { billingProviderNames, billingProviderOf, planChangeRefusalOf } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
 import { assertBillingCallAllowed } from "@/lib/billing-limit";
 import { createDomainContext } from "@/lib/domain-context";
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
       const account = (await tx.select({ plan: billingAccounts.plan, interval: billingAccounts.billingInterval, state: billingAccounts.subscriptionState, planCode: billingAccounts.planCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0];
       // A checkout someone paid, or a plan change Polar made, once Polar's webhook has put the business on the plan: a promo code's plan, or the target's standard one.
       const synced = ["ready", "changed"].includes(row.status) && account?.plan === row.target && account.interval === row.billingInterval && account.planCode === row.planCode && ["active", "trialing"].includes(account.state ?? "");
-      return { ...row, synced, refusal: planChangeRefusalOf(row.error) };
+      return { ...row, synced, refusal: planChangeRefusalOf(row.error), providerName: billingProviderNames[billingProviderOf(process.env)] };
     }, { minimumRole: "business_admin" }));
   } catch (error) {
     return asApiResponse(error);

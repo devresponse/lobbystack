@@ -114,6 +114,8 @@ import {
 } from "@lobbystack/domain";
 import { SecretBox } from "@lobbystack/providers";
 import {
+  billingProviderNames,
+  billingProviderOf,
   apiAppointmentCreateSchema,
   apiAppointmentRescheduleSchema,
   apiBillingCatalogApplySchema,
@@ -204,7 +206,7 @@ async function checkoutAvailable(context: DomainContext, plan: "starter" | "pro"
 }
 
 /** A managed plan bypasses Polar and the catalog is every business's, so only the operator's own platform keys, with access to every business, may manage either. */
-function requireOperatorKey(credential: ApiCredential, action = "manage a plan outside Polar"): void {
+function requireOperatorKey(credential: ApiCredential, action = `manage a plan outside ${billingProviderNames[billingProviderOf(process.env)]}`): void {
   if (credential.kind !== "platform_key" || credential.access !== "all") throw new PublicApiError(403, "forbidden", `Only an operator's platform key, one with access to every business, can ${action}.`);
 }
 

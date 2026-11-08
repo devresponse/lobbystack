@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { billingAccounts, phoneNumbers } from "@lobbystack/db";
 import { assignCalendarStaff, discoverCalendars, disconnectCalendar, listCalendarConnections, listCalendarStaff, refreshCalendar, resolveCalendarAccessToken, selectCalendar } from "@lobbystack/domain";
 import { SecretBox } from "@lobbystack/providers";
+import { billingProviderNames, billingProviderOf } from "@lobbystack/shared";
 import { asApiResponse, businessIdFromRequest, jsonError, readJson, requireApiSession, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext, createWorkerDomainContext } from "@/lib/domain-context";
 import { googleCalendarProvider } from "@/lib/google-calendar-provider";
@@ -56,7 +57,7 @@ export async function GET(request: Request) {
         integrations: [
           ...(calendar[0] ? [{ name: calendar[0].provider === "google" ? "Google Calendar" : calendar[0].provider, account: calendar[0].externalAccountId, status: calendar[0].status, updatedAt: calendar[0].updatedAt, connectionId: calendar[0].id, staffId: calendar[0].staffId, selectedCalendarId: calendar[0].selectedCalendarId, lastSyncError: calendar[0].lastSyncError, calendarOptions, discoveryError }] : [{ name: "Google Calendar", account: "Not connected", status: "disconnected", updatedAt: null, connectionId: null, staffId: null, selectedCalendarId: null, lastSyncError: null, calendarOptions: [], discoveryError: null }]),
           { name: "Twilio", account: `${Number(phones[0]?.count ?? 0)} active phone number${Number(phones[0]?.count ?? 0) === 1 ? "" : "s"}`, status: Number(phones[0]?.count ?? 0) > 0 ? "connected" : "disconnected", updatedAt: null },
-          { name: "Polar billing", account: billing[0]?.plan ?? "Not configured", status: billing[0]?.state ?? "disconnected", updatedAt: billing[0]?.updatedAt ?? null },
+          { name: `${billingProviderNames[billingProviderOf(process.env)]} billing`, account: billing[0]?.plan ?? "Not configured", status: billing[0]?.state ?? "disconnected", updatedAt: billing[0]?.updatedAt ?? null },
         ],
       });
   } catch (error) {

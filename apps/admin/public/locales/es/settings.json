@@ -349,7 +349,11 @@
       "checkoutFailed": "No se pudo abrir el pago.",
       "portalFailed": "No se pudo abrir el portal del cliente.",
       "rateLimited": "Demasiados intentos. Inténtelo más tarde.",
-      "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto Polar lo confirme.",
+      "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto {{provider}} lo confirme.",
+      "planResumed": "Su plan seguirá renovándose.",
+      "planKept": "Mantiene su plan actual.",
+      "planActionFailed": "No se pudo completar. Inténtelo de nuevo en un minuto.",
+      "resumeFirst": "Su suscripción está programada para terminar, así que su plan no puede cambiar. Reactive primero su plan en esta página.",
       "planChangeFailed": "No se pudo cambiar su plan.",
       "planChangeRefused": {
         "payment_failed": "No se pudo cobrar el nuevo plan a su método de pago guardado. Actualícelo en Gestionar suscripción y vuelva a intentarlo.",
@@ -403,6 +407,10 @@
       "changingPlan": "Cambiando de plan...",
       "openingPortal": "Abriendo el portal...",
       "viewInvoice": "Ver factura",
+      "completePayment": "Completar el pago",
+      "cancelPlan": "Cancelar el plan",
+      "resume": "Reanudar",
+      "keepPlan": "Mantener mi plan",
       "retry": "Reintentar"
     },
     "currentPlan": {
@@ -419,6 +427,10 @@
       "billingContactMissing": "Aún no hay un contacto de facturación registrado.",
       "subscriptionStateTitle": "Suscripción",
       "billingPeriod": "El período actual se reinicia el {{resetAt}}",
+      "planEndsOn": "Su plan termina el {{date}}.",
+      "planChangesOn": "Su plan cambia a {{plan}} el {{date}}.",
+      "overageNote": "El uso que supera lo incluido se cobra en una factura aparte el día 1 de cada mes.",
+      "completePaymentHint": "Su banco pide confirmar el pago del nuevo plan.",
       "selfHostNotice": "Los espacios de trabajo autoalojados usan sus propios proveedores. No se aplican límites de uso ni facturación.",
       "enterpriseNotice": "El uso y los límites se rigen por su acuerdo empresarial.",
       "proNotice": "El uso incluido se reinicia cada mes. El uso adicional se factura con la tarifa de excedente.",
@@ -608,7 +620,7 @@
     },
     "transactions": {
       "title": "Historial de transacciones",
-      "description": "Pedidos, reembolsos y cargos de configuración sincronizados desde Polar.",
+      "description": "Pedidos, reembolsos y cargos de configuración sincronizados desde {{provider}}.",
       "empty": "Aún no hay transacciones.",
       "columns": {
         "date": "Fecha",

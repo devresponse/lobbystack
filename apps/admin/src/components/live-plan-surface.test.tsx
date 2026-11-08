@@ -13,10 +13,10 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { route.search = new URLSearchParams(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup({ paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null } = {}) {
+function setup({ provider = "polar", planActions = false, paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  const billing = { provider: "polar", providerName: "Polar", cancelsAt, nextChange, paymentActionUrl, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
+  const billing = { provider, providerName: provider === "stripe" ? "Stripe" : "Polar", planActions, cancelsAt, nextChange, paymentActionUrl, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
   if (!billingFails) client.setQueryData(["billing", "business"], billing);
   const fetchMock = vi.fn(async (url: string) => url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
@@ -111,6 +111,33 @@ describe("original billing overview behavior", () => {
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.completePaymentHint");
     await userEvent.click(screen.getByRole("button", { name: "billing.actions.completePayment" }));
     expect(assign).toHaveBeenCalledWith("https://invoice.stripe.com/i/in_1");
+  });
+  it("cancels a Stripe plan at its renewal once confirmed, following the request until Stripe shows it", async () => {
+    const billingFetch = setup({ provider: "stripe", planActions: true });
+    // The billing summary as before; the change request and its status as Stripe made it.
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => url === "/api/billing/subscription" ? Response.json({ requestId: "change-1" }, { status: 202 }) : url.includes("/checkout?") ? Response.json({ status: "changed", synced: true, refusal: null }) : await billingFetch(url));
+    vi.stubGlobal("fetch", fetchMock);
+    await userEvent.click(screen.getByRole("button", { name: "billing.actions.cancelPlan" }));
+    expect(translate).toHaveBeenCalledWith("billing.cancelDialog.description", { date: expect.any(String) });
+    // The dialog's own button confirms.
+    await userEvent.click(screen.getAllByRole("button", { name: "billing.actions.cancelPlan" }).at(-1)!);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/billing/checkout?businessId=business&requestId=change-1"), expect.anything()));
+    const [, posted] = fetchMock.mock.calls.find(([url]) => url === "/api/billing/subscription")!;
+    expect(JSON.parse(String(posted!.body))).toEqual({ businessId: "business", action: "cancel" });
+    await waitFor(() => expect(translate).toHaveBeenCalledWith("billing.toast.planCanceled"));
+  });
+  it("offers Resume while a Stripe plan ends and Keep my plan while a change waits, says overage comes on its own invoice, and offers neither on Polar", () => {
+    setup({ provider: "stripe", planActions: true, cancelsAt: "2026-12-01T12:00:00.000Z" });
+    expect(screen.getByRole("button", { name: "billing.actions.resume" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "billing.actions.cancelPlan" })).toBeNull();
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.overageNote");
+    cleanup();
+    setup({ provider: "stripe", planActions: true, nextChange: { plan: "starter", tier: "starter", names: null, interval: "monthly", at: "2026-12-01T12:00:00.000Z" } });
+    expect(screen.getByRole("button", { name: "billing.actions.keepPlan" })).toBeTruthy();
+    cleanup();
+    setup({ cancelsAt: "2026-12-01T12:00:00.000Z" });
+    expect(screen.queryByRole("button", { name: "billing.actions.resume" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "billing.actions.cancelPlan" })).toBeNull();
   });
   it("shows no payment to complete when none waits", () => {
     setup();

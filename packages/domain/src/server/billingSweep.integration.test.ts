@@ -58,9 +58,9 @@ async function usage(tx: DatabaseTransaction, businessId: string, input: { minut
   return row!.id;
 }
 
-async function checkout(tx: DatabaseTransaction, businessId: string, input: { userId: string; created: number; updated?: number; status?: string; at?: Date }) {
+async function checkout(tx: DatabaseTransaction, businessId: string, input: { userId: string; created: number; updated?: number; status?: string; at?: Date; target?: string }) {
   const at = input.at ?? now;
-  const [row] = await tx.insert(billingCheckoutRequests).values({ businessId, requestedByUserId: input.userId, target: "pro", billingInterval: "monthly", status: input.status ?? "pending", createdAt: ago(input.created, at), updatedAt: ago(input.updated ?? input.created, at) }).returning({ id: billingCheckoutRequests.id });
+  const [row] = await tx.insert(billingCheckoutRequests).values({ businessId, requestedByUserId: input.userId, target: input.target ?? "pro", billingInterval: "monthly", status: input.status ?? "pending", createdAt: ago(input.created, at), updatedAt: ago(input.updated ?? input.created, at) }).returning({ id: billingCheckoutRequests.id });
   return row!.id;
 }
 
@@ -79,6 +79,17 @@ async function asWorkerLogin<T>(tx: DatabaseTransaction, run: (context: { db: Da
 }
 
 describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
+  it("queues a cancel, resume or keep no job finished with its own job", async () => {
+    await rollbackTest(async (tx) => {
+      const paying = await business(tx);
+      const userId = await owner(tx);
+      const lostCancel = await checkout(tx, paying, { userId, created: 8, target: "cancel" });
+      await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
+      const hour = Math.floor(now.getTime() / 3_600_000);
+      expect(await sweepJobs(tx, [lostCancel])).toEqual([{ topic: "billing.changeSubscription", aggregateId: lostCancel, dedupeKey: `billing-sweep:checkout_request:${lostCancel}:${hour}`, payload: { requestId: lostCancel } }]);
+    });
+  });
+
   it("queues the billing work no job finished, in each business's scope, and fails checkouts that waited too long", async () => {
     await rollbackTest(async (tx) => {
       const paying = await business(tx);

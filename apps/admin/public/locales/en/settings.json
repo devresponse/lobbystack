@@ -346,6 +346,7 @@
       "portalFailed": "Unable to open the customer portal.",
       "rateLimited": "Too many tries. Try again later.",
       "planChanged": "Your plan is changing. It shows here as soon as {{provider}} confirms it.",
+      "planCanceled": "Your plan won't renew. It stays active until the end of the period you paid for.",
       "planResumed": "Your plan will keep renewing.",
       "planKept": "You're staying on your current plan.",
       "planActionFailed": "That didn't go through. Try again in a minute.",
@@ -408,6 +409,11 @@
       "resume": "Resume",
       "keepPlan": "Keep my plan",
       "retry": "Try again"
+    },
+    "cancelDialog": {
+      "title": "Cancel your plan?",
+      "description": "Your plan stays active until {{date}}, then moves to Free. Usage over what's included until then is still billed.",
+      "back": "Go back"
     },
     "currentPlan": {
       "title": "Your plan",

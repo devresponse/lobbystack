@@ -118,7 +118,7 @@ The file's format is the input of `devops/railway-vars.mjs`; setting the values 
 
 ### Use the other billing commands
 
-`pnpm lobbystack billing` takes these. `status`, `plans`, `cap`, `checkout` and `checkout-status` work with a business API key that has `billing:manage`; the rest need an operator key.
+`pnpm lobbystack billing` takes these. `status`, `plans`, `cap`, `checkout`, `checkout-status`, `cancel`, `resume`, `keep-plan` and `change-status` work with a business API key that has `billing:manage`; the rest need an operator key.
 
 | Command | Does |
 | --- | --- |
@@ -126,6 +126,7 @@ The file's format is the input of `devops/railway-vars.mjs`; setting the values 
 | `plans` | The plans the business can buy, with what each includes, its receptionists among it, and their prices |
 | `cap <cents>` | Sets the spending cap on a paid plan's overage |
 | `checkout`, `checkout-status <id>` | Starts a checkout and prints the page to send whoever pays, or says the existing subscription moved |
+| `cancel`, `resume`, `keep-plan`, `change-status <id>` | On Stripe, ends the plan at its renewal, undoes that, or drops a change waiting for the renewal; Polar does these in its billing portal |
 | `managed-plan`, `end-managed-plan` | Puts a business on Enterprise outside Polar, and takes it off |
 | `end-promo-plan` | Ends a business's promo plan at its next renewal; its owners get an email |
 | `catalog` | The applied file, plans, prices and links |
@@ -170,6 +171,7 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `billing.verifyCatalog` | Daily | Compares the file, the tables and Polar; leaves out the webhook, which `pnpm billing verify` checks |
 | `billing.endPromoPlan` | Daily, per business | Ends promo plans whose months ran out, a week ahead |
 | `billing.revokeSubscription` | Each delete of a business that pays | Ends its Polar subscription at once and marks it canceled, so the delete can go ahead (fork PR #101, [delete a business](../features/business-deletion.md)); tries 12 times over about 3 hours, and the delete asks again every 10 minutes. On Stripe, its overage subscription ends too, with its usage invoiced |
+| `billing.changeSubscription` | Each Cancel plan, Resume or Keep my plan | Stripe only (Stripe billing's step 15): asks Stripe to end the plan at its renewal, undo that, or drop a change waiting for the renewal |
 | `billing.ensureOverage` | A Stripe plan event that needs it | Stripe only (Stripe billing's step 13): gives a live plan its overage subscription, anchored on the 1st, and once the plan has ended, ends it with its month |
 | `billing.refreshUnitEconomics` | Hourly, per business | Adds up what the business cost this month in provider, AI and hosting fees (`unit_economics_rollups`) |
 

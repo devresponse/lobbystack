@@ -3,6 +3,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { billingCheckoutRequests, billingUsageEvents, enqueueOutbox, providerEvents, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 
 import { BILLING_CHECKOUT_CLAIM_STALE_MS, BILLING_CHECKOUT_EXPIRES_MS, expireBillingCheckoutRequest } from "./billing";
+import { isBillingSubscriptionAction } from "./billingSubscription";
 import type { DomainContext } from "./context";
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
 
@@ -130,9 +131,10 @@ async function requeue(tx: DatabaseTransaction, row: SweepRow, now: Date): Promi
     case "checkout_request": {
       if (await expireBillingCheckoutRequest(tx, { businessId, requestId: id, now })) return "expired";
       // The job claims the request, or waits for a run that holds it.
-      const [request] = await tx.select({ id: billingCheckoutRequests.id }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, id), eq(billingCheckoutRequests.businessId, businessId), inArray(billingCheckoutRequests.status, ["pending", "processing"]))).limit(1);
+      const [request] = await tx.select({ id: billingCheckoutRequests.id, target: billingCheckoutRequests.target }).from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.id, id), eq(billingCheckoutRequests.businessId, businessId), inArray(billingCheckoutRequests.status, ["pending", "processing"]))).limit(1);
       if (!request) return "done";
-      await enqueueOutbox(tx, { topic: "billing.createCheckout", businessId, aggregateType: "billing_checkout_request", aggregateId: id, dedupeKey, payload: { requestId: id } });
+      // Cancel, resume and keep are requests too, which their own job makes.
+      await enqueueOutbox(tx, { topic: isBillingSubscriptionAction(request.target) ? "billing.changeSubscription" : "billing.createCheckout", businessId, aggregateType: "billing_checkout_request", aggregateId: id, dedupeKey, payload: { requestId: id } });
       return "queued";
     }
   }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView } from "@lobbystack/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { billingPlanIncluded, billingPlanName, type BillingPlanLimits, type BillingPlanList, type BillingPlanSlug, type BillingPromoPlanView, type BillingSubscriptionAction, type PlanChangeRefusal } from "@lobbystack/shared";
 import { ArrowUpRight, Check } from "lucide-react";
 import { toast } from "sonner";
 import { requestJson } from "@/lib/request-json";
@@ -16,7 +16,8 @@ import { SectionBlock } from "./section-block";
 import { Button } from "./ui/button";
 import { useOpenUpgradePlanDialog } from "./upgrade-plan-dialog-context";
 import { SpendingCapSection } from "./billing-spending-cap";
-import { findPlan, formatMoney, includedLines, isBillingRateLimited, monthlyPriceCents } from "@/lib/billing-plans";
+import { findPlan, formatMoney, includedLines, isBillingRateLimited, isPlanChangePending, monthlyPriceCents, PLAN_CHANGE_SYNC_MS } from "@/lib/billing-plans";
+import { ConfirmActionDialog } from "./confirm-action-dialog";
 import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
@@ -25,8 +26,11 @@ import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 
 type Billing = {
-  /** The deployment's billing provider, by name. */
+  /** The deployment's billing provider, and its name. */
+  provider?: string;
   providerName: string;
+  /** Cancel plan, Resume and Keep my plan here, where the provider lets the app do them (Stripe). */
+  planActions?: boolean;
   /** When the live plan ends unless resumed; null when it renews. */
   cancelsAt: string | null;
   /** A change waiting for the renewal: the plan's code, and its tier and names when the business can read them. */
@@ -53,6 +57,9 @@ function nextPlanName(next: NonNullable<Billing["nextChange"]>, locale: string, 
   return (next.names ? billingPlanName(next.names, locale) : null) ?? (tierKey ? t(`billing.planLabels.${tierKey}`) : next.plan);
 }
 
+/** What each plan action's success says. */
+const planActionToasts: Record<BillingSubscriptionAction, string> = { cancel: "billing.toast.planCanceled", resume: "billing.toast.planResumed", keep: "billing.toast.planKept" };
+
 function formatBillingDate(value: string | null, locale = "en"): string { return value ? formatDateTime(value, locale, { month: "short", day: "numeric", year: "numeric" }) : "—"; }
 
 
@@ -63,6 +70,9 @@ export function LivePlanSurface() {
   const queryClient = useQueryClient();
   const openUpgradePlanDialog = useOpenUpgradePlanDialog();
   const [portalPending, setPortalPending] = useState(false);
+  // A cancel, resume or keep the provider is making, which the page follows as it follows a checkout.
+  const [planAction, setPlanAction] = useState<{ businessId: string; requestId: string; action: BillingSubscriptionAction } | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const { businesses, business } = useActiveBusiness();
   const billing = useQuery({ queryKey: ["billing", business?.businessId], queryFn: () => requestJson<Billing>(`/api/billing?businessId=${encodeURIComponent(business!.businessId)}`), enabled: Boolean(business?.businessId) });
 
@@ -81,6 +91,37 @@ export function LivePlanSurface() {
   }, [business, returnRequestId, returnedCheckout.data?.synced, queryClient, router]);
 
   useEffect(() => { if (searchParams.get("checkout") && business?.businessId) void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] }); }, [business?.businessId, queryClient, searchParams]);
+
+  const planActionMutation = useMutation({
+    mutationFn: (input: { businessId: string; action: BillingSubscriptionAction }) => requestJson<{ requestId: string }>("/api/billing/subscription", { method: "POST", body: JSON.stringify(input) }),
+    onSuccess: (result, input) => setPlanAction({ businessId: input.businessId, requestId: result.requestId, action: input.action }),
+    onError: (error) => { toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : isPlanChangePending(error) ? "billing.toast.planChangeRefused.change_pending" : "billing.toast.planActionFailed")); },
+  });
+  const planActionStatus = useQuery({
+    queryKey: ["billing-subscription-change", planAction?.businessId, planAction?.requestId],
+    enabled: Boolean(planAction && planAction.businessId === business?.businessId),
+    queryFn: () => requestJson<{ status: string; synced: boolean; refusal: PlanChangeRefusal | null }>(`/api/billing/checkout?businessId=${encodeURIComponent(planAction!.businessId)}&requestId=${encodeURIComponent(planAction!.requestId)}`),
+    // Until the provider's webhook shows the change on the plan, or it failed.
+    refetchInterval: (query) => query.state.data?.status === "error" || (query.state.data?.status === "changed" && query.state.data.synced) ? false : 1500,
+  });
+  useEffect(() => {
+    const data = planActionStatus.data;
+    if (!planAction || !data) return;
+    if (data.status === "error") {
+      toast.error(data.refusal ? t(`billing.toast.planChangeRefused.${data.refusal}`) : t("billing.toast.planActionFailed"));
+      setPlanAction(null);
+      return;
+    }
+    if (data.status !== "changed") return;
+    const finish = () => {
+      toast.success(t(planActionToasts[planAction.action]));
+      void queryClient.invalidateQueries({ queryKey: ["billing", planAction.businessId] });
+      setPlanAction(null);
+    };
+    if (data.synced) { finish(); return; }
+    const timer = window.setTimeout(finish, PLAN_CHANGE_SYNC_MS);
+    return () => window.clearTimeout(timer);
+  }, [planAction, planActionStatus.data, queryClient, t]);
 
   // The bank wants the upgrade's payment confirmed: its page opens as a checkout does.
   function openPaymentPage(url: string) { setUpgradeInProgress(true); window.location.assign(url); }
@@ -111,6 +152,11 @@ export function LivePlanSurface() {
     (plan === "free_cloud" || (plan === "starter" && target === "pro")) && billing.data.availableCheckoutIntervals[target].length > 0);
   const canManage = permissions?.hasCustomerPortalAccess === true;
   const paymentActionUrl = billing.data.paymentActionUrl ?? null;
+  // Cancel, resume and keep a paid plan here on a provider that lets the app do them.
+  const paid = plan === "starter" || plan === "pro";
+  const planActions = billing.data.planActions === true && paid;
+  const planActionPending = planActionMutation.isPending || planAction?.businessId === business.businessId;
+  const changeWaits = Boolean(billing.data.nextChange && !billing.data.cancelsAt && !promoPlan?.ends);
   // Anyone who could buy a plan here can enter a code, except on a plan billed outside Polar.
   const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "starter" || plan === "pro");
 
@@ -175,6 +221,11 @@ export function LivePlanSurface() {
                     {t("billing.currentPlan.completePaymentHint")}
                   </span>
                 ) : null}
+                {billing.data.provider === "stripe" && paid ? (
+                  <span className="text-sm text-muted-foreground">
+                    {t("billing.currentPlan.overageNote")}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -193,7 +244,7 @@ export function LivePlanSurface() {
             </div>}
           </div>
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} /> : null}
-          {(canUpgrade || canManage || paymentActionUrl) && (
+          {(canUpgrade || canManage || paymentActionUrl || planActions) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
               {paymentActionUrl && (
                 <Button
@@ -215,6 +266,17 @@ export function LivePlanSurface() {
                   {t("billing.actions.upgradeToPro")}
                 </Button>
               )}
+              {/* A promo plan that ends cancelled stays that way: its ending isn't the business's to undo. */}
+              {planActions && billing.data.cancelsAt && !promoPlan?.ends ? (
+                <Button className="w-full sm:w-auto" size="sm" disabled={planActionPending} onClick={() => planActionMutation.mutate({ businessId: business.businessId, action: "resume" })}>
+                  {t("billing.actions.resume")}
+                </Button>
+              ) : null}
+              {planActions && changeWaits ? (
+                <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={planActionPending} onClick={() => planActionMutation.mutate({ businessId: business.businessId, action: "keep" })}>
+                  {t("billing.actions.keepPlan")}
+                </Button>
+              ) : null}
               {canManage && (
                 <Button
                   className="w-full sm:w-auto"
@@ -229,6 +291,22 @@ export function LivePlanSurface() {
                   <ArrowUpRight className="size-3.5" />
                 </Button>
               )}
+              {planActions && !billing.data.cancelsAt ? (
+                <Button className="w-full sm:w-auto" size="sm" variant="outline" disabled={planActionPending} onClick={() => setCancelOpen(true)}>
+                  {t("billing.actions.cancelPlan")}
+                </Button>
+              ) : null}
+              <ConfirmActionDialog
+                cancelLabel={t("billing.cancelDialog.back")}
+                confirmLabel={t("billing.actions.cancelPlan")}
+                confirmVariant="destructive"
+                description={t("billing.cancelDialog.description", { date: formatBillingDate(account?.currentPeriodEnd ?? null, i18n.language) })}
+                onConfirm={async () => { await planActionMutation.mutateAsync({ businessId: business.businessId, action: "cancel" }); }}
+                onOpenChange={setCancelOpen}
+                open={cancelOpen}
+                pending={planActionMutation.isPending}
+                title={t("billing.cancelDialog.title")}
+              />
             </div>
           )}
         </div>

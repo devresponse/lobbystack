@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 14 are done: phases 1 and 2, and steps 9 to 14 of phase 3.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 15 are done: phases 1 and 2, and steps 9 to 15 of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -201,3 +201,14 @@ The check for this step, on a Stripe sandbox: a checkout starts the plan, the ov
 - **Tests:** on the fake, an upgrade paid at once, declined, and needing 3-D Secure, then paid or expired, with a retried job getting the same page; the prorations and a promo price's coupon; a downgrade at the renewal and its phase taking effect, and a change now releasing a schedule; both promo endings and a discount removed. The fake gained `payInvoice`, `expirePendingUpdate` and `enterSchedulePhase` for them. The worker's three outcomes run on the in-memory Stripe, and the plan page's **Complete payment** in the admin's tests. On PostgreSQL: the request settled both ways, `payment_action_url`, and the `stripe` block's words.
 
 The check for this step, on a Stripe sandbox with Stripe's test cards: an upgrade, a downgrade, a declined upgrade and a 3-D Secure upgrade each end as the tests say.
+
+## Step 15: cancel, resume and keep my plan
+
+- **The adapter** (`stripe/cancel.ts`): cancelling at the renewal releases a schedule whose next phase would undo the end, then sets the subscription to cancel at its period's end; cancelling now ends it at once. Resuming clears the end while the period lasts, and keeping the plan releases the schedule that holds a change waiting for the renewal. Each call is keyed by its request.
+- **Requests of their own** (`packages/domain/src/server/billingSubscription.ts`): `billing_checkout_requests` rows whose `target` is `cancel`, `resume` or `keep`, so they share the checkout's poll, its one-change-at-a-time rule, its hourly limits and the sweep, which queues them again with their own job. Polar's billing portal does these on a Polar deployment, so a request there is refused, as are a managed plan, a business without a live subscription, and a change with nothing to change.
+- **The job:** `billing.changeSubscription` (`apps/worker/src/billing/subscription.ts`) claims the request and the subscription, as plan changes do, and calls the adapter. The provider's webhook then shows the end, or its absence, on the account.
+- **Where they're asked:** `POST /api/billing/subscription` from Settings > Plan; the API's `POST /billing/cancellation` (`cancelBillingPlan`), `DELETE /billing/cancellation` (`resumeBillingPlan`) and `DELETE /billing/scheduled-change` (`keepBillingPlan`), with `Idempotency-Key`, and `GET /billing/subscription-changes/{change_id}` to follow one; and the CLI's `billing cancel`, `resume`, `keep-plan` and `change-status`.
+- **Settings > Plan** shows them where the provider does them in the app (`planActions`): **Cancel plan**, after a confirmation that the plan runs to its period's end and that overage until then is still invoiced; **Resume** while the plan ends, except a promo plan's own ending; and **Keep my plan** while a change waits. The plan card says overage comes on its own invoice on the 1st. The confirmation and the cancel toast are new strings in the four languages; step 7 had left them out.
+- **Tests:** on the fake, cancelling and resuming once each, keeping a plan with and without a waiting change, and cancelling with one waiting; the job's outcomes on the in-memory Stripe; on PostgreSQL, the request rules, the sweep and the API; the CLI's commands with `--wait`; and the plan page's buttons.
+
+The check for this step, on a Stripe sandbox: cancel and resume, and a downgrade kept with Keep my plan, each show on the plan page.

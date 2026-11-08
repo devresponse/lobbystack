@@ -137,6 +137,17 @@ export type BillingErrorCode =
 // The billing providers a deployment can bill through (ADR 0010), and their environments.
 export const billingProviders = ["polar", "stripe"] as const;
 export type BillingProvider = (typeof billingProviders)[number];
+
+/**
+ * What Settings > Plan and the API ask of a live subscription where the
+ * provider lets the app do it (Stripe): end it at the renewal, undo that, or
+ * drop a change waiting for the renewal. Polar does these in its billing portal.
+ */
+export const billingSubscriptionActions = ["cancel", "resume", "keep"] as const;
+export type BillingSubscriptionAction = (typeof billingSubscriptionActions)[number];
+
+/** Whether plans are cancelled, resumed and kept in the app on this provider, as the adapter's can.inAppCancel says. */
+export const inAppPlanActions = (provider: BillingProvider): boolean => provider === "stripe";
 export const billingProviderEnvs = ["sandbox", "live"] as const;
 export type BillingProviderEnv = (typeof billingProviderEnvs)[number];
 /** How screens, messages and the CLI name each provider. */

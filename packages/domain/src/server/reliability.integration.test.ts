@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
+import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
 import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, loadPlanChangePayment, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
@@ -936,6 +937,55 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
     } finally {
       await client!.db.delete(businesses).where(eq(businesses.id, businessId));
       await client!.db.delete(users).where(eq(users.id, userId));
+    }
+  });
+
+  it("queues cancel, resume and keep on Stripe one change at a time, and refuses what there's nothing to change", async () => {
+    const stripe = { BILLING_PROVIDER: "stripe" };
+    const businessId = randomUUID();
+    const userId = randomUUID();
+    const otherId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe plan actions test", timezone: "UTC", businessType: "test" });
+    await client!.db.insert(users).values([userId, otherId].map((id) => ({ id, email: `${id}@example.invalid`, normalizedEmail: `${id}@example.invalid` })));
+    await client!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", plan: "pro", subscriptionId: "sub_1", subscriptionState: "active", billingInterval: "annual" });
+    const ask = async (action: "cancel" | "resume" | "keep", env: Record<string, string> = stripe, user = userId) => await withBusinessTransaction(client!.db, { businessId, userId: user, actorType: "operator" }, async (tx) => await createBillingSubscriptionRequestInTransaction(tx, { userId: user, businessId, action }, env));
+    const refusal = async (asked: Promise<unknown>) => {
+      try {
+        await asked;
+      } catch (error) {
+        const { status, code, message } = error as { status?: number; code?: string; message: string };
+        return { status, code, message };
+      }
+      throw new Error("The change was queued.");
+    };
+    const setAccount = async (fields: Partial<typeof billingAccounts.$inferInsert>) => await client!.db.update(billingAccounts).set(fields).where(eq(billingAccounts.businessId, businessId));
+    try {
+      // Polar's billing portal does these on a Polar deployment.
+      expect(await refusal(ask("cancel", {}))).toMatchObject({ status: 409, message: expect.stringContaining("Polar's billing portal") });
+      expect(await refusal(ask("resume"))).toMatchObject({ status: 409, message: "The plan isn't set to end, so there's nothing to resume." });
+      expect(await refusal(ask("keep"))).toMatchObject({ status: 409, message: "No plan change waits for the renewal." });
+
+      const cancel = await ask("cancel");
+      expect(cancel.created).toBe(true);
+      // The same person's click again gets the same request; anyone else's change waits for it.
+      expect(await ask("cancel")).toEqual({ id: cancel.id, created: false });
+      expect(await refusal(ask("cancel", stripe, otherId))).toMatchObject({ status: 409, code: "plan_change_pending" });
+      expect((await client!.db.select({ target: billingCheckoutRequests.target, status: billingCheckoutRequests.status, interval: billingCheckoutRequests.billingInterval }).from(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, cancel.id)))[0]).toEqual({ target: "cancel", status: "pending", interval: "annual" });
+      expect(await client!.db.select({ topic: outboxMessages.topic, dedupeKey: outboxMessages.dedupeKey, payload: outboxMessages.payload }).from(outboxMessages).where(eq(outboxMessages.aggregateId, cancel.id))).toEqual([{ topic: "billing.changeSubscription", dedupeKey: `billing-subscription:${cancel.id}`, payload: { requestId: cancel.id } }]);
+
+      // The job made the change, and the webhook brought the end: cancelling again has nothing to do, resuming has.
+      await client!.db.update(billingCheckoutRequests).set({ status: "changed" }).where(eq(billingCheckoutRequests.id, cancel.id));
+      await setAccount({ cancelAt: new Date("2027-11-01T00:00:00Z") });
+      expect(await refusal(ask("cancel"))).toMatchObject({ status: 409, message: "The plan already ends at its renewal." });
+      expect((await ask("resume", stripe, otherId)).created).toBe(true);
+
+      // Without a live subscription there's nothing to change at all.
+      await client!.db.update(billingCheckoutRequests).set({ status: "changed" }).where(eq(billingCheckoutRequests.businessId, businessId));
+      await setAccount({ subscriptionState: "canceled" });
+      expect(await refusal(ask("resume"))).toMatchObject({ status: 404 });
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await client!.db.delete(users).where(inArray(users.id, [userId, otherId]));
     }
   });
 

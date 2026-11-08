@@ -19,6 +19,13 @@ export const checkoutWait: WaitSpec = {
   failed: (data) => (data.status === "error" ? `The billing provider couldn't make the checkout page or change the plan: ${reason(data)}. Start another checkout.` : undefined),
 };
 
+export const subscriptionChangeWait: WaitSpec = {
+  operation: "getSubscriptionChange",
+  param: "change_id",
+  done: (data) => data.status === "changed" || data.status === "error",
+  failed: (data) => (data.status === "error" ? `The billing provider didn't change the subscription: ${reason(data)}.` : undefined),
+};
+
 export const sourceWait: WaitSpec = {
   operation: "getKnowledgeSource",
   param: "source_id",

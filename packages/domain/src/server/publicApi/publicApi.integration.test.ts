@@ -5,7 +5,7 @@ import { DateTime } from "luxon";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { agentRules, apiKeys, appointments, auditLogs, billingAccounts, billingCheckoutRequests, businessHours, businessPublicProfiles, businesses, calendarBusyBlocks, calendarConnections, calls, contacts, conversations, createDatabaseClient, idempotencyKeys, inboxItems, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, onboardingNumberClaimEvents, operatorNotificationDeliveries, operatorNotificationPreferences, outboxMessages, phoneNumbers, platformPartnerBusinesses, receptionistProfiles, services, staff, staffServiceAssignments, storageObjects, users, businessMemberships, webhookDeliveries, webhookDeliveryAttempts, webhookEndpoints, webhookEvents, websiteIngestionJobs, widgetKeys } from "@lobbystack/db";
-import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
+import { OPERATOR_SMS_DISCLOSURE_VERSION, apiAppointmentSchema, apiKnowledgeSearchResultSchema, apiBillingSchema, apiCalendarConnectionSchema, apiNotificationPreferencesSchema, apiOnboardingSchema, apiTeamSchema, apiWidgetKeyCreatedSchema, apiWidgetKeySchema, apiBusinessSchema, apiContactSchema, apiMessageSchema, apiCheckoutSchema, apiCallSchema, apiKnowledgeEntrySchema, apiKnowledgeSourceSchema, apiPhoneNumberClaimSchema, apiPhoneNumberOfferSchema, apiPhoneNumberSchema, apiPublicProfileSchema, apiReceptionistSchema, apiRuleSchema, apiServiceSchema, apiStaffSchema, apiSubscriptionChangeSchema, WEBHOOK_MAX_ATTEMPTS } from "@lobbystack/shared";
 
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, markBillingPlanChanged } from "../billing";
 import { finalizeConversationSession } from "../conversations";
@@ -17,7 +17,7 @@ import { CANCELLATION_REQUEST, createVoiceFollowUpTask } from "../voice";
 import { generateApiKey, resolveApiKey } from "./apiKeys";
 import { runIdempotent } from "./idempotency";
 import { searchKnowledgeForApi } from "./knowledgeSearch";
-import { cancelAppointmentForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
+import { cancelAppointmentForApi, changeBillingSubscriptionForApi, cancelKnowledgeSourceForApi, claimPhoneNumberForApi, completeKnowledgeUploadForApi, completeOnboardingForApi, createCalendarConnectLinkForApi, createClaimLinkForApi, deleteCalendarConnectionForApi, getNotificationPreferencesForApi, listAccountCalendarsForApi, listCalendarConnectionsForApi, updateCalendarConnectionForApi, updateNotificationPreferencesForApi, createTeamInvitationForApi, createWidgetKeyForApi, createAppointmentForApi, createCheckoutForApi, createContactForApi, createKnowledgeEntryForApi, createKnowledgeSourceForApi, createKnowledgeUploadForApi, createRuleForApi, createServiceForApi, deleteKnowledgeEntryForApi, deleteKnowledgeSourceForApi, deleteRuleForApi, deleteServiceForApi, endManagedPlanForApi, expandKnowledgeSourceForApi, getAvailabilityForApi, getBillingForApi, getBusinessForApi, getCheckoutForApi, getContactForApi, getKnowledgeEntryForApi, getKnowledgeSourceForApi, getMeForApi, getOnboardingForApi, getPhoneNumberClaimForApi, getPublicProfileForApi, getSubscriptionChangeForApi, getTeamForApi, getReceptionistForApi, listAppointmentsForApi, listContactsForApi, listKnowledgeEntriesForApi, listKnowledgeSourcesForApi, listMessagesForApi, listPhoneNumbersForApi, listRulesForApi, listServicesForApi, listStaffForApi, listWidgetKeysForApi, releasePhoneNumberForApi, removeTeamMemberForApi, revokeTeamInvitationForApi, reorderRulesForApi, rescheduleAppointmentForApi, retryKnowledgeSourceForApi, searchPhoneNumbersForApi, setManagedPlanForApi, updateBillingForApi, updateBusinessForApi, updateKnowledgeEntryForApi, updateKnowledgeSourceForApi, updateOnboardingForApi, updatePublicProfileForApi, updateReceptionistForApi, updateTeamMemberForApi, updateWidgetKeyForApi, updateRuleForApi, updateServiceForApi, type ApiCaller, type ApiKeyCaller, type PlatformKeyCaller } from "./operations";
 import { PublicApiError } from "./errors";
 import { requirePlatformBusinessAccess } from "./platformKeys";
 import { createWebhookEndpoint, processWebhookDelivery, pruneApiHistory } from "./webhooks";
@@ -919,6 +919,42 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await store("retired_step");
       expect(await stages()).toEqual(["create_business", "create_business"]);
     } finally {
+      await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("cancels, resumes and keeps a Stripe plan through the API, one change at a time, and leaves them to Polar's portal on Polar", async () => {
+    const context = { db: worker!.db };
+    const businessId = randomUUID();
+    await admin!.db.insert(businesses).values({ id: businessId, slug: `api-plan-actions-${businessId}`, name: "Plan actions test", timezone: "UTC", businessType: "test" });
+    await admin!.db.insert(businessMemberships).values({ businessId, userId: ownerId, role: "business_owner" });
+    const generated = generateApiKey();
+    const [key] = await admin!.db.insert(apiKeys).values({ businessId, name: "billing", prefix: generated.prefix, keyHash: generated.keyHash, scopes: ["billing:manage"], createdByUserId: ownerId }).returning({ id: apiKeys.id });
+    const caller: ApiKeyCaller = { businessId, apiKeyId: key!.id };
+    await admin!.db.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", plan: "pro", subscriptionId: "sub_1", subscriptionState: "active", billingInterval: "monthly" });
+    try {
+      await expectApiError(changeBillingSubscriptionForApi(context, caller, "cancel"), 409, "conflict");
+      vi.stubEnv("BILLING_PROVIDER", "stripe");
+      const cancel = await changeBillingSubscriptionForApi(context, caller, "cancel");
+      expect(cancel).toMatchObject({ action: "cancel", status: "pending", error: null, done: false });
+      expect(apiSubscriptionChangeSchema.safeParse(cancel).success).toBe(true);
+      // Another change while that one is open waits for it.
+      await expectApiError(changeBillingSubscriptionForApi(context, caller, "resume"), 409, "conflict");
+      // The job made it, and the webhook brought the end.
+      await admin!.db.update(billingCheckoutRequests).set({ status: "changed" }).where(eq(billingCheckoutRequests.id, cancel.id));
+      await admin!.db.update(billingAccounts).set({ cancelAt: new Date("2027-01-01T00:00:00.000Z") }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getSubscriptionChangeForApi(context, caller, cancel.id)).toMatchObject({ status: "changed", done: true });
+      expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: "2027-01-01T00:00:00.000Z" });
+      const resume = await changeBillingSubscriptionForApi(context, caller, "resume");
+      expect(resume).toMatchObject({ action: "resume", status: "pending" });
+      await admin!.db.update(billingCheckoutRequests).set({ status: "error", error: "Your subscription can't change right now." }).where(eq(billingCheckoutRequests.id, resume.id));
+      expect(await getSubscriptionChangeForApi(context, caller, resume.id)).toMatchObject({ status: "error", error: "Your subscription can't change right now.", done: false });
+      // A checkout isn't a subscription change, and a business without a subscription has nothing to change.
+      await expectApiError(getSubscriptionChangeForApi(context, caller, randomUUID()), 404, "not_found");
+      await admin!.db.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
+      await expectApiError(changeBillingSubscriptionForApi(context, caller, "keep"), 404, "not_found");
+    } finally {
+      vi.unstubAllEnvs();
       await admin!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
   });

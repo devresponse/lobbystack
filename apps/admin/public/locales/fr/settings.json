@@ -350,6 +350,7 @@
       "portalFailed": "Impossible d'ouvrir le portail client.",
       "rateLimited": "Trop de tentatives. Réessayez plus tard.",
       "planChanged": "Votre forfait est en cours de changement. Il s'affichera ici dès que {{provider}} l'aura confirmé.",
+      "planCanceled": "Votre forfait ne sera pas renouvelé. Il reste actif jusqu'à la fin de la période payée.",
       "planResumed": "Votre forfait continuera de se renouveler.",
       "planKept": "Vous gardez votre forfait actuel.",
       "planActionFailed": "Ça n'a pas fonctionné. Réessayez dans une minute.",
@@ -412,6 +413,11 @@
       "resume": "Reprendre",
       "keepPlan": "Garder mon forfait",
       "retry": "Réessayer"
+    },
+    "cancelDialog": {
+      "title": "Annuler votre forfait ?",
+      "description": "Votre forfait reste actif jusqu'au {{date}}, puis passe au forfait Gratuit. L'utilisation au-delà de ce qui est inclus d'ici là reste facturée.",
+      "back": "Retour"
     },
     "currentPlan": {
       "title": "Votre forfait",

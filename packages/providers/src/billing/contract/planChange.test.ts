@@ -135,3 +135,39 @@ describe("the billing provider contract: a plan change on Stripe", () => {
     expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", discounts: "" }, idempotencyKey: "drop-discount:coupon_1" });
   });
 });
+
+describe("the billing provider contract: cancelling, resuming and keeping a plan on Stripe", () => {
+  it("cancels at the renewal and resumes before it, once each for a retried job", async () => {
+    const { billing, stripe, periodEnd } = await onStarter();
+    await expect(billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r1" })).resolves.toMatchObject({ priceRef: starter.ref, cancelAt: periodEnd });
+    await billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r1" });
+    expect(stripe.requests.filter((request) => request.call === "subscriptions.update")).toEqual([{ call: "subscriptions.update", params: { id: "sub_1", cancel_at_period_end: true }, idempotencyKey: "cancel:r1" }]);
+    await expect(billing.resume({ subscriptionId: "sub_1", requestId: "r2" })).resolves.toMatchObject({ cancelAt: null });
+    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", cancel_at_period_end: false }, idempotencyKey: "resume:r2" });
+    // Nothing to resume: no call.
+    const updates = stripe.requests.length;
+    await expect(billing.resume({ subscriptionId: "sub_1", requestId: "r3" })).resolves.toMatchObject({ cancelAt: null });
+    expect(stripe.requests.slice(updates).map((request) => request.call)).toEqual(["subscriptions.retrieve", "subscriptions.retrieve"]);
+  });
+
+  it("cancels a plan with a downgrade waiting by releasing its schedule first, and keeps the plan by releasing it alone", async () => {
+    const { billing, stripe, periodEnd } = await onStarter();
+    await billing.changePlan({ subscriptionId: "sub_1", to: pro, discount: "keep", when: "now", proration: "invoice_now", requestId: "r0" });
+    await billing.changePlan({ subscriptionId: "sub_1", to: starter, discount: "keep", when: "renewal", proration: "none", requestId: "r1" });
+    await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r2" })).resolves.toMatchObject({ priceRef: pro.ref, next: null, cancelAt: null });
+    expect(stripe.requests.filter((request) => request.call === "subscriptionSchedules.release")).toMatchObject([{ idempotencyKey: "keep:r2" }]);
+    // Keeping a plan with nothing waiting asks nothing.
+    await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r3" })).resolves.toMatchObject({ next: null });
+    expect(stripe.requests.filter((request) => request.call === "subscriptionSchedules.release")).toHaveLength(1);
+    await billing.changePlan({ subscriptionId: "sub_1", to: starter, discount: "keep", when: "renewal", proration: "none", requestId: "r4" });
+    await expect(billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r5" })).resolves.toMatchObject({ priceRef: pro.ref, next: null, cancelAt: periodEnd });
+    expect(stripe.requests.slice(-4).map((request) => request.call)).toEqual(["subscriptions.retrieve", "subscriptionSchedules.release", "subscriptions.update", "subscriptions.retrieve"]);
+  });
+
+  it("ends one now, and counts one that already ended as ended", async () => {
+    const { billing, stripe } = await onStarter();
+    await expect(billing.cancel({ subscriptionId: "sub_1", when: "now", requestId: "r1" })).resolves.toBeNull();
+    expect(stripe.state.subscriptions.get("sub_1")?.status).toBe("canceled");
+    await expect(billing.cancel({ subscriptionId: "sub_1", when: "now", requestId: "r2" })).resolves.toBeNull();
+  });
+});

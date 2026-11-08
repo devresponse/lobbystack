@@ -115,12 +115,8 @@ describe("the billing provider contract: a subscription", () => {
       await expect(billing.revoke({ subscriptionId: "sub_ended", requestId: "r1" })).resolves.toBe("already_ended");
     });
 
-    it("answers not_supported, naming the step, for the flows later steps add", async () => {
-      const { billing, stripe } = stripeHarness();
-      await expect(billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 15") });
-      await expect(billing.resume({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
-      await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
-      expect(stripe.requests).toEqual([]);
+    it("says what Stripe does that Polar doesn't", () => {
+      const { billing } = stripeHarness();
       expect(billing.can).toEqual({ uniqueCustomerEmail: false, meterMoney: true, separateOverage: true, readBack: true, inAppCancel: true });
     });
   });

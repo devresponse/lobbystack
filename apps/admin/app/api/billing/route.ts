@@ -1,4 +1,4 @@
-import { billingIntervals, billingPlanPrice, billingProviderNames, billingProviderOf, hostedCheckoutPlanSlugs, isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
+import { billingIntervals, billingPlanPrice, billingProviderNames, billingProviderOf, hostedCheckoutPlanSlugs, inAppPlanActions, isWidgetKeyIssuanceEnabled, type HostedCheckoutPlanIntervals } from "@lobbystack/shared";
 import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
@@ -45,7 +45,9 @@ export async function GET(request: Request) {
       const paymentActionUrl = permissions.hasCheckoutAccess ? await loadPlanChangePayment(tx, { businessId, subscriptionId: own?.subscriptionId ?? null }) : null;
       // The deployment's billing provider, which the plan screens name.
       const provider = billingProviderOf(process.env);
-      return { provider, providerName: billingProviderNames[provider], cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      // Cancel plan, Resume and Keep my plan, where the provider lets the app do them, for those who can buy plans.
+      const planActions = permissions.hasCheckoutAccess && inAppPlanActions(provider);
+      return { provider, providerName: billingProviderNames[provider], planActions, cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

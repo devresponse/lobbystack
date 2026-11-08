@@ -350,6 +350,7 @@
       "portalFailed": "No se pudo abrir el portal del cliente.",
       "rateLimited": "Demasiados intentos. Inténtelo más tarde.",
       "planChanged": "Su plan está cambiando. Aparecerá aquí en cuanto {{provider}} lo confirme.",
+      "planCanceled": "Su plan no se renovará. Sigue activo hasta el final del período pagado.",
       "planResumed": "Su plan seguirá renovándose.",
       "planKept": "Mantiene su plan actual.",
       "planActionFailed": "No se pudo completar. Inténtelo de nuevo en un minuto.",
@@ -412,6 +413,11 @@
       "resume": "Reanudar",
       "keepPlan": "Mantener mi plan",
       "retry": "Reintentar"
+    },
+    "cancelDialog": {
+      "title": "¿Cancelar su plan?",
+      "description": "Su plan sigue activo hasta el {{date}} y luego pasa a Free. El uso que supere lo incluido hasta entonces se sigue cobrando.",
+      "back": "Volver"
     },
     "currentPlan": {
       "title": "Su plan",

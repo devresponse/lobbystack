@@ -350,6 +350,7 @@
       "portalFailed": "Nije moguće otvoriti portal za korisnike.",
       "rateLimited": "Previše pokušaja. Pokušajte ponovo kasnije.",
       "planChanged": "Vaš paket se menja. Prikazaće se ovde čim ga {{provider}} potvrdi.",
+      "planCanceled": "Vaš paket se neće obnoviti. Ostaje aktivan do kraja plaćenog perioda.",
       "planResumed": "Vaš paket će se i dalje obnavljati.",
       "planKept": "Ostajete na trenutnom paketu.",
       "planActionFailed": "Nije uspelo. Pokušajte ponovo za minut.",
@@ -412,6 +413,11 @@
       "resume": "Nastavi",
       "keepPlan": "Zadrži moj paket",
       "retry": "Pokušaj ponovo"
+    },
+    "cancelDialog": {
+      "title": "Otkazati paket?",
+      "description": "Vaš paket ostaje aktivan do {{date}}, a zatim prelazi na Free. Potrošnja preko uključene do tada se i dalje naplaćuje.",
+      "back": "Nazad"
     },
     "currentPlan": {
       "title": "Vaš paket",

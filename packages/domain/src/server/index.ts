@@ -3,6 +3,7 @@ export * from "./aiTraces";
 export * from "./appointmentChanges";
 export * from "./activation";
 export * from "./billing";
+export * from "./billingSubscription";
 export * from "./billingAccess";
 export * from "./billingCatalog";
 export * from "./billingCodes";

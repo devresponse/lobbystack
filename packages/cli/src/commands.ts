@@ -9,7 +9,7 @@ import { formatTable, print } from "./output";
 import { LOG_DIR_VARIABLE, logFolder, saveLog } from "./searchLog";
 import { readUploadFile, uploadKnowledgeFile } from "./upload";
 import { userAgent, version } from "./version";
-import { checkoutWait, claimWait, sourceWait } from "./waits";
+import { checkoutWait, claimWait, sourceWait, subscriptionChangeWait } from "./waits";
 
 // The command groups. Most commands are specs for operationCommand; the few
 // that need more than one call, or a file, are written out below.
@@ -435,12 +435,16 @@ export const groups: Record<string, Group> = Object.fromEntries([
     cancel: { operation: "cancelKnowledgeSource" },
     search: knowledgeSearch,
   }),
-  group("billing", "The plan, its checkout and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
+  group("billing", "The plan, its checkout, cancelling and the spending cap, and with an operator key the deployment's billing catalog and promo codes.", {
     status: { operation: "getBilling" },
     plans: { operation: "listBillingPlans", show: planTable },
     cap: { operation: "updateBilling", args: ["spending_cap_cents"] },
     checkout: { operation: "createCheckout", wait: checkoutWait, show: (data) => data.checkout_url ? `Send this page to whoever pays: ${String(data.checkout_url)}` : data.status === "changed" ? `The business already paid for a plan, so Polar moved that subscription to ${String(data.plan)} ${String(data.interval)} and charged any difference to the saved payment method. No page is needed.` : `${showRecord(data)}\n\nThe page isn't ready yet. Wait for it with --wait, or check with lobbystack billing checkout-status ${String(data.id)}.` },
     "checkout-status": { operation: "getCheckout" },
+    cancel: { operation: "cancelBillingPlan", wait: subscriptionChangeWait },
+    resume: { operation: "resumeBillingPlan", wait: subscriptionChangeWait },
+    "keep-plan": { operation: "keepBillingPlan", wait: subscriptionChangeWait },
+    "change-status": { operation: "getSubscriptionChange" },
     "managed-plan": { operation: "setManagedPlan", fixed: { plan: "enterprise" } },
     "end-managed-plan": { operation: "endManagedPlan" },
     "end-promo-plan": { operation: "endPromoPlan" },

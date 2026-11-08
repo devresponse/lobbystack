@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanSlugs, billingProviderEnvs, billingProviders, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
+import { billingPlanSlugs, billingProviderEnvs, billingProviders, billingSubscriptionActions, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
@@ -238,6 +238,16 @@ export const apiCheckoutSchema = z.object({
   created_at: timestamp,
   updated_at: timestamp,
 }).describe("A checkout for a plan, through the billing provider.");
+
+export const apiSubscriptionChangeSchema = z.object({
+  id,
+  action: z.enum(billingSubscriptionActions).describe("cancel: the plan ends at its renewal. resume: a plan set to end renews again. keep: a plan change waiting for the renewal, such as a downgrade, is dropped."),
+  status: z.enum(["pending", "processing", "changed", "error"]).describe("pending or processing: the billing provider is making the change. changed: it made it, and done turns true once GET /billing shows it. error: nothing changed, and error says why."),
+  error: z.string().nullable(),
+  done: z.boolean().describe("true once GET /billing shows the change: cancels_at set after cancel, null after resume, and next_change null after keep."),
+  created_at: timestamp,
+  updated_at: timestamp,
+}).describe("A change to the business's subscription through the billing provider: ending it at the renewal, resuming it, or keeping the plan.");
 
 export const apiManagedPlanCreateSchema = z.strictObject({
   plan: z.literal("enterprise"),
@@ -1384,6 +1394,7 @@ export type ApiBillingUpdate = z.infer<typeof apiBillingUpdateSchema>;
 export type ApiBillingCode = z.infer<typeof apiBillingCodeSchema>;
 export type ApiBillingCodeCreate = z.infer<typeof apiBillingCodeCreateSchema>;
 export type ApiCheckout = z.infer<typeof apiCheckoutSchema>;
+export type ApiSubscriptionChange = z.infer<typeof apiSubscriptionChangeSchema>;
 export type ApiCheckoutCreate = z.infer<typeof apiCheckoutCreateSchema>;
 export type ApiWidgetConfig = z.infer<typeof apiWidgetConfigSchema>;
 export type ApiWidgetKey = z.infer<typeof apiWidgetKeySchema>;

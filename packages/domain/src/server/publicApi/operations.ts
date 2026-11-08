@@ -40,6 +40,7 @@ import {
   type ApiAiTrace,
   type ApiAiTraceDetail,
   type ApiCheckout,
+  type ApiSubscriptionChange,
   type ApiCheckoutCreate,
   type ApiClaimLink,
   type ApiClaimLinkCreate,
@@ -92,6 +93,7 @@ import {
   type ApiWidgetKeyCreate,
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
+  type BillingSubscriptionAction,
   type PublicProfileSettings,
   billingProviderNames,
   billingProviderOf,
@@ -104,6 +106,7 @@ import { attributeBusiness } from "../affiliates";
 import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isLiveSubscriptionState, isManagedBillingAccount, loadPlanChangePayment, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
+import { billingSubscriptionChangeShown, createBillingSubscriptionRequestInTransaction, isBillingSubscriptionAction } from "../billingSubscription";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
 import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
@@ -386,6 +389,24 @@ export async function updateBillingForApi(context: DomainContext, caller: ApiCal
   });
 }
 
+/** A cancel, resume or keep request as the API shows it; done once the account shows the change, as the provider's webhook brings it. */
+async function loadSubscriptionChange(tx: DatabaseTransaction, businessId: string, changeId: string): Promise<ApiSubscriptionChange> {
+  const [row] = await tx.select().from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.id, changeId))).limit(1);
+  if (!row || !isBillingSubscriptionAction(row.target)) throw notFound("Subscription change");
+  const [account] = await tx.select({ cancelAt: billingAccounts.cancelAt, nextPlanCode: billingAccounts.nextPlanCode }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  // One the business moved to a managed plan from reads as failed, as a checkout does.
+  const status = row.status === "canceled" ? "error" : (["pending", "processing", "changed", "error"] as const).find((value) => value === row.status) ?? "pending";
+  return {
+    id: row.id,
+    action: row.target,
+    status,
+    error: status === "error" ? row.error : null,
+    done: status === "changed" && billingSubscriptionChangeShown(account, row.target),
+    created_at: row.createdAt.toISOString(),
+    updated_at: row.updatedAt.toISOString(),
+  };
+}
+
 async function loadCheckout(tx: DatabaseTransaction, businessId: string, checkoutId: string): Promise<ApiCheckout> {
   const [row] = await tx.select().from(billingCheckoutRequests).where(and(eq(billingCheckoutRequests.businessId, businessId), eq(billingCheckoutRequests.id, checkoutId))).limit(1);
   if (!row || (row.target !== "starter" && row.target !== "pro") || (row.billingInterval !== "monthly" && row.billingInterval !== "annual")) throw notFound("Checkout");
@@ -469,6 +490,29 @@ export async function createCheckoutForApi(context: DomainContext, caller: ApiCa
     if (checkout.created) await audit(tx, caller, { eventType: "api.billing.checkout_started", entityType: "billing_checkout_request", entityId: checkout.id, payload: { plan: input.plan, interval: input.interval, payerUserId: userId } });
     return await loadCheckout(tx, caller.businessId, checkout.id);
   });
+}
+
+/**
+ * Cancels the plan at its renewal, resumes it, or keeps it, as Settings >
+ * Plan does on a provider that does these in the app. Made in the name of
+ * the person the key acts for, or the owner for a platform key.
+ */
+export async function changeBillingSubscriptionForApi(context: DomainContext, caller: ApiCaller, action: BillingSubscriptionAction, options: { checkLimit?: BillingCheckoutLimit } = {}): Promise<ApiSubscriptionChange> {
+  const userId = await checkoutPayerId(context, caller);
+  return await inBusiness(context, caller, async (tx) => {
+    let change: { id: string; created: boolean };
+    try {
+      change = await createBillingSubscriptionRequestInTransaction(tx, { userId, businessId: caller.businessId, action, checkLimit: options.checkLimit });
+    } catch (error) {
+      throw apiErrorFromDomain(error, "Subscription");
+    }
+    if (change.created) await audit(tx, caller, { eventType: `api.billing.plan_${action}_requested`, entityType: "billing_checkout_request", entityId: change.id, payload: { action, requestedByUserId: userId } });
+    return await loadSubscriptionChange(tx, caller.businessId, change.id);
+  });
+}
+
+export async function getSubscriptionChangeForApi(context: DomainContext, caller: ApiCaller, changeId: string): Promise<ApiSubscriptionChange> {
+  return await inBusiness(context, caller, async (tx) => await loadSubscriptionChange(tx, caller.businessId, changeId));
 }
 
 export async function getCheckoutForApi(context: DomainContext, caller: ApiCaller, checkoutId: string): Promise<ApiCheckout> {

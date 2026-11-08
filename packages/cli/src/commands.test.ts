@@ -60,6 +60,28 @@ describe("business use", () => {
   });
 });
 
+describe("billing cancel, resume and keep-plan", () => {
+  it("asks the provider for the change and waits for it, saying why one failed", async () => {
+    const changeId = "6f1d2c3b-4a59-4e6f-8071-92a3b4c5d6e7";
+    const change = (status: string, extra: Record<string, unknown> = {}) => ({ data: { id: changeId, action: "cancel", status, error: null, done: status === "changed", created_at: "2026-11-08T06:00:00.000Z", updated_at: "2026-11-08T06:00:01.000Z", ...extra } });
+    const api = fakeApi({
+      "POST /api/v1/billing/cancellation": { status: 202, body: change("pending") },
+      [`GET /api/v1/billing/subscription-changes/${changeId}`]: { body: change("changed") },
+    });
+    const cancelled = await runCli(["billing", "cancel", "--wait", "--json"], { fetch: api.fetch });
+    expect(cancelled.code).toBe(exitCodes.ok);
+    expect(JSON.parse(cancelled.out)).toMatchObject({ action: "cancel", status: "changed", done: true });
+    expect(api.sent.map((request) => `${request.method} ${request.path}`)).toEqual(["POST /api/v1/billing/cancellation", `GET /api/v1/billing/subscription-changes/${changeId}`]);
+
+    const refused = fakeApi({
+      "DELETE /api/v1/billing/scheduled-change": { status: 202, body: change("pending", { action: "keep" }) },
+      [`GET /api/v1/billing/subscription-changes/${changeId}`]: { body: change("error", { action: "keep", error: "An earlier change to your subscription is still being applied." }) },
+    });
+    expect(await runCli(["billing", "keep-plan", "--wait"], { fetch: refused.fetch })).toMatchObject({ code: exitCodes.failed, err: "The billing provider didn't change the subscription: An earlier change to your subscription is still being applied." });
+    expect((await runCli(["billing", "resume"], { fetch: fakeApi({ "DELETE /api/v1/billing/cancellation": { status: 202, body: change("pending", { action: "resume" }) } }).fetch })).code).toBe(exitCodes.ok);
+  });
+});
+
 describe("knowledge upload", () => {
   it("reserves the upload, sends the bytes to its URL without the key, then completes it", async () => {
     const dir = await tempDir();

@@ -16,6 +16,7 @@ import {
   enqueueAccountSetupEmail,
   createCalendarConnectLinkForApi,
   createBillingCodeForApi,
+  changeBillingSubscriptionForApi,
   createCheckoutForApi,
   createClaimLinkForApi,
   createContactForApi,
@@ -57,6 +58,7 @@ import {
   getAiTraceForApi,
   listAiTracesForApi,
   getCheckoutForApi,
+  getSubscriptionChangeForApi,
   getPhoneNumberClaimForApi,
   getContactForApi,
   getWebhookEndpoint,
@@ -370,6 +372,11 @@ export const v1 = {
   }),
   listBillingPlans: (request: Request) => handleApiRequest(request, "listBillingPlans", async ({ context }) => ({ body: data(await listBillingPlansForApi(context)) })),
   getCheckout: (request: Request, { params }: Params<"checkout_id">) => handleApiRequest(request, "getCheckout", async ({ context, caller }) => ({ body: data(await getCheckoutForApi(context, caller, uuidParam((await params).checkout_id, "checkout_id"))) })),
+  // Each new change is a call to the billing provider, so it counts toward the checkout limits.
+  cancelBillingPlan: (request: Request) => handleApiRequest(request, "cancelBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "cancel", { checkLimit: requireCheckoutAllowed })) })),
+  resumeBillingPlan: (request: Request) => handleApiRequest(request, "resumeBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "resume", { checkLimit: requireCheckoutAllowed })) })),
+  keepBillingPlan: (request: Request) => handleApiRequest(request, "keepBillingPlan", async ({ context, caller }) => ({ body: data(await changeBillingSubscriptionForApi(context, caller, "keep", { checkLimit: requireCheckoutAllowed })) })),
+  getSubscriptionChange: (request: Request, { params }: Params<"change_id">) => handleApiRequest(request, "getSubscriptionChange", async ({ context, caller }) => ({ body: data(await getSubscriptionChangeForApi(context, caller, uuidParam((await params).change_id, "change_id"))) })),
   setManagedPlan: (request: Request) => handleApiRequest(request, "setManagedPlan", async ({ context, caller, credential }) => {
     requireOperatorKey(credential);
     await readApiBody(request, apiManagedPlanCreateSchema);

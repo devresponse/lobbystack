@@ -97,3 +97,29 @@ describe("production database role startup validation", () => {
     expect(mocks.getDatabase).not.toHaveBeenCalled();
   });
 });
+
+describe("billing provider startup validation", () => {
+  beforeEach(() => {
+    vi.stubEnv("NEXT_RUNTIME", "nodejs");
+    vi.stubEnv("NODE_ENV", "production");
+    for (const name of ["BETTER_AUTH_SECRET", "INTERNAL_SERVICE_SECRET", "INTERNAL_SERVICE_TOKEN", "WIDGET_SESSION_SECRET", "ENCRYPTION_KEY", "OTP_HASH_SECRET", "LOCAL_STORAGE_SIGNING_SECRET"]) {
+      vi.stubEnv(name, "strong-production-fixture-secret-12345");
+    }
+    vi.stubEnv("STORAGE_PROVIDER", "local");
+    mocks.getDatabase.mockImplementation((role: DatabaseRole) => ownRole(role));
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+  });
+
+  it("refuses a billing provider the worker would refuse, before opening database clients", async () => {
+    vi.stubEnv("BILLING_PROVIDER", "strpe");
+    await expect(register()).rejects.toThrow("BILLING_PROVIDER must be polar or stripe, not \"strpe\".");
+    vi.stubEnv("BILLING_PROVIDER", "stripe");
+    await expect(register()).rejects.toThrow("BILLING_PROVIDER=stripe isn't available yet");
+    expect(mocks.getDatabase).not.toHaveBeenCalled();
+    vi.stubEnv("BILLING_STRIPE_PREVIEW", "true");
+    await expect(register()).resolves.toBeUndefined();
+  });
+});

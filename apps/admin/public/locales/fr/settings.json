@@ -644,7 +644,9 @@
         "partially_refunded": "Remboursement partiel",
         "succeeded": "Effectué",
         "failed": "Échoué",
-        "canceled": "Annulé"
+        "canceled": "Annulé",
+        "void": "Invalidé",
+        "uncollectible": "Impayé"
       },
       "kindLabels": {
         "order": "Commande",

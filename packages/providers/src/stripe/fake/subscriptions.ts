@@ -49,6 +49,8 @@ export function fakeSubscriptions(fake: FakeStripeContext): StripeApi["subscript
         const found = fake.state.subscriptions.get(id);
         if (!found) throw missing("subscription", id);
         if (found.status === "canceled") throw invalid("A canceled subscription can only update its cancellation_details and metadata.");
+        // Stripe's own answer, seen in a sandbox.
+        if (params.cancel_at_period_end !== undefined && params.cancel_at !== undefined) throw invalid("Received both cancel_at_period_end and cancel_at parameters. Please pass in only one.");
         if (found.schedule && (params.cancel_at_period_end !== undefined || params.cancel_at !== undefined)) throw invalid(`The subscription is managed by the subscription schedule \`${idOf(found.schedule)}\`, and updating any cancelation behavior directly is not allowed. Please update the schedule instead.`);
         const changes = params.items?.length || params.discounts !== undefined || params.billing_cycle_anchor?.type === "now";
         const base = changes ? updateWithPayment(fake, found, params) : { ...found, metadata: { ...found.metadata, ...((params.metadata ?? {}) as Record<string, string>) } } as Stripe.Subscription;

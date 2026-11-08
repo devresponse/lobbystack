@@ -59,10 +59,30 @@ describe("billing jobs: a plan change on Stripe", () => {
   });
 
   it("tells the business a declined upgrade couldn't be charged, leaving the plan as it was", async () => {
-    const { stripe, businessId, requestId, domain, result } = await upgrade("pm_card_chargeDeclined");
+    const { stripe, businessId, requestId, domain, result } = await upgrade("pm_card_chargeCustomerFail");
     expect(result).toEqual({ status: "skipped", entityId: requestId });
     expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: planChangeRefusalSentence("stripe", "payment_failed") });
     expect(stripe.state.subscriptions.get("sub_1")).toMatchObject({ pending_update: null });
     expect(stripe.state.subscriptions.get("sub_1")!.items.data[0]!.price.id).toBe("price_starter_month");
+  });
+});
+
+describe("billing jobs: a promo plan's discount on Stripe", () => {
+  it("removes a promo coupon from each subscription that kept it on a standard price, as two businesses can share one", async () => {
+    const stripe = createFakeStripe({ accountId: "acct_1", clock: new FakeClock(Math.floor(Date.now() / 1000)) });
+    vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "price_starter_month");
+    const billing = new StripeBilling(stripe, { accountId: "acct_1", env: "sandbox" });
+    for (const n of [1, 2]) {
+      stripe.addCustomer({ id: `cus_${n}`, businessId: `b${n}` });
+      stripe.addSubscription({ id: `sub_${n}`, customer: `cus_${n}`, price: "price_starter_month", coupon: "coupon_launch" });
+    }
+    for (const n of [1, 2]) {
+      const businessId = randomUUID();
+      const job: JobEnvelope = { jobId: randomUUID(), type: "billing.endPromoPlan", queue: "default", businessId, payload: { dropDiscount: "coupon_launch", subscriptionId: `sub_${n}` }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+      await expect(handleJob(job, { domain: { db: undefined as never }, billing })).resolves.toEqual({ status: "completed", entityId: `${businessId}:coupon_launch` });
+    }
+    // Stripe refuses an idempotency key used again for another subscription, so each removal has its own.
+    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").map((request) => request.idempotencyKey)).toEqual(["drop-discount:sub_1:coupon_launch", "drop-discount:sub_2:coupon_launch"]);
+    expect([stripe.state.subscriptions.get("sub_1")!.discounts, stripe.state.subscriptions.get("sub_2")!.discounts]).toEqual([[], []]);
   });
 });

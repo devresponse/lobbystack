@@ -884,15 +884,30 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       expect(await reports()).toEqual([expect.objectContaining({ provider: "stripe", overageSubscriptionId: "sub_overage", businessId })]);
       expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: false });
 
+      // Its invoice paid later, or voided or forgiven: that invoice's event queues the job, which makes a new one.
+      const settled = await reconcile("invoice.paid", { kind: "payment", orderId: "in_overage", status: "paid", amountCents: 1_250, currency: "cad", overageSubscriptionId: "sub_overage" });
+      expect(await jobs()).toContain(`ensure-overage:${settled}`);
+      // With an overage subscription recorded, its events queue nothing.
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage_2" });
+      await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "active" });
+      expect(await jobs()).toHaveLength(3);
+      // Left unpaid, then paid: dropped and reported, and live again its event queues the job, which records it again.
+      await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "unpaid", cancellation_details: { reason: null } });
+      expect([await overage(), (await reports()).length]).toEqual([null, 2]);
+      const liveAgain = await reconcile("customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage_2", status: "active" });
+      expect(await jobs()).toContain(`ensure-overage:${liveAgain}`);
+
       // The plan ends with an overage subscription: its event queues the job, which ends it with its month.
       await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" });
       const ended = await planEvent("canceled");
       expect(await jobs()).toContain(`ensure-overage:${ended}`);
       // Its end once the plan has ended isn't an unpaid one, whatever the reason.
       await overageEnded("unpaid", null);
-      expect([await overage(), (await reports()).length]).toEqual([null, 1]);
+      expect([await overage(), (await reports()).length]).toEqual([null, 2]);
+      // An overage invoice once the plan has ended queues nothing, nor does the plan's next event.
+      await reconcile("invoice.paid", { kind: "payment", orderId: "in_overage_2", status: "paid", amountCents: 900, currency: "cad", overageSubscriptionId: "sub_overage" });
       await planEvent("canceled");
-      expect(await jobs()).toHaveLength(3);
+      expect(await jobs()).toHaveLength(5);
     } finally {
       await client!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
@@ -931,7 +946,11 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
 
       // Another one never paid: Stripe drops it within a day, and the business hears the card wasn't charged.
       const expired = await waiting();
+      const warnings = vi.spyOn(console, "warn").mockImplementation(() => undefined);
       await reconcile("customer.subscription.pending_update_expired", read("price_pro_month"));
+      const lines = warnings.mock.calls.map(([line]) => String(line)).filter((line) => line.startsWith("{")).map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(lines).toContainEqual(expect.objectContaining({ level: "warn", message: "ops.billing.plan_change_expired", businessId, requestId: expired, subscriptionId: "sub_1" }));
+      warnings.mockRestore();
       expect(await request(expired)).toEqual({ status: "error", error: planChangeRefusalSentence("stripe", "payment_failed") });
       expect(await published(expired)).toEqual([`billing-checkout:${expired}:error`]);
       expect(await payment()).toBeNull();
@@ -1004,6 +1023,10 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       await reconcile("invoice.payment_failed", invoice("in_1", "uncollectible"));
       await reconcile("invoice.paid", invoice("in_1", "paid"));
       expect(await order("in_1")).toEqual({ status: "paid", amount: 8_700, refunded: 0 });
+      // A declined upgrade's invoice, voided once its payment failed, no longer waits.
+      await reconcile("invoice.finalized", invoice("in_3", "pending"));
+      await reconcile("invoice.voided", invoice("in_3", "void"));
+      expect(await order("in_3")).toMatchObject({ status: "void" });
       // The refund's read-back named its invoice before Stripe's paid event was applied.
       await reconcile("charge.refunded", { kind: "refund", amount: 8_700, refundedAmount: 8_700, paymentRef: "pi_2", status: "refunded" }, "in_2");
       await reconcile("invoice.paid", invoice("in_2", "paid"));

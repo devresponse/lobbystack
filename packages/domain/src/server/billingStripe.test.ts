@@ -79,7 +79,7 @@ describe("desiredStripeCatalog", () => {
     expect(catalog.coupons).toEqual([]);
     expect(catalog.portal).toEqual({ returnUrl: `https://dev1.${brand}.com/settings/plan`, ...links, planChanges: true, cancel: false, upgrade: "invoice", downgrade: "next_period", plans: ["starter", "pro"] });
     expect(catalog.webhook).toEqual({ url: webhookUrl(brand), events: expect.arrayContaining(["checkout.session.completed", "customer.subscription.updated", "invoice.paid", "charge.dispute.created"]) });
-    expect(catalog.webhook!.events).toHaveLength(14);
+    expect(catalog.webhook!.events).toHaveLength(16);
     expect(catalog.meterErrors).toEqual({ url: `${webhookUrl(brand)}/meter-errors`, events: ["v1.billing.meter.error_report_triggered", "v1.billing.meter.no_meter_found"] });
     expect(catalog).toMatchObject({ currency: "cad", taxCode: "txcd_10103001", managedPayments: false, overageMode: "separate", usageGraceHours: 1 });
   });

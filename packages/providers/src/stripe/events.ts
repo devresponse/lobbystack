@@ -172,9 +172,12 @@ function invoiceEvent(object: RecordValue): NormalizedBillingEvent {
   const customerId = idOf(object.customer);
   const overage = subscriptionMetadata.lobbystack_role === "overage";
   const subscriptionId = overage ? undefined : idOf(details.subscription);
+  // Reconcile reads it to give a plan that lost its overage subscription one again once the debt is settled.
+  const overageSubscriptionId = overage ? idOf(details.subscription) : undefined;
   const id = idOf(object.id) ?? "";
   const status = orderStatusOf(text(object.status));
-  const amountCents = amount(object.total) ?? 0;
+  // What the customer was charged, or is asked for: the total less any balance credit, such as the daily totals check gives.
+  const amountCents = amount(object.amount_due) ?? amount(object.total) ?? 0;
   const currency = text(object.currency) ?? "";
   const invoiceUrl = text(object.hosted_invoice_url) ?? null;
   const number = text(object.number);
@@ -195,6 +198,7 @@ function invoiceEvent(object: RecordValue): NormalizedBillingEvent {
       kind: "payment",
       ...(customerId ? { customerId } : {}),
       ...(subscriptionId ? { subscriptionId } : {}),
+      ...(overageSubscriptionId ? { overageSubscriptionId } : {}),
       orderId: id,
       status,
       amountCents,

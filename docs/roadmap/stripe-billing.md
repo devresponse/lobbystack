@@ -36,6 +36,35 @@ Each decision was taken as the study recommended, on 2026-11-08:
 7. **Upstream's partner billing:** not now.
 8. **Which provider the live deployment starts on:** Stripe, once step 18 is done.
 
+## Review of the Stripe work (2026-11-08)
+
+A review of every change the Stripe work made, with three findings checked against a Stripe sandbox.
+
+### Fixed in the review
+
+- **One overage subscription per customer:** a business that bought a plan again before the last one's overage month ended got a second overage subscription, and Stripe's meters count by customer, so both billed the same usage. `ensureStripeOverage` now keeps one per customer and moves a live one to the new plan.
+- **Taking back an overage subscription's end:** it sent `cancel_at` and `cancel_at_period_end` together, which Stripe refuses (checked in the sandbox). It sends the one that's set, and the fake refuses both, as Stripe does.
+- **Dropping a promo plan's discount:** the idempotency key named only the coupon, so Stripe refused the second subscriber's removal within its 24 hours. The key names the subscription too.
+- **An overage subscription paid up again:** one Stripe made live again once its invoice was paid, or one it ended whose invoice was paid, voided or marked uncollectible, waited for the plan's next event, a year off on a yearly plan, before usage past the allowance was billed again. That event now queues `billing.ensureOverage`, and an overage invoice's event names its subscription for it.
+- **A declined upgrade's invoice:** voided by the adapter, it stayed a pending transaction. The webhook takes `invoice.voided` and `invoice.marked_uncollectible`, so the endpoint has 16 events, and **Settings > Plan** names both statuses in every language.
+- **An invoice's amount:** a payment stores `amount_due`, what the customer was charged after a balance credit such as the totals check gives, and falls back to `total`.
+- **The declined test card:** Stripe refuses to attach `pm_card_chargeDeclined` or `pm_card_visa_chargeDeclined` to a customer (checked in the sandbox), so the scenarios and the fake use `pm_card_chargeCustomerFail`, which attaches and fails when charged.
+- **`BILLING_PROVIDER` at the admin's startup:** a value the worker refuses now stops the admin too, which showed Polar's plans for it.
+- **`ops.billing.plan_change_expired`:** its log line has a test.
+
+### Technical debt
+
+| Item | Why it matters | When |
+| --- | --- | --- |
+| A promo plan bought as an upgrade that waits for 3-D Secure | Stripe keeps only the price of a pending update and drops its coupon and metadata (checked in the sandbox), so the upgrade applies at the promo price without its discount. The coupon should be applied once `pending_update_applied` arrives. | Before a live deployment sells promo plans on Stripe; moot if Stripe becomes the merchant of record, which has no pending updates |
+| `checkout.session.expired` | Subscribed and normalized, but reconcile does nothing with it, so an expired checkout's request waits for its own expiry. | Low |
+| Two readers of `BILLING_PROVIDER` | `billingProviderOf` in `@lobbystack/shared` takes anything but `stripe` as Polar, while the factory's `readBillingProviderId` refuses it. Both services now refuse a bad value at startup, but one reader should go. | Low |
+| Helpers written again in each Stripe module | `idOf` is defined in six files under `packages/providers/src/stripe/`, and `events.ts` has readers of its own. | Low |
+| Repeated reads | `usageTotals` lists the meters on each call, twice per daily totals check, and the webhook route reads the catalog for every delivery before it knows whether it uses the event. | Low |
+| Polar names on Stripe paths | `readPolarProductLinks`, `polarProductLinks` and `billingCodes`' `polarId` read Stripe's prices too, and the API keeps its `polar_*` aliases. | With the next API version |
+| Not yet checked against Stripe | The scenarios haven't run on a sandbox; a negative meter event, which the totals check sends to take usage back, and the restricted keys' permission names are unconfirmed. | Step 18 |
+| The scenarios workflow | GitHub lists a manual workflow only from the default branch, so it runs from a computer while this work stays off `main`. | When the branch merges |
+
 ## Step 1: the worker's billing jobs in their own folder
 
 The worker's eight billing jobs and their helpers moved, unchanged, from `apps/worker/src/handlers.ts` into `apps/worker/src/billing/`, one file per flow: `checkout.ts`, `planChange.ts`, `reconcile.ts` (with the sweep), `usage.ts`, `promo.ts`, `deletion.ts` and `catalog.ts`. `billing/index.ts` maps each billing job type to its function, and `handlers.ts` sends the eight there. `businessIdOrThrow` moved to `apps/worker/src/jobInput.ts`, which both use. The billing tests moved from `handlers.test.ts` to `billing/*.test.ts` unchanged, with the mocks they share in `billing/testing.ts`: 108 tests before and after. `.gitattributes` merges `docs/project/changelog.md` with `merge=union`, so rows added on two branches don't conflict.
@@ -137,7 +166,7 @@ Nothing runs it yet: `pnpm billing` and the daily check run Stripe's planner fro
   - Three meters (`ls_overage_voice`, `ls_overage_sms` and `ls_overage_transfers`, a sum of dollars by `stripe_customer_id`), and an overage product and a metered price for each (`ls_overage_<kind>_<currency>`, a dollar a unit). They are the account's, shared by every brand on it, and never archived.
   - A coupon per discounted plan, under the ID `ls-<brand>-<plan>-<terms8>`, for that plan's product only; one Stripe can't change is refused, and a leftover is deleted only with `--allow-archive`.
   - The billing portal's configuration: invoices, cards, email, address and tax ID; plan changes between the public standard plans, an upgrade charged as `upgrade` says (`reset` starts a new cycle) and a downgrade at the period's end for `next_period`; cancelling as `portalCancel` says; the brand's terms and privacy pages; Settings > Plan to return to.
-  - The webhook endpoint at `/api/webhooks/stripe`, with the 14 events of the proposal (`STRIPE_WEBHOOK_EVENTS`) in `STRIPE_API_VERSION`, and the meter error destination under it, with the two thin events. An endpoint in another version is replaced only with `--allow-replace`.
+  - The webhook endpoint at `/api/webhooks/stripe`, with the 14 events of the proposal and the two that void or forgive an invoice (`STRIPE_WEBHOOK_EVENTS`) in `STRIPE_API_VERSION`, and the meter error destination under it, with the two thin events. An endpoint in another version is replaced only with `--allow-replace`.
 - **The link** records each plan's price and coupon IDs, and the meters, the overage prices, the portal configuration, the endpoint and the destination; pnpm billing adds the webhook secret's SHA-256 in step 11.
 - **Verify** shares the file and Postgres checks with Polar, compares the file with Stripe through the planner, checks Stripe Tax (active, an origin address and a registration; drift on a live account, a warning in a sandbox, nothing with Managed Payments), and compares the rows and the latest link with Stripe: the linked prices, the account, the key's mode, the overage prices, the portal configuration and the webhook secret's hash.
 - **Tests** (`billingStripe.test.ts`, on the stand-in in `billingStripe.testing.ts`): both brands' files with a test block, an empty account, a run cut off halfway, new terms, another brand in the same account, a renamed meter, objects Stripe can't change, coupons, the portal's settings, the webhook, the link body and verify against drifted accounts.
@@ -152,7 +181,7 @@ On an empty account, RealInfoBot's file with the recommended block makes:
 | 4 prices | Starter 37.00 CAD a month and 370.00 a year, Pro 87.00 a month and 870.00 a year, before tax |
 | No coupon | The file has no discounted plan |
 | The billing portal | Plan changes between Starter and Pro; Settings > Plan cancels |
-| The webhook endpoint and the meter error destination | 14 events in `2026-10-28.endive`, and the two meter error events |
+| The webhook endpoint and the meter error destination | 16 events in `2026-10-28.endive`, and the two meter error events |
 
 ## Step 11: `pnpm billing` on Stripe
 
@@ -183,7 +212,7 @@ The check for this step: sandbox events forwarded by the Stripe CLI reconcile on
 - **Checkout** (`stripe/checkout.ts`): a subscription-mode session on the business's customer, the one the billing account holds or a new one, with the plan's price and a promo plan's coupon. The request ID is the `client_reference_id`, and the business, the request and the role go in the session's and the subscription's metadata. The page lasts an hour from the next minute, so a retry within the minute gets the same page (idempotency key `checkout:<request>:<expiry>`), and speaks the business's language where Stripe has it. Stripe Tax applies, with the billing address and tax IDs collected. Stripe keeps no customer per email, so the billing email form, which shows only after Polar refuses an email, never shows.
 - **The overage subscription** (`stripe/overage.ts`, and the worker's `billing.ensureOverage` in `apps/worker/src/billing/overage.ts`): the three overage prices in the catalog's currency, anchored on the 1st at 00:00 UTC with no proration, with Stripe Tax. A try that died is found again by the metadata (`lobbystack_role` `overage` and `lobbystack_plan_subscription`). The checkout's card becomes the customer's default, so both subscriptions pay with it, as does a card changed in the portal. The job stores `overage_subscription_id` while the account still pays with that plan subscription.
 - **When the job runs:** reconcile queues it, once per event, for a Stripe plan event that finds the plan live without an overage subscription, live again, or ended with one. A live plan keeps its overage subscription while it's set to end. Once the plan has ended, the job sets the overage subscription to end with its month, whose overage is still invoiced. The proposal ended it at a `cancel_at` too, which would have stopped it on the 1st, before a plan set to end in a later month, a yearly one most of all.
-- **Without one:** a Stripe account without an overage subscription bills no overage, so usage stops at the allowance (`noOverage` in `usage.ts`). A job that fails an hour or more into the plan's period reports `ops.billing.overage_missing`. Reconcile drops an overage subscription Stripe ended or left unpaid. One Stripe ended after failed payments or a dispute, or left unpaid, while the plan is live is reported as `ops.billing.overage_unpaid`, and the job makes no other while its invoice is open. Once that invoice is paid, voided or marked uncollectible, the plan's next event makes a new one, as it does for one canceled by hand.
+- **Without one:** a Stripe account without an overage subscription bills no overage, so usage stops at the allowance (`noOverage` in `usage.ts`). A job that fails an hour or more into the plan's period reports `ops.billing.overage_missing`. Reconcile drops an overage subscription Stripe ended or left unpaid. One Stripe ended after failed payments or a dispute, or left unpaid, while the plan is live is reported as `ops.billing.overage_unpaid`, and the job makes no other while its invoice is open. Once that invoice is paid, voided or marked uncollectible, that invoice's event queues the job, which makes a new one, or records the old one again once Stripe makes it live again. One canceled by hand gets a new one with the plan's next event.
 - **Deletion:** `billing.revokeSubscription` ends the plan subscription and the overage subscription at once, each with its last invoice.
 - **Startup:** the worker reads its key's own account (`checkAccount`). With another account's key than `STRIPE_ACCOUNT_ID`, it runs without billing and sends `ops.billing.provider_mismatch`; when Stripe can't be reached, it bills on and logs `ops.billing.account_unchecked`.
 - **Overage on the checkout:** the `stripe` block's `overage: checkout`, the answer to decision 3 that wasn't taken, isn't built: checkout would still make the overage subscription.

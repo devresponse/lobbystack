@@ -85,7 +85,7 @@ A Polar deployment needs none of them, and a Stripe deployment none of `POLAR_*`
 
 | Endpoint | Signed with | Events |
 | --- | --- | --- |
-| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed` and `finalized`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`) |
+| `/api/webhooks/stripe` | `STRIPE_WEBHOOK_SECRET` | `checkout.session.completed` and `expired`; `customer.subscription.created`, `updated`, `deleted`, `paused`, `resumed`, `pending_update_applied` and `pending_update_expired`; `invoice.paid`, `payment_failed`, `finalized`, `voided` and `marked_uncollectible`; `charge.refunded` and `charge.dispute.created` (`STRIPE_WEBHOOK_EVENTS`) |
 | `/api/webhooks/stripe/meter-errors` | `STRIPE_METER_WEBHOOK_SECRET` | The meter error destination's thin events, `v1.billing.meter.error_report_triggered` and `v1.billing.meter.no_meter_found` |
 
 A delivery more than 300 seconds old, or of the other mode, is refused. `/api/webhooks/polar` answers 404 on a Stripe deployment, and logs `ops.billing.webhook_wrong_provider` at most once a minute.

@@ -92,6 +92,24 @@ describe("the billing provider contract: checkout", () => {
       expect([...stripe.state.subscriptions.values()].filter((subscription) => subscription.metadata.lobbystack_role === "overage")).toHaveLength(1);
     });
 
+    it("keeps one overage subscription per customer: a plan bought again before the last one's overage month ends takes the one there is", async () => {
+      const { billing, stripe } = withCatalog();
+      const first = await billing.createCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null } });
+      const plan = stripe.completeCheckout(first.id);
+      const overage = await overageOf(billing, plan.id);
+      // The plan ended, and its overage subscription is set to end with its month, as the worker leaves it.
+      await billing.revoke({ subscriptionId: plan.id, requestId: "end-1" });
+      await billing.endOverage!({ subscriptionId: overage.subscriptionId, when: "period_end" });
+      // The business buys a plan again within that month: the meters count by customer, so a second overage subscription would bill the month again.
+      const again = await billing.createCheckout({ ...base, requestId: "request-2", customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null } });
+      const second = stripe.completeCheckout(again.id);
+      await expect(overageOf(billing, second.id)).resolves.toEqual(overage);
+      const kept = stripe.state.subscriptions.get(overage.subscriptionId)!;
+      expect(kept.cancel_at_period_end).toBe(false);
+      expect(kept.metadata.lobbystack_plan_subscription).toBe(second.id);
+      expect([...stripe.state.subscriptions.values()].filter((subscription) => subscription.metadata.lobbystack_role === "overage")).toHaveLength(1);
+    });
+
     it("ends the overage subscription with its usage invoiced, once, and refuses one without the overage prices", async () => {
       const { billing, stripe } = withCatalog();
       const checkout = await billing.createCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null } });

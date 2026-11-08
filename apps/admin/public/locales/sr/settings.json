@@ -644,7 +644,9 @@
         "partially_refunded": "Delimično vraćeno",
         "succeeded": "Završeno",
         "failed": "Neuspelo",
-        "canceled": "Otkazano"
+        "canceled": "Otkazano",
+        "void": "Poništeno",
+        "uncollectible": "Neplaćeno"
       },
       "kindLabels": {
         "order": "Porudžbina",

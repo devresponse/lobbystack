@@ -625,7 +625,9 @@
         "partially_refunded": "Partial refund",
         "succeeded": "Completed",
         "failed": "Failed",
-        "canceled": "Canceled"
+        "canceled": "Canceled",
+        "void": "Voided",
+        "uncollectible": "Unpaid"
       },
       "kindLabels": {
         "order": "Order",

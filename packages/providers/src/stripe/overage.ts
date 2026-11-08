@@ -33,18 +33,26 @@ export const stripeOverageLookupKeys = (currency: string) => Object.values(strip
 /**
  * The plan subscription's overage subscription, made once: one a try that
  * died made is found again by its metadata, and one set to end with its month
- * is kept on. One that ended is replaced, unless it's owing (see owing). The
- * checkout's card moves from the plan subscription to the customer, so a card
- * changed in the portal pays for both.
+ * is kept on. A customer has one at a time, whatever plan it came with: the
+ * meters count by customer, so a second would bill the same usage again, as
+ * when a business buys a plan again before the last one's overage month ends.
+ * One that ended is replaced, unless one is owing (see owing). The checkout's
+ * card moves from the plan subscription to the customer, so a card changed in
+ * the portal pays for both.
  */
 export async function ensureStripeOverage(api: StripeApi, input: Parameters<NonNullable<BillingProvider["ensureOverage"]>>[0]): ReturnType<NonNullable<BillingProvider["ensureOverage"]>> {
   const subscriptions = await api.subscriptions.list({ customer: input.customerId, status: "all", limit: 100, expand: ["data.latest_invoice"] });
-  const plans = subscriptions.data.filter((subscription) => subscription.metadata?.lobbystack_role === "overage" && subscription.metadata?.lobbystack_plan_subscription === input.planSubscriptionId);
-  const unpaid = plans.find(owing);
+  const overages = subscriptions.data.filter((subscription) => subscription.metadata?.lobbystack_role === "overage");
+  const unpaid = overages.find(owing);
   if (unpaid) return { unpaidSubscriptionId: unpaid.id };
-  const found = plans.find((subscription) => !endedStates.has(subscription.status));
+  const plans = overages.filter((subscription) => subscription.metadata?.lobbystack_plan_subscription === input.planSubscriptionId);
+  const live = overages.filter((subscription) => !endedStates.has(subscription.status));
+  const found = live.find((subscription) => plans.includes(subscription)) ?? live[0];
   if (found) {
-    if (found.cancel_at_period_end || found.cancel_at) await api.subscriptions.update(found.id, { cancel_at: "", cancel_at_period_end: false });
+    // Stripe takes one of the two at a time; cancel_at_period_end sets cancel_at too.
+    const end = found.cancel_at_period_end ? { cancel_at_period_end: false } : found.cancel_at ? { cancel_at: "" as const } : {};
+    const moved = found.metadata?.lobbystack_plan_subscription !== input.planSubscriptionId ? { metadata: { lobbystack_plan_subscription: input.planSubscriptionId } } : {};
+    if (Object.keys(end).length || Object.keys(moved).length) await api.subscriptions.update(found.id, { ...end, ...moved });
     return { subscriptionId: found.id };
   }
   const lookupKeys = stripeOverageLookupKeys(input.currency);

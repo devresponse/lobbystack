@@ -68,7 +68,8 @@ function expectThat(condition: unknown, message: string): asserts condition {
 // A public building's address, so Stripe Tax can work out the tax on the scenarios' invoices.
 const SCENARIO_ADDRESS = { line1: "100 Queen St W", city: "Toronto", state: "ON", postal_code: "M5H 2N2", country: "CA" };
 const GOOD_CARD = "pm_card_visa";
-const DECLINED_CARD = "pm_card_chargeDeclined";
+// The declining card that attaches: Stripe refuses to attach pm_card_chargeDeclined and pm_card_visa_chargeDeclined.
+const DECLINED_CARD = "pm_card_chargeCustomerFail";
 const THREE_D_SECURE_CARD = "pm_card_authenticationRequired";
 
 const usageKindOf: Record<OverageKind, PricedUsageKind> = { voice: "voice_seconds", alert_sms: "alert_sms_segments", transfer: "outbound_call_attempts" };

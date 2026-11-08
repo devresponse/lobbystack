@@ -230,6 +230,9 @@ export const STRIPE_WEBHOOK_EVENTS = [
   "invoice.paid",
   "invoice.payment_failed",
   "invoice.finalized",
+  // A declined upgrade's invoice is voided, and an operator can void or forgive one.
+  "invoice.voided",
+  "invoice.marked_uncollectible",
   "charge.refunded",
   "charge.dispute.created",
 ] as const;

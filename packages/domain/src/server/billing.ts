@@ -1213,6 +1213,7 @@ export async function reconcileBillingProviderEvent(
     // The overage subscription ending leaves the account without overage: usage stops at the allowance. Stripe
     // ending it after failed payments or a dispute, or leaving it unpaid, while the plan pays on is reported: the
     // open invoice is the operator's to collect or forgive, and billing.ensureOverage makes no other until then.
+    // An overage invoice's event names its subscription too, with the invoice's status, which is never one of these.
     const overageSubscriptionId = stringField(payload, "overageSubscriptionId");
     const overageStatus = stringField(payload, "status") ?? "";
     if (event.provider === "stripe" && overageSubscriptionId && ["canceled", "unpaid", "incomplete_expired"].includes(overageStatus)) {
@@ -1231,6 +1232,11 @@ export async function reconcileBillingProviderEvent(
           properties: { provider: "stripe", overageSubscriptionId },
         });
       }
+    } else if (event.provider === "stripe" && overageSubscriptionId && existing?.source === "stripe" && existing.subscriptionId && !existing.overageSubscriptionId && isLiveSubscriptionState(existing.subscriptionState)) {
+      // An overage subscription live again once its invoice is paid, or the invoice of one Stripe ended paid, voided
+      // or marked uncollectible, while the plan pays on without one: billing.ensureOverage records the live one, or
+      // makes a new one, so overage is billed again without waiting for the plan's next event, a year off for some.
+      await enqueueOutbox(tx, { topic: "billing.ensureOverage", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `ensure-overage:${event.id}`, payload: { subscriptionId: existing.subscriptionId } });
     }
 
     // A Stripe refund names its payment, and the worker read back the invoice it paid: the invoice's order row

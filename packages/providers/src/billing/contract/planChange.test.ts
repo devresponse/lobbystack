@@ -66,7 +66,7 @@ describe("the billing provider contract: a plan change on Stripe", () => {
   });
 
   it("drops a declined upgrade by voiding its invoice, and refuses it as payment_failed", async () => {
-    const { billing, stripe } = await onStarter("pm_card_chargeDeclined");
+    const { billing, stripe } = await onStarter("pm_card_chargeCustomerFail");
     expect(await refusalOf(billing, billing.changePlan({ subscriptionId: "sub_1", to: pro, discount: "keep", when: "now", proration: "invoice_now", requestId: "r1" }))).toBe("payment_failed");
     const [invoice] = [...stripe.state.invoices.values()];
     expect(invoice?.status).toBe("void");
@@ -131,8 +131,8 @@ describe("the billing provider contract: a plan change on Stripe", () => {
   it("removes the discounts, keyed by the request", async () => {
     const { billing, stripe } = await onStarter();
     await billing.changePlan({ subscriptionId: "sub_1", to: proLaunch, discount: "price", when: "now", proration: "invoice_now", requestId: "r0" });
-    await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "drop-discount:coupon_1" })).resolves.toMatchObject({ priceRef: proLaunch.ref, discountRef: null });
-    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", discounts: "" }, idempotencyKey: "drop-discount:coupon_1" });
+    await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "drop-discount:sub_1:coupon_1" })).resolves.toMatchObject({ priceRef: proLaunch.ref, discountRef: null });
+    expect(stripe.requests.filter((request) => request.call === "subscriptions.update").at(-1)).toEqual({ call: "subscriptions.update", params: { id: "sub_1", discounts: "" }, idempotencyKey: "drop-discount:sub_1:coupon_1" });
   });
 });
 

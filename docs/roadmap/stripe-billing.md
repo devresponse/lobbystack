@@ -27,7 +27,7 @@ Each step lands on `feature/receptionists` once its checks pass, and leaves Pola
 
 Each decision was taken as the study recommended, on 2026-11-08:
 
-1. **Merchant of record:** Stripe directly, with Stripe Tax: the operator registers for, collects and files the taxes, once an accountant confirms which registrations are needed. Stripe's Managed Payments, the merchant for 3.5% more, wasn't taken.
+1. **Merchant of record:** Stripe directly, with Stripe Tax: the operator registers for, collects and files the taxes, once an accountant confirms which registrations are needed. Stripe's Managed Payments, the merchant for 3.5% more, wasn't taken then, and is now being added as a second mode (below).
 2. **Yearly plans:** kept. With Stripe directly they work unchanged.
 3. **How overage is billed:** a second subscription, monthly and anchored to the 1st (UTC).
 4. **Who changes plans:** **Settings > Plan** for upgrades, downgrades and cancelling; Stripe's portal for cards, invoices and billing details, with its plan switches and cancelling off.
@@ -35,6 +35,41 @@ Each decision was taken as the study recommended, on 2026-11-08:
 6. **Stripe accounts:** one per live deployment, grouped in a Stripe Organization, and a sandbox per test deployment.
 7. **Upstream's partner billing:** not now.
 8. **Which provider the live deployment starts on:** Stripe, once step 18 is done.
+
+## Merchant of record as a second mode
+
+Proposed on 2026-11-08 and under way: Stripe as the merchant of record (Managed Payments) becomes a second Stripe mode beside Stripe directly, chosen per brand by `stripe.managedPayments` in its `billing.json`, with both brands on it. Decision 1 above stays the other mode, and both stay built and tested.
+
+| | Stripe directly (`managedPayments: false`) | Merchant of record (`managedPayments: true`) |
+| --- | --- | --- |
+| Tax | The operator registers and files; Stripe Tax computes | Stripe, in more than 80 countries |
+| Checkout | The plan's price | The plan's price and the three overage prices |
+| Overage | A second subscription, invoiced on the 1st | Metered items on the plan subscription, invoiced at its renewal |
+| Yearly plans | Sold | Not sold on Stripe; the file keeps them for the brand's Polar deployments |
+| Cards and cancelling | Stripe's portal | Stripe's portal or Link; LobbyStack can't set a card by API |
+| Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off |
+| Receipts and legal pages | The operator's, naming Stripe | Sold through Link, receipts from Link; the pages name Stripe and Link |
+
+### Checked in a Stripe sandbox
+
+- A merchant of record Checkout takes the metered overage prices beside the plan's price, and everything today's Checkout sends: the customer and its address, metadata, the checkout request, the expiry, the language, a coupon, address and tax ID collection. Automatic tax is always on, with Stripe liable.
+- It refuses to turn Adaptive Pricing off.
+- The customer portal opens, and a customer balance credit, which the daily totals check gives, is accepted.
+- Stripe's documentation adds: a subscription starts only from Checkout or a payment link; invoice items and one-off invoices aren't allowed; updates and refunds by API are; and a subscription's card can't be set by API.
+- Still to check, on a subscription a person pays through a test checkout: upgrades, and whether they can wait for a payment as a pending update; schedules at the renewal; cancelling and resuming; removing a discount; a balance credit on the renewal invoice; and a renewal that invoices a month's metered usage.
+
+### Steps
+
+1. **The setting:** with `stripe.overage` `checkout`, the Stripe catalog sells no yearly prices, which stay in the file for Polar, instead of refusing the file (check C9); `managedPayments` still needs `overage: checkout` (C8). The worker and the admin read the mode from the brand's file, as they read the proration settings.
+2. **Checkout:** `managed_payments` on, and the three overage prices on the plan's checkout. No overage subscription: `billing.ensureOverage` checks that the plan subscription has its metered items, adds any a plan change dropped, and records the plan subscription as the one that bills overage.
+3. **Usage:** meter events don't change, since the meters count by customer. A late event counts toward the plan subscription's period, not the calendar month, for the grace window, the resend window and the daily totals check.
+4. **Plan changes:** the plan's item changes and the metered items stay, so an upgrade also invoices the usage so far. Schedules at the renewal carry the metered items in each phase. Pending updates stay or go by the sandbox check.
+5. **Cancelling and deleting:** cancelling at the period's end stays, and ending a plan now invoices its outstanding usage with it.
+6. **Cards, currency and receipts:** **Manage billing** opens the portal, which works under both modes. Transactions keep each invoice's own currency, and affiliate commissions and the finance export handle an invoice in another currency.
+7. **Legal pages and docs:** a merchant of record variant of the payment terms naming Stripe and Link, the provider page, the operator guide's Stripe steps (Managed Payments' eligibility review), and both brands' `stripe` blocks.
+8. **Scenarios:** a merchant of record subscription can't be made by API, so its scenarios start from test checkouts a person pays, and the rest run as today.
+
+The estimate is 3 to 4 days.
 
 ## Review of the Stripe work (2026-11-08)
 

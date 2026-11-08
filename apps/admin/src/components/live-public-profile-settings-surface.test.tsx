@@ -71,13 +71,45 @@ afterEach(() => {
 });
 
 describe("public profile settings", () => {
-  it("publishes the page with the details the owner typed", async () => {
+  it("publishes and unpublishes the page at once with its button, leaving what the owner typed for Save", async () => {
+    const fetch = setup(view());
+    expect(await screen.findByText("publicPage.publish.labelOff")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("publicPage.details.category"), { target: { value: "Dental clinic" } });
+    fireEvent.click(screen.getByRole("button", { name: "publicPage.publish.publishAction" }));
+
+    await waitFor(() => expect(saves(fetch)).toHaveLength(1));
+    // Only the page's state goes out: the category waits for Save.
+    expect(saves(fetch)[0]!.body).toEqual({
+      published: true,
+      category: null,
+      description: "Family dentistry.",
+      publicEmail: null,
+      address: { line1: null, line2: null, city: null, region: null, postalCode: null, countryCode: null },
+      showPhone: true,
+      showHours: true,
+      showServices: true,
+      showMap: true,
+      widgetKeyId: KEY_ONE,
+    });
+    expect(await screen.findByRole("button", { name: "publicPage.publish.unpublishAction" })).toBeTruthy();
+    expect(screen.getByText("publicPage.publish.label")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "publicPage.publish.open" })).toBeTruthy();
+    expect((screen.getByLabelText("publicPage.details.category") as HTMLInputElement).value).toBe("Dental clinic");
+    expect((screen.getByRole("button", { name: "publicPage.save" }) as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "publicPage.publish.unpublishAction" }));
+    await waitFor(() => expect(saves(fetch)).toHaveLength(2));
+    expect(saves(fetch)[1]!.body).toMatchObject({ published: false, category: null });
+    expect(await screen.findByRole("button", { name: "publicPage.publish.publishAction" })).toBeTruthy();
+    expect(screen.getByText("publicPage.publish.labelOff")).toBeTruthy();
+  });
+
+  it("saves the details the owner typed", async () => {
     const fetch = setup(view());
     expect(await screen.findByText("https://app.example.com/profile/acme-dental")).toBeTruthy();
     expect(screen.getByRole("link", { name: "publicPage.publish.preview" }).getAttribute("href")).toBe("https://app.example.com/profile/acme-dental");
     expect((screen.getByRole("button", { name: "publicPage.save" }) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(screen.getByRole("switch", { name: "publicPage.publish.label" }));
     fireEvent.change(screen.getByLabelText("publicPage.details.category"), { target: { value: "Dental clinic" } });
     fireEvent.change(screen.getByLabelText("publicPage.details.line1"), { target: { value: "123 Main St" } });
     fireEvent.change(screen.getByLabelText("publicPage.details.city"), { target: { value: "Toronto" } });
@@ -90,7 +122,7 @@ describe("public profile settings", () => {
     expect(saves(fetch)[0]).toEqual({
       url: "/api/business-profile?businessId=business",
       body: {
-        published: true,
+        published: false,
         category: "Dental clinic",
         description: "Family dentistry.",
         publicEmail: null,
@@ -103,7 +135,7 @@ describe("public profile settings", () => {
       },
     });
     expect(await screen.findByRole("status")).toBeTruthy();
-    expect(screen.getByRole("link", { name: "publicPage.publish.open" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "publicPage.publish.preview" })).toBeTruthy();
   });
 
   it("checks the email before saving", async () => {
@@ -156,7 +188,7 @@ describe("public profile settings", () => {
     setup(view({ canEdit: false }));
     expect(await screen.findByText("publicPage.readOnly")).toBeTruthy();
     expect((screen.getByLabelText("publicPage.details.category") as HTMLInputElement).disabled).toBe(true);
-    expect(screen.getByRole("switch", { name: "publicPage.publish.label" }).getAttribute("aria-disabled") ?? String((screen.getByRole("switch", { name: "publicPage.publish.label" }) as HTMLButtonElement).disabled)).toBe("true");
+    expect((screen.getByRole("button", { name: "publicPage.publish.publishAction" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.queryByRole("button", { name: "publicPage.save" })).toBeNull();
   });
 

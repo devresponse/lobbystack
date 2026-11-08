@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink, Globe, LayoutList, MapPin, MessageSquareMore } from "lucide-react";
+import { Check, Copy, ExternalLink, EyeOff, Globe, LayoutList, MapPin, MessageSquareMore } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -19,7 +19,7 @@ import { BusinessPageReceptionists } from "./receptionists/business-page-recepti
 import { Alert, AlertDescription } from "./ui/alert";
 import { Button, buttonVariants } from "./ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet } from "./ui/field";
+import { Field, FieldContent, FieldDescription, FieldError, FieldLabel, FieldLegend, FieldSet, FieldTitle } from "./ui/field";
 import { Input } from "./ui/input";
 import { NativeSelect, NativeSelectOption } from "./ui/native-select";
 import { Switch } from "./ui/switch";
@@ -162,6 +162,29 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
     },
   });
 
+  // Publish page and Unpublish page save the page's state at once, apart from the form's Save.
+  const publish = useMutation({
+    mutationFn: (settings: PublicProfileSettings) => requestJson<PublicProfileSettingsResponse>(`/api/business-profile?businessId=${encodeURIComponent(businessId)}`, { method: "PUT", body: JSON.stringify(settings) }),
+    onSuccess: (result) => {
+      setView(result);
+      // What the owner is typing elsewhere stays in the form, still to save.
+      setForm((current) => ({ ...current, published: result.settings.published }));
+      queryClient.setQueryData(["business-profile", businessId], result);
+    },
+    onError: () => setError({ field: null, message: t("publicPage.errors.saveFailed") }),
+  });
+
+  function switchPublished() {
+    // The saved settings with the page's state switched, so unsaved edits don't go out with it.
+    const parsed = publicProfileSettingsSchema.safeParse({ ...settingsFromForm(formFromView(view)), published: !view.settings.published });
+    if (!parsed.success) {
+      setError({ field: null, message: t("publicPage.errors.invalid") });
+      return;
+    }
+    setError(null);
+    publish.mutate(parsed.data);
+  }
+
   function update<K extends keyof Form>(key: K, value: Form[K]) {
     setForm((current) => ({ ...current, [key]: value }));
     setSaved(false);
@@ -226,13 +249,16 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
           </div>
           <Field orientation="horizontal">
             <FieldContent className="min-w-0">
-              <FieldLabel htmlFor="public-profile-published">{t("publicPage.publish.label")}</FieldLabel>
+              <FieldTitle>{view.settings.published ? t("publicPage.publish.label") : t("publicPage.publish.labelOff")}</FieldTitle>
               <FieldDescription>
-                {form.published ? t("publicPage.publish.on") : t("publicPage.publish.off")}
-                {form.published && view.settings.published && view.publishedAt ? <> {t("publicPage.publish.since", { date: formatDateTime(view.publishedAt, locale, { dateStyle: "medium" }) })}</> : null}
+                {view.settings.published ? t("publicPage.publish.on") : t("publicPage.publish.off")}
+                {view.settings.published && view.publishedAt ? <> {t("publicPage.publish.since", { date: formatDateTime(view.publishedAt, locale, { dateStyle: "medium" }) })}</> : null}
               </FieldDescription>
             </FieldContent>
-            <Switch checked={form.published} disabled={readOnly} id="public-profile-published" onCheckedChange={(checked) => update("published", checked)} />
+            <Button className="shrink-0" disabled={readOnly || publish.isPending} onClick={switchPublished} size="lg" type="button">
+              {view.settings.published ? <EyeOff /> : <Globe />}
+              {view.settings.published ? t("publicPage.publish.unpublishAction") : t("publicPage.publish.publishAction")}
+            </Button>
           </Field>
         </CardContent>
       </Card>

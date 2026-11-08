@@ -37,7 +37,7 @@ With `managedPayments: true` and `overage: checkout` in the brand's `stripe` blo
 | Checkout | The plan's price | The plan's price and the three overage prices, with Managed Payments on |
 | Overage | A second subscription, invoiced on the 1st | Metered items on the plan subscription, invoiced at its renewal; `billing.ensureOverage` checks they're there |
 | Yearly plans | Sold | Not sold: the deployment leaves the file's yearly prices out, which its Polar deployments still sell |
-| Usage dates | By the month's end and the grace hours | By the plan's renewal and the grace hours, and the daily totals check's open period starts at the renewal |
+| Usage dates | By the month's end and the grace hours | By the plan's renewal and the grace hours, with usage from before the period the last renewal ended dated now, since its invoice is final; the daily totals check's open period starts at the renewal |
 | Plan changes, cancelling | **Settings > Plan**, as on Stripe directly; a renewal schedule keeps the metered items | The same |
 | Cards | The portal | The portal or Link; the API can't set a subscription's card |
 | Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off, so a transaction can be in another currency than the plans |

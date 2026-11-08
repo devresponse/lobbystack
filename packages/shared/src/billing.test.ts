@@ -56,6 +56,19 @@ describe("usage as money (the Stripe plan's step 16)", () => {
     const next = new Date("2026-12-08T11:10:00Z");
     expect(meterEventTime(next, new Date("2026-12-08T11:45:00Z"), 1, period)).toEqual(next);
   });
+
+  it("dates usage from before the period the renewal ended by now, since its invoice is final", () => {
+    // The period before this one ran from 10-08 11:00; the one before that was invoiced on 10-08.
+    const period = { start: new Date("2026-11-08T11:00:00Z"), end: new Date("2026-12-08T11:00:00Z") };
+    const justRenewed = new Date("2026-11-08T11:10:00Z");
+    // Within Stripe's 35 days and the renewal's grace, but from two periods back.
+    expect(meterEventTime(new Date("2026-10-06T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+    // Usage surely in the period the renewal ended keeps its time.
+    const previous = new Date("2026-10-20T12:00:00Z");
+    expect(meterEventTime(previous, justRenewed, 1, period)).toEqual(previous);
+    // Its first days could be the period before's when that one is shorter, so they go out with now, a period late.
+    expect(meterEventTime(new Date("2026-10-10T12:00:00Z"), justRenewed, 1, period)).toEqual(justRenewed);
+  });
 });
 
 describe("knowledge storage limits", () => {

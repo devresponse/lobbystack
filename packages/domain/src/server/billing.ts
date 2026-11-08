@@ -5,6 +5,7 @@ import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWra
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
 import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
+import { logEvent } from "@lobbystack/telemetry/node";
 
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
 
@@ -321,6 +322,8 @@ export async function loadBillingCheckoutRequest(
   billingEmail: string | null;
   /** The account's billing key: the external ID of the business's Polar customer. */
   externalCustomerId: string;
+  /** The account's customer at the provider, once it has one: Stripe's checkout reuses it, Polar finds its own by the billing key. */
+  customerId: string | null;
   businessName: string;
   onboardingStage: string;
   /** The plan other than the target's standard one it sells, such as a promo plan; null for the standard plan. */
@@ -342,6 +345,7 @@ export async function loadBillingCheckoutRequest(
       customerEmail: users.email,
       billingEmail: billingCheckoutRequests.billingEmail,
       billingKey: billingAccounts.billingKey,
+      customerId: billingAccounts.customerId,
       subscriptionId: billingAccounts.subscriptionId,
       plan: billingAccounts.plan,
       currentPlanCode: billingAccounts.planCode,
@@ -911,6 +915,39 @@ function billingEventKindOf(eventType: string): string {
   return "other";
 }
 
+/** What billing.ensureOverage reads: the account's plan subscription, its overage subscription, and the catalog's currency. */
+export type OverageWork = {
+  source: string | null;
+  customerId: string | null;
+  subscriptionId: string | null;
+  subscriptionState: string | null;
+  cancelAt: Date | null;
+  overageSubscriptionId: string | null;
+  periodStart: Date | null;
+  /** The live prices' currency, which the overage prices share. */
+  currency: string | null;
+};
+
+export async function loadOverageWork(context: DomainContext, input: { businessId: string }): Promise<OverageWork | null> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const [account] = await tx.select({ source: billingAccounts.source, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, subscriptionState: billingAccounts.subscriptionState, cancelAt: billingAccounts.cancelAt, overageSubscriptionId: billingAccounts.overageSubscriptionId, periodStart: billingAccounts.currentPeriodStart })
+      .from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
+    if (!account) return null;
+    const catalog = await readBillingCatalogSnapshot(tx);
+    return { ...account, currency: catalog.prices.find((price) => !price.retired)?.currency ?? null };
+  }, { accessMode: "read only" });
+}
+
+/** Stores the overage subscription, while the account still pays with the plan subscription it was made for. */
+export async function recordOverageSubscription(context: DomainContext, input: { businessId: string; planSubscriptionId: string; overageSubscriptionId: string }): Promise<boolean> {
+  return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const rows = await tx.update(billingAccounts).set({ overageSubscriptionId: input.overageSubscriptionId, updatedAt: new Date() })
+      .where(and(eq(billingAccounts.businessId, input.businessId), eq(billingAccounts.subscriptionId, input.planSubscriptionId)))
+      .returning({ businessId: billingAccounts.businessId });
+    return rows.length > 0;
+  });
+}
+
 /** What a stored event is about, which the worker reads back before reconcile opens its transaction. Null once it's processed. */
 export type BillingEventSubject = { provider: string; kind: string; subscriptionId: string | null; paymentRef: string | null };
 
@@ -997,6 +1034,7 @@ export async function reconcileBillingProviderEvent(
       planCode: billingAccounts.planCode,
       currentPeriodStart: billingAccounts.currentPeriodStart,
       endSetAt: billingAccounts.endSetAt,
+      overageSubscriptionId: billingAccounts.overageSubscriptionId,
     }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1))[0];
     // The billing key is the external ID that usage and the billing portal name the business's Polar
     // customer by, and the checkout makes that customer with it, so an event never changes it. Polar
@@ -1097,6 +1135,37 @@ export async function reconcileBillingProviderEvent(
       // A plan with fewer receptionists pauses the newest ones past its number, in a job of its
       // own so nothing about receptionists can hold up the payment.
       if (polarFields.plan || polarFields.subscriptionState) await enqueueReceptionistAllowanceCheck(tx, input.businessId, "billing_reconcile");
+      // On Stripe, overage is a subscription of its own (the Stripe plan's step 13). billing.ensureOverage gives a
+      // live plan without one its overage subscription, takes back an end set while the plan wasn't live, and ends
+      // it with its month once the plan has ended. Each plan event that finds one of those to do queues it once.
+      const planEvent = kind === "subscription" || fresh !== undefined;
+      if (event.provider === "stripe" && planEvent && subscriptionId && !stale && !keepsManagedPlan) {
+        const overageWork = live ? !existing?.overageSubscriptionId || !isLiveSubscriptionState(existing.subscriptionState) : Boolean(existing?.overageSubscriptionId);
+        if (overageWork) await enqueueOutbox(tx, { topic: "billing.ensureOverage", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `ensure-overage:${event.id}`, payload: { subscriptionId } });
+      }
+    }
+
+    // The overage subscription ending leaves the account without overage: usage stops at the allowance. Stripe
+    // ending it after failed payments or a dispute, or leaving it unpaid, while the plan pays on is reported: the
+    // open invoice is the operator's to collect or forgive, and billing.ensureOverage makes no other until then.
+    const overageSubscriptionId = stringField(payload, "overageSubscriptionId");
+    const overageStatus = stringField(payload, "status") ?? "";
+    if (event.provider === "stripe" && overageSubscriptionId && ["canceled", "unpaid", "incomplete_expired"].includes(overageStatus)) {
+      const [cleared] = await tx.update(billingAccounts).set({ overageSubscriptionId: null, updatedAt: new Date() })
+        .where(and(eq(billingAccounts.businessId, input.businessId), eq(billingAccounts.overageSubscriptionId, overageSubscriptionId)))
+        .returning({ subscriptionState: billingAccounts.subscriptionState });
+      const reason = stringField(recordObject(payload.cancellation_details), "reason");
+      const unpaid = overageStatus === "unpaid" || reason === "payment_failed" || reason === "payment_disputed";
+      if (cleared && unpaid && isLiveSubscriptionState(cleared.subscriptionState)) {
+        logEvent("warn", "ops.billing.overage_unpaid", { businessId: input.businessId, overageSubscriptionId, status: overageStatus, ...(reason ? { reason } : {}) });
+        await recordProductEventInTransaction(tx, {
+          name: "ops.billing.overage_unpaid",
+          distinctId: getPostHogDistinctIdForBusinessSystem(input.businessId),
+          businessId: input.businessId,
+          actorType: "worker",
+          properties: { provider: "stripe", overageSubscriptionId },
+        });
+      }
     }
 
     // A Stripe refund names its payment, and the worker read back the invoice it paid: the invoice's order row

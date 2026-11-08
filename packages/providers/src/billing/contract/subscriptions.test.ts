@@ -124,7 +124,6 @@ describe("the billing provider contract: a subscription", () => {
       await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
       await expect(billing.endAtRenewal({ subscriptionId: "sub_1", then: "cancel", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
       await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
-      await expect(billing.ensureOverage({ customerId: "cus_1", planSubscriptionId: "sub_1", businessId: "b1", currency: "cad" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 13") });
       expect(stripe.requests).toEqual([]);
       expect(billing.can).toEqual({ uniqueCustomerEmail: false, meterMoney: true, separateOverage: true, readBack: true, inAppCancel: true });
     });

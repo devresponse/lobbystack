@@ -23,6 +23,8 @@ export default defineConfig({
       "@lobbystack/providers/polar/adapter": `${root}/packages/providers/src/polar/adapter.ts`,
       "@lobbystack/providers/polar/polarCatalog": `${root}/packages/providers/src/polar/polarCatalog.ts`,
       "@lobbystack/providers/polar/polarBilling": `${root}/packages/providers/src/polar/polarBilling.ts`,
+      "@lobbystack/providers/stripe/adapter": `${root}/packages/providers/src/stripe/adapter.ts`,
+      "@lobbystack/providers/stripe/fake": `${root}/packages/providers/src/stripe/fake/index.ts`,
       "@lobbystack/providers/storage/provider": `${root}/packages/providers/src/storage/provider.ts`,
       "@lobbystack/providers/twilio/twilioProvider": `${root}/packages/providers/src/twilio/twilioProvider.ts`,
       "@lobbystack/providers": `${root}/packages/providers/src/index.ts`,

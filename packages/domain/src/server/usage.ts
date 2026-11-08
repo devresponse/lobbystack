@@ -143,13 +143,15 @@ export function replayEvents(events: ReplayEvent[], current: PlanInForce, limits
   return { usage, rawSpendCents: Math.max(0, rawSpendCents) };
 }
 
-type BillingContext = PlanInForce & { capCents: number | null; billingInterval: string | null };
+/** noOverage: a Stripe account without its overage subscription, as before it's made or after Stripe ended it unpaid, so usage stops at the allowance. */
+type BillingContext = PlanInForce & { capCents: number | null; billingInterval: string | null; noOverage?: boolean };
 // The business's plan with every plan's limits, which replaying the month needs.
 type UsageContext = BillingContext & { limits: BillingPlanLimitBook };
 
 // The limits of the plan in force.
-function currentLimits(billing: Pick<UsageContext, "plan" | "planCode" | "limits">): BillingPlanLimits {
-  return limitsFor(billing.limits, billing.plan, billing.planCode);
+function currentLimits(billing: Pick<UsageContext, "plan" | "planCode" | "limits" | "noOverage">): BillingPlanLimits {
+  const limits = limitsFor(billing.limits, billing.plan, billing.planCode);
+  return billing.noOverage && limits.overagesBillable ? { ...limits, overagesBillable: false } : limits;
 }
 
 // Reservations, top-ups and corrections in a business's billing period run one at a time.
@@ -186,7 +188,7 @@ function reservableVoiceSeconds(billing: Pick<UsageContext, "plan" | "planCode" 
 
 export async function loadBillingContext(tx: DatabaseTransaction, businessId: string): Promise<BillingContext> {
   const [business] = await tx.select({ deploymentMode: businesses.deploymentMode }).from(businesses).where(eq(businesses.id, businessId)).limit(1);
-  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode, subscriptionState: billingAccounts.subscriptionState, overageSpendingCapCents: billingAccounts.overageSpendingCapCents, billingInterval: billingAccounts.billingInterval }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
+  const [account] = await tx.select({ plan: billingAccounts.plan, planCode: billingAccounts.planCode, subscriptionState: billingAccounts.subscriptionState, overageSpendingCapCents: billingAccounts.overageSpendingCapCents, billingInterval: billingAccounts.billingInterval, source: billingAccounts.source, overageSubscriptionId: billingAccounts.overageSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1);
   const plan = effectiveBillingPlan({ deploymentMode: business?.deploymentMode ?? "cloud", accountPlan: account?.plan ?? null, subscriptionState: account?.subscriptionState ?? null });
   // A promo plan counts only while its subscription is live, so a lapsed one is Free like any other.
   const live = (liveSubscriptionStates as readonly (string | null)[]).includes(account?.subscriptionState ?? null);
@@ -195,6 +197,7 @@ export async function loadBillingContext(tx: DatabaseTransaction, businessId: st
     planCode: live && plan === account?.plan ? account.planCode ?? null : null,
     capCents: account?.overageSpendingCapCents ?? null,
     billingInterval: account?.billingInterval ?? null,
+    noOverage: account?.source === "stripe" && !account.overageSubscriptionId,
   };
 }
 

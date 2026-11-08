@@ -8,6 +8,7 @@ import { FirecrawlProvider } from "@lobbystack/providers/crawling/firecrawl";
 import { SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
 import { GoogleCalendarProvider } from "@lobbystack/providers/google/calendar";
 import { createBillingCatalogClient, createBillingProvider } from "@lobbystack/providers/billing/factory";
+import { checkedBilling } from "./billing/account";
 import { createStorageProvider } from "@lobbystack/providers/storage/provider";
 import { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
 import { getMeter, initializeTelemetry, redactOtelExceptionText, shutdownTelemetry } from "@lobbystack/telemetry/node";
@@ -145,14 +146,15 @@ async function main(): Promise<void> {
   const twilio = createTwilioProvider();
   const twilioAlerts = createAlertSmsProvider();
   const storage = createStorageProvider();
-  const billing = createBillingProvider(process.env);
-  // The daily billing check reads with the same token, which needs organizations:read, meters:read,
+  // The daily billing check reads with the worker's billing token, which needs organizations:read, meters:read,
   // products:read and discounts:read for it. It never reads the webhook, so the token goes without
   // webhooks:read, with which Polar lists the webhook's signing secret.
   const billingCatalog = createBillingCatalogClient(process.env);
   const crawler = createCrawlerProvider();
   const calendar = createCalendarProvider();
   const productAnalytics = createProductAnalytics();
+  // A Stripe key of another account than STRIPE_ACCOUNT_ID leaves the worker without billing.
+  const billing = await checkedBilling(createBillingProvider(process.env), productAnalytics);
   const callSummarizer = createCallSummarizer();
   const businessSummarizer = createBusinessSummarizer();
   const businessHoursExtractor = createBusinessHoursExtractor();

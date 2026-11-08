@@ -41,7 +41,7 @@ function job(type: JobEnvelope["type"], payload: Record<string, unknown>, queue:
 }
 
 function checkoutRequest(extra: Record<string, unknown> = {}) {
-  return { id: requestId, businessId, target: "starter" as const, billingInterval: "monthly" as const, status: "processing" as const, checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null, ...extra };
+  return { id: requestId, businessId, target: "starter" as const, billingInterval: "monthly" as const, status: "processing" as const, checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: null, externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null, ...extra };
 }
 
 beforeEach(() => {

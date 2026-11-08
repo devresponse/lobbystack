@@ -169,7 +169,8 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `billing.sweep` | Every 5 minutes | Queues again a Polar event, usage or checkout request a job left behind, at most once an hour each, and reports work older than an hour (fork PR #71) |
 | `billing.verifyCatalog` | Daily | Compares the file, the tables and Polar; leaves out the webhook, which `pnpm billing verify` checks |
 | `billing.endPromoPlan` | Daily, per business | Ends promo plans whose months ran out, a week ahead |
-| `billing.revokeSubscription` | Each delete of a business that pays | Ends its Polar subscription at once and marks it canceled, so the delete can go ahead (fork PR #101, [delete a business](../features/business-deletion.md)); tries 12 times over about 3 hours, and the delete asks again every 10 minutes |
+| `billing.revokeSubscription` | Each delete of a business that pays | Ends its Polar subscription at once and marks it canceled, so the delete can go ahead (fork PR #101, [delete a business](../features/business-deletion.md)); tries 12 times over about 3 hours, and the delete asks again every 10 minutes. On Stripe, its overage subscription ends too, with its usage invoiced |
+| `billing.ensureOverage` | A Stripe plan event that needs it | Stripe only (Stripe billing's step 13): gives a live plan its overage subscription, anchored on the 1st, and once the plan has ended, ends it with its month |
 | `billing.refreshUnitEconomics` | Hourly, per business | Adds up what the business cost this month in provider, AI and hosting fees (`unit_economics_rollups`) |
 
 `billing.reconcile` and `billing.syncUsage` try 12 times over about 3 hours before the sweep takes over, so nothing needs requeueing by hand. A deleted business's billing account, usage and transactions go with it, so the finance export no longer lists them; Polar keeps the customer and its orders.
@@ -189,6 +190,10 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `ops.billing.webhook_customer_mismatch` | Warning log line from the admin | A subscription came on another business's Polar customer; it still goes to the business that bought it | Any |
 | `ops.billing.webhook_wrong_provider` | Warning log line from the admin, at most once a minute | A delivery reached the route of the provider the deployment doesn't bill through, such as from an endpoint left in that provider's dashboard; answered 404 | Any in a day |
 | `ops.billing.meter_error` | Warning log line from the admin | Stripe couldn't use a meter event, so that usage isn't billed until the daily totals check corrects it (Stripe billing's step 16) | Any |
+| `ops.billing.overage_missing` | PostHog event from the worker, and a warning log line | A live Stripe plan still has no overage subscription an hour into its period, so usage past the allowance waits; the job's error says why | Any |
+| `ops.billing.overage_unpaid` | PostHog event from the worker, and a warning log line | Stripe ended a live plan's overage subscription after failed payments or a dispute, or left it unpaid. Usage stops at the allowance until its invoice is paid, voided or marked uncollectible in Stripe; the plan's next event then makes a new one | Any |
+| `ops.billing.provider_mismatch` | PostHog event from the worker, and an error log line, at startup | `STRIPE_API_KEY` belongs to another account than `STRIPE_ACCOUNT_ID`, so the worker runs without billing | Any |
+| `ops.billing.account_unchecked` | Warning log line from the worker, at startup | Stripe couldn't be reached to check the key's account; the worker bills on | None |
 | `ops.billing.sweep` | Log line from the worker | What each sweep that found work queued again | None |
 
 Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set ([observability](../features/observability.md)). The daily checks' history is also on the deployment: `pnpm lobbystack --profile ops billing catalog-runs --kind verify`.

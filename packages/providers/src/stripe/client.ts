@@ -12,8 +12,10 @@ import type { BillingEnv } from "../billing/types";
 /** The calls the Stripe adapter makes, as the SDK names them. */
 export type StripeApi = {
   accounts: Pick<Stripe["accounts"], "retrieveCurrent">;
-  customers: Pick<Stripe["customers"], "create" | "retrieve">;
-  subscriptions: Pick<Stripe["subscriptions"], "retrieve" | "cancel">;
+  customers: Pick<Stripe["customers"], "create" | "retrieve" | "update">;
+  subscriptions: Pick<Stripe["subscriptions"], "retrieve" | "cancel" | "create" | "update" | "list">;
+  prices: Pick<Stripe["prices"], "list">;
+  checkout: { sessions: Pick<Stripe["checkout"]["sessions"], "create"> };
   billingPortal: { sessions: Pick<Stripe["billingPortal"]["sessions"], "create"> };
   invoicePayments: Pick<Stripe["invoicePayments"], "list">;
 };

@@ -120,6 +120,9 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.unit_economics_rollup_recorded",
   "ops.billing.profile_drift",
   "ops.billing.profile_drift_recovered",
+  "ops.billing.overage_missing",
+  "ops.billing.overage_unpaid",
+  "ops.billing.provider_mismatch",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -551,6 +554,12 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   // polarEnv comes too on a Polar deployment, for the dashboards that read it.
   "ops.billing.profile_drift": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
   "ops.billing.profile_drift_recovered": ["status", "problemCodes", "problemCount", "provider", "providerEnv"],
+  // A live Stripe plan still without its overage subscription an hour on: usage past the allowance waits.
+  "ops.billing.overage_missing": ["businessId", "deploymentMode", "provider"],
+  // Stripe ended a live plan's overage subscription after failed payments: usage stops at the allowance.
+  "ops.billing.overage_unpaid": ["businessId", "deploymentMode", "provider"],
+  // The worker's startup check found a billing key of another account: deployment-wide, so no business.
+  "ops.billing.provider_mismatch": ["provider", "providerEnv", "expectedAccount", "foundAccount"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

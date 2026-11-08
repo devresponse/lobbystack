@@ -1,6 +1,6 @@
 // The checkout job: a checkout page for a new plan, or a paying business's plan change (planChange.ts).
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { planChangeRefusalSentence } from "@lobbystack/shared";
+import { billingProviderNames, planChangeRefusalSentence } from "@lobbystack/shared";
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, readPolarProductLinks, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed } from "@lobbystack/domain";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
@@ -35,7 +35,7 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
   try {
     links = await readPolarProductLinks(dependencies.domain);
   } catch (error) {
-    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: request.subscription ? "Polar plan change failed." : "Polar checkout creation failed.", retrying });
+    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: `${billingProviderNames[billing.id]} ${request.subscription ? "plan change" : "checkout creation"} failed.`, retrying });
     throw error;
   }
   // A promo plan sells through its own product and discount, while it is on sale.
@@ -55,7 +55,8 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
   try {
     // The business's own customer, made out to its billing email, else the person's own.
     const email = request.billingEmail ?? request.customerEmail;
-    const customer = await billing.findOrCreateCustomer({ customer: { id: null, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId });
+    // The account's own customer, when it has one: Polar finds it by the billing key, Stripe by its ID.
+    const customer = await billing.findOrCreateCustomer({ customer: { id: request.customerId, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId });
     const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
     const checkout = await billing.createCheckout({
       customer: { id: customer?.id ?? null, billingKey: request.externalCustomerId },
@@ -78,7 +79,7 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
       await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusalSentence(billing.id, refusal) });
       return { status: "skipped", entityId: requestId };
     }
-    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: "Polar checkout creation failed.", retrying });
+    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: `${billingProviderNames[billing.id]} checkout creation failed.`, retrying });
     throw error;
   }
 }

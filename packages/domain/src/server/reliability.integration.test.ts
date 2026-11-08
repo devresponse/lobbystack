@@ -5,7 +5,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
-import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, reconcileBillingProviderEvent, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
+import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
 import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
@@ -833,6 +833,66 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       } finally {
         await client!.db.delete(businesses).where(eq(businesses.id, businessId));
       }
+    }
+  });
+
+  it("queues a Stripe plan's overage job when there's one to do, drops an overage subscription Stripe ended, and reports one ended unpaid", async () => {
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month" };
+    const context = { db: client!.db as unknown as Database };
+    let seconds = 0;
+    const read = (state: ProviderSubscription["state"]): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state, priceRef: "price_starter_month", interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: state === "canceled" ? new Date("2026-11-20T00:00:00Z") : null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds++)) });
+    const businessId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe overage test", timezone: "UTC", businessType: "test" });
+    const reconcile = async (eventType: string, payload: Record<string, unknown>, fresh?: ProviderSubscription) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { customerId: "cus_1", ...payload } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent(context, { businessId, providerEventId: event!.id, ...(fresh ? { fresh } : {}) }, env);
+      return event!.id;
+    };
+    const planEvent = (state: ProviderSubscription["state"]) => reconcile("customer.subscription.updated", { kind: "subscription", subscriptionId: "sub_1" }, read(state));
+    // What the webhook stores for the overage subscription's events: its own object, beside the ID.
+    const overageEnded = (status: string, reason: string | null) => reconcile(status === "canceled" ? "customer.subscription.deleted" : "customer.subscription.updated", { kind: "other", overageSubscriptionId: "sub_overage", status, cancellation_details: { reason } });
+    const jobs = async () => (await client!.db.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.topic, "billing.ensureOverage")))).map((row) => row.dedupeKey);
+    const reports = async () => (await client!.db.select({ properties: productEvents.properties }).from(productEvents).where(and(eq(productEvents.businessId, businessId), eq(productEvents.name, "ops.billing.overage_unpaid")))).map((row) => row.properties);
+    const overage = async () => (await client!.db.select({ id: billingAccounts.overageSubscriptionId }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.id;
+    try {
+      // The plan goes live without an overage subscription: its event queues the job, and usage stops at the allowance meanwhile.
+      const live = await reconcile("customer.subscription.created", { kind: "subscription", subscriptionId: "sub_1" }, read("active"));
+      expect(await jobs()).toEqual([`ensure-overage:${live}`]);
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: false });
+      // The job stores the one it made while the account pays with the plan it was made for.
+      expect(await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_other", overageSubscriptionId: "sub_overage" })).toBe(false);
+      expect(await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" })).toBe(true);
+      expect(await loadOverageWork(context, { businessId })).toMatchObject({ source: "stripe", customerId: "cus_1", subscriptionId: "sub_1", subscriptionState: "active", cancelAt: null, overageSubscriptionId: "sub_overage" });
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: true });
+      // A live plan with its overage subscription has nothing for the job.
+      await planEvent("active");
+      expect(await jobs()).toHaveLength(1);
+
+      // Canceled by hand: the account has none, nothing's reported, and the plan's next event queues a new one.
+      await overageEnded("canceled", "cancellation_requested");
+      expect([await overage(), await reports()]).toEqual([null, []]);
+      const again = await planEvent("active");
+      expect(await jobs()).toContain(`ensure-overage:${again}`);
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" });
+
+      // Stripe ends it after failed payments while the plan pays on: dropped and reported, once.
+      await overageEnded("canceled", "payment_failed");
+      await overageEnded("canceled", "payment_failed");
+      expect(await overage()).toBeNull();
+      expect(await reports()).toEqual([expect.objectContaining({ provider: "stripe", overageSubscriptionId: "sub_overage", businessId })]);
+      expect(await getBillingUsageStatus(context, { businessId })).toMatchObject({ overagesBillable: false });
+
+      // The plan ends with an overage subscription: its event queues the job, which ends it with its month.
+      await recordOverageSubscription(context, { businessId, planSubscriptionId: "sub_1", overageSubscriptionId: "sub_overage" });
+      const ended = await planEvent("canceled");
+      expect(await jobs()).toContain(`ensure-overage:${ended}`);
+      // Its end once the plan has ended isn't an unpaid one, whatever the reason.
+      await overageEnded("unpaid", null);
+      expect([await overage(), (await reports()).length]).toEqual([null, 1]);
+      await planEvent("canceled");
+      expect(await jobs()).toHaveLength(3);
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
     }
   });
 

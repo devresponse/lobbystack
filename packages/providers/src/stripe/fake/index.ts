@@ -1,6 +1,9 @@
+import type Stripe from "stripe";
+
 import type { StripeCatalogApi, StripeSnapshot } from "../catalog";
 import type { StripeApi } from "../client";
 import { fakeCatalog, loadFakeCatalog } from "./catalog";
+import { completeFakeCheckout, fakeCheckout } from "./checkout";
 import { FakeClock } from "./clock";
 import { FakeStripeContext, type FakeStripeRequest, type FakeStripeState } from "./context";
 import { addFakeCustomer, fakeCustomers } from "./customers";
@@ -27,6 +30,8 @@ export type FakeStripe = StripeApi & StripeCatalogApi & {
   addSubscription(input: FakeSubscriptionInput): void;
   addSchedule(input: { id: string; subscription: string; phases: Array<{ start: number; end: number | null; price: string }> }): void;
   addInvoice(input: { id: string; customer: string; subscription: string | null; hostedInvoiceUrl?: string | null }): void;
+  /** Pays a checkout session with a card, making its subscription. */
+  completeCheckout(sessionId: string, input?: { card?: string }): Stripe.Subscription;
   /** A payment intent that paid an invoice. */
   addInvoicePayment(input: { invoice: string; paymentIntent: string }): void;
   /** Puts a snapshot's catalog objects into the account. */
@@ -44,6 +49,7 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
     customers: fakeCustomers(fake),
     subscriptions: fakeSubscriptions(fake),
     billingPortal: { ...fakeBillingPortal(fake), ...catalog.billingPortal },
+    checkout: fakeCheckout(fake),
     invoicePayments: {
       list: async (params: { payment?: { payment_intent?: string } }) => await fake.call("invoicePayments.list", params, null, () => ({
         object: "list",
@@ -64,6 +70,7 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
     addInvoice: (input) => {
       fake.state.invoices.set(input.id, stripeInvoiceObject(input));
     },
+    completeCheckout: (sessionId, input) => completeFakeCheckout(fake, sessionId, input),
     addInvoicePayment: (input) => {
       fake.state.invoicePayments.push({ ...input });
     },

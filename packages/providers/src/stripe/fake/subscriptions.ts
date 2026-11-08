@@ -3,7 +3,7 @@ import type Stripe from "stripe";
 import type { StripeApi } from "../client";
 import { idOf, type FakeStripeContext } from "./context";
 import { invalid, missing } from "./errors";
-import { stripeInvoiceObject } from "./objects";
+import { stripeInvoiceObject, stripeSubscriptionObject } from "./objects";
 
 /** The subscription as Stripe answers a read: the objects named in expand in full, the rest by ID. */
 function expanded(fake: FakeStripeContext, subscription: Stripe.Subscription, expand: readonly string[]): Stripe.Subscription {
@@ -13,9 +13,56 @@ function expanded(fake: FakeStripeContext, subscription: Stripe.Subscription, ex
   return { ...subscription, schedule, latest_invoice: invoice, discounts } as Stripe.Subscription;
 }
 
-/** subscriptions.retrieve and subscriptions.cancel, on the fake's subscriptions. */
+/** subscriptions.retrieve, create, update, list and cancel, on the fake's subscriptions. */
 export function fakeSubscriptions(fake: FakeStripeContext): StripeApi["subscriptions"] {
   return {
+    /** Items on prices the account sells; a metered price needs its meter. Anchored as billing_cycle_anchor_config says. */
+    async create(params: Stripe.SubscriptionCreateParams, options: Stripe.RequestOptions = {}) {
+      return await fake.call("subscriptions.create", params, options.idempotencyKey ?? null, () => {
+        if (!params.customer || !fake.state.customers.has(params.customer)) throw missing("customer", params.customer ?? "", "customer");
+        const prices = (params.items ?? []).map((item) => fake.state.catalog.prices.find((price) => price.id === item.price && price.active));
+        if (!prices.length || prices.some((price) => !price)) throw invalid("Each item needs an active price.", "items");
+        const metered = prices.filter((price) => price!.recurring?.usage_type === "metered").map((price) => price!.id);
+        const licensed = prices.find((price) => price!.recurring?.usage_type !== "metered");
+        const now = fake.clock.now();
+        // The next 1st at the anchor's time, in UTC.
+        const anchor = params.billing_cycle_anchor_config ? (() => { const at = new Date(now * 1000); return Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, params.billing_cycle_anchor_config!.day_of_month, params.billing_cycle_anchor_config!.hour ?? 0, params.billing_cycle_anchor_config!.minute ?? 0, params.billing_cycle_anchor_config!.second ?? 0) / 1000; })() : null;
+        const id = fake.nextId("sub");
+        const made = {
+          ...stripeSubscriptionObject({ id, customer: params.customer, ...(licensed ? { price: licensed.id } : {}), overagePrices: metered, periodStart: now, ...(anchor ? { periodEnd: anchor } : {}), metadata: (params.metadata ?? {}) as Record<string, string> }, now),
+          ...(licensed ? {} : { items: { object: "list", data: metered.map((price, index) => ({ id: `si_${id}_${index}`, object: "subscription_item", price: { id: price, object: "price", recurring: { interval: "month", interval_count: 1, usage_type: "metered", meter: null }, metadata: {} }, current_period_start: now, current_period_end: anchor ?? now + 30 * 86_400, subscription: id, metadata: {} })), has_more: false } }),
+          billing_cycle_anchor: anchor ?? now,
+          default_payment_method: params.default_payment_method ?? null,
+        } as unknown as Stripe.Subscription;
+        fake.state.subscriptions.set(id, made);
+        return made;
+      });
+    },
+    /** Its end, metadata and default card; one that ended takes none of them. */
+    async update(id: string, params: Stripe.SubscriptionUpdateParams = {}) {
+      return await fake.call("subscriptions.update", { id, ...params }, null, () => {
+        const found = fake.state.subscriptions.get(id);
+        if (!found) throw missing("subscription", id);
+        if (found.status === "canceled") throw invalid("A canceled subscription can only update its cancellation_details and metadata.");
+        const updated = {
+          ...found,
+          ...(params.cancel_at_period_end !== undefined ? { cancel_at_period_end: params.cancel_at_period_end } : {}),
+          ...(params.cancel_at !== undefined ? { cancel_at: params.cancel_at === "" ? null : params.cancel_at } : {}),
+          ...(params.default_payment_method !== undefined ? { default_payment_method: params.default_payment_method === "" ? null : params.default_payment_method } : {}),
+          metadata: { ...found.metadata, ...((params.metadata ?? {}) as Record<string, string>) },
+        } as Stripe.Subscription;
+        fake.state.subscriptions.set(id, updated);
+        return updated;
+      });
+    },
+    /** A customer's subscriptions; status all includes the ended ones, and expand names data.latest_invoice and the like. */
+    async list(params: Stripe.SubscriptionListParams = {}) {
+      return await fake.call("subscriptions.list", params, null, () => {
+        const expand = (params.expand ?? []).map((path) => path.replace(/^data\./, ""));
+        const data = [...fake.state.subscriptions.values()].filter((subscription) => (!params.customer || subscription.customer === params.customer) && (params.status === "all" || subscription.status !== "canceled")).map((subscription) => expanded(fake, subscription, expand));
+        return { object: "list", data, has_more: false, url: "/v1/subscriptions" };
+      });
+    },
     async retrieve(id: string, params: Stripe.SubscriptionRetrieveParams = {}) {
       return await fake.call("subscriptions.retrieve", { id, ...params }, null, () => {
         const found = fake.state.subscriptions.get(id);
@@ -30,7 +77,7 @@ export function fakeSubscriptions(fake: FakeStripeContext): StripeApi["subscript
         if (!found) throw missing("subscription", id);
         if (found.status === "canceled" || found.status === "incomplete_expired") throw invalid("This subscription has already been canceled.");
         const now = fake.clock.now();
-        const ended = { ...found, status: "canceled", canceled_at: now, ended_at: now, cancel_at: null, cancel_at_period_end: false } as Stripe.Subscription;
+        const ended = { ...found, status: "canceled", canceled_at: now, ended_at: now, cancel_at: null, cancel_at_period_end: false, cancellation_details: { comment: null, feedback: null, reason: "cancellation_requested" } } as Stripe.Subscription;
         fake.state.subscriptions.set(id, ended);
         if (params.invoice_now) {
           const invoice = stripeInvoiceObject({ id: fake.nextId("in"), customer: idOf(found.customer) ?? "", subscription: id, status: "open" });

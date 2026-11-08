@@ -101,8 +101,16 @@ export interface BillingProvider {
   /** Ends the subscription now, as for a business being deleted. */
   revoke(input: { subscriptionId: string; requestId: string }): Promise<"ended" | "already_ended">;
 
-  /** The overage subscription, made once a plan goes live (Stripe directly). */
-  ensureOverage?(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string }>;
+  /** The worker's startup check (Stripe): null when the credentials are the deployment's own account, else the account expected and the one found. */
+  checkAccount?(): Promise<{ expected: string; found: string } | null>;
+
+  /**
+   * The plan's overage subscription, made once it goes live (Stripe directly).
+   * One the provider ended after failed payments, or left unpaid, comes back
+   * as unpaid while its invoice is open: no other is made until that invoice
+   * is collected or forgiven.
+   */
+  ensureOverage?(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }>;
   endOverage?(input: { subscriptionId: string; when: "period_end" | "now" }): Promise<void>;
 
   /**

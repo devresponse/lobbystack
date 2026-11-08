@@ -52,7 +52,7 @@ describe("billing jobs: checkout", () => {
     vi.stubEnv("APP_BASE_URL", "https://app.example/");
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: null, externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
     vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
     const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
 
@@ -111,7 +111,7 @@ describe("billing jobs: checkout", () => {
     const domain = { db: undefined as never };
     vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "product-starter-monthly");
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
-    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: null, externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
     const error = new PolarRequestError(503, null);
     const createCheckout = vi.fn().mockRejectedValue(error);
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
@@ -134,7 +134,7 @@ describe("billing jobs: checkout", () => {
       vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
       vi.mocked(markBillingCheckoutFailed).mockResolvedValue(true);
       vi.mocked(markBillingCheckoutCreated).mockResolvedValue(true as never);
-      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: input.billingEmail ?? null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: null, externalCustomerId: `business:${businessId}`, billingEmail: input.billingEmail ?? null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
       const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
       const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout, findCustomerByExternalId: vi.fn().mockResolvedValue(null), createCustomer: vi.fn(), ...input.polar }) }, { isFinalAttempt: input.isFinalAttempt ?? true });
@@ -231,7 +231,7 @@ describe("billing jobs: checkout", () => {
       const links = async () => polarProductLinks(catalog(input.status ?? "active"), process.env);
       vi.mocked(readPolarProductLinks).mockImplementation(links);
       const subscription = input.subscription ? { id: "sub-1", billingInterval: "monthly" as const, ...input.subscription } : null;
-      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
+      vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: null, externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
       const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar }) });
       return { businessId, requestId, domain, run };

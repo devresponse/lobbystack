@@ -127,7 +127,17 @@ export class StripeBilling implements BillingProvider {
     }
   }
 
-  async ensureOverage(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string }> {
+  /**
+   * The key's own account, which must be STRIPE_ACCOUNT_ID: another
+   * account's key would bill or look for the wrong customers. The factory
+   * took only a key of the deployment's mode.
+   */
+  async checkAccount(): Promise<{ expected: string; found: string } | null> {
+    const found = (await this.api.accounts.retrieveCurrent()).id;
+    return found === this.account ? null : { expected: this.account, found };
+  }
+
+  async ensureOverage(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }> {
     return await ensureStripeOverage(this.api, input);
   }
 

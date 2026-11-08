@@ -23,6 +23,22 @@ export function fakeCustomers(fake: FakeStripeContext): StripeApi["customers"] {
         return customer;
       });
     },
+    /** Its default card and metadata, which Stripe merges. */
+    async update(id: string, params: Stripe.CustomerUpdateParams = {}) {
+      return await fake.call("customers.update", { id, ...params }, null, () => {
+        const found = fake.state.customers.get(id);
+        if (!found || ("deleted" in found && found.deleted)) throw missing("customer", id);
+        const customer = found as Stripe.Customer;
+        const updated = {
+          ...customer,
+          ...(params.email !== undefined ? { email: params.email } : {}),
+          ...(params.invoice_settings ? { invoice_settings: { ...(customer.invoice_settings ?? {}), ...params.invoice_settings } } : {}),
+          metadata: { ...(customer.metadata ?? {}), ...((params.metadata ?? {}) as Record<string, string>) },
+        } as Stripe.Customer;
+        fake.state.customers.set(id, updated);
+        return updated;
+      });
+    },
     async retrieve(id: string) {
       return await fake.call("customers.retrieve", { id }, null, () => {
         const found = fake.state.customers.get(id);

@@ -126,7 +126,13 @@ export function fakeCatalog(fake: FakeStripeContext, state: FakeCatalogState): O
   };
 
   const prices = {
-    list: (params: Params) => listOf(fake, "prices.list", params, () => state.prices),
+    list: (params: Params) => {
+      // As autoPagingToArray for the catalog client, and as a page for the adapter's lookups.
+      const items = () => state.prices.filter((price) => (!params?.lookup_keys || params.lookup_keys.includes(price.lookup_key)) && (params?.active === undefined || price.active === params.active));
+      let pending: Promise<{ object: string; data: StripeCatalogPrice[]; has_more: boolean }> | undefined;
+      const page = () => (pending ??= fake.call("prices.list", params, null, () => ({ object: "list", data: items(), has_more: false })));
+      return { then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) => page().then(resolve, reject), autoPagingToArray: async () => (await page()).data };
+    },
     create: (params: Params, options?: Stripe.RequestOptions) => write("prices.create", params, options, () => {
       only(params, ["product", "currency", "unit_amount", "recurring", "lookup_key", "transfer_lookup_key", "tax_behavior", "metadata", "nickname"]);
       const product = find(state.products, params.product, "product");

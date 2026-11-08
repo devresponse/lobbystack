@@ -4,11 +4,12 @@ import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
 import { verifyBillingCatalog } from "./catalog";
 import { createBillingCheckout } from "./checkout";
 import { revokeBillingSubscription } from "./deletion";
+import { ensureBillingOverage } from "./overage";
 import { endBillingPromoPlan } from "./promo";
 import { reconcileBillingEvent, sweepBilling } from "./reconcile";
 import { refreshBillingUnitEconomics, syncBillingUsage } from "./usage";
 
-export type BillingJobType = "billing.syncUsage" | "billing.reconcile" | "billing.refreshUnitEconomics" | "billing.createCheckout" | "billing.endPromoPlan" | "billing.revokeSubscription" | "billing.sweep" | "billing.verifyCatalog";
+export type BillingJobType = "billing.syncUsage" | "billing.reconcile" | "billing.refreshUnitEconomics" | "billing.createCheckout" | "billing.endPromoPlan" | "billing.revokeSubscription" | "billing.ensureOverage" | "billing.sweep" | "billing.verifyCatalog";
 type BillingJob = (job: JobEnvelope, dependencies: WorkerDependencies, execution: JobExecution) => Promise<JobResult>;
 
 export const billingJobs: Record<BillingJobType, BillingJob> = {
@@ -18,6 +19,7 @@ export const billingJobs: Record<BillingJobType, BillingJob> = {
   "billing.createCheckout": createBillingCheckout,
   "billing.endPromoPlan": endBillingPromoPlan,
   "billing.revokeSubscription": revokeBillingSubscription,
+  "billing.ensureOverage": ensureBillingOverage,
   "billing.sweep": sweepBilling,
   "billing.verifyCatalog": verifyBillingCatalog,
 };

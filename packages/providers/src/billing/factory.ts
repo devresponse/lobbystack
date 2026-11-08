@@ -52,8 +52,8 @@ export function createBillingProvider(env: Env): BillingProvider | undefined {
 /**
  * Stripe's adapter from the worker's or the admin's STRIPE_API_KEY and
  * STRIPE_ACCOUNT_ID, or undefined without them. In the preview the key must
- * be a test one. checkStripeAccount, the check of the key's own account, runs
- * at the worker's startup once the worker bills on Stripe (step 13).
+ * be a test one. The worker checks the key's own account at startup
+ * (checkAccount).
  */
 function createStripeBilling(env: Env): StripeBilling | undefined {
   const key = env.STRIPE_API_KEY?.trim();

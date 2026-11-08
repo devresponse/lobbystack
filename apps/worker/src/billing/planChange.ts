@@ -1,22 +1,24 @@
-// Moving a paying business's Polar subscription to another plan, and what checkout and promo endings share with it.
+// Moving a paying business's subscription to another plan, and what checkout and promo endings share with it.
 import { planChangeDirection, planChangeRefusals, type PlanChangeRefusal } from "@lobbystack/shared";
 import { claimBillingSubscription, loadPlanChangeProration, releaseBillingCheckoutRequest, releaseBillingSubscription, type PolarProductLinks, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
 import { isLiveSubscriptionState } from "@lobbystack/domain";
-import { PolarRequestError } from "@lobbystack/providers/polar/polarBilling";
 import { reportWarning } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
+import type { BillingProvider } from "@lobbystack/providers/billing/types";
 
-/** Polar's answer to a plan change as the refusal to tell the business, or undefined when trying again may work. */
-export function planChangeRefusalFor(error: unknown): PlanChangeRefusal | undefined {
-  if (!(error instanceof PolarRequestError)) return undefined;
-  if (error.status === 401 || error.errorName === "insufficient_scope" || error.errorName === "invalid_token") return "token_scope";
-  if (error.status === 402) return "payment_failed";
-  if (error.status === 403 && error.errorName === "AlreadyCanceledSubscription") return "subscription_ending";
-  if (error.status === 403 || error.status === 404) return "subscription_unavailable";
-  if (error.status === 409) return "change_pending";
-  if (error.status === 422) return "product_unavailable";
-  return undefined;
+/** The provider's answer to a plan change as the refusal to tell the business, or undefined when trying again may work. */
+export function planChangeRefusalFor(billing: BillingProvider, error: unknown): PlanChangeRefusal | undefined {
+  const refusal = billing.refusalFor(error);
+  return refusal && refusal !== "retry" && refusal !== "billing_email_taken" && refusal !== "billing_email_invalid" ? refusal : undefined;
 }
+
+/** billing.json's words for a plan change, as when it happens and how it charges. */
+const planChangeTimings = {
+  invoice: { when: "now", proration: "invoice_now" },
+  prorate: { when: "now", proration: "next_invoice" },
+  next_period: { when: "renewal", proration: "none" },
+  reset: { when: "now", proration: "restart" },
+} as const;
 
 /**
  * Moves a paying business's Polar subscription to the plan it asked for. A
@@ -42,8 +44,8 @@ export async function changeBillingPlan(
   },
 ): Promise<JobResult | null> {
   const { businessId, requestId } = input;
-  const polar = dependencies.polar;
-  if (!polar?.getSubscription || !polar.changeSubscriptionProduct) {
+  const billing = dependencies.billing;
+  if (!billing) {
     await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "Billing plan changes are not configured." });
     return { status: "skipped", entityId: requestId };
   }
@@ -56,28 +58,29 @@ export async function changeBillingPlan(
   try {
     const { links } = input;
     const productId = input.promo?.productId ?? polarCheckoutProductId(links, input.target, input.billingInterval);
-    const subscription = await polar.getSubscription(input.subscription.id);
-    if (!subscription || subscription.endedAt || !isLiveSubscriptionState(subscription.status)) return null;
+    const subscription = await billing.getSubscription(input.subscription.id);
+    if (!subscription || subscription.endedAt || !isLiveSubscriptionState(subscription.state)) return null;
     // A retry after Polar made the change, or a change already waiting for the next period.
-    if (subscription.productId === productId || subscription.pendingProductId === productId) {
+    if (subscription.priceRef === productId || subscription.next?.priceRef === productId) {
       await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
       return { status: "completed", entityId: requestId };
     }
-    if (subscription.cancelAtPeriodEnd) {
+    if (subscription.cancelAt) {
       await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals.subscription_ending });
       return { status: "skipped", entityId: requestId };
     }
     // Polar's own product says what the business pays for now; the account can lag a webhook behind it.
-    const current = links.planFor(subscription.productId) ?? { plan: input.subscription.plan, interval: input.subscription.billingInterval ?? input.billingInterval };
+    const current = links.planFor(subscription.priceRef) ?? { plan: input.subscription.plan, interval: input.subscription.billingInterval ?? input.billingInterval };
     const direction = planChangeDirection(current, { plan: input.target, interval: input.billingInterval });
     const proration = await loadPlanChangeProration(dependencies.domain);
     // A promo plan brings its discount. Leaving one for a standard plan drops its discount, which no standard product takes.
-    const discount = input.promo ? { discountId: input.promo.discountId, metadata: input.promo.metadata } : input.subscription.planCode ? { discountId: null } : {};
-    await polar.changeSubscriptionProduct({ subscriptionId: subscription.id, productId, prorationBehavior: direction === "downgrade" ? proration.downgrade : proration.upgrade, ...discount });
+    const discount = input.promo ? "price" : input.subscription.planCode ? "remove" : "keep";
+    const timing = planChangeTimings[direction === "downgrade" ? proration.downgrade : proration.upgrade];
+    await billing.changePlan({ subscriptionId: subscription.id, to: { ref: productId, discountRef: input.promo?.discountId ?? null }, discount, ...timing, ...(input.promo ? { metadata: input.promo.metadata } : {}), requestId });
     await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
     return { status: "completed", entityId: requestId };
   } catch (error) {
-    const refusal = planChangeRefusalFor(error);
+    const refusal = planChangeRefusalFor(billing, error);
     if (refusal) {
       // Asking again gets the same answer, so the business hears why instead of a retry.
       await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals[refusal] });

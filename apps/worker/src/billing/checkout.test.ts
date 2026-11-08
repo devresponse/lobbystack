@@ -11,6 +11,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => (await import("./testing
 
 import { handleJob, type WorkerDependencies } from "../handlers";
 import { brand } from "./testing";
+import { polarFake } from "./polarFake";
+import type { PolarBillingClient } from "@lobbystack/providers/polar/adapter";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -63,7 +65,7 @@ describe("billing jobs: checkout", () => {
       trace: {},
       idempotencyKey: `test:${randomUUID()}`,
       scheduled: false,
-    }, { domain, polar: { recordUsage: vi.fn(), createCheckout } });
+    }, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout }) });
 
     expect(result).toEqual({ status: "completed", entityId: requestId });
     expect(createCheckout).toHaveBeenCalledWith(expect.objectContaining({
@@ -84,8 +86,8 @@ describe("billing jobs: checkout", () => {
     const createCheckout = vi.fn();
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValueOnce({ claimed: false, retryAt }).mockResolvedValueOnce({ claimed: false, retryAt: null });
 
-    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout } })).toEqual({ status: "deferred", entityId: requestId, retryAt });
-    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout } })).toEqual({ status: "skipped", entityId: requestId });
+    expect(await handleJob(job, { domain: { db: undefined as never }, billing: polarFake({ recordUsage: vi.fn(), createCheckout }) })).toEqual({ status: "deferred", entityId: requestId, retryAt });
+    expect(await handleJob(job, { domain: { db: undefined as never }, billing: polarFake({ recordUsage: vi.fn(), createCheckout }) })).toEqual({ status: "skipped", entityId: requestId });
     expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
     expect(createCheckout).not.toHaveBeenCalled();
   });
@@ -97,7 +99,7 @@ describe("billing jobs: checkout", () => {
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
     vi.mocked(claimBillingCheckoutRequest).mockResolvedValueOnce({ claimed: false, retryAt: null, expired: true });
 
-    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage: vi.fn(), createCheckout: vi.fn() } })).toEqual({ status: "skipped", entityId: requestId });
+    expect(await handleJob(job, { domain: { db: undefined as never }, billing: polarFake({ recordUsage: vi.fn(), createCheckout: vi.fn() }) })).toEqual({ status: "skipped", entityId: requestId });
     expect(error.mock.calls.map(([line]) => JSON.parse(String(line)) as Record<string, unknown>)).toContainEqual(expect.objectContaining({ message: expect.stringMatching(/\] exception: Billing work waited longer than it should\.$/), operation: "job.billing.createCheckout", businessId, requestId, alertable: true }));
     expect(loadBillingCheckoutRequest).not.toHaveBeenCalled();
     error.mockRestore();
@@ -114,17 +116,17 @@ describe("billing jobs: checkout", () => {
     const createCheckout = vi.fn().mockRejectedValue(error);
     const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
 
-    await expect(handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout } }, { isFinalAttempt: false })).rejects.toBe(error);
+    await expect(handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout }) }, { isFinalAttempt: false })).rejects.toBe(error);
     expect(releaseBillingCheckoutRequest).toHaveBeenCalledWith(domain, { businessId, requestId });
     expect(markBillingCheckoutFailed).not.toHaveBeenCalled();
 
-    await expect(handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout } }, { isFinalAttempt: true })).rejects.toBe(error);
+    await expect(handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout }) }, { isFinalAttempt: true })).rejects.toBe(error);
     expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: "Polar checkout creation failed." });
     expect(releaseBillingCheckoutRequest).toHaveBeenCalledTimes(1);
   });
 
   describe("a checkout's Polar customer", () => {
-    function checkout(input: { billingEmail?: string; isFinalAttempt?: boolean; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+    function checkout(input: { billingEmail?: string; isFinalAttempt?: boolean; polar: Partial<PolarBillingClient> }) {
       const businessId = randomUUID();
       const requestId = randomUUID();
       const domain = { db: undefined as never };
@@ -135,7 +137,7 @@ describe("billing jobs: checkout", () => {
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: input.billingEmail ?? null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
       const createCheckout = vi.fn().mockResolvedValue({ checkoutId: "checkout-1", checkoutUrl: "https://polar.example/checkout-1" });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
-      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout, findCustomerByExternalId: vi.fn().mockResolvedValue(null), createCustomer: vi.fn(), ...input.polar } }, { isFinalAttempt: input.isFinalAttempt ?? true });
+      const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout, findCustomerByExternalId: vi.fn().mockResolvedValue(null), createCustomer: vi.fn(), ...input.polar }) }, { isFinalAttempt: input.isFinalAttempt ?? true });
       return { businessId, requestId, domain, createCheckout, run };
     }
 
@@ -216,7 +218,7 @@ describe("billing jobs: checkout", () => {
     const catalog = (status: "draft" | "active") => ({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status, polar_disc: "disc-half-off" }] });
     const metadata = (businessId: string, requestId: string) => ({ lobbystack_business: businessId, lobbystack_plan: "salons-half-off", lobbystack_checkout: requestId });
 
-    function promoCheckout(input: { status?: "draft" | "active"; subscription?: { plan: "starter" | "pro"; planCode: string | null } | null; planCode?: string | null; polar: Partial<NonNullable<WorkerDependencies["polar"]>> }) {
+    function promoCheckout(input: { status?: "draft" | "active"; subscription?: { plan: "starter" | "pro"; planCode: string | null } | null; planCode?: string | null; polar: Partial<PolarBillingClient> }) {
       const businessId = randomUUID();
       const requestId = randomUUID();
       const domain = { db: undefined as never };
@@ -231,7 +233,7 @@ describe("billing jobs: checkout", () => {
       const subscription = input.subscription ? { id: "sub-1", billingInterval: "monthly" as const, ...input.subscription } : null;
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode === undefined ? "salons-half-off" : input.planCode, subscription });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
-      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } });
+      const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar }) });
       return { businessId, requestId, domain, run };
     }
 

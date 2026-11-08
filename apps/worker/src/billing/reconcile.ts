@@ -24,7 +24,7 @@ export async function reconcileBillingEvent(job: JobEnvelope, dependencies: Work
 /** billing.sweep: queues billing work that waited too long again, and reports it. */
 export async function sweepBilling(_job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
   const outcome = await sweepBillingWork(dependencies.domain);
-  await recordBillingSweep(outcome, Boolean(dependencies.polar));
+  await recordBillingSweep(outcome, Boolean(dependencies.billing));
   // The next try sweeps again and finds the rows it couldn't queue; its last one reports the error.
   if (outcome.failed > 0) throw outcome.error;
   const queued = outcome.queued.provider_event + outcome.queued.usage_event + outcome.queued.checkout_request;

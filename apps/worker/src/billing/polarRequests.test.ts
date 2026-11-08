@@ -12,6 +12,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => (await import("./testing
 
 import { handleJob, type WorkerDependencies } from "../handlers";
 import { brand } from "./testing";
+import { polarFake } from "./polarFake";
 
 const businessId = "00000000-0000-4000-8000-0000000000b1";
 const requestId = "00000000-0000-4000-8000-0000000000c1";
@@ -31,7 +32,7 @@ function subscriptionBody(extra: Record<string, unknown> = {}): Record<string, u
   return { id: "sub-1", status: "active", product_id: "product-starter-monthly", cancel_at_period_end: false, ended_at: null, pending_update: null, discount_id: null, current_period_end: "2099-12-01T00:00:00Z", ...extra };
 }
 
-function polar(): NonNullable<WorkerDependencies["polar"]> {
+function polar(): PolarBillingProvider {
   return new PolarBillingProvider({ accessToken: "polar-token", organizationId: "org-1", baseUrl: "https://polar.test" });
 }
 
@@ -75,7 +76,7 @@ describe("the requests Polar receives", () => {
       answer("GET", `/v1/customers/external/business%3A${businessId}`, { detail: "Not found" }, 404);
       answer("POST", "/v1/customers/", { id: "cus-new", external_id: `business:${businessId}` }, 201);
       answer("POST", "/v1/checkouts/", { id: "checkout-1", url: "https://polar.test/checkout/1" }, 201);
-      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
 
@@ -83,7 +84,7 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue(checkoutRequest({ target: "pro", billingInterval: "annual" }));
       answer("GET", `/v1/customers/external/business%3A${businessId}`, { id: "cus-known", external_id: `business:${businessId}` });
       answer("POST", "/v1/checkouts/", { id: "checkout-2", url: "https://polar.test/checkout/2" }, 201);
-      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
 
@@ -92,7 +93,7 @@ describe("the requests Polar receives", () => {
       answer("GET", `/v1/customers/external/business%3A${businessId}`, { detail: "Not found" }, 404);
       answer("POST", "/v1/customers/", { id: "cus-billing", external_id: `business:${businessId}` }, 201);
       answer("POST", "/v1/checkouts/", { id: "checkout-3", url: "https://polar.test/checkout/3" }, 201);
-      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.createCheckout", { requestId }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
   });
@@ -103,7 +104,7 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue(checkoutRequest({ target: input.target, billingInterval: input.billingInterval, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: null } }));
       answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: input.from }));
       answer("PATCH", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: input.from }));
-      return handleJob(job("billing.createCheckout", { requestId }), { domain, polar: polar() });
+      return handleJob(job("billing.createCheckout", { requestId }), { domain, billing: polarFake(polar()) });
     }
 
     it("an upgrade invoiced now", async () => {
@@ -136,7 +137,7 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadPromoEndWork).mockResolvedValue(work());
       answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "promo-starter-monthly", discount_id: "disc-half-off" }));
       answer("PATCH", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "promo-starter-monthly", discount_id: "disc-half-off" }));
-      await expect(handleJob(job("billing.endPromoPlan", {}, "default"), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.endPromoPlan", {}, "default"), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
 
@@ -144,14 +145,14 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadPromoEndWork).mockResolvedValue(work({ ending: "cancel" }));
       answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "promo-starter-monthly", discount_id: "disc-half-off" }));
       answer("PATCH", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "promo-starter-monthly", cancel_at_period_end: true }));
-      await expect(handleJob(job("billing.endPromoPlan", {}, "default"), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.endPromoPlan", {}, "default"), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
 
     it("its discount dropped from a standard product", async () => {
       answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "product-starter-monthly", discount_id: "disc-half-off" }));
       answer("PATCH", "/v1/subscriptions/sub-1", subscriptionBody({ product_id: "product-starter-monthly" }));
-      await expect(handleJob(job("billing.endPromoPlan", { dropDiscount: "disc-half-off", subscriptionId: "sub-1" }, "default"), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+      await expect(handleJob(job("billing.endPromoPlan", { dropDiscount: "disc-half-off", subscriptionId: "sub-1" }, "default"), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
       expect(recorded).toMatchSnapshot();
     });
   });
@@ -160,7 +161,7 @@ describe("the requests Polar receives", () => {
     vi.mocked(recordDeletedBusinessPlanEnded).mockResolvedValue(undefined as never);
     answer("DELETE", "/v1/subscriptions/sub-1", subscriptionBody({ status: "canceled", ended_at: "2099-11-08T00:00:00Z" }));
     answer("GET", "/v1/subscriptions/sub-1", subscriptionBody({ status: "canceled", ended_at: "2099-11-08T00:00:00Z" }));
-    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub-1" }), { domain, polar: polar() })).resolves.toMatchObject({ status: "completed" });
+    await expect(handleJob(job("billing.revokeSubscription", { subscriptionId: "sub-1" }), { domain, billing: polarFake(polar()) })).resolves.toMatchObject({ status: "completed" });
     expect(recorded).toMatchSnapshot();
   });
 
@@ -173,8 +174,8 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadBillingUsageEvent).mockResolvedValue(usageEvent({}) as never);
       vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
       vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0 }).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2 });
-      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, polar: polar() });
-      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, polar: polar() });
+      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
+      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
       expect(recorded).toMatchSnapshot();
     });
 
@@ -182,7 +183,7 @@ describe("the requests Polar receives", () => {
       vi.mocked(loadBillingUsageEvent).mockResolvedValue(usageEvent({ usageKind: "voice_seconds", quantity: 95, plan: "pro" }) as never);
       vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
       vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-1", quantity: 95, seq: 0 });
-      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, polar: polar() });
+      await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
       expect(recorded).toMatchSnapshot();
     });
   });

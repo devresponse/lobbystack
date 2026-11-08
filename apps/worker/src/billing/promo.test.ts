@@ -11,6 +11,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => (await import("./testing
 
 import { handleJob, type WorkerDependencies } from "../handlers";
 import { brand } from "./testing";
+import { polarFake } from "./polarFake";
+import type { PolarBillingClient } from "@lobbystack/providers/polar/adapter";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -28,7 +30,7 @@ describe("billing jobs: promo plans", () => {
     const subscription = (extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId: "promo-starter-monthly", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: "disc-half-off", currentPeriodEnd: periodEnd, ...extra });
     const work = (extra: Partial<PromoEndWork> = {}): PromoEndWork => ({ planCode: "salons-half-off", planEnds, tier: "starter", interval: "monthly", subscriptionId: "sub-1", ending: "tier", endsAt: planEnds, set: true, notify: true, overdue: false, ...extra });
 
-    function endPromo(input: { work: PromoEndWork | null; polar: Partial<NonNullable<WorkerDependencies["polar"]>>; payload?: Record<string, unknown> }) {
+    function endPromo(input: { work: PromoEndWork | null; polar: Partial<PolarBillingClient>; payload?: Record<string, unknown> }) {
       const businessId = randomUUID();
       const domain = { db: undefined as never };
       for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
@@ -37,7 +39,7 @@ describe("billing jobs: promo plans", () => {
       vi.mocked(loadPromoEndWork).mockResolvedValue(input.work);
       vi.mocked(recordPromoEnd).mockResolvedValue(1);
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.endPromoPlan", queue: "default", businessId, payload: input.payload ?? {}, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: true };
-      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), getSubscription: vi.fn(), changeSubscriptionProduct: vi.fn(), cancelSubscriptionAtPeriodEnd: vi.fn(), removeSubscriptionDiscount: vi.fn(), ...input.polar } });
+      const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), getSubscription: vi.fn(), changeSubscriptionProduct: vi.fn(), cancelSubscriptionAtPeriodEnd: vi.fn(), removeSubscriptionDiscount: vi.fn(), ...input.polar }) });
       return { businessId, domain, run };
     }
 

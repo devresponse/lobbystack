@@ -33,7 +33,7 @@ describe("billing jobs: the daily catalog check", () => {
       .mockResolvedValueOnce({ status: "failed", previousStatus: "drift", problems: [{ ...drift, code: "unreadable", subject: "Polar" }], polarEnv: "sandbox", runId: "run-2" })
       .mockResolvedValueOnce({ status: "passed", previousStatus: "failed", problems: [warn], polarEnv: "sandbox", runId: "run-3" })
       .mockResolvedValueOnce({ status: "passed", previousStatus: "passed", problems: [], polarEnv: "sandbox", runId: "run-4" });
-    const dependencies = { domain, polarCatalog: { readSnapshot }, productAnalytics: { capture } };
+    const dependencies = { domain, billingCatalog: { readSnapshot }, productAnalytics: { capture } };
     expect(await handleJob(job, dependencies)).toEqual({ status: "skipped" });
     expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readPolar: expect.any(Function) });
     await vi.mocked(runDailyBillingVerify).mock.calls[0]![1].readPolar().catch(() => undefined);

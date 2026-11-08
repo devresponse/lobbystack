@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { eq } from "drizzle-orm";
 
 import { billingAccounts } from "@lobbystack/db";
-import { PolarBillingProvider } from "@lobbystack/providers";
+import { createBillingProvider } from "@lobbystack/providers";
 import { hasBillingCustomerPortal, isManagedBillingAccount } from "@lobbystack/domain";
 import { asApiResponse, jsonError, withOperatorTransaction } from "@/lib/api-helpers";
 import { assertBillingCallAllowed } from "@/lib/billing-limit";
@@ -11,9 +11,8 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
-    const token = process.env.POLAR_ACCESS_TOKEN;
-    const organizationId = process.env.POLAR_ORGANIZATION_ID;
-    if (!token || !organizationId) throw new Error("Billing customer portal is not configured.");
+    const billing = createBillingProvider(process.env);
+    if (!billing) throw new Error("Billing customer portal is not configured.");
     const { account, businessId, userId } = await withOperatorTransaction(request, async ({ businessId, session, tx }) => ({
       account: (await tx.select({ source: billingAccounts.source, billingKey: billingAccounts.billingKey, customerId: billingAccounts.customerId, subscriptionId: billingAccounts.subscriptionId, plan: billingAccounts.plan, subscriptionState: billingAccounts.subscriptionState }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)).limit(1))[0] ?? null,
       businessId,
@@ -24,7 +23,6 @@ export async function POST(request: Request) {
     if (isManagedBillingAccount(account)) return jsonError("This business is on a managed plan, billed directly by the operator.", 409);
     // Each session is a call to Polar.
     await assertBillingCallAllowed("portal", { businessId, userId });
-    const provider = new PolarBillingProvider({ accessToken: token, organizationId, ...(process.env.POLAR_API_BASE_URL ? { baseUrl: process.env.POLAR_API_BASE_URL } : {}) });
-    return NextResponse.json(await provider.createCustomerPortalSession({ externalCustomerId: account.billingKey, returnUrl: `${process.env.APP_BASE_URL ?? new URL(request.url).origin}/settings/plan` }));
+    return NextResponse.json(await billing.createPortalSession({ customer: { id: account.customerId, billingKey: account.billingKey }, returnUrl: `${process.env.APP_BASE_URL ?? new URL(request.url).origin}/settings/plan`, locale: null }));
   } catch (error) { return asApiResponse(error); }
 }

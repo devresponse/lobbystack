@@ -22,7 +22,7 @@ import { isBusinessDeleted } from "@lobbystack/domain";
 import { PROVIDER_PRICE_RECHECKS, recheckProviderPrice } from "@lobbystack/domain";
 import type { DomainContext } from "@lobbystack/domain";
 import { callTranscriptSubject, cancellationSubject, invitationSubject, permanentSmtpRefusal, promoEndingSubject, type SmtpEmailProvider } from "@lobbystack/providers/email/smtp";
-import { type PolarCustomer, type PolarProrationBehavior, type PolarSubscription } from "@lobbystack/providers/polar/polarBilling";
+import type { BillingProvider } from "@lobbystack/providers/billing/types";
 import type { PolarSnapshot } from "@lobbystack/providers/polar/polarCatalog";
 import type { RuntimeStorageProvider } from "@lobbystack/providers/storage/provider";
 import type { TwilioProvider } from "@lobbystack/providers/twilio/twilioProvider";
@@ -70,19 +70,10 @@ export type WorkerDependencies = {
   email?: Pick<SmtpEmailProvider, "sendTemplate">;
   twilio?: Pick<TwilioProvider, "sendSms"> & Partial<Pick<TwilioProvider, "getMessagePricing" | "getCallPricing" | "findTrunkCall" | "releasePhoneNumber" | "verifyPhone" | "findOwnedPhoneNumber" | "purchasePhoneNumber" | "addNumberToSipTrunk">>;
   twilioAlerts?: Pick<TwilioProvider, "sendSms"> & { from: string };
-  polar?: {
-    recordUsage(input: { eventName: string; externalCustomerId: string; quantity: number; timestamp: string; idempotencyKey: string; businessId: string; usageKind: string }): Promise<void>;
-    createCheckout?(input: { productId: string; customer: { id: string } | { email: string; externalId: string }; metadata: Record<string, string>; discountId?: string | null; successUrl: string; returnUrl: string }): Promise<{ checkoutUrl: string; checkoutId: string }>;
-    findCustomerByExternalId?(externalId: string): Promise<PolarCustomer | null>;
-    createCustomer?(input: { externalId: string; email: string; name: string | null }): Promise<PolarCustomer>;
-    getSubscription?(subscriptionId: string): Promise<PolarSubscription | null>;
-    changeSubscriptionProduct?(input: { subscriptionId: string; productId: string; prorationBehavior: PolarProrationBehavior; discountId?: string | null; metadata?: Record<string, string> }): Promise<PolarSubscription>;
-    cancelSubscriptionAtPeriodEnd?(subscriptionId: string): Promise<PolarSubscription>;
-    removeSubscriptionDiscount?(subscriptionId: string): Promise<PolarSubscription>;
-    revokeSubscription?(subscriptionId: string): Promise<void>;
-  };
+  /** The deployment's billing provider (ADR 0010), from createBillingProvider. Without it, billing jobs wait or report the provider unavailable. */
+  billing?: BillingProvider;
   /** Reads the deployment's Polar organization for the daily billing check, with the worker's POLAR_ACCESS_TOKEN. */
-  polarCatalog?: { readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> };
+  billingCatalog?: { readSnapshot(options: { webhooks: false }): Promise<PolarSnapshot> };
   embeddings?: { fingerprint?: string; embed(values: string[], onUsage?: (usage: DurableAiUsage) => Promise<void> | void): Promise<number[][]> };
   crawler?: { crawl(input: { url: string; limit?: number }): Promise<Array<{ url: string; title?: string; markdown?: string }>> };
   calendar?: CalendarOperations;

@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Step 1 is done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 and 2 are done.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -39,3 +39,15 @@ Phases 1 and 2 need none of them. Each has a recommendation:
 ## Step 1: the worker's billing jobs in their own folder
 
 The worker's eight billing jobs and their helpers moved, unchanged, from `apps/worker/src/handlers.ts` into `apps/worker/src/billing/`, one file per flow: `checkout.ts`, `planChange.ts`, `reconcile.ts` (with the sweep), `usage.ts`, `promo.ts`, `deletion.ts` and `catalog.ts`. `billing/index.ts` maps each billing job type to its function, and `handlers.ts` sends the eight there. `businessIdOrThrow` moved to `apps/worker/src/jobInput.ts`, which both use. The billing tests moved from `handlers.test.ts` to `billing/*.test.ts` unchanged, with the mocks they share in `billing/testing.ts`: 108 tests before and after. `.gitattributes` merges `docs/project/changelog.md` with `merge=union`, so rows added on two branches don't conflict.
+
+## Step 2: the billing provider interface, and Polar behind it
+
+Its first commit, on the code as it was, records every request Polar receives in the worker's billing flows: `apps/worker/src/billing/polarRequests.test.ts` runs the real Polar client against a stub of `fetch` through checkouts (a new customer, a known one, a billing email), an upgrade invoiced now and one prorated, a downgrade, both kinds of promo ending, a promo discount dropped, a deleted business's plan ended, and usage with a correction and a call's seconds. The rest of the step leaves that snapshot unchanged.
+
+- **The interface:** `packages/providers/src/billing/types.ts` declares `BillingProvider`, with what it can do (`can`), and the webhook and catalog interfaces the next steps fill in. `errors.ts` holds `BillingProviderError`, and `usage.ts` maps usage rows to the three kinds of overage.
+- **The factory:** `factory.ts` reads `BILLING_PROVIDER` (unset or `polar`; `stripe` stops the service as not available yet) and builds the provider and the daily check's catalog client from the Polar variables, as the worker did.
+- **The Polar adapter:** `packages/providers/src/polar/adapter.ts` implements the interface over the Polar client, with what the worker held before: finding or making the business's customer, the refusals of plan changes and billing emails, billing.json's proration words, promo endings, ending a plan and sending usage.
+- **Its callers:** the worker's billing jobs use `WorkerDependencies.billing` and `billingCatalog`, which replace `polar` and `polarCatalog`, and the admin's billing portal route asks the provider for its session. Nothing else builds the Polar client.
+- **Tests:** the worker's billing tests wrap their Polar fakes in the adapter and keep their assertions; contract tests in `packages/providers/src/billing/contract/` run each flow against the Polar adapter over a stub of `fetch`, refusals included, and the Stripe adapter joins them in step 9.
+
+Left to the steps that use them: the job types for the overage subscription, plan actions and the daily totals check, and the names that drop Polar, such as `PriceLinks`.

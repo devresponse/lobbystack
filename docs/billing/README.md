@@ -196,6 +196,7 @@ Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set (
 | The plans file and its schema | `brands/<brand>/billing.json`, `brands/billing.schema.json`, `packages/shared/src/billingProfile.ts` |
 | Plan list, limits and what a business can buy | `packages/domain/src/server/billingPlans.ts`, `billingAccess.ts`, `packages/shared/src/billing.ts` |
 | Usage, allowances and the spending cap | `packages/domain/src/server/usage.ts` |
+| The billing provider interface, and Polar behind it | `packages/providers/src/billing/` (`types.ts`, `errors.ts`, `factory.ts`, `usage.ts`), `packages/providers/src/polar/adapter.ts` ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)) |
 | Checkout, reconcile and plan changes | `packages/domain/src/server/billing.ts`, `packages/providers/src/polar/polarBilling.ts`, `packages/providers/src/polar/webhook.ts` |
 | Catalog, Polar setup and the daily check | `packages/domain/src/server/billingCatalog.ts`, `billingPolar.ts`, `billingVerify.ts`, `packages/providers/src/polar/polarCatalog.ts`, `scripts/billing.ts` |
 | Promo codes and endings | `packages/domain/src/server/billingCodes.ts`, `billingPromoEnd.ts`, `packages/shared/src/billingCodes.ts` |

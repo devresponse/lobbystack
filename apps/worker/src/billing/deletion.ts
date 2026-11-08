@@ -25,8 +25,8 @@ export async function revokeBillingSubscription(job: JobEnvelope, dependencies: 
  */
 async function revokeDeletedBusinessPlan(dependencies: WorkerDependencies, input: { businessId: string; subscriptionId: string }): Promise<JobResult> {
   const { businessId, subscriptionId } = input;
-  const polar = dependencies.polar;
-  if (!polar?.revokeSubscription) {
+  const billing = dependencies.billing;
+  if (!billing) {
     await reportWarning(new Error("A business being deleted or canceled still pays for a plan, and the worker has no Polar token to end it with. Set POLAR_ACCESS_TOKEN and POLAR_ORGANIZATION_ID on the worker."), { operation: "job.billing.revokeSubscription", businessId });
     return { status: "skipped", entityId: businessId };
   }
@@ -34,11 +34,11 @@ async function revokeDeletedBusinessPlan(dependencies: WorkerDependencies, input
   const hold = await claimBillingSubscription(dependencies.domain, { businessId });
   if ("retryAt" in hold) return { status: "deferred", entityId: businessId, retryAt: hold.retryAt };
   try {
-    await polar.revokeSubscription(subscriptionId);
-    const subscription = polar.getSubscription ? await polar.getSubscription(subscriptionId) : null;
-    if (subscription && !subscription.endedAt && isLiveSubscriptionState(subscription.status) && !subscription.cancelAtPeriodEnd) throw new Error("Polar still shows the subscription live after ending it.");
+    await billing.revoke({ subscriptionId, requestId: `revoke:${subscriptionId}` });
+    const subscription = await billing.getSubscription(subscriptionId);
+    if (subscription && !subscription.endedAt && isLiveSubscriptionState(subscription.state) && !subscription.cancelAt) throw new Error("Polar still shows the subscription live after ending it.");
   } catch (error) {
-    if (planChangeRefusalFor(error) !== "token_scope") throw error;
+    if (planChangeRefusalFor(billing, error) !== "token_scope") throw error;
     // Every try would be refused the same way; the operator's to fix, and the delete says the plan couldn't be canceled.
     await reportWarning(new Error("Polar refused to end the plan of a business being deleted or canceled: the worker's POLAR_ACCESS_TOKEN needs subscriptions:write."), { operation: "job.billing.revokeSubscription", businessId });
     return { status: "skipped", entityId: businessId };

@@ -7,6 +7,7 @@ vi.mock("@lobbystack/domain", async (importOriginal) => (await import("./testing
 
 import { handleJob } from "../handlers";
 import { brand, billingJob } from "./testing";
+import { polarFake } from "./polarFake";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -26,7 +27,7 @@ describe("billing jobs: usage", () => {
   it("skips malformed usage jobs without touching the database", async () => {
     const result = await handleJob(billingJob({}), {
       domain: { db: undefined as never },
-      polar: { recordUsage: async () => undefined },
+      billing: polarFake({ recordUsage: async () => undefined }),
     });
 
     expect(result.status).toBe("skipped");
@@ -37,7 +38,7 @@ describe("billing jobs: usage", () => {
     vi.mocked(loadBillingUsageEvent).mockResolvedValue({ id: String(job.payload.usageEventId), sourceKey: "voice:call-1", isFinal: true, plan: "enterprise", businessId: job.businessId!, usageKind: "voice_seconds", quantity: 120, billableQuantity: null, billingIntervalAtRecordTime: null, createdAt: new Date("2026-01-01T00:00:00.000Z"), syncStatus: "pending", billingKey: "business-key", customerId: "polar-customer-id" });
     const recordUsage = vi.fn();
 
-    expect(await handleJob(job, { domain: { db: undefined as never }, polar: { recordUsage } })).toEqual({ status: "skipped", entityId: String(job.payload.usageEventId) });
+    expect(await handleJob(job, { domain: { db: undefined as never }, billing: polarFake({ recordUsage }) })).toEqual({ status: "skipped", entityId: String(job.payload.usageEventId) });
     expect(recordUsage).not.toHaveBeenCalled();
   });
 
@@ -64,7 +65,7 @@ describe("billing jobs: usage", () => {
     const recordUsage = vi.fn().mockResolvedValue(undefined);
     const usage = { businessId: job.businessId, usageEventId: String(job.payload.usageEventId) };
 
-    const result = await handleJob(job, { domain, polar: { recordUsage } });
+    const result = await handleJob(job, { domain, billing: polarFake({ recordUsage }) });
 
     expect(result).toEqual({ status: "completed", entityId: String(job.payload.usageEventId) });
     expect(claimBillingUsageSync).toHaveBeenCalledWith(domain, usage);
@@ -81,7 +82,7 @@ describe("billing jobs: usage", () => {
 
     // A correction after Polar took the first event: one segment fewer, under the row's next number.
     vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2 });
-    await handleJob(job, { domain, polar: { recordUsage } });
+    await handleJob(job, { domain, billing: polarFake({ recordUsage }) });
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ quantity: -1, idempotencyKey: "alert_sms:operator_notification:delivery-1:2", timestamp: "2026-01-01T00:00:00.000Z" }));
     expect(confirmBillingUsageSync).toHaveBeenLastCalledWith(domain, { ...usage, seq: 2 });
 
@@ -89,21 +90,21 @@ describe("billing jobs: usage", () => {
     const original = await event;
     vi.mocked(loadBillingUsageEvent).mockResolvedValue({ ...original!, usageKind: "voice_seconds", quantity: 180, billableQuantity: 30, billingIntervalAtRecordTime: "annual" });
     vi.mocked(claimBillingUsageSync).mockResolvedValue({ externalId: "voice:call-1", quantity: 30, seq: 0 });
-    await handleJob(job, { domain, polar: { recordUsage } });
+    await handleJob(job, { domain, billing: polarFake({ recordUsage }) });
     expect(recordUsage).toHaveBeenLastCalledWith(expect.objectContaining({ eventName: "billing.voice_minutes", quantity: 0.5, externalCustomerId: "business-key" }));
 
     // Nothing left to send, as when a correction came back to what Polar has.
     recordUsage.mockClear();
     vi.mocked(confirmBillingUsageSync).mockClear();
     vi.mocked(claimBillingUsageSync).mockResolvedValue(null);
-    expect(await handleJob(job, { domain, polar: { recordUsage } })).toEqual({ status: "completed", entityId: String(job.payload.usageEventId) });
+    expect(await handleJob(job, { domain, billing: polarFake({ recordUsage }) })).toEqual({ status: "completed", entityId: String(job.payload.usageEventId) });
     expect(recordUsage).not.toHaveBeenCalled();
     expect(confirmBillingUsageSync).not.toHaveBeenCalled();
 
     for (const change of [{ isFinal: false }, { customerId: null }, { syncStatus: "skipped" }, { plan: "free_cloud" }]) {
       vi.mocked(claimBillingUsageSync).mockClear();
       vi.mocked(loadBillingUsageEvent).mockResolvedValue({ ...original!, ...change });
-      expect((await handleJob(job, { domain, polar: { recordUsage } })).status).toBe("skipped");
+      expect((await handleJob(job, { domain, billing: polarFake({ recordUsage }) })).status).toBe("skipped");
       expect(claimBillingUsageSync).not.toHaveBeenCalled();
       expect(recordUsage).not.toHaveBeenCalled();
     }
@@ -131,7 +132,7 @@ describe("billing jobs: usage", () => {
     const error = new Error("polar unavailable");
     const recordUsage = vi.fn().mockRejectedValue(error);
 
-    await expect(handleJob(job, { domain, polar: { recordUsage } })).rejects.toThrow(error);
+    await expect(handleJob(job, { domain, billing: polarFake({ recordUsage }) })).rejects.toThrow(error);
 
     expect(recordProductEvent).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       name: "ops.billing.usage_sync_failed",

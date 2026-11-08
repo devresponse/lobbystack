@@ -7,8 +7,8 @@ import type { JobResult, WorkerDependencies } from "../handlers";
 
 /** billing.verifyCatalog: the daily check of the catalog against Polar. */
 export async function verifyBillingCatalog(_job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
-  if (!dependencies.polarCatalog) return { status: "skipped" };
-  const polarCatalog = dependencies.polarCatalog;
+  if (!dependencies.billingCatalog) return { status: "skipped" };
+  const polarCatalog = dependencies.billingCatalog;
   // Without the webhook, which Polar lists with its signing secret: the worker's token goes without webhooks:read.
   const outcome = await runDailyBillingVerify(dependencies.domain, { brand: currentBrand().id, env: process.env, readPolar: () => polarCatalog.readSnapshot({ webhooks: false }) });
   if (outcome.status === "skipped") return { status: "skipped" };

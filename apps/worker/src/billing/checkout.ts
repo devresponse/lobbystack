@@ -2,8 +2,7 @@
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { planChangeRefusals } from "@lobbystack/shared";
 import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, readPolarProductLinks, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed } from "@lobbystack/domain";
-import { PolarRequestError, type PolarCustomer } from "@lobbystack/providers/polar/polarBilling";
-import { reportError, reportWarning } from "@lobbystack/telemetry/node";
+import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
 import { changeBillingPlan, failBillingCheckoutTry, polarCheckoutProductId } from "./planChange";
@@ -25,7 +24,8 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
     return claim.retryAt ? { status: "deferred", entityId: requestId, retryAt: claim.retryAt } : { status: "skipped", entityId: requestId };
   }
   const retrying = execution.isFinalAttempt === false;
-  if (!dependencies.polar?.createCheckout) {
+  const billing = dependencies.billing;
+  if (!billing) {
     await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: "Billing checkout provider is not configured." });
     return { status: "skipped", entityId: requestId };
   }
@@ -53,23 +53,27 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
     if (changed) return changed;
   }
   try {
-    const customer = await checkoutCustomer(dependencies, { businessId, requestId, externalId: request.externalCustomerId, email: request.billingEmail ?? request.customerEmail, name: request.businessName });
+    // The business's own customer, made out to its billing email, else the person's own.
+    const email = request.billingEmail ?? request.customerEmail;
+    const customer = await billing.findOrCreateCustomer({ customer: { id: null, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId });
     const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
-    const checkout = await dependencies.polar.createCheckout({
-      productId: promo?.productId ?? polarCheckoutProductId(links, request.target, request.billingInterval),
-      customer: customer ? { id: customer.id } : { email: request.billingEmail ?? request.customerEmail, externalId: request.externalCustomerId },
+    const checkout = await billing.createCheckout({
+      customer: { id: customer?.id ?? null, billingKey: request.externalCustomerId },
+      email,
+      price: promo ? { ref: promo.productId, discountRef: promo.discountId } : { ref: polarCheckoutProductId(links, request.target, request.billingInterval), discountRef: null },
+      businessId,
+      requestId,
       metadata: promo?.metadata ?? metadata,
-      ...(promo?.discountId ? { discountId: promo.discountId } : {}),
       successUrl: `${planUrl}?checkout=success&requestId=${encodeURIComponent(requestId)}`,
-      // Polar's back arrow. Someone leaving checkout hasn't paid, so it
-      // returns to the plan page without the success marker.
-      returnUrl: planUrl,
+      // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
+      cancelUrl: planUrl,
+      locale: null,
     });
-    await markBillingCheckoutCreated(dependencies.domain, { businessId, requestId, ...checkout });
+    await markBillingCheckoutCreated(dependencies.domain, { businessId, requestId, checkoutUrl: checkout.url, checkoutId: checkout.id });
     return { status: "completed", entityId: requestId };
   } catch (error) {
-    const refusal = billingEmailRefusalFor(error);
-    if (refusal) {
+    const refusal = billing.refusalFor(error);
+    if (refusal === "billing_email_taken" || refusal === "billing_email_invalid") {
       // Polar answers the same email the same way, so the person is asked for another.
       await markBillingCheckoutFailed(dependencies.domain, { businessId, requestId, error: planChangeRefusals[refusal] });
       return { status: "skipped", entityId: requestId };
@@ -77,46 +81,4 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
     await failBillingCheckoutTry(dependencies, { businessId, requestId, error: "Polar checkout creation failed.", retrying });
     throw error;
   }
-}
-
-/**
- * The Polar customer a checkout is made out to: the business's own, found or
- * made by the account's billing key, which usage and the billing portal name
- * it by. Without one Polar picks a customer by email at payment, so the
- * second business of someone who pays for two would land on the first's
- * customer. A new customer gets the billing email the person gave, else their
- * own. Null when the worker's token can't read or make customers, and the
- * checkout then leaves the customer to Polar, as before.
- */
-async function checkoutCustomer(dependencies: WorkerDependencies, input: { businessId: string; requestId: string; externalId: string; email: string; name: string | null }): Promise<PolarCustomer | null> {
-  const polar = dependencies.polar;
-  if (!polar?.findCustomerByExternalId || !polar.createCustomer) return null;
-  try {
-    const found = await polar.findCustomerByExternalId(input.externalId);
-    if (found) return found;
-    try {
-      return await polar.createCustomer({ externalId: input.externalId, email: input.email, name: input.name });
-    } catch (error) {
-      // Another run made it first.
-      if (error instanceof PolarRequestError && error.status === 422 && error.fields.includes("external_id")) {
-        const made = await polar.findCustomerByExternalId(input.externalId);
-        if (made) return made;
-      }
-      throw error;
-    }
-  } catch (error) {
-    if (!(error instanceof PolarRequestError) || error.errorName !== "insufficient_scope") throw error;
-    await reportWarning(new Error("The worker's Polar token can't read or make customers, so Polar picks a checkout's customer by email. Give the worker's POLAR_ACCESS_TOKEN the customers:write scope."), { operation: "job.billing.createCheckout", businessId: input.businessId, requestId: input.requestId });
-    return null;
-  }
-}
-
-/**
- * Polar's refusal of a new customer's email: one another customer has, as
- * Polar keeps one customer per email, or one it doesn't take as an email.
- */
-function billingEmailRefusalFor(error: unknown): "billing_email_taken" | "billing_email_invalid" | undefined {
-  if (!(error instanceof PolarRequestError) || error.status !== 422 || !error.fields.includes("email")) return undefined;
-  // Polar's own check finds the email taken; the request's validation refuses one that isn't an email.
-  return error.errorName === "PolarRequestValidationError" ? "billing_email_taken" : "billing_email_invalid";
 }

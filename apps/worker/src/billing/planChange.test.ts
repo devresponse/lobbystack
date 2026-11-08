@@ -11,6 +11,8 @@ vi.mock("@lobbystack/domain", async (importOriginal) => (await import("./testing
 
 import { handleJob, type WorkerDependencies } from "../handlers";
 import { brand } from "./testing";
+import { polarFake } from "./polarFake";
+import type { PolarBillingClient } from "@lobbystack/providers/polar/adapter";
 
 afterEach(() => {
   vi.clearAllMocks();
@@ -23,7 +25,7 @@ describe("billing jobs: plan changes", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_STARTER_ANNUAL_PRODUCT_ID: "product-starter-annual", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly", POLAR_PRO_ANNUAL_PRODUCT_ID: "product-pro-annual" };
     const liveSubscription = (productId: string, extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId, cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: null, currentPeriodEnd: null, ...extra });
 
-    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<NonNullable<WorkerDependencies["polar"]>>; isFinalAttempt?: boolean }) {
+    function changePlan(input: { target: "starter" | "pro"; billingInterval: "monthly" | "annual"; plan: "starter" | "pro"; planCode?: string; subscriptionPlanCode?: string; polar: Partial<PolarBillingClient>; isFinalAttempt?: boolean }) {
       const businessId = randomUUID();
       const requestId = randomUUID();
       const domain = { db: undefined as never };
@@ -34,7 +36,7 @@ describe("billing jobs: plan changes", () => {
       vi.mocked(loadPlanChangeProration).mockResolvedValue({ upgrade: "invoice", downgrade: "next_period" });
       vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: input.target, billingInterval: input.billingInterval, status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: input.planCode ?? null, subscription: { id: "sub-1", plan: input.plan, billingInterval: "monthly", planCode: input.subscriptionPlanCode ?? null } });
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
-      const run = handleJob(job, { domain, polar: { recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar } }, input.isFinalAttempt === undefined ? {} : { isFinalAttempt: input.isFinalAttempt });
+      const run = handleJob(job, { domain, billing: polarFake({ recordUsage: vi.fn(), createCheckout: vi.fn(), ...input.polar }) }, input.isFinalAttempt === undefined ? {} : { isFinalAttempt: input.isFinalAttempt });
       return { businessId, requestId, domain, run };
     }
 

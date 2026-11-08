@@ -71,17 +71,17 @@ afterEach(() => {
 });
 
 describe("public profile settings", () => {
-  it("publishes and unpublishes the page at once with its button, leaving what the owner typed for Save", async () => {
+  it("publishes and unpublishes the page at once with its button, saving what the owner typed with it", async () => {
     const fetch = setup(view());
     expect(await screen.findByText("publicPage.publish.labelOff")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("publicPage.details.category"), { target: { value: "Dental clinic" } });
     fireEvent.click(screen.getByRole("button", { name: "publicPage.publish.publishAction" }));
 
     await waitFor(() => expect(saves(fetch)).toHaveLength(1));
-    // Only the page's state goes out: the category waits for Save.
+    // The category the owner typed goes out with it.
     expect(saves(fetch)[0]!.body).toEqual({
       published: true,
-      category: null,
+      category: "Dental clinic",
       description: "Family dentistry.",
       publicEmail: null,
       address: { line1: null, line2: null, city: null, region: null, postalCode: null, countryCode: null },
@@ -95,13 +95,24 @@ describe("public profile settings", () => {
     expect(screen.getByText("publicPage.publish.label")).toBeTruthy();
     expect(screen.getByRole("link", { name: "publicPage.publish.open" })).toBeTruthy();
     expect((screen.getByLabelText("publicPage.details.category") as HTMLInputElement).value).toBe("Dental clinic");
-    expect((screen.getByRole("button", { name: "publicPage.save" }) as HTMLButtonElement).disabled).toBe(false);
+    // Nothing is left to save.
+    expect((screen.getByRole("button", { name: "publicPage.save" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: "publicPage.publish.unpublishAction" }));
     await waitFor(() => expect(saves(fetch)).toHaveLength(2));
-    expect(saves(fetch)[1]!.body).toMatchObject({ published: false, category: null });
+    expect(saves(fetch)[1]!.body).toMatchObject({ published: false, category: "Dental clinic" });
     expect(await screen.findByRole("button", { name: "publicPage.publish.publishAction" })).toBeTruthy();
     expect(screen.getByText("publicPage.publish.labelOff")).toBeTruthy();
+  });
+
+  it("doesn't publish while an edit is invalid, and says which", async () => {
+    const fetch = setup(view());
+    expect(await screen.findByText("publicPage.publish.labelOff")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("publicPage.details.email"), { target: { value: "not an email" } });
+    fireEvent.click(screen.getByRole("button", { name: "publicPage.publish.publishAction" }));
+    expect((await screen.findByRole("alert")).textContent).toBe("publicPage.errors.email");
+    expect(saves(fetch)).toHaveLength(0);
+    expect(screen.getByRole("button", { name: "publicPage.publish.publishAction" })).toBeTruthy();
   });
 
   it("saves the details the owner typed", async () => {

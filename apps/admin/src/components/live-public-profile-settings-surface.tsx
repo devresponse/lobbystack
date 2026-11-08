@@ -162,28 +162,6 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
     },
   });
 
-  // Publish page and Unpublish page save the page's state at once, apart from the form's Save.
-  const publish = useMutation({
-    mutationFn: (settings: PublicProfileSettings) => requestJson<PublicProfileSettingsResponse>(`/api/business-profile?businessId=${encodeURIComponent(businessId)}`, { method: "PUT", body: JSON.stringify(settings) }),
-    onSuccess: (result) => {
-      setView(result);
-      // What the owner is typing elsewhere stays in the form, still to save.
-      setForm((current) => ({ ...current, published: result.settings.published }));
-      queryClient.setQueryData(["business-profile", businessId], result);
-    },
-    onError: () => setError({ field: null, message: t("publicPage.errors.saveFailed") }),
-  });
-
-  function switchPublished() {
-    // The saved settings with the page's state switched, so unsaved edits don't go out with it.
-    const parsed = publicProfileSettingsSchema.safeParse({ ...settingsFromForm(formFromView(view)), published: !view.settings.published });
-    if (!parsed.success) {
-      setError({ field: null, message: t("publicPage.errors.invalid") });
-      return;
-    }
-    setError(null);
-    publish.mutate(parsed.data);
-  }
 
   function update<K extends keyof Form>(key: K, value: Form[K]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -193,7 +171,16 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
-    const parsed = publicProfileSettingsSchema.safeParse(settingsFromForm(form));
+    saveForm(form);
+  }
+
+  // Publish page and Unpublish page switch the page's state and save the form's edits with it, as Save does.
+  function switchPublished() {
+    saveForm({ ...form, published: !view.settings.published });
+  }
+
+  function saveForm(next: Form) {
+    const parsed = publicProfileSettingsSchema.safeParse(settingsFromForm(next));
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const field = issueField(issue?.path);
@@ -255,7 +242,7 @@ function PublicProfileForm({ businessId, view: initialView }: { businessId: stri
                 {view.settings.published && view.publishedAt ? <> {t("publicPage.publish.since", { date: formatDateTime(view.publishedAt, locale, { dateStyle: "medium" }) })}</> : null}
               </FieldDescription>
             </FieldContent>
-            <Button className="shrink-0" disabled={readOnly || publish.isPending} onClick={switchPublished} size="lg" type="button">
+            <Button className="shrink-0" disabled={readOnly || save.isPending} onClick={switchPublished} size="lg" type="button">
               {view.settings.published ? <EyeOff /> : <Globe />}
               {view.settings.published ? t("publicPage.publish.unpublishAction") : t("publicPage.publish.publishAction")}
             </Button>

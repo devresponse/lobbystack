@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { expectedOverageCents, firstOfMonth, inPool, nextFirstOfMonth, parseScenarioArgs, redactKeys, SCENARIOS, scenarioKeyProblem, ScenarioUsage } from "./billing-scenarios-core";
+import { expectedOverageCents, firstOfMonth, inPool, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, SCENARIOS, scenarioKeyProblem, ScenarioUsage } from "./billing-scenarios-core";
 
 describe("the sandbox scenarios' command line", () => {
   it("runs every scenario on RealInfoBot's file, four at once, by default", () => {
@@ -30,6 +30,15 @@ describe("the scenarios' key", () => {
   it("never shows a key, whole or as Stripe's errors mask one", () => {
     expect(redactKeys("Invalid API Key provided: sk_test_********************1234, with rk_live_abc too")).toBe("Invalid API Key provided: ‹key›, with ‹key› too");
     expect(redactKeys("sub_123 and cus_456 stay")).toBe("sub_123 and cus_456 stay");
+  });
+
+  it("redacts everything the run says, once, through the output it was given", () => {
+    const said: string[] = [];
+    let io = { env: {}, out: (text: string) => said.push(`out ${text}`), err: (text: string) => said.push(`err ${text}`) };
+    io = redactingOutput(io);
+    io.out("key sk_test_abc123 refused");
+    io.err("rk_live_xyz too");
+    expect(said).toEqual(["out key ‹key› refused", "err ‹key› too"]);
   });
 
   it("takes a test key only", () => {

@@ -93,6 +93,13 @@ export function redactKeys(text: string): string {
   return text.replace(/\b(?:sk|rk|pk)_(?:test|live)_[A-Za-z0-9*]+/g, "‹key›");
 }
 
+/** The same output, with every key redacted from what it says. */
+export function redactingOutput<T extends { out(text: string): void; err(text: string): void }>(io: T): T {
+  const out = io.out.bind(io);
+  const err = io.err.bind(io);
+  return { ...io, out: (text: string) => out(redactKeys(text)), err: (text: string) => err(redactKeys(text)) };
+}
+
 /** The first of the month after a moment, at 00:00 UTC: when an overage subscription renews. */
 export function nextFirstOfMonth(at: Date): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth() + 1, 1));

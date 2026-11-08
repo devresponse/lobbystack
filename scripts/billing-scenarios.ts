@@ -37,7 +37,7 @@ import {
   inPool,
   nextFirstOfMonth,
   parseScenarioArgs,
-  redactKeys,
+  redactingOutput,
   sameCents,
   SCENARIO_STRIPE_BLOCK,
   SCENARIO_USAGE,
@@ -441,8 +441,7 @@ export async function runScenarios(argv: string[], io: ScenarioIo): Promise<numb
   }
   const key = io.env.STRIPE_SCENARIOS_KEY!.trim();
   // Stripe's own errors repeat part of a key: everything the run says goes through redactKeys.
-  const output: ScenarioIo = { env: io.env, out: (text) => io.out(redactKeys(text)), err: (text) => io.err(redactKeys(text)) };
-  io = output;
+  io = redactingOutput(io);
   const started = new Date();
   let setup: Setup;
   try {

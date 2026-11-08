@@ -132,7 +132,7 @@ A delivery more than 300 seconds old, or of the other mode, is refused. `/api/we
 | `totals` | A usage event Stripe never got shows as a gap, a numbered correction sent twice closes it once, and a balance credit counts once |
 | `events` | Every webhook event of the scenarios' customers normalizes, each to its own business |
 
-1. **A sandbox of its own,** not a deployment's: the run adds the brand's catalog to it, without the webhook endpoint. In it, set Stripe Tax's origin address (**Settings > Tax**) *(name not confirmed)*: every subscription uses automatic tax, and the run stops without it.
+1. **A sandbox of its own,** not a deployment's: the run adds the brand's catalog to it, without the webhook endpoint, and archives prices the other selling mode sold. It refuses a sandbox with any webhook endpoint or event destination, which a deployment's apply makes. In it, set Stripe Tax's origin address (**Settings > Tax**) *(name not confirmed)*: every subscription uses automatic tax, and the run stops without it.
 2. **Its test secret key** in `STRIPE_SCENARIOS_KEY`. The run refuses a live key and never prints the key.
 3. **Run it** from the code folder, after `pnpm install`:
 

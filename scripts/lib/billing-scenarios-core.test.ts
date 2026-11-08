@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { checkoutRequest, expectedOverageCents, firstOfMonth, inPool, MERCHANT_OF_RECORD_SCENARIOS, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, scenarioRun, SCENARIOS, scenarioKeyProblem, ScenarioUsage } from "./billing-scenarios-core";
+import { checkoutRequest, expectedOverageCents, firstOfMonth, inPool, MERCHANT_OF_RECORD_SCENARIOS, nextFirstOfMonth, parseScenarioArgs, redactingOutput, redactKeys, scenarioRun, SCENARIOS, scenarioKeyProblem, scenarioSandboxProblem, ScenarioUsage } from "./billing-scenarios-core";
 
 describe("the sandbox scenarios' command line", () => {
   it("runs every scenario on RealInfoBot's file, four at once, by default", () => {
@@ -62,6 +62,16 @@ describe("the scenarios' key", () => {
     expect(scenarioKeyProblem(undefined)).toContain("Set STRIPE_SCENARIOS_KEY");
     expect(scenarioKeyProblem("sk_live_abc123")).toContain("is a live key");
     expect(scenarioKeyProblem("pk_test_abc123")).toContain("isn't a Stripe test key");
+  });
+
+  it("runs only in a sandbox nothing listens to, since a run archives prices a deployment may sell", () => {
+    expect(scenarioSandboxProblem({ webhooks: [], eventDestinations: [] })).toBeNull();
+    // What pnpm billing apply makes in a deployment's sandbox, and a destination of another kind.
+    const problem = scenarioSandboxProblem({
+      webhooks: [{ url: "https://dev1.example.com/api/webhooks/stripe" }],
+      eventDestinations: [{ url: "https://dev1.example.com/api/webhooks/stripe/meter-errors", type: "webhook_endpoint" }, { url: null, type: "amazon_eventbridge" }],
+    });
+    expect(problem).toContain("sends events to dev1.example.com, amazon_eventbridge, so it isn't the scenarios' own");
   });
 });
 

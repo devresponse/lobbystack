@@ -536,6 +536,28 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
   });
 });
 
+/** An answer with what changes from run to run, ids and times, replaced, so it can be recorded. */
+function stable(value: unknown): unknown {
+  return JSON.parse(JSON.stringify(value), (_key, entry: unknown) => typeof entry !== "string" ? entry : entry
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
+    .replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, "<time>"));
+}
+
+describe.skipIf(!testUrl)("billing catalog answers on a Polar deployment", () => {
+  // Recorded before the provider-neutral fields (the Stripe plan's step 6): a Polar
+  // deployment's answers may gain fields, and must not change otherwise.
+  it("answers GET /billing/catalog and a link as recorded", async () => {
+    await rollbackTest(async (tx) => {
+      const billingFile = file(withExamples("salons-half-off"));
+      await apply(tx, billingFile);
+      const { plans } = await seededPolar(billingFile);
+      const linked = await link(tx, { hash: hashOf(billingFile), plans }, { key: "record-link" });
+      const catalog = await getBillingCatalogForApi(context(tx), { deployment: polarDeployment({ POLAR_WEBHOOK_SECRET: "whsec_recorded" }) });
+      expect(stable({ link: linked.run, catalog })).toMatchSnapshot();
+    });
+  });
+});
+
 describe.skipIf(!testUrl)("billing catalog limits", () => {
   // The business's limits and number gate, read as the worker in the business's scope.
   const inBusiness = <T>(tx: DatabaseTransaction, businessId: string, run: (scoped: DatabaseTransaction) => Promise<T>) => withBusinessTransaction(tx as unknown as Database, { businessId, actorType: "worker" }, run);

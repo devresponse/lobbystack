@@ -10,6 +10,7 @@ export default defineConfig({
       "@lobbystack/contracts": `${root}/packages/contracts/src/index.ts`,
       "@lobbystack/db": `${root}/packages/db/src/index.ts`,
       "@lobbystack/jobs": `${root}/packages/jobs/src/index.ts`,
+      "@lobbystack/providers/polar/polarCatalog": `${root}/packages/providers/src/polar/polarCatalog.ts`,
       "@lobbystack/shared": `${root}/packages/shared/src/index.ts`,
       "@lobbystack/telemetry/node": `${root}/packages/telemetry/src/node.ts`,
       "@lobbystack/telemetry": `${root}/packages/telemetry/src/index.ts`,

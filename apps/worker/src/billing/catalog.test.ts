@@ -29,10 +29,10 @@ describe("billing jobs: the daily catalog check", () => {
     const warn = { code: "code_hash", pair: "file_postgres", level: "warn", subject: "code", message: "y" } as const;
     vi.mocked(runDailyBillingVerify)
       .mockResolvedValueOnce({ status: "skipped", reason: "nothing was linked yet" })
-      .mockResolvedValueOnce({ status: "drift", previousStatus: "passed", problems: [drift, { ...drift, code: "linked_id", pair: "postgres_polar" }, { ...drift, subject: "Product \"Pro annual\"" }, warn], polarEnv: "sandbox", runId: "run-1" })
-      .mockResolvedValueOnce({ status: "failed", previousStatus: "drift", problems: [{ ...drift, code: "unreadable", subject: "Polar" }], polarEnv: "sandbox", runId: "run-2" })
-      .mockResolvedValueOnce({ status: "passed", previousStatus: "failed", problems: [warn], polarEnv: "sandbox", runId: "run-3" })
-      .mockResolvedValueOnce({ status: "passed", previousStatus: "passed", problems: [], polarEnv: "sandbox", runId: "run-4" });
+      .mockResolvedValueOnce({ status: "drift", previousStatus: "passed", problems: [drift, { ...drift, code: "linked_id", pair: "postgres_polar" }, { ...drift, subject: "Product \"Pro annual\"" }, warn], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-1" })
+      .mockResolvedValueOnce({ status: "failed", previousStatus: "drift", problems: [{ ...drift, code: "unreadable", subject: "Polar" }], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-2" })
+      .mockResolvedValueOnce({ status: "passed", previousStatus: "failed", problems: [warn], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-3" })
+      .mockResolvedValueOnce({ status: "passed", previousStatus: "passed", problems: [], polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox", runId: "run-4" });
     const dependencies = { domain, billingCatalog: { readSnapshot }, productAnalytics: { capture } };
     expect(await handleJob(job, dependencies)).toEqual({ status: "skipped" });
     expect(runDailyBillingVerify).toHaveBeenLastCalledWith(domain, { brand: expect.any(String), env: process.env, readPolar: expect.any(Function) });
@@ -45,9 +45,9 @@ describe("billing jobs: the daily catalog check", () => {
     expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-3:passed" });
     expect(await handleJob(job, dependencies)).toEqual({ status: "completed", entityId: "run-4:passed" });
     expect(capture.mock.calls.map((call) => (call as unknown as [Array<{ event: string; distinctId: string; properties: unknown }>])[0].map(({ event, distinctId, properties }) => ({ event, distinctId, properties })))).toEqual([
-      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "drift", problemCodes: ["linked_id", "product"], problemCount: 3, polarEnv: "sandbox" } }],
-      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "failed", problemCodes: ["unreadable"], problemCount: 1, polarEnv: "sandbox" } }],
-      [{ event: "ops.billing.profile_drift_recovered", distinctId: "system:deployment", properties: { status: "passed", problemCodes: [], problemCount: 0, polarEnv: "sandbox" } }],
+      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "drift", problemCodes: ["linked_id", "product"], problemCount: 3, polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox" } }],
+      [{ event: "ops.billing.profile_drift", distinctId: "system:deployment", properties: { status: "failed", problemCodes: ["unreadable"], problemCount: 1, polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox" } }],
+      [{ event: "ops.billing.profile_drift_recovered", distinctId: "system:deployment", properties: { status: "passed", problemCodes: [], problemCount: 0, polarEnv: "sandbox", provider: "polar", providerEnv: "sandbox" } }],
     ]);
   });
 });

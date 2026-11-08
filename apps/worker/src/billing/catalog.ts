@@ -27,7 +27,7 @@ async function recordBillingCatalogCheck(dependencies: WorkerDependencies, outco
   if (outcome.status === "passed" && !recovered) return;
   const event = recovered ? "ops.billing.profile_drift_recovered" : "ops.billing.profile_drift";
   const problemCodes = [...new Set(outcome.problems.filter((problem) => problem.level === "drift").map((problem) => problem.code))].sort();
-  const properties = { status: outcome.status, problemCodes, problemCount: outcome.problems.filter((problem) => problem.level === "drift").length, polarEnv: outcome.polarEnv };
+  const properties = { status: outcome.status, problemCodes, problemCount: outcome.problems.filter((problem) => problem.level === "drift").length, polarEnv: outcome.polarEnv, provider: outcome.provider, providerEnv: outcome.providerEnv };
   logEvent(recovered ? "info" : "warn", event, { ...properties, problemCodes: problemCodes.join(","), runId: outcome.runId });
   if (!dependencies.productAnalytics) return;
   try {

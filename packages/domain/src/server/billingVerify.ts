@@ -7,6 +7,8 @@ import { billingDeploymentPolar, desiredBillingPlans, diffBillingCatalog, getBil
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
 import { polarProductVariableName } from "./billingPlans";
 import type { DomainContext } from "./context";
+import type { BillingProviderId } from "@lobbystack/providers/billing/types";
+import { plannerFor, readBillingDeployment } from "./billingProvider";
 
 // Verify compares the three copies of a brand's plans two at a time, so a
 // failure names the side that moved: the repository file (the reference),
@@ -205,7 +207,7 @@ export type DailyBillingVerifyInput = {
 
 export type DailyBillingVerifyOutcome =
   | { status: "skipped"; reason: string }
-  | { status: BillingVerifyStatus; previousStatus: string | null; problems: ApiBillingCheck[]; polarEnv: PolarEnv; runId: string };
+  | { status: BillingVerifyStatus; previousStatus: string | null; problems: ApiBillingCheck[]; polarEnv: PolarEnv; provider: BillingProviderId; providerEnv: "sandbox" | "live"; runId: string };
 
 /**
  * The worker's daily check: every check but the webhook's, against the
@@ -215,7 +217,7 @@ export type DailyBillingVerifyOutcome =
  * Polar organization and a first link.
  */
 export async function runDailyBillingVerify(context: DomainContext, input: DailyBillingVerifyInput): Promise<DailyBillingVerifyOutcome> {
-  const polar = billingDeploymentPolar(input.env, { withSecret: false });
+  const polar = readBillingDeployment(input.env, { withSecret: false });
   if (!polar.org) return { status: "skipped", reason: "POLAR_ORGANIZATION_ID isn't set" };
   const catalog = await getBillingCatalogForApi(context, { deployment: { brand: input.brand, polar } });
   const latest = catalog.last_run;
@@ -228,7 +230,7 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   } catch (error) {
     snapshot = { env: polar.env, error: error instanceof Error ? error.message : String(error) };
   }
-  const result = verifyBillingCatalog({
+  const result = plannerFor(polar.provider).verify({
     file: { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(parsed.data) },
     catalog,
     polar: snapshot,
@@ -237,5 +239,5 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   });
   const problems = billingProblems(result.checks);
   const recorded = await recordBillingVerifyRun(context, { catalog: { brand: latest.brand, ver: latest.ver, hash: latest.hash }, codeHash: catalog.code_hash, status: result.status, problems, polarEnv: polar.env, polarOrg: polar.org });
-  return { status: result.status, previousStatus: recorded.previousStatus, problems, polarEnv: polar.env, runId: recorded.run.id! };
+  return { status: result.status, previousStatus: recorded.previousStatus, problems, polarEnv: polar.env, provider: polar.provider, providerEnv: polar.providerEnv, runId: recorded.run.id! };
 }

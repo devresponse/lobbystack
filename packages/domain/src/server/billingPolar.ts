@@ -1,4 +1,5 @@
 import type { PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
+import { isPolarRef, polarRef, type PolarRef } from "@lobbystack/providers/polar/polarCatalog";
 import { billingMeterEventNames, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPlan } from "./billingCatalog";
@@ -138,8 +139,8 @@ export type PolarStepObject = "organization" | "meter" | "product" | "discount" 
 /** tag: an object polar-setup.mjs made, taken over by --adopt. detach: a product's Credits taken off. end: a discount ended now. */
 export type PolarStepAction = "create" | "update" | "tag" | "detach" | "archive" | "end";
 
-/** An object made earlier in the same run, named until Polar gives it an id. */
-export type PolarRef = { $ref: string };
+export type { PolarCaller, PolarRef } from "@lobbystack/providers/polar/polarCatalog";
+export { runPolarSteps } from "@lobbystack/providers/polar/polarCatalog";
 
 export type PolarStep = {
   object: PolarStepObject;
@@ -170,8 +171,8 @@ export type PolarPlanOptions = {
 
 export type PolarPlan = { steps: PolarStep[]; refusals: PolarRefusal[] };
 
-const ref = (name: string): PolarRef => ({ $ref: name });
-const isRef = (value: unknown): value is PolarRef => Boolean(value && typeof value === "object" && "$ref" in value);
+const ref = polarRef;
+const isRef = isPolarRef;
 const idText = (value: string | PolarRef) => (isRef(value) ? `{{${value.$ref}}}` : value);
 
 function money(cents: number, currency: string): string {
@@ -630,44 +631,7 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
   return { steps: [...steps, ...late, ...lateMeters], refusals };
 }
 
-// Running a plan.
-
-export type PolarCaller = { request(method: "POST" | "PATCH", path: string, body: unknown): Promise<unknown> };
-
-function resolveRefs(value: unknown, ids: ReadonlyMap<string, string>): unknown {
-  if (isRef(value)) {
-    const id = ids.get(value.$ref);
-    if (!id) throw new Error(`No Polar id for ${value.$ref}: the call that makes it didn't run.`);
-    return id;
-  }
-  if (Array.isArray(value)) return value.map((entry) => resolveRefs(entry, ids));
-  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, resolveRefs(entry, ids)]));
-  return value;
-}
-
-/**
- * Makes each call in order, putting the ids of objects made earlier into the
- * ones after. Stops at the first failure: what landed is found again by its
- * tags on the next run. Returns the new webhook's secret, when one was made;
- * onStep hears it with the call that made the webhook, so a caller keeps it
- * even when a later call fails.
- */
-export async function runPolarSteps(caller: PolarCaller, steps: readonly PolarStep[], onStep?: (step: PolarStep, webhookSecret: string | null) => void): Promise<{ webhookSecret: string | null }> {
-  const ids = new Map<string, string>();
-  let webhookSecret: string | null = null;
-  for (const step of steps) {
-    const path = step.path.replace(/\{\{([^{}]+)\}\}/g, (_match, name: string) => resolveRefs(ref(name), ids) as string);
-    const result = (await caller.request(step.method, path, resolveRefs(step.body, ids))) as { id?: unknown; secret?: unknown } | null;
-    if (step.produces) {
-      if (typeof result?.id !== "string") throw new Error(`Polar made ${step.subject} but sent no id back. Run again: it is found by its tags.`);
-      ids.set(step.produces, result.id);
-    }
-    const secret = step.object === "webhook" && step.action === "create" && typeof result?.secret === "string" ? result.secret : null;
-    if (secret) webhookSecret = secret;
-    onStep?.(step, secret);
-  }
-  return { webhookSecret };
-}
+// Running a plan is the catalog client's: PolarCatalogClient.run, or runPolarSteps with any caller.
 
 // Links.
 

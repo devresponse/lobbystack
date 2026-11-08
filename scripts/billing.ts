@@ -26,8 +26,9 @@ import { createClient, type Client } from "../packages/cli/src/client";
 import { configPath, readConfig, resolveConnection } from "../packages/cli/src/config";
 import { ApiError, CliError } from "../packages/cli/src/errors";
 import { desiredBillingPlans } from "../packages/domain/src/server/billingCatalog";
-import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, runPolarSteps, POLAR_WEBHOOK_PATH, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "../packages/domain/src/server/billingPolar";
-import { billingVerifyReport, verifyBillingCatalog, type BillingVerifyResult } from "../packages/domain/src/server/billingVerify";
+import { POLAR_WEBHOOK_PATH, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "../packages/domain/src/server/billingPolar";
+import { plannerFor } from "../packages/domain/src/server/billingProvider";
+import { billingVerifyReport, type BillingVerifyResult } from "../packages/domain/src/server/billingVerify";
 import { PolarCatalogClient, type PolarSnapshot } from "../packages/providers/src/polar/polarCatalog";
 import { billingProfileSchema, canonicalBillingProfileJson, polarBaseUrls, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type PolarEnv } from "../packages/shared/src/index";
 
@@ -53,6 +54,9 @@ const USAGE = [
 ].join("\n");
 
 const exit = { ok: 0, drift: 1, failed: 2 } as const;
+
+/** What pnpm billing decides for the provider it sets up: Polar, until --stripe (Stripe plan, step 11). */
+const planner = plannerFor("polar");
 
 /** Something that stops the run before it changes anything, or a drift it found: exit 1. */
 class Refused extends Error {
@@ -234,7 +238,7 @@ async function verifyCommand(options: Options, io: BillingIo, input: { file: Bil
   } catch (error) {
     polar = { env: options.polar, error: (error as Error).message };
   }
-  const result = verifyBillingCatalog({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans }, catalog, polar, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
+  const result = planner.verify({ file: { brand: options.brand, hash: input.file.hash, profile: input.file.profile, plans: input.file.plans }, catalog, polar, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
   if (options.json) io.out(JSON.stringify({ status: result.status, checks: result.checks }, null, 2));
   else io.out(billingVerifyReport(result, `${options.brand} billing.json v${input.file.profile.version} (${short(input.file.hash)}) against Polar ${polarWord(options.polar)} and ${input.url}`));
   return verifyExit(result);
@@ -256,8 +260,8 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
     catalogChanged ||= catalogChanges.length > 0;
     reasons.push(...preview.blocked_by.map(apiRefusalLine));
   }
-  const desired = desiredPolarCatalog({ brand: options.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl });
-  const polarPlan = planPolarChanges({ catalog: desired, snapshot, options: options.plan });
+  const desired = planner.desired({ brand: options.brand, profile: file.profile, plans: file.plans, webhookUrl: input.webhookUrl });
+  const polarPlan = planner.plan({ desired, snapshot, options: options.plan });
   reasons.push(...polarPlan.refusals.map(refusalLine));
   const sold = file.plans.filter((plan) => plan.sold && plan.prices.length);
   const linkCount = sold.reduce((total, plan) => total + plan.prices.length, 0);
@@ -309,7 +313,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   if (polarPlan.steps.length) io.out("\nPolar:");
   const made: { webhookSecret: string | null } = { webhookSecret: null };
   try {
-    await runPolarSteps(polar, polarPlan.steps, (step, secret) => {
+    await polar.run(polarPlan.steps, (step, secret) => {
       made.webhookSecret ??= secret;
       io.out(`  done ${stepLine(step).trimStart()}`);
     });
@@ -323,17 +327,17 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
 
   // Step 9: Polar against the file, before anything is linked.
   const after = await polar.readSnapshot();
-  const check = planPolarChanges({ catalog: desired, snapshot: after, options: { adopt: false, allowReplace: true, allowArchive: true } });
+  const check = planner.plan({ desired, snapshot: after, options: { adopt: false, allowReplace: true, allowArchive: true } });
   if (check.steps.length || check.refusals.length) throw new Refused([...check.steps.map((step) => stepLine(step).trimStart()), ...check.refusals.map(refusalLine)], "Polar still differs from the file, so nothing was linked. Run again:");
 
   // Step 10: the links.
-  const links = polarLinkPlans({ catalog: desired, plans: file.plans, snapshot: after });
+  const links = planner.linkBody({ desired, snapshot: after, plans: file.plans });
   if (links.missing.length) throw new Refused(links.missing, "Polar has no single object for these, so nothing was linked:");
   const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, polar_env: options.polar, polar_org: after.organization.id, plans: links.plans, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
   io.out(`\nLinks: ${link.status === "unchanged" ? "already recorded" : `recorded ${link.changes.length} ${link.changes.length === 1 ? "change" : "changes"}`} in run ${String(link.id)}.`);
 
   // Step 11: all three pairs.
-  const result = verifyBillingCatalog({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans }, catalog: (await api.call("getBillingCatalog")).data, polar: { env: options.polar, snapshot: after }, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
+  const result = planner.verify({ file: { brand: options.brand, hash: file.hash, profile: file.profile, plans: file.plans }, catalog: (await api.call("getBillingCatalog")).data, polar: { env: options.polar, snapshot: after }, webhookUrl: input.webhookUrl, checkWebhookSecret: true });
   io.out("");
   io.out(billingVerifyReport(result, `${options.brand} billing.json v${file.profile.version} (${short(file.hash)}) against Polar ${polarWord(options.polar)} and ${input.url}`));
   return verifyExit(result);

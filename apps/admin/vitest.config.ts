@@ -17,6 +17,7 @@ export default defineConfig({
       "@lobbystack/agent-core": `${root}/packages/agent-core/src`,
       "@lobbystack/providers/billing/errors": `${root}/packages/providers/src/billing/errors.ts`,
       "@lobbystack/providers/billing/factory": `${root}/packages/providers/src/billing/factory.ts`,
+      "@lobbystack/providers/polar/polarCatalog": `${root}/packages/providers/src/polar/polarCatalog.ts`,
       "@lobbystack/providers/polar/events": `${root}/packages/providers/src/polar/events.ts`,
       "@lobbystack/providers/storage/local": `${root}/packages/providers/src/storage/local.ts`,
       "@lobbystack/providers/crawling/urlSafety": `${root}/packages/providers/src/crawling/urlSafety.ts`,

@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 3 are done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 4 are done.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -60,3 +60,11 @@ Left to the steps that use them: the job types for the overage subscription, pla
 - **Reconcile** reads the stored kind, and for an event stored before it, the event's name, as before. A new test shows an event stored either way reconciles to the same rows.
 
 A Polar deployment sees no change: the same answers, the same log lines and the same rows, with two more fields in each stored payload.
+
+## Step 4: the catalog seam
+
+Its first commit, on the code as it was, saves what `pnpm billing` prints: `plan --json` for both brands on an empty Polar organization and on the objects `polar-setup.mjs` made, and `apply` then `verify --json`. The rest of the step leaves those snapshots unchanged.
+
+- **The planner:** `packages/domain/src/server/billingProvider.ts` declares `CatalogPlanner`: what a brand's file makes the provider sell, the calls that get the account there, the three-way verify and the link request. `polarPlanner` wraps `desiredPolarCatalog`, `planPolarChanges`, `verifyBillingCatalog` and `polarLinkPlans` unchanged, and `plannerFor` picks the deployment's. `readBillingDeployment` reads the provider with Polar's settings.
+- **The client:** `PolarCatalogClient` implements `BillingCatalogClient`. The step runner, `runPolarSteps`, moved beside it into `packages/providers`, and `billingPolar.ts` exports it as before.
+- **Its callers:** `pnpm billing` and the worker's daily check go through the planner, and the client runs the plan's calls. The daily check's `ops.billing.profile_drift` events add `provider` and `providerEnv` beside `polarEnv`, which existing dashboards read.

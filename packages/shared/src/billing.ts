@@ -160,6 +160,13 @@ export type PolarEnv = keyof typeof polarBaseUrls;
  */
 export const POLAR_API_VERSION = "2026-10";
 
+/**
+ * The Stripe API version every call asks for, the one the stripe package was
+ * released with; pnpm billing makes the webhook endpoint with it too, so
+ * event objects match the SDK's types. Change it with the package, on purpose.
+ */
+export const STRIPE_API_VERSION = "2026-10-28.endive";
+
 /** The server a POLAR_API_BASE_URL names: sandbox for sandbox-api.polar.sh, else production, as an unset one means api.polar.sh. */
 export function polarEnvForBaseUrl(baseUrl: string | null | undefined): PolarEnv {
   if (!baseUrl) return "production";

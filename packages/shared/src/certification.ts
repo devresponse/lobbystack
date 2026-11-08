@@ -26,6 +26,12 @@ export function assertCertificationCalendar(calendarId: string, source: Environm
   if (!calendarId || calendarId === "primary" || !allowed.includes(calendarId)) throw new Error("CERTIFICATION_CALENDAR_BLOCKED");
 }
 
+/** A certification run takes Stripe test keys only (sk_test_ or rk_test_), so no live payment can happen. */
+export function assertCertificationStripeKey(key: string, source: Environment = process.env): void {
+  if (!isCertificationMode(source)) return;
+  if (!/^(?:sk|rk)_test_[A-Za-z0-9]/.test(key.trim())) throw new Error("CERTIFICATION_REQUIRES_STRIPE_TEST_KEY");
+}
+
 export function assertCertificationBillingSandbox(baseUrl: string, source: Environment = process.env): void {
   if (!isCertificationMode(source)) return;
   const url = new URL(baseUrl);

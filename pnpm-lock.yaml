@@ -891,6 +891,9 @@ importers:
       standardwebhooks:
         specifier: ^1.1.1
         version: 1.1.1
+      stripe:
+        specifier: 23.1.0
+        version: 23.1.0(@types/node@26.6.4)
       twilio:
         specifier: ^6.1.2
         version: 6.1.2
@@ -8876,6 +8879,15 @@ packages:
   strip-json-comments@3.1.1:
     resolution: {integrity: sha512-6fPc+R4ihwqP6N/aIv2f1gMH8lOVtWQHoqC4yK6oSDVVocumAsfCqjkXnqiYMhmMwS/mEHLp7Vehlt3ql6lEig==}
     engines: {node: '>=8'}
+
+  stripe@23.1.0:
+    resolution: {integrity: sha512-fVUfMSfTPoukfoV//MUKAx2+YxyKmYaYtnAL9VkfnHfaPNQylFdWZMD+zgUFerI8rjbaiER8Vzj2XEUQ2AhAsQ==}
+    engines: {node: '>=20'}
+    peerDependencies:
+      '@types/node': '>=20'
+    peerDependenciesMeta:
+      '@types/node':
+        optional: true
 
   strnum@2.4.2:
     resolution: {integrity: sha512-rDG3Ah4TV0k1hWvLSzkZtMmLN9+eS+h3knq4MP6A42Y3Yh5qGNnOUs1jJkoSr8FG5dsL28c7KgkIBzSEykqtuw==}
@@ -19063,6 +19075,10 @@ snapshots:
     optional: true
 
   strip-json-comments@3.1.1: {}
+
+  stripe@23.1.0(@types/node@26.6.4):
+    optionalDependencies:
+      '@types/node': 26.6.4
 
   strnum@2.4.2:
     dependencies:

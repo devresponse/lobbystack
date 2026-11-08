@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { polarHarness } from "./harness";
+import { polarHarness, stripeHarness } from "./harness";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -27,6 +27,28 @@ describe("the billing provider contract: usage and the billing portal", () => {
       polar.answer("POST", "/v1/customer-sessions/", { customer_portal_url: "https://polar.test/portal/1" }, 201);
       await expect(polar.billing.createPortalSession({ customer: { id: "cus-1", billingKey: "business:b1" }, returnUrl: "https://app.example/settings/plan", locale: "fr" })).resolves.toEqual({ url: "https://polar.test/portal/1" });
       expect(polar.requests).toEqual([{ method: "POST", path: "/v1/customer-sessions/", body: { external_customer_id: "business:b1", return_url: "https://app.example/settings/plan" } }]);
+    });
+  });
+
+  describe("on Stripe", () => {
+    it("opens the billing portal for the business's customer, with the deployment's configuration once a link recorded one", async () => {
+      const { billing, stripe } = stripeHarness({ portalConfiguration: "bpc_1" });
+      stripe.addCustomer({ id: "cus_1", businessId: "b1" });
+      await expect(billing.createPortalSession({ customer: { id: "cus_1", billingKey: "business:b1" }, returnUrl: "https://app.example/settings/plan", locale: "fr" })).resolves.toEqual({ url: expect.stringMatching(/^https:\/\/billing\.stripe\.com\//) });
+      expect(stripe.requests).toEqual([{ call: "billingPortal.sessions.create", params: { customer: "cus_1", return_url: "https://app.example/settings/plan", configuration: "bpc_1", locale: "fr" }, idempotencyKey: null }]);
+    });
+
+    it("lets Stripe pick the portal's language from the browser for one it doesn't have", async () => {
+      const { billing, stripe } = stripeHarness();
+      stripe.addCustomer({ id: "cus_1", businessId: "b1" });
+      await billing.createPortalSession({ customer: { id: "cus_1", billingKey: "business:b1" }, returnUrl: "https://app.example/settings/plan", locale: "sr" });
+      expect(stripe.requests).toEqual([{ call: "billingPortal.sessions.create", params: { customer: "cus_1", return_url: "https://app.example/settings/plan" }, idempotencyKey: null }]);
+    });
+
+    it("opens none for a business that has no customer yet, and sends usage only from step 16", async () => {
+      const { billing } = stripeHarness();
+      await expect(billing.createPortalSession({ customer: { id: null, billingKey: "business:b1" }, returnUrl: "https://app.example", locale: null })).rejects.toMatchObject({ code: "not_found" });
+      await expect(billing.reportUsage({ customer: { id: "cus_1", billingKey: "business:b1" }, businessId: "b1", kind: "voice", units: 60, amountCents: 20, occurredAt: new Date(), identifier: "voice:1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 16") });
     });
   });
 });

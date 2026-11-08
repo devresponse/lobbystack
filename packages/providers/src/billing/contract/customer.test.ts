@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.mock("@lobbystack/telemetry/node", async (importOriginal) => ({ ...await importOriginal<typeof import("@lobbystack/telemetry/node")>(), reportWarning: vi.fn() }));
 
 import { reportWarning } from "@lobbystack/telemetry/node";
-import { polarHarness } from "./harness";
+import { polarHarness, stripeHarness } from "./harness";
 
 const input = { customer: { id: null, billingKey: "business:b1" }, businessId: "b1", email: "owner@example.com", name: "Allo Salon", locale: null, requestId: "request-1" };
 
@@ -61,6 +61,45 @@ describe("the billing provider contract: the customer", () => {
       invalid.answer("POST", "/v1/customers/", { error: "RequestValidationError", detail: [{ loc: ["body", "email"], msg: "invalid" }] }, 422);
       const invalidError = await invalid.billing.findOrCreateCustomer(input).catch((error: unknown) => error);
       expect(invalid.billing.refusalFor(invalidError)).toBe("billing_email_invalid");
+    });
+  });
+
+  describe("on Stripe", () => {
+    it("makes the business's customer with its email, name, language and IDs, once for a retried job", async () => {
+      const { billing, stripe } = stripeHarness();
+      const made = await billing.findOrCreateCustomer({ ...input, locale: "fr" });
+      expect(made).toEqual({ id: expect.stringMatching(/^cus_/), created: true });
+      expect(stripe.requests).toEqual([{ call: "customers.create", params: { email: "owner@example.com", name: "Allo Salon", preferred_locales: ["fr"], metadata: { lobbystack_business: "b1", lobbystack_billing_key: "business:b1", lobbystack_deployment: "https://app.example" } }, idempotencyKey: "customer:b1" }]);
+      // A retry with the same key gets the same customer.
+      await expect(billing.findOrCreateCustomer({ ...input, locale: "fr" })).resolves.toEqual({ id: made.id, created: true });
+      expect(stripe.state.customers.size).toBe(1);
+    });
+
+    it("leaves out a language Stripe's emails don't come in", async () => {
+      const { billing, stripe } = stripeHarness();
+      await billing.findOrCreateCustomer({ ...input, locale: "sr" });
+      expect(stripe.requests[0]?.params).not.toHaveProperty("preferred_locales");
+    });
+
+    it("finds the business's customer by the ID the account holds", async () => {
+      const { billing, stripe } = stripeHarness();
+      stripe.addCustomer({ id: "cus_known", businessId: "b1" });
+      await expect(billing.findOrCreateCustomer({ ...input, customer: { id: "cus_known", billingKey: "business:b1" } })).resolves.toEqual({ id: "cus_known", created: false });
+      expect(stripe.requests.map((request) => request.call)).toEqual(["customers.retrieve"]);
+    });
+
+    it("makes a new one for a deleted customer, one naming another business, and one Stripe no longer has", async () => {
+      for (const known of [{ id: "cus_old", deleted: true }, { id: "cus_old", businessId: "b2" }, null]) {
+        const { billing, stripe } = stripeHarness();
+        if (known) stripe.addCustomer(known);
+        const made = await billing.findOrCreateCustomer({ ...input, customer: { id: "cus_old", billingKey: "business:b1" } });
+        expect(made).toEqual({ id: expect.not.stringMatching(/^cus_old$/), created: true });
+        expect(stripe.requests.at(-1)).toMatchObject({ call: "customers.create", idempotencyKey: "customer:b1:2" });
+      }
+    });
+
+    it("keeps no customer per email, so a billing email is never refused", () => {
+      expect(stripeHarness().billing.can.uniqueCustomerEmail).toBe(false);
     });
   });
 });

@@ -2,6 +2,8 @@ import { vi } from "vitest";
 
 import { PolarBilling } from "../../polar/adapter";
 import { PolarBillingProvider } from "../../polar/polarBilling";
+import { StripeBilling } from "../../stripe/adapter";
+import { createFakeStripe, type FakeStripe } from "../../stripe/fake";
 import type { BillingProvider } from "../types";
 
 // The contract suite runs each flow's file against every adapter. Polar runs
@@ -36,6 +38,14 @@ export function polarHarness(): PolarHarness {
       answers.push({ method, path, body, status });
     },
   };
+}
+
+export type StripeHarness = { billing: StripeBilling; stripe: FakeStripe };
+
+/** The Stripe adapter over the in-memory fake, on a sandbox account. */
+export function stripeHarness(options: { portalConfiguration?: string } = {}): StripeHarness {
+  const stripe = createFakeStripe({ accountId: "acct_1" });
+  return { stripe, billing: new StripeBilling(stripe, { accountId: "acct_1", env: "sandbox", deployment: "https://app.example", ...(options.portalConfiguration ? { portalConfiguration: options.portalConfiguration } : {}) }) };
 }
 
 /** A Polar subscription body, active on a standard product, with a period ending in 2099. */

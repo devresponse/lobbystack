@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BillingProviderError } from "../errors";
-import { polarHarness, polarSubscriptionBody } from "./harness";
+import { polarHarness, polarSubscriptionBody, stripeHarness } from "./harness";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -83,6 +83,50 @@ describe("the billing provider contract: a subscription", () => {
       await expect(polar.billing.keepPlan({ subscriptionId: "sub-1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
       expect(polar.billing.can.inAppCancel).toBe(false);
       expect(polar.requests).toEqual([]);
+    });
+  });
+
+  describe("on Stripe", () => {
+    it("reads one with its schedule, discounts and latest invoice, and null for one Stripe doesn't know", async () => {
+      const { billing, stripe } = stripeHarness();
+      stripe.addSubscription({ id: "sub_1", customer: "cus_1", status: "past_due", price: "price_pro_monthly", coupon: "coupon_1", cancelAtPeriodEnd: true, periodEnd: 4_100_000_000 });
+      const subscription = await billing.getSubscription("sub_1");
+      expect(subscription).toMatchObject({ id: "sub_1", customerId: "cus_1", state: "past_due", priceRef: "price_pro_monthly", discountRef: "coupon_1", periodEnd: new Date(4_100_000_000_000), cancelAt: new Date(4_100_000_000_000) });
+      expect(stripe.requests[0]).toEqual({ call: "subscriptions.retrieve", params: { id: "sub_1", expand: ["schedule", "discounts", "latest_invoice"] }, idempotencyKey: null });
+      await expect(billing.getSubscription("sub_2")).resolves.toBeNull();
+    });
+
+    it("ends one now, invoicing what it owes with no proration, once for a retried job", async () => {
+      const { billing, stripe } = stripeHarness();
+      stripe.addSubscription({ id: "sub_1", customer: "cus_1" });
+      await expect(billing.revoke({ subscriptionId: "sub_1", requestId: "r1" })).resolves.toBe("ended");
+      expect(stripe.requests).toEqual([{ call: "subscriptions.cancel", params: { id: "sub_1", invoice_now: true, prorate: false }, idempotencyKey: "revoke:sub_1" }]);
+      expect(stripe.state.subscriptions.get("sub_1")?.status).toBe("canceled");
+      expect(stripe.state.invoices.size).toBe(1);
+      // The same job again: Stripe answers the key's first answer.
+      await expect(billing.revoke({ subscriptionId: "sub_1", requestId: "r1" })).resolves.toBe("ended");
+      expect(stripe.state.invoices.size).toBe(1);
+    });
+
+    it("counts one Stripe no longer has, or that already ended, as ended", async () => {
+      const { billing, stripe } = stripeHarness();
+      await expect(billing.revoke({ subscriptionId: "sub_gone", requestId: "r1" })).resolves.toBe("already_ended");
+      stripe.addSubscription({ id: "sub_ended", status: "canceled", endedAt: 1 });
+      await expect(billing.revoke({ subscriptionId: "sub_ended", requestId: "r1" })).resolves.toBe("already_ended");
+    });
+
+    it("answers not_supported, naming the step, for the flows later steps add", async () => {
+      const { billing, stripe } = stripeHarness();
+      const to = { ref: "price_pro_monthly", discountRef: null };
+      await expect(billing.changePlan({ subscriptionId: "sub_1", to, discount: "keep", when: "now", proration: "invoice_now", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 14") });
+      await expect(billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 15") });
+      await expect(billing.resume({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
+      await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
+      await expect(billing.endAtRenewal({ subscriptionId: "sub_1", then: "cancel", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
+      await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
+      await expect(billing.ensureOverage({ customerId: "cus_1", planSubscriptionId: "sub_1", businessId: "b1", currency: "cad" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 13") });
+      expect(stripe.requests).toEqual([]);
+      expect(billing.can).toEqual({ uniqueCustomerEmail: false, meterMoney: true, separateOverage: true, readBack: true, inAppCancel: true });
     });
   });
 });

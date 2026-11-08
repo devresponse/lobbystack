@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { PolarBilling } from "../../polar/adapter";
 import { PolarRequestError } from "../../polar/polarBilling";
+import { stripeHarness } from "./harness";
 import { BillingProviderError } from "../errors";
 
 const polar = new PolarBilling({ recordUsage: async () => undefined }, { organizationId: "org-1", env: "sandbox" });
@@ -25,6 +26,14 @@ describe("the billing provider contract: refusals", () => {
       [new BillingProviderError("polar", "refused", "refused", "token_scope"), "token_scope"],
     ] as const)("answers %s with %s", (error, refusal) => {
       expect(polar.refusalFor(error)).toBe(refusal);
+    });
+  });
+
+  describe("on Stripe", () => {
+    it("answers Stripe's errors through its error table, and a neutral refusal as itself", () => {
+      const { billing } = stripeHarness();
+      expect(billing.refusalFor(new BillingProviderError("stripe", "refused", "refused", "change_pending"))).toBe("change_pending");
+      expect(billing.refusalFor(new Error("socket hang up"))).toBeUndefined();
     });
   });
 });

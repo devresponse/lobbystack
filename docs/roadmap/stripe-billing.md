@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 8 are done: phases 1 and 2.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 9 are done: phases 1 and 2, and the first step of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -113,3 +113,14 @@ Reconcile stores when a plan ends and what it changes to, for Polar too, so **Se
 - **Settings > Plan** says "Your plan ends on DATE" or "Your plan changes to PLAN on DATE" under the plan, with step 7's strings; a promo plan's own end keeps its wording, and **Manage subscription** still opens Polar's portal.
 
 On the demo, a sandbox subscription canceled in Polar's portal should then show its end date: the check for this step once it's deployed.
+
+## Step 9: the Stripe client, adapter core, fake and contract tests
+
+No app path calls Stripe yet: a deployment only reaches it with `BILLING_PROVIDER=stripe` and `BILLING_STRIPE_PREVIEW=true`, and then with test keys only.
+
+- **The package:** `stripe` 23.1.0 in `packages/providers`, at that exact version, and `STRIPE_API_VERSION` (`2026-10-28.endive`, the version the package was released with) in `packages/shared/src/billing.ts`.
+- **The client** (`packages/providers/src/stripe/client.ts`): the pinned version, two network retries, a 15-second timeout, LobbyStack in the user agent and no request telemetry. `checkStripeAccount` is the startup check: the key's own account must be `STRIPE_ACCOUNT_ID`, and a test key goes with a sandbox. The worker calls it once it bills on Stripe, in step 13. `assertCertificationStripeKey` in `packages/shared/src/certification.ts` keeps a certification run on test keys.
+- **The adapter** (`stripe/adapter.ts`, `StripeBilling`): finding or making the business's customer (by the ID the account holds; a deleted one, or one naming another business, gets a new one; an idempotency key per business), reading a subscription with its schedule, discounts and latest invoice (`stripe/subscriptions.ts`: the plan's item, never an overage price, with its period), the billing portal, ending a subscription now with its last invoice, and refusals (`stripe/errors.ts`, the proposal's error table). Stripe gets the business's language only when its pages and emails come in it (`stripeLocale`): Serbian isn't one, so Stripe goes by the browser. The flows of later steps have a module each, `checkout.ts`, `overage.ts`, `planChange.ts`, `cancel.ts`, `usage.ts`, `catalog.ts` and `events.ts`, which answers not_supported, naming its step, until then.
+- **The fake** (`stripe/fake/`): an in-memory Stripe answering the calls the adapter makes, with Stripe's own error classes and idempotency, and builders for subscriptions, schedules, invoices and test cards.
+- **The factory** takes `stripe` behind `BILLING_STRIPE_PREVIEW=true`, building the adapter from `STRIPE_API_KEY` and `STRIPE_ACCOUNT_ID` and refusing a live key; Stripe's webhook stays refused until step 12, and a preview worker has no catalog client until step 11, so it starts and skips the daily check.
+- **Tests:** the contract files for the customer, a subscription, the billing portal and refusals run on both adapters; Stripe's statuses, items and errors each have a test, and so do the certification guard and the factory's refusals.

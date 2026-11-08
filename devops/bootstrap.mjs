@@ -148,8 +148,7 @@ BILLING_PROVIDER=polar
 POLAR_ORGANIZATION_ID=
 POLAR=sandbox
 # Stripe, only with BILLING_PROVIDER=stripe: sandbox or live. The account is the one the keys
-# belong to (STRIPE_ADMIN_KEY and STRIPE_WORKER_KEY, in the secrets file). Until Stripe billing
-# is switched on, it's sandbox only.
+# belong to (STRIPE_ADMIN_KEY and STRIPE_WORKER_KEY, in the secrets file).
 STRIPE=sandbox
 
 # Turn steps off with no (each then takes its values from the secrets file, or asks you).
@@ -491,8 +490,6 @@ function loadRun(file, { log = true } = {}) {
   if (!["sandbox", "live"].includes(s.POLAR)) problems.push("POLAR is sandbox or live");
   if (!["sandbox", "live"].includes(s.STRIPE)) problems.push("STRIPE is sandbox or live");
   if (s.BILLING_PROVIDER === "stripe" && s.DEPLOYMENT_MODE !== "cloud") problems.push("BILLING_PROVIDER=stripe is only for DEPLOYMENT_MODE=cloud");
-  // Until Stripe billing is switched on (BILLING_STRIPE_PREVIEW), the admin and the worker take Stripe test keys only.
-  if (s.BILLING_PROVIDER === "stripe" && s.STRIPE === "live") problems.push("STRIPE=live isn't available yet: until Stripe billing is switched on, a Stripe deployment takes test keys only, so STRIPE is sandbox");
   if (s.REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.REPO)) problems.push("REPO is owner/name");
   if (s.TEMPLATE_REPO && !/^[\w.-]+\/[\w.-]+$/.test(s.TEMPLATE_REPO)) problems.push("TEMPLATE_REPO is owner/name");
   // APP_BASE_URL is the dashboard's own address, and CUSTOM_HOST its older name: both come down to the host name.
@@ -1681,7 +1678,7 @@ async function railwaySteps(run) {
 
 // Variables that differ for each deployment, or depend on its settings, stay out of the template.
 const NOT_IN_TEMPLATE = new Set(["DEPLOYMENT_MODE", "BRAND_PRESET", "EMAIL_FROM", "POLAR_ORGANIZATION_ID", "POLAR_API_BASE_URL", "TWILIO_ALERT_SMS_FROM", "REQUIRE_EMAIL_VERIFICATION",
-  "BILLING_PROVIDER", "BILLING_STRIPE_PREVIEW", "STRIPE_ACCOUNT_ID"]);
+  "BILLING_PROVIDER", "STRIPE_ACCOUNT_ID"]);
 
 /**
  * Builds a Railway project that holds only the layout (services, volumes, bucket, settings,
@@ -1953,8 +1950,7 @@ function variableSections(run) {
       S3_ACCESS_KEY_ID: "${{Bucket.ACCESS_KEY_ID}}", S3_SECRET_ACCESS_KEY: "${{Bucket.SECRET_ACCESS_KEY}}", S3_FORCE_PATH_STYLE: "false",
       ...(cloud && x("TWILIO_ALERT_SMS_FROM") ? { TWILIO_ALERT_SMS_FROM: x("TWILIO_ALERT_SMS_FROM") } : {}),
       ...(polar ? { POLAR_ORGANIZATION_ID: s.POLAR_ORGANIZATION_ID, ...(s.POLAR === "sandbox" ? { POLAR_API_BASE_URL: "https://sandbox-api.polar.sh" } : {}) } : {}),
-      // Until Stripe billing is switched on, the admin and the worker bill through Stripe only with the preview's word.
-      ...(stripe ? { BILLING_PROVIDER: "stripe", BILLING_STRIPE_PREVIEW: "true", STRIPE_ACCOUNT_ID: x("STRIPE_ACCOUNT_ID") } : {}),
+      ...(stripe ? { BILLING_PROVIDER: "stripe", STRIPE_ACCOUNT_ID: x("STRIPE_ACCOUNT_ID") } : {}),
     }],
     ["admin", {
       RAILWAY_DOCKERFILE_PATH: "Dockerfile.admin", PORT: "3000", HOSTNAME: "::",

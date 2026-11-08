@@ -35,7 +35,7 @@ Section numbers such as "guide 3.2" in this page and in the script's messages ar
 | Turnstile | Creates the widget, or adds this deployment's addresses to the widget whose keys you gave | Nothing, if the Cloudflare token can edit Turnstile |
 | `connect` | Checks the admin's health, takes the webhook's secret, makes the operator's platform key, and sets both on the admin | Create the webhook in OpenAI first |
 | Polar, in cloud mode | Takes the admin's and the worker's tokens | Make those tokens, and later run `pnpm billing` ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
-| Stripe, in cloud mode with `BILLING_PROVIDER=stripe` | Takes the admin's and the worker's restricted keys, checks that each is of the deployment's mode and that both belong to one account, and puts that account on both services as `STRIPE_ACCOUNT_ID`, with `BILLING_PROVIDER` and `BILLING_STRIPE_PREVIEW` | Make those keys, and later run `pnpm billing --stripe` ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
+| Stripe, in cloud mode with `BILLING_PROVIDER=stripe` | Takes the admin's and the worker's restricted keys, checks that each is of the deployment's mode and that both belong to one account, and puts that account on both services as `STRIPE_ACCOUNT_ID`, with `BILLING_PROVIDER` | Make those keys, and later run `pnpm billing --stripe` ([step 8](#8-cloud-mode-sell-plans-through-polar)) |
 
 ## Before you start
 
@@ -89,9 +89,9 @@ This writes `.env.bootstrap-<name>` for the settings and `.env.bootstrap-<name>.
 | `CLOUDFLARE_ZONE` | `example.com` | The zone's domain name, not its 32-character Zone ID. Empty: the script prints every DNS record for you to add |
 | `CLOUDFLARE_ACCOUNT_ID` | 32 characters | From the zone's **Overview** page. Empty: you make the Turnstile widget by hand |
 | `TWILIO_TOLLFREE` | `buy` | Cloud mode only: `buy`, a number already in the subaccount such as `+18445550123`, or empty for none |
-| `BILLING_PROVIDER` | `polar` | Cloud mode only: `polar` or `stripe`, who sells the plans. A deployment keeps its provider. `stripe` is a preview, with test keys only, until Stripe billing is switched on ([Stripe billing](../docs/providers/stripe.md)) |
+| `BILLING_PROVIDER` | `polar` | Cloud mode only: `polar` or `stripe`, who sells the plans. A deployment keeps its provider ([Stripe billing](../docs/providers/stripe.md)) |
 | `POLAR_ORGANIZATION_ID`, `POLAR` | the ID, `sandbox` | With `BILLING_PROVIDER=polar` only. `POLAR` is `sandbox` or `live` |
-| `STRIPE` | `sandbox` | With `BILLING_PROVIDER=stripe` only: `sandbox`, the only one the preview takes, or `live`. The account is the one the keys belong to |
+| `STRIPE` | `sandbox` | With `BILLING_PROVIDER=stripe` only: `sandbox` or `live`. The account is the one the keys belong to |
 | `STEP_GITHUB` … `STEP_TURNSTILE` | `yes` | `no` skips that service's API, and its values then come from the secrets file, or are asked for |
 | `RAILWAY_TEMPLATE` | the code `template` printed | Optional: make the Railway layout from your private template in one call ([below](#optional-a-private-railway-template)) |
 | `TEMPLATE_PROJECT`, `TEMPLATE_REPO` | `lobbystack-template`, `your-org/lobbystack` | Optional, read only by `template` |
@@ -360,7 +360,6 @@ The script stops at the failing step, names it, and lists **What to try**. Finis
 | `isn't allowed to do this` | The token lacks a permission, such as Cloudflare's **DNS Edit** or **Turnstile Edit**, or Twilio is still a trial |
 | `STRIPE_ADMIN_KEY is a live key, and STRIPE is sandbox`, or the reverse | Make the key in the deployment's mode: a sandbox's keys start with `rk_test_` |
 | `the admin's key belongs to Stripe account …, and the worker's to …` | Make both keys in the deployment's own account or sandbox, put them in the secrets file, and run `up` again |
-| `STRIPE=live isn't available yet` | Stripe billing is a preview, with test keys only, until it's switched on: set `STRIPE=sandbox` |
 | `can't see a zone named …` | `CLOUDFLARE_ZONE` is the domain name, not the Zone ID, and the token's Zone Resources must include it |
 | `couldn't be reached` | Check the internet connection, a VPN or a firewall. Behind a proxy, set `HTTPS_PROXY` and `NODE_USE_ENV_PROXY=1` |
 | `another bootstrap.mjs run (…, process …) is using …` | Let that run finish, or close its window. If no such run is left, delete the `.lock` file it names |

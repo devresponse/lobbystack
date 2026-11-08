@@ -5,7 +5,7 @@ A business on a cloud deployment pays a monthly or yearly price for Starter or P
 The other billing pages:
 
 - [Polar billing](../providers/polar.md): the Polar settings, tokens, routes, retries and checks, for whoever sets Polar up.
-- [Stripe billing](../providers/stripe.md): the same for a deployment that bills through Stripe, a preview until it's switched on.
+- [Stripe billing](../providers/stripe.md): the same for a deployment that bills through Stripe.
 - [`brands/README.md`](../../brands/README.md#billingjson): how to write a brand's `billing.json`, its promo plans and its codes.
 - [Data model](data-model.md): the billing tables, columns and migrations.
 - [Design history](design-history.md): the options weighed, the ten steps, the two reviews and the decisions.
@@ -98,7 +98,7 @@ pnpm billing apply  --brand alloplace --polar sandbox --profile ops --railway-fi
 pnpm billing verify --brand alloplace --polar sandbox --profile ops
 ```
 
-A deployment that bills through Stripe takes `--stripe sandbox|live` in place of `--polar`, with `STRIPE_SETUP_KEY` and `STRIPE_READ_KEY` in place of Polar's tokens, and every flag but `--adopt`. Stripe billing is a preview, behind `BILLING_STRIPE_PREVIEW` and test keys, until it's switched on ([Stripe billing](../providers/stripe.md)).
+A deployment that bills through Stripe takes `--stripe sandbox|live` in place of `--polar`, with `STRIPE_SETUP_KEY` and `STRIPE_READ_KEY` in place of Polar's tokens, and every flag but `--adopt` ([Stripe billing](../providers/stripe.md)).
 
 `plan` and `verify` take `--json` for scripts. `apply` asks before it changes anything; `--yes` skips the question. A run that stops part-way is finished by running it again: everything is found again by its `lobbystack_*` tags in Polar, or its lookup key and metadata in Stripe, and the webhook by its address.
 

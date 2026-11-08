@@ -19,7 +19,6 @@ const thin = JSON.stringify({ id: "evt_thin_1", object: "v2.core.event", type: "
 
 beforeEach(() => {
   vi.stubEnv("BILLING_PROVIDER", "stripe");
-  vi.stubEnv("BILLING_STRIPE_PREVIEW", "true");
   vi.stubEnv("STRIPE_API_KEY", "rk_test_admin123");
   vi.stubEnv("STRIPE_METER_WEBHOOK_SECRET", secret);
   warned = vi.spyOn(console, "warn").mockImplementation(() => undefined);

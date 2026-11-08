@@ -17,17 +17,12 @@ type Env = Record<string, string | undefined>;
 
 /**
  * The deployment's billing provider: BILLING_PROVIDER, Polar when unset.
- * Until step 18 of the Stripe plan switches it on, Stripe also needs
- * BILLING_STRIPE_PREVIEW=true, and takes test keys only. Anything else stops
- * the service at startup.
+ * Anything else stops the service at startup.
  */
 export function readBillingProviderId(env: Env): BillingProviderId {
   const value = env.BILLING_PROVIDER?.trim().toLowerCase() ?? "";
   if (value === "" || value === "polar") return "polar";
-  if (value === "stripe") {
-    if (env.BILLING_STRIPE_PREVIEW?.trim().toLowerCase() !== "true") throw new Error("BILLING_PROVIDER=stripe isn't available yet: Stripe billing is still being built. Set BILLING_STRIPE_PREVIEW=true, with Stripe test keys, to try it, or leave BILLING_PROVIDER unset for Polar.");
-    return "stripe";
-  }
+  if (value === "stripe") return "stripe";
   throw new Error(`BILLING_PROVIDER must be polar or stripe, not "${env.BILLING_PROVIDER}".`);
 }
 
@@ -51,9 +46,9 @@ export function createBillingProvider(env: Env): BillingProvider | undefined {
 
 /**
  * Stripe's adapter from the worker's or the admin's STRIPE_API_KEY and
- * STRIPE_ACCOUNT_ID, or undefined without them. In the preview the key must
- * be a test one. The worker checks the key's own account at startup
- * (checkAccount).
+ * STRIPE_ACCOUNT_ID, or undefined without them: a test key bills in a
+ * sandbox, a live one for real. The worker checks the key's own account at
+ * startup (checkAccount).
  */
 function createStripeBilling(env: Env): StripeBilling | undefined {
   const key = env.STRIPE_API_KEY?.trim();
@@ -61,7 +56,6 @@ function createStripeBilling(env: Env): StripeBilling | undefined {
   if (!key || !accountId) return undefined;
   const keyEnv = stripeKeyEnv(key);
   if (keyEnv === null) throw new Error("STRIPE_API_KEY must be a Stripe secret or restricted key (sk_ or rk_).");
-  if (keyEnv !== "sandbox") throw new Error("BILLING_STRIPE_PREVIEW takes Stripe test keys only (sk_test_ or rk_test_): live Stripe billing comes with step 18 of the Stripe plan.");
   return new StripeBilling(createStripeClient(key), { accountId, env: keyEnv, deployment: env.APP_BASE_URL?.trim() || null });
 }
 
@@ -86,7 +80,6 @@ export function createBillingCatalogClient(env: Env, token?: string): PolarCatal
     if (!key) return undefined;
     const keyEnv = stripeKeyEnv(key);
     if (keyEnv === null) throw new Error("STRIPE_API_KEY must be a Stripe secret or restricted key (sk_ or rk_).");
-    if (keyEnv !== "sandbox") throw new Error("BILLING_STRIPE_PREVIEW takes Stripe test keys only (sk_test_ or rk_test_): live Stripe billing comes with step 18 of the Stripe plan.");
     return createStripeCatalogClient(key);
   }
   const key = token?.trim() || (env.POLAR_ORGANIZATION_ID?.trim() ? env.POLAR_ACCESS_TOKEN?.trim() : undefined);

@@ -89,7 +89,6 @@ export default defineRailway((ctx) => {
       POLAR_API_BASE_URL: preserve(),
       // A deployment billed through Stripe (BILLING_PROVIDER=stripe) has these instead of POLAR_*.
       BILLING_PROVIDER: preserve(),
-      BILLING_STRIPE_PREVIEW: preserve(),
       STRIPE_API_KEY: preserve(),
       STRIPE_ACCOUNT_ID: preserve(),
       POSTHOG_API_KEY: preserve(),
@@ -166,7 +165,6 @@ export default defineRailway((ctx) => {
       POLAR_WEBHOOK_SECRET: preserve(),
       // A deployment billed through Stripe (BILLING_PROVIDER=stripe) has these instead of POLAR_*.
       BILLING_PROVIDER: preserve(),
-      BILLING_STRIPE_PREVIEW: preserve(),
       STRIPE_API_KEY: preserve(),
       STRIPE_ACCOUNT_ID: preserve(),
       STRIPE_WEBHOOK_SECRET: preserve(),

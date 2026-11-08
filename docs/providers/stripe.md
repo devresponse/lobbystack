@@ -12,7 +12,7 @@ meta:
 
 Use this page to bill a new deployment's businesses through Stripe instead of Polar. A deployment bills through one provider, chosen with `BILLING_PROVIDER` when it's set up, and stays with it ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)). With Stripe the operator is the seller: Stripe runs the checkout page, the billing portal, the subscriptions and the invoices, and Stripe Tax works out the taxes, which the operator registers for and files.
 
-**Status:** a preview, built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)). A deployment bills through Stripe only with `BILLING_PROVIDER=stripe` and `BILLING_STRIPE_PREVIEW=true`, and only with Stripe test keys, until step 18 of that plan has run its sandbox scenarios and switched Stripe on. Nothing here has been tried against a real Stripe sandbox yet. Written on 2026-11-08 from the code of step 17, with step 18's scenarios.
+**Status:** built on `feature/receptionists` ([Stripe billing](../roadmap/stripe-billing.md)), and switched on on 2026-11-08, once its sandbox scenarios had passed twice in a row with Stripe as the merchant of record. A deployment bills through Stripe with `BILLING_PROVIDER=stripe`: in a sandbox with test keys, and for real with live ones.
 
 ## Know what Stripe does here
 
@@ -80,8 +80,7 @@ The setup and read keys never go on Railway. Make them for the run and delete th
 | Variable | Service | Value |
 | --- | --- | --- |
 | `BILLING_PROVIDER` | admin and worker | `stripe`. Empty means `polar`; any other value stops the service at startup |
-| `BILLING_STRIPE_PREVIEW` | admin and worker | `true`, until step 18 of the plan switches Stripe on; without it `BILLING_PROVIDER=stripe` stops the service |
-| `STRIPE_API_KEY` | admin and worker, each its own | A restricted key, `rk_test_` in a sandbox. The preview takes test keys only |
+| `STRIPE_API_KEY` | admin and worker, each its own | A restricted key: `rk_test_` in a sandbox, `rk_live_` for real |
 | `STRIPE_ACCOUNT_ID` | admin and worker | The keys' account, `acct_...`. The worker checks its key against it at startup, and `pnpm billing` against the setup key |
 | `STRIPE_WEBHOOK_SECRET` | admin | The webhook endpoint's signing secret, `whsec_...`; two, comma-separated, while you roll it |
 | `STRIPE_METER_WEBHOOK_SECRET` | admin | The meter error destination's signing secret |
@@ -162,6 +161,6 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 ## Know what's left
 
-- [The sandbox scenarios](#run-the-sandbox-scenarios), passing twice in a row against a real sandbox, in the mode the brands use, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. Then step 18 of the plan takes away `BILLING_STRIPE_PREVIEW` and adds the `stripe` block to the brand of the first Stripe deployment.
+- The checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. [The sandbox scenarios](#run-the-sandbox-scenarios) passed twice in a row with Stripe as the merchant of record, the mode both brands use; Stripe directly hasn't run against a sandbox.
 - Stripe's names for each key's permissions, from that run.
 - The legal pages: with Stripe directly the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments; with Stripe as the merchant of record, the payment terms name Link as the seller. The landing's legal pages, which this fork doesn't publish, name only Polar or Stripe.

@@ -116,10 +116,8 @@ describe("billing provider startup validation", () => {
   it("refuses a billing provider the worker would refuse, before opening database clients", async () => {
     vi.stubEnv("BILLING_PROVIDER", "strpe");
     await expect(register()).rejects.toThrow("BILLING_PROVIDER must be polar or stripe, not \"strpe\".");
-    vi.stubEnv("BILLING_PROVIDER", "stripe");
-    await expect(register()).rejects.toThrow("BILLING_PROVIDER=stripe isn't available yet");
     expect(mocks.getDatabase).not.toHaveBeenCalled();
-    vi.stubEnv("BILLING_STRIPE_PREVIEW", "true");
+    vi.stubEnv("BILLING_PROVIDER", "stripe");
     await expect(register()).resolves.toBeUndefined();
   });
 });

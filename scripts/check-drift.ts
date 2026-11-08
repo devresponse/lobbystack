@@ -163,7 +163,7 @@ for (const variable of ["POLAR_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET", "STRIPE
 }
 // Both services read the deployment's billing provider, and on Stripe each its own key.
 for (const service of ["admin", "worker"]) {
-  for (const variable of ["BILLING_PROVIDER", "BILLING_STRIPE_PREVIEW", "STRIPE_API_KEY", "STRIPE_ACCOUNT_ID"]) {
+  for (const variable of ["BILLING_PROVIDER", "STRIPE_API_KEY", "STRIPE_ACCOUNT_ID"]) {
     if (!composeServiceBlock(service).includes(`${variable}: \${${variable}:-}`)) {
       errors.push(`Compose service ${service} does not pass ${variable}`);
     }

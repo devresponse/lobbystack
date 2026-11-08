@@ -94,7 +94,7 @@ describe("Polar payload normalization", () => {
   });
 
   it("names the plan of a product the catalog links, a retired price's too, before the product variables", () => {
-    const price = (plan: string, tier: string, period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired });
+    const price = (plan: string, tier: string, period: "monthly" | "annual", polarId: string, retired = false) => ({ plan, tier, status: "active", period, currency: "cad", cents: 1, per_month: 1, provider_ref: polarId, retired });
     const catalog: BillingCatalogSnapshot = { plans: [], prices: [price("pro", "pro", "annual", "prod_pro_year"), price("starter", "starter", "monthly", "prod_old", true), price("free_cloud", "free_cloud", "monthly", "prod_free")] };
     const links = polarProductLinks(catalog, { POLAR_STARTER_MONTHLY_PRODUCT_ID: "prod_pro_year", POLAR_PRO_MONTHLY_PRODUCT_ID: "prod_var" });
     const event = (productId: string) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: productId, customer: { external_id: `business:${businessId}` } }, links).payload;
@@ -108,7 +108,7 @@ describe("Polar payload normalization", () => {
   });
 
   it("names a promo plan's own code beside the tier it behaves as", () => {
-    const price = (plan: string, tier: string, polarId: string) => ({ plan, tier, status: "active", period: "monthly" as const, currency: "cad", cents: 1, per_month: 1, polar_id: polarId, retired: false });
+    const price = (plan: string, tier: string, polarId: string) => ({ plan, tier, status: "active", period: "monthly" as const, currency: "cad", cents: 1, per_month: 1, provider_ref: polarId, retired: false });
     const links = polarProductLinks({ plans: [], prices: [price("salons-half-off", "starter", "prod_promo"), price("starter", "starter", "prod_starter")] }, {});
     const event = (productId: string) => normalizePolarEvent("subscription.updated", { id: "sub_1", status: "active", product_id: productId, customer: { external_id: `business:${businessId}` } }, links).payload;
     expect(event("prod_promo")).toMatchObject({ plan: "starter", planCode: "salons-half-off", billingInterval: "monthly" });

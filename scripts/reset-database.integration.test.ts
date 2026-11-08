@@ -173,6 +173,18 @@ describe.skipIf(!adminUrl)("devops/reset-database.mjs", () => {
     }
   });
 
+  it("refuses a database linked to Stripe's live mode", async () => {
+    await target.pool.query("insert into public.billing_runs (kind, status, brand, ver, hash, profile, provider, provider_env, provider_account) values ('verify', 'passed', 'alloplace', 1, repeat('c', 64), '{}', 'stripe', 'live', 'acct_live')");
+    try {
+      const run = reset(databaseUrl(database), ["--confirm", database]);
+      expect(run.status, run.out).toBe(1);
+      expect(run.out).toContain("a billing provider's live account");
+      expect(await businesses()).toBe(2);
+    } finally {
+      await target.pool.query("delete from public.billing_runs where provider = 'stripe'");
+    }
+  });
+
   it.skipIf(!process.env.LOBBYSTACK_APP_PASSWORD)("refuses a user that row level security limits", async () => {
     const run = reset(databaseUrl(database, { user: "lobbystack_app", password: process.env.LOBBYSTACK_APP_PASSWORD! }), ["--confirm", database]);
     expect(run.status, run.out).toBe(1);

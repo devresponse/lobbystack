@@ -35,10 +35,16 @@ function run(kind: ApiBillingCatalogRun["kind"], fields: Partial<ApiBillingCatal
   return { id: crypto.randomUUID(), kind, status: "applied", brand: "alloplace", ver: 1, hash: "0".repeat(64), prev_hash: null, code_hash: null, changes: [], problems: [], blocked_by: [], polar_env: null, polar_org: null, key_id: "key", partner: "lobbystack", started_at: now, ended_at: now, ...fields };
 }
 
+/** A write's columns as the catalog reads the row back: provider_ref and provider_disc keep the API's names until step 6 of the Stripe plan. */
+function asStored(set: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(set).map(([column, value]) => [column === "provider_ref" ? "polar_id" : column === "provider_disc" ? "polar_disc" : column, value]));
+}
+
 /** Writes an apply's or a link's rows as Postgres would. */
 function write(instance: Instance, writes: ReturnType<typeof diffBillingCatalog>["writes"]) {
   const now = new Date().toISOString();
-  for (const entry of billingCatalogWriteOrder(writes)) {
+  for (const { set: columns, ...rest } of billingCatalogWriteOrder(writes)) {
+    const entry = { ...rest, set: asStored(columns) };
     if (entry.change.table === "billing_plans") {
       if (entry.change.action === "insert") instance.plans.push({ polar_disc: null, frozen_at: null, run_id: null, retired_at: null, created_at: now, updated_at: now, ...entry.set } as StoredBillingPlan);
       else Object.assign(instance.plans.find((plan) => plan.code === entry.change.key)!, entry.set, { updated_at: now });

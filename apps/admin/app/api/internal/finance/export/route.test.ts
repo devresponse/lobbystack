@@ -121,6 +121,7 @@ describe("finance export", () => {
           sourceId: "polar-order-id",
           orderId: "polar-order-id",
           subscriptionId: null,
+          providerCustomerId: "polar-customer-id",
           polarCustomerId: "polar-customer-id",
           occurredAt: new Date("2026-09-12T00:00:00.000Z"),
           updatedAt: "2026-09-12T00:00:01.000000Z",
@@ -141,6 +142,7 @@ describe("finance export", () => {
         expect.objectContaining({
           businessId: "business-id",
           orderId: "polar-order-id",
+          providerCustomerId: "polar-customer-id",
           polarCustomerId: "polar-customer-id",
           subscriptionId: null,
         }),
@@ -148,6 +150,8 @@ describe("finance export", () => {
     });
     const query = mocks.execute.mock.calls[0]?.[0] as string;
     expect(query).toContain("from billing_transactions");
+    // The payer's customer from the provider-neutral column, also under its old name for existing readers.
+    expect(query).toContain(`provider_customer_id as "providerCustomerId", provider_customer_id as "polarCustomerId"`);
     expect(query).toContain("occurred_at >= '2026-09-01'::date");
     expect(query).toContain("occurred_at < ('2026-09-30'::date + interval '1 day')");
     expect(query).toContain("order by updated_at, id");

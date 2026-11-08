@@ -11,7 +11,7 @@ const plan = (code: CatalogStandardPlan["code"], status: CatalogStandardPlan["st
   sort: { free_cloud: 0, starter: 10, pro: 20, enterprise: 30 }[code], ...extra,
 });
 const price = (planCode: string, period: CatalogPrice["period"], cents: number, polarId: string | null, extra: Partial<CatalogPrice> = {}): CatalogPrice => ({
-  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: perMonthCents(period, cents), polar_id: polarId, retired: false, ...extra,
+  plan: planCode, tier: planCode, status: "active", period, currency: "cad", cents, per_month: perMonthCents(period, cents), provider_ref: polarId, retired: false, ...extra,
 });
 const variables = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "var_starter_month", POLAR_STARTER_ANNUAL_PRODUCT_ID: "var_starter_year", POLAR_PRO_MONTHLY_PRODUCT_ID: " var_pro_month ", POLAR_PRO_ANNUAL_PRODUCT_ID: "" };
 const empty: BillingCatalogSnapshot = { plans: [], prices: [] };
@@ -146,7 +146,7 @@ describe("plan list", () => {
     // Starter isn't linked yet, so the variables sell it, at the catalog's price.
     expect(starter!.prices.map((entry) => [entry.interval, entry.amountCents, entry.monthlyAmountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, 3500, true], ["annual", 33_600, 2800, true]]);
     // Once a link reached it, as the retired price's product shows, a draft Starter waits for the next link.
-    const relinking: BillingCatalogSnapshot = { ...catalog, prices: catalog.prices.map((entry) => (entry.retired ? { ...entry, polar_id: "old" } : entry)) };
+    const relinking: BillingCatalogSnapshot = { ...catalog, prices: catalog.prices.map((entry) => (entry.retired ? { ...entry, provider_ref: "old" } : entry)) };
     const waiting = billingPlanList(relinking, { checkout: true, links: polarProductLinks(relinking, variables) }).plans.find((entry) => entry.slug === "starter")!;
     expect(waiting.prices.map((entry) => [entry.interval, entry.amountCents, entry.checkoutAvailable])).toEqual([["monthly", 3500, false], ["annual", 33_600, false]]);
     // Enterprise is hidden from the app's role, so it keeps its built-in custom terms, unpriced.
@@ -226,7 +226,7 @@ describe("brand catalog", () => {
     expect(catalog.plans.map((entry) => [entry.code, entry.receptionists])).toEqual([["free_cloud", 1], ["starter", 1], ["pro", 5], ["enterprise", null]]);
     expect(catalog.prices).toEqual(standard.flatMap((entry) => entry.prices.map((value) => ({
       plan: entry.code, tier: entry.code, status: entry.sold ? "draft" : "active", period: value.period, currency: profile.currency, cents: value.cents,
-      per_month: perMonthCents(value.period, value.cents), polar_id: null, retired: false,
+      per_month: perMonthCents(value.period, value.cents), provider_ref: null, retired: false,
     }))));
     // A brand without a billing.json keeps the built-in plans.
     expect(brandBillingCatalog("lobbystack")).toBeNull();

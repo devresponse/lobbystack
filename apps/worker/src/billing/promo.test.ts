@@ -23,8 +23,8 @@ afterEach(() => {
 describe("billing jobs: promo plans", () => {
   describe("a promo plan's end", () => {
     const productEnv = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "product-starter-monthly", POLAR_PRO_MONTHLY_PRODUCT_ID: "product-pro-monthly" };
-    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
-    const otherPromoPrice = { ...promoPrice, plan: "pro-launch", tier: "pro", polar_id: "promo-pro-monthly" };
+    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, provider_ref: "promo-starter-monthly", retired: false };
+    const otherPromoPrice = { ...promoPrice, plan: "pro-launch", tier: "pro", provider_ref: "promo-pro-monthly" };
     const planEnds = new Date(Date.now() + 5 * 86_400_000);
     const periodEnd = new Date(Date.now() + 6 * 86_400_000).toISOString();
     const subscription = (extra: Partial<PolarSubscription> = {}): PolarSubscription => ({ id: "sub-1", status: "active", productId: "promo-starter-monthly", cancelAtPeriodEnd: false, endedAt: null, pendingProductId: null, discountId: "disc-half-off", currentPeriodEnd: periodEnd, ...extra });
@@ -35,7 +35,7 @@ describe("billing jobs: promo plans", () => {
       const domain = { db: undefined as never };
       for (const [key, value] of Object.entries(productEnv)) vi.stubEnv(key, value);
       vi.stubEnv("APP_BASE_URL", "https://app.example");
-      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice, otherPromoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", polar_disc: "disc-half-off" }, { code: "pro-launch", tier: "pro", status: "active", polar_disc: "disc-launch" }] } as never, process.env));
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice, otherPromoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", provider_disc: "disc-half-off" }, { code: "pro-launch", tier: "pro", status: "active", provider_disc: "disc-launch" }] } as never, process.env));
       vi.mocked(loadPromoEndWork).mockResolvedValue(input.work);
       vi.mocked(recordPromoEnd).mockResolvedValue(1);
       const job: JobEnvelope = { jobId: randomUUID(), type: "billing.endPromoPlan", queue: "default", businessId, payload: input.payload ?? {}, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: true };

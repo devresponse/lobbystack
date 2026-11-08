@@ -13,6 +13,7 @@ import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
 import { polarProductLinks, readBillingCatalogSnapshot } from "./billingPlans";
+import { readBillingDeployment } from "./billingProvider";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
 export type BillingCheckoutTarget = "starter" | "pro";
@@ -168,6 +169,7 @@ export type BillingCheckoutLimit = (subject: { businessId: string; userId: strin
 export async function createBillingCheckoutRequestInTransaction(
   tx: DatabaseTransaction,
   input: { userId: string; businessId: string; target: BillingCheckoutTarget; billingInterval: BillingInterval; promo?: BillingCheckoutPromo | undefined; billingEmail?: string | undefined; checkLimit?: BillingCheckoutLimit | undefined },
+  env: Record<string, string | undefined> = process.env,
 ): Promise<{ id: string; created: boolean }> {
   // The lock a managed plan takes, so a checkout and a managed plan can't both start at once.
   await lockBillingAccount(tx, input.businessId);
@@ -196,7 +198,8 @@ export async function createBillingCheckoutRequestInTransaction(
     if (other) throw Object.assign(new Error("Another plan change for this business is in progress. Try again in a minute."), { status: 409, code: "plan_change_pending" });
   }
   await input.checkLimit?.({ businessId: input.businessId, userId: input.userId });
-  await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}` }).onConflictDoNothing({ target: billingAccounts.businessId });
+  // The account the subscription will land on, billed through the deployment's provider.
+  await tx.insert(billingAccounts).values({ businessId: input.businessId, billingKey: `business:${input.businessId}`, source: readBillingDeployment(env, { withSecret: false }).provider }).onConflictDoNothing({ target: billingAccounts.businessId });
   const [request] = await tx.insert(billingCheckoutRequests).values({
     businessId: input.businessId,
     requestedByUserId: input.userId,
@@ -862,7 +865,7 @@ async function promoPlanFields(
  * so a standard product can carry one, and the worker then removes it.
  */
 async function isPromoPlanDiscount(tx: DatabaseTransaction, discountId: string): Promise<boolean> {
-  const rows = (await tx.execute(sql`select 1 from public.billing_plans where polar_disc = ${discountId} and code <> tier limit 1`)).rows;
+  const rows = (await tx.execute(sql`select 1 from public.billing_plans where provider_disc = ${discountId} and code <> tier limit 1`)).rows;
   return rows.length > 0;
 }
 
@@ -895,7 +898,7 @@ export async function reconcileBillingProviderEvent(
     // read the same pre-paid account and each reports a subscription start, so
     // the event would count webhook races instead of subscriptions.
     await lockBillingAccount(tx, input.businessId);
-    const event = (await tx.select({ id: providerEvents.id, providerEventId: providerEvents.providerEventId, eventType: providerEvents.eventType, status: providerEvents.status, payload: providerEvents.payload, createdAt: providerEvents.createdAt })
+    const event = (await tx.select({ id: providerEvents.id, provider: providerEvents.provider, providerEventId: providerEvents.providerEventId, eventType: providerEvents.eventType, status: providerEvents.status, payload: providerEvents.payload, createdAt: providerEvents.createdAt })
       .from(providerEvents)
       .where(and(eq(providerEvents.id, input.providerEventId), eq(providerEvents.businessId, input.businessId)))
       .limit(1))[0];
@@ -975,7 +978,7 @@ export async function reconcileBillingProviderEvent(
       // again each hour, and the worker reports it.
       if (!plan && productId && isLiveSubscriptionState(subscriptionState) && !stale && !keepsManagedPlan) return { result: "held", started: null };
       const polarFields = stale || keepsManagedPlan ? {} : {
-        ...(takesOver ? { source: "polar" } : {}),
+        ...(takesOver ? { source: event.provider } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
         ...(plan ? { plan } : {}),
         ...(billingInterval ? { billingInterval } : {}),
@@ -1002,6 +1005,8 @@ export async function reconcileBillingProviderEvent(
       await tx.insert(billingAccounts).values({
         businessId: input.businessId,
         billingKey,
+        // A new account pays through the provider whose event made it.
+        ...(existing ? {} : { source: event.provider }),
         ...(customerId ? { customerId } : {}),
         ...subscriptionFields,
       }).onConflictDoUpdate({
@@ -1028,7 +1033,7 @@ export async function reconcileBillingProviderEvent(
       const orderId = stringField(transactionPayload, "orderId", "order_id") ?? stringField(payload, "orderId", "order_id") ?? sourceId;
       const refundedCents = orderRefundedCents(transactionPayload, payload);
       const subscriptionId = stringField(transactionPayload, "subscriptionId", "subscription_id") ?? stringField(payload, "subscriptionId", "subscription_id");
-      const polarCustomerId = stringField(transactionPayload, "customerId", "customer_id") ?? stringField(payload, "customerId", "customer_id");
+      const providerCustomerId = stringField(transactionPayload, "customerId", "customer_id") ?? stringField(payload, "customerId", "customer_id");
       const description = stringField(transactionPayload, "description", "reason") ?? stringField(payload, "description", "reason");
       const invoiceUrl = stringField(transactionPayload, "invoiceUrl", "invoice_url") ?? stringField(payload, "invoiceUrl", "invoice_url");
       const [transaction] = await tx.insert(billingTransactions).values({
@@ -1043,7 +1048,7 @@ export async function reconcileBillingProviderEvent(
         ...(invoiceUrl ? { invoiceUrl } : {}),
         ...(orderId ? { orderId } : {}),
         ...(subscriptionId ? { subscriptionId } : {}),
-        ...(polarCustomerId ? { polarCustomerId } : {}),
+        ...(providerCustomerId ? { providerCustomerId } : {}),
         occurredAt,
         lastSyncedAt: new Date(),
       }).onConflictDoUpdate({
@@ -1060,7 +1065,7 @@ export async function reconcileBillingProviderEvent(
           ...(invoiceUrl ? { invoiceUrl } : {}),
           ...(orderId ? { orderId } : {}),
           ...(subscriptionId ? { subscriptionId } : {}),
-          ...(polarCustomerId ? { polarCustomerId } : {}),
+          ...(providerCustomerId ? { providerCustomerId } : {}),
           occurredAt,
           lastSyncedAt: new Date(),
           updatedAt: new Date(),

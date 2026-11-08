@@ -86,9 +86,9 @@ export async function findBillingCodeOffer(tx: DatabaseTransaction, code: string
     tier: first.tier,
     names: (first.names ?? {}) as Record<string, string>,
     discount: (first.discount ?? null) as ResolvedBillingDiscount | null,
-    polarDiscountId: textOrNull(first.polar_disc),
+    polarDiscountId: textOrNull(first.provider_disc),
     currency: String(first.currency),
-    prices: rows.map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month), polarId: textOrNull(row.polar_id) })),
+    prices: rows.map((row) => ({ interval: row.period as BillingInterval, cents: Number(row.cents), perMonth: Number(row.per_month), polarId: textOrNull(row.provider_ref) })),
     included: {
       voiceSeconds: numberOrNull(first.voice_sec),
       alertSmsSegments: numberOrNull(first.sms_seg),

@@ -238,6 +238,6 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
     checkWebhookSecret: false,
   });
   const problems = billingProblems(result.checks);
-  const recorded = await recordBillingVerifyRun(context, { catalog: { brand: latest.brand, ver: latest.ver, hash: latest.hash }, codeHash: catalog.code_hash, status: result.status, problems, polarEnv: polar.env, polarOrg: polar.org });
+  const recorded = await recordBillingVerifyRun(context, { catalog: { brand: latest.brand, ver: latest.ver, hash: latest.hash }, codeHash: catalog.code_hash, status: result.status, problems, provider: polar.provider, providerEnv: polar.providerEnv, providerAccount: polar.org });
   return { status: result.status, previousStatus: recorded.previousStatus, problems, polarEnv: polar.env, provider: polar.provider, providerEnv: polar.providerEnv, runId: recorded.run.id! };
 }

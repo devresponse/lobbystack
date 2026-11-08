@@ -214,8 +214,8 @@ describe("billing jobs: checkout", () => {
   });
 
   describe("a promo plan", () => {
-    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
-    const catalog = (status: "draft" | "active") => ({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status, polar_disc: "disc-half-off" }] });
+    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, provider_ref: "promo-starter-monthly", retired: false };
+    const catalog = (status: "draft" | "active") => ({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status, provider_disc: "disc-half-off" }] });
     const metadata = (businessId: string, requestId: string) => ({ lobbystack_business: businessId, lobbystack_plan: "salons-half-off", lobbystack_checkout: requestId });
 
     function promoCheckout(input: { status?: "draft" | "active"; subscription?: { plan: "starter" | "pro"; planCode: string | null } | null; planCode?: string | null; polar: Partial<PolarBillingClient> }) {

@@ -63,12 +63,13 @@ export type CatalogPrice = {
   currency: string;
   cents: number;
   per_month: number;
-  polar_id: string | null;
+  /** The provider's object that sells it: a Polar product, or a Stripe price. */
+  provider_ref: string | null;
   retired: boolean;
 };
 
 /** A plan other than the four standard ones, such as a promo plan: what selling it needs. */
-export type CatalogOtherPlan = { code: string; tier: string; status: "draft" | "active" | "retired"; polar_disc: string | null };
+export type CatalogOtherPlan = { code: string; tier: string; status: "draft" | "active" | "retired"; provider_disc: string | null };
 
 export type BillingCatalogSnapshot = { plans: CatalogStandardPlan[]; prices: CatalogPrice[]; others?: CatalogOtherPlan[] };
 
@@ -108,11 +109,11 @@ function planRow(row: Row): CatalogStandardPlan {
  */
 export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promise<BillingCatalogSnapshot> {
   const plans = await readStandardPlans(tx);
-  const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.polar_id, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
-  const others = (await tx.execute<Row>(sql`select code, tier, status, polar_disc from public.billing_plans where code <> tier order by code`)).rows;
+  const prices = (await tx.execute<Row>(sql`select r.plan, p.tier, p.status, r.period, r.currency, r.cents, r.per_month, r.provider_ref, r.retired_at from public.billing_prices r join public.billing_plans p on p.code = r.plan order by r.plan, r.period, r.retired_at nulls first`)).rows;
+  const others = (await tx.execute<Row>(sql`select code, tier, status, provider_disc from public.billing_plans where code <> tier order by code`)).rows;
   return {
     plans,
-    others: others.map((row) => ({ code: String(row.code), tier: String(row.tier), status: row.status as CatalogOtherPlan["status"], polar_disc: (row.polar_disc ?? null) as string | null })),
+    others: others.map((row) => ({ code: String(row.code), tier: String(row.tier), status: row.status as CatalogOtherPlan["status"], provider_disc: (row.provider_disc ?? null) as string | null })),
     prices: prices.map((row) => ({
       plan: String(row.plan),
       tier: String(row.tier),
@@ -121,7 +122,7 @@ export async function readBillingCatalogSnapshot(tx: DatabaseTransaction): Promi
       currency: String(row.currency),
       cents: Number(row.cents),
       per_month: Number(row.per_month),
-      polar_id: (row.polar_id ?? null) as string | null,
+      provider_ref: (row.provider_ref ?? null) as string | null,
       retired: row.retired_at !== null && row.retired_at !== undefined,
     })),
   };
@@ -166,18 +167,18 @@ export function polarProductLinks(catalog: BillingCatalogSnapshot, env: Record<s
     productFor(plan, interval) {
       const row = catalog.plans.find((entry) => entry.code === plan);
       const prices = catalog.prices.filter((price) => price.plan === plan);
-      if (row?.status === "active") return prices.find((price) => price.period === interval && !price.retired)?.polar_id ?? null;
-      return prices.some((price) => price.polar_id !== null) ? null : productVariable(env, plan, interval);
+      if (row?.status === "active") return prices.find((price) => price.period === interval && !price.retired)?.provider_ref ?? null;
+      return prices.some((price) => price.provider_ref !== null) ? null : productVariable(env, plan, interval);
     },
     saleFor(plan, interval) {
       const row = catalog.others?.find((entry) => entry.code === plan);
       if (row?.status !== "active") return null;
-      const productId = catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.polar_id;
-      return productId ? { productId, discountId: row.polar_disc } : null;
+      const productId = catalog.prices.find((price) => price.plan === plan && price.period === interval && !price.retired)?.provider_ref;
+      return productId ? { productId, discountId: row.provider_disc } : null;
     },
     planFor(productId) {
       if (!productId) return null;
-      const linked = catalog.prices.find((price) => price.polar_id === productId);
+      const linked = catalog.prices.find((price) => price.provider_ref === productId);
       if (linked) return isCheckoutPlan(linked.tier) ? { plan: linked.tier, interval: linked.period, code: linked.plan } : null;
       for (const plan of hostedCheckoutPlanSlugs) {
         for (const interval of billingIntervals) {
@@ -210,7 +211,7 @@ export function brandBillingCatalog(brandId: string): BillingCatalogSnapshot | n
       cents: price.cents,
       // As billing_prices computes per_month.
       per_month: perMonthCents(price.period, price.cents),
-      polar_id: null,
+      provider_ref: null,
       retired: false,
     }))),
   };

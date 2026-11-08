@@ -4,6 +4,7 @@ import { eq, getTableColumns, sql, type SQL } from "drizzle-orm";
 import type { PgTable } from "drizzle-orm/pg-core";
 
 import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
+import type { BillingEnv, BillingProviderId } from "@lobbystack/providers/billing/types";
 import {
   DEFAULT_PLAN_RECEPTIONISTS,
   billingProfileHash,
@@ -49,7 +50,7 @@ const CATALOG_LOCK = sql`select pg_advisory_xact_lock(hashtext('lobbystack.billi
 
 type PlanStatus = "draft" | "active" | "retired";
 
-/** A billing_plans row as the diff reads it: every column, times as ISO strings. */
+/** A billing_plans row as the diff reads it: every column, times as ISO strings. polar_disc holds provider_disc, under the name the API gives it. */
 export type StoredBillingPlan = Omit<ResolvedBillingPlan, "prices"> & {
   status: PlanStatus;
   src: "file" | "api";
@@ -62,7 +63,7 @@ export type StoredBillingPlan = Omit<ResolvedBillingPlan, "prices"> & {
   updated_at: string;
 };
 
-/** A billing_prices row as the diff reads it. */
+/** A billing_prices row as the diff reads it. polar_id holds provider_ref, under the name the API gives it. */
 export type StoredBillingPrice = {
   id: string;
   plan: string;
@@ -298,7 +299,7 @@ function storedPlan(row: Row): StoredBillingPlan {
     ends: (row.ends ?? null) as StoredBillingPlan["ends"],
     offer_end: isoOrNull(row.offer_end),
     discount: (row.discount ?? null) as StoredBillingPlan["discount"],
-    polar_disc: (row.polar_disc ?? null) as string | null,
+    polar_disc: (row.provider_disc ?? null) as string | null,
     terms_hash: String(row.terms_hash),
     frozen_at: isoOrNull(row.frozen_at),
     sort: Number(row.sort),
@@ -317,12 +318,21 @@ function storedPrice(row: Row): StoredBillingPrice {
     currency: String(row.currency),
     cents: Number(row.cents),
     per_month: Number(row.per_month),
-    polar_id: (row.polar_id ?? null) as string | null,
+    polar_id: (row.provider_ref ?? null) as string | null,
     run_id: (row.run_id ?? null) as string | null,
     retired_at: isoOrNull(row.retired_at),
     created_at: iso(row.created_at),
     updated_at: iso(row.updated_at),
   };
+}
+
+/** Polar's sandbox or production as the provider columns name it. */
+export const providerEnvOfPolar = (env: PolarEnv): BillingEnv => (env === "production" ? "live" : "sandbox");
+
+/** A Polar run's environment and organization, from the provider columns, under the names the API gives them; null for any other run. */
+function polarRunAccount(row: Row): Pick<ApiBillingCatalogRun, "polar_env" | "polar_org"> {
+  if (row.provider !== "polar") return { polar_env: null, polar_org: null };
+  return { polar_env: row.provider_env === "live" ? "production" : "sandbox", polar_org: (row.provider_account ?? null) as string | null };
 }
 
 function runResource(row: Row): ApiBillingCatalogRun {
@@ -339,8 +349,7 @@ function runResource(row: Row): ApiBillingCatalogRun {
     problems: row.problems as ApiBillingCheck[],
     // A refused apply stores nothing, so a stored run was never blocked.
     blocked_by: [],
-    polar_env: (row.polar_env ?? null) as ApiBillingCatalogRun["polar_env"],
-    polar_org: (row.polar_org ?? null) as string | null,
+    ...polarRunAccount(row),
     key_id: (row.key_id ?? null) as string | null,
     partner: (row.partner ?? null) as string | null,
     started_at: iso(row.started_at),
@@ -603,7 +612,7 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
       }
       if (row.polar_id === price.polar_id) return;
       if (row.polar_id === null) {
-        writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "update", fields: { polar_id: { from: null, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { polar_id: price.polar_id }, id: row.id });
+        writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "update", fields: { polar_id: { from: null, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { provider_ref: price.polar_id }, id: row.id });
         return;
       }
       if (!replace) {
@@ -611,7 +620,7 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
         return;
       }
       writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "retire", fields: {}, lowers_allowance: false, raises_price: false }, set: { retired_at: input.now }, id: row.id });
-      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "insert", fields: { polar_id: { from: row.polar_id, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { plan: row.plan, period: row.period, currency: row.currency, cents: row.cents, polar_id: price.polar_id } });
+      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "insert", fields: { polar_id: { from: row.polar_id, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { plan: row.plan, period: row.period, currency: row.currency, cents: row.cents, provider_ref: price.polar_id } });
     });
 
     if (sent.polar_disc !== null && plan.discount !== null && sent.polar_disc !== plan.polar_disc) {
@@ -619,13 +628,13 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
       if (taken || (sentDiscounts.get(sent.polar_disc) ?? 0) > 1) refuse("id_taken", `${path}.polar_disc`, `Discount ${sent.polar_disc} is already ${taken ? `linked to ${taken.code}` : "named for another plan"}. One discount belongs to one plan.`);
       else if (plan.polar_disc !== null && !replace) refuse("id_changed", `${path}.polar_disc`, `${plan.code} has discount ${plan.polar_disc}. Send replace_ids to link ${sent.polar_disc} instead.`);
       else {
-        set.polar_disc = sent.polar_disc;
+        set.provider_disc = sent.polar_disc;
         fields.polar_disc = { from: plan.polar_disc, to: sent.polar_disc };
       }
     }
     // A plan whose discount the file dropped no longer sells with the one Polar ended.
     if (plan.discount === null && sent.polar_disc === null && plan.polar_disc !== null) {
-      set.polar_disc = null;
+      set.provider_disc = null;
       fields.polar_disc = { from: plan.polar_disc, to: null };
     }
     if (plan.status === "draft") {
@@ -672,8 +681,9 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
     if (polar.org === null) refusals.push({ code: "polar_org_mismatch", message: "POLAR_ORGANIZATION_ID isn't set on this deployment, so it can't take products from any Polar organization.", path: "polar_org" });
     else if (body.polar_env !== polar.env || body.polar_org !== polar.org) refusals.push({ code: "polar_org_mismatch", message: `This deployment uses Polar ${polar.env} organization ${polar.org}, not ${body.polar_env} ${body.polar_org}.`, path: body.polar_env !== polar.env ? "polar_env" : "polar_org" });
     const latestLink = current.latestLink;
-    if (latestLink && (latestLink.polar_env !== body.polar_env || latestLink.polar_org !== body.polar_org)) {
-      refusals.push({ code: "polar_org_changed", message: `This deployment was linked to Polar ${String(latestLink.polar_env)} organization ${String(latestLink.polar_org)}, and it stays with it. Live payments get a deployment of their own.`, path: "polar_org" });
+    const linked = latestLink ? polarRunAccount(latestLink) : null;
+    if (linked && (linked.polar_env !== body.polar_env || linked.polar_org !== body.polar_org)) {
+      refusals.push({ code: "polar_org_changed", message: `This deployment was linked to Polar ${String(linked.polar_env)} organization ${String(linked.polar_org)}, and it stays with it. Live payments get a deployment of their own.`, path: "polar_org" });
     }
     const now = new Date().toISOString();
     const diff = diffBillingLinks({ body, current, now });
@@ -709,8 +719,9 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
       profile: {},
       changes,
       problems: [],
-      polarEnv: body.polar_env,
-      polarOrg: body.polar_org,
+      provider: "polar",
+      providerEnv: providerEnvOfPolar(body.polar_env),
+      providerAccount: body.polar_org,
       keyId: caller.platformKeyId,
       partner: caller.partnerId,
       idemKey: input.idempotencyKey,
@@ -727,7 +738,7 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
  * read, with no key: no one asked for it. Returns the run and the status of
  * the verify before it, so a recovery can be told apart from a pass.
  */
-export async function recordBillingVerifyRun(context: DomainContext, input: { catalog: { brand: string; ver: number; hash: string }; codeHash: string | null; status: "passed" | "drift" | "failed"; problems: ApiBillingCheck[]; polarEnv: PolarEnv; polarOrg: string }): Promise<{ run: ApiBillingCatalogRun; previousStatus: string | null }> {
+export async function recordBillingVerifyRun(context: DomainContext, input: { catalog: { brand: string; ver: number; hash: string }; codeHash: string | null; status: "passed" | "drift" | "failed"; problems: ApiBillingCheck[]; provider: BillingProviderId; providerEnv: BillingEnv; providerAccount: string }): Promise<{ run: ApiBillingCatalogRun; previousStatus: string | null }> {
   return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
     await tx.execute(CATALOG_LOCK);
     const previous = await latestRun(tx, "verify");
@@ -743,8 +754,9 @@ export async function recordBillingVerifyRun(context: DomainContext, input: { ca
       profile: {},
       changes: [],
       problems: input.problems,
-      polarEnv: input.polarEnv,
-      polarOrg: input.polarOrg,
+      provider: input.provider,
+      providerEnv: input.providerEnv,
+      providerAccount: input.providerAccount,
     }).returning({ id: billingRuns.id });
     const [finished] = (await tx.execute<Row>(sql`update public.billing_runs set ended_at = clock_timestamp() where id = ${run!.id}::uuid returning *`)).rows;
     return { run: runResource(finished!), previousStatus: (previous?.status ?? null) as string | null };

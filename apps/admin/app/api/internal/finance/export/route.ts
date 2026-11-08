@@ -85,7 +85,7 @@ export async function GET(request: Request) {
     return envelope(resource, rows, size);
   }
   if (resource === "transactions") {
-    const rows = (await db.execute<Record<string, unknown>>(`select id, business_id as "businessId", kind, source_id as "sourceId", order_id as "orderId", subscription_id as "subscriptionId", polar_customer_id as "polarCustomerId", occurred_at as "occurredAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_transactions where true ${range(from, to, "occurred_at")} ${cursorFilter(cursor, "updated_at", "id::text")} order by updated_at, id limit ${size + 1}`)).rows;
+    const rows = (await db.execute<Record<string, unknown>>(`select id, business_id as "businessId", kind, source_id as "sourceId", order_id as "orderId", subscription_id as "subscriptionId", provider_customer_id as "providerCustomerId", provider_customer_id as "polarCustomerId", occurred_at as "occurredAt", ${exportUpdatedAt("updated_at")} as "updatedAt" from billing_transactions where true ${range(from, to, "occurred_at")} ${cursorFilter(cursor, "updated_at", "id::text")} order by updated_at, id limit ${size + 1}`)).rows;
     return envelope(resource, rows, size);
   }
 

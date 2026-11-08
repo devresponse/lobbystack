@@ -107,10 +107,12 @@ async function main() {
       throw new Refusal(`${database} is protected against resets: someone ran this script on it with --protect. If it really is a test database, run the script with --unprotect first.`);
     }
 
-    // A billing run against Polar production: only a deployment that takes real payments has one.
-    const live = (await queryOrNull(client, "select exists (select 1 from public.billing_runs where polar_env = 'production') as live"))?.[0]?.live === true;
+    // A billing run against a provider's live account, Polar's production or Stripe's live mode: only a
+    // deployment that takes real payments has one. Each column is read through to_jsonb, so the check
+    // works on a database from before migration 0146 added provider_env and after the contract drops polar_env.
+    const live = (await queryOrNull(client, "select exists (select 1 from public.billing_runs r where to_jsonb(r)->>'provider_env' = 'live' or to_jsonb(r)->>'polar_env' = 'production') as live"))?.[0]?.live === true;
     if (live && !options.allowLivePayments) {
-      throw new Refusal(`${database} was linked to Polar's live organization, so it takes real payments and looks like production. If it really is a test copy, run the script again with --allow-live-payments.`);
+      throw new Refusal(`${database} was linked to a billing provider's live account, so it takes real payments and looks like production. If it really is a test copy, run the script again with --allow-live-payments.`);
     }
 
     const tables = await listTables(client);

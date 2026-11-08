@@ -426,8 +426,12 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       expect(first).toMatchObject({ status: 201, replayed: false, run: { kind: "polar", status: "applied", hash: deployedHash, prev_hash: null, polar_env: "sandbox", polar_org: "org_test", key_id: caller.platformKeyId, problems: [] } });
       expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad"]);
       expect(Object.fromEntries((await rows(tx, sql`select code, status from public.billing_plans`)).map((row) => [row.code, row.status]))).toEqual({ free_cloud: "active", starter: "active", pro: "active", enterprise: "active" });
-      const linkedIds = (await rows(tx, sql`select polar_id from public.billing_prices order by polar_id`)).map((row) => row.polar_id);
-      expect(linkedIds).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.polar_id)).sort());
+      const linkedRows = await rows(tx, sql`select provider_ref, polar_id from public.billing_prices order by provider_ref`);
+      expect(linkedRows.map((row) => row.provider_ref)).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.polar_id)).sort());
+      // The release before reads polar_id, which a trigger keeps equal (migration 0146).
+      expect(linkedRows.every((row) => row.polar_id === row.provider_ref)).toBe(true);
+      // The link run names its provider, environment and account.
+      expect(await rows(tx, sql`select kind, provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ kind: "polar", provider: "polar", provider_env: "sandbox", provider_account: "org_test", polar_env: "sandbox", polar_org: "org_test" }]);
       // The rows a link changes carry its run; the rest keep the apply's.
       expect((await rows(tx, sql`select distinct run_id from public.billing_prices`)).map((row) => row.run_id)).toEqual([first.run.id]);
       expect((await plan(tx, "free_cloud")).run_id).toBe(applied.run.id);
@@ -689,10 +693,13 @@ describe.skipIf(!testUrl)("billing catalog daily check", () => {
 
   it("records a verify run as the worker with no key, and returns the status before it", async () => {
     await rollbackTest(async (tx) => {
-      const first = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "drift", problems: [{ code: "catalog_hash", pair: "file_postgres", level: "drift", subject: "catalog", message: "x" }], polarEnv: "sandbox", polarOrg: "org_test" });
+      const first = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "drift", problems: [{ code: "catalog_hash", pair: "file_postgres", level: "drift", subject: "catalog", message: "x" }], provider: "polar", providerEnv: "sandbox", providerAccount: "org_test" });
       expect(first).toMatchObject({ previousStatus: null, run: { kind: "verify", status: "drift", key_id: null, prev_hash: null, problems: [{ code: "catalog_hash" }] } });
-      const second = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "passed", problems: [], polarEnv: "sandbox", polarOrg: "org_test" });
+      const second = await recordBillingVerifyRun(context(tx), { catalog: { brand: "alloplace", ver: 1, hash: deployedHash }, codeHash: null, status: "passed", problems: [], provider: "polar", providerEnv: "sandbox", providerAccount: "org_test" });
       expect(second.previousStatus).toBe("drift");
+      // The run names its provider, and Polar's columns follow for the release before.
+      expect(first.run).toMatchObject({ polar_env: "sandbox", polar_org: "org_test" });
+      expect(await rows(tx, sql`select provider, provider_env, provider_account, polar_env, polar_org from public.billing_runs where id = ${first.run.id}::uuid`)).toEqual([{ provider: "polar", provider_env: "sandbox", provider_account: "org_test", polar_env: "sandbox", polar_org: "org_test" }]);
       expect(second.run.started_at > first.run.started_at).toBe(true);
       await as(tx, "lobbystack_app");
       expect((await failure(tx, sql`insert into public.billing_runs (kind, status, brand, ver, hash, profile, polar_env, polar_org) values ('verify', 'passed', 'alloplace', 1, ${deployedHash}, '{}', 'sandbox', 'org_test')`)).code).toBe("42501");

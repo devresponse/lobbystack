@@ -87,6 +87,8 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
       const userId = await owner(tx);
       const lostEvent = await event(tx, paying, { minutes: 10 });
       const oldEvent = await event(tx, other, { minutes: 120 });
+      // Either billing provider's events wait for the sweep (migration 0146).
+      const stripeEvent = await event(tx, paying, { minutes: 10, provider: "stripe" });
       const lostUsage = await usage(tx, paying, { minutes: 30 });
       const oldUsage = await usage(tx, other, { minutes: 120 });
       const lostCheckout = await checkout(tx, paying, { userId, created: 8 });
@@ -96,6 +98,7 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
         await event(tx, paying, { minutes: 2 }),
         await event(tx, paying, { minutes: 10, status: "processed" }),
         await event(tx, paying, { minutes: 10, provider: "resend" }),
+        await event(tx, paying, { minutes: 10, provider: "twilio" }),
         await usage(tx, paying, { minutes: 5 }),
         await usage(tx, paying, { minutes: 30, isFinal: false }),
         await usage(tx, paying, { minutes: 30, usageKind: "chat_ai_tokens" }),
@@ -108,13 +111,14 @@ describe.skipIf(!testUrl)("the billing sweep against PostgreSQL", () => {
 
       const outcome = await asWorkerLogin(tx, (context) => sweepBillingWork(context, now));
 
-      expect(outcome).toEqual({ queued: { provider_event: 2, usage_event: 2, checkout_request: 2 }, overdue: { provider_event: 1, usage_event: 1, checkout_request: 1 }, failed: 0 });
+      expect(outcome).toEqual({ queued: { provider_event: 3, usage_event: 2, checkout_request: 2 }, overdue: { provider_event: 1, usage_event: 1, checkout_request: 1 }, failed: 0 });
       const hour = Math.floor(now.getTime() / 3_600_000);
-      expect(await sweepJobs(tx, [lostEvent, oldEvent, lostUsage, oldUsage, lostCheckout, diedCheckout, abandoned, ...waiting])).toEqual([
+      expect(await sweepJobs(tx, [lostEvent, oldEvent, stripeEvent, lostUsage, oldUsage, lostCheckout, diedCheckout, abandoned, ...waiting])).toEqual([
         { topic: "billing.createCheckout", aggregateId: lostCheckout, dedupeKey: `billing-sweep:checkout_request:${lostCheckout}:${hour}`, payload: { requestId: lostCheckout } },
         { topic: "billing.createCheckout", aggregateId: diedCheckout, dedupeKey: `billing-sweep:checkout_request:${diedCheckout}:${hour}`, payload: { requestId: diedCheckout } },
         { topic: "billing.reconcile", aggregateId: lostEvent, dedupeKey: `billing-sweep:provider_event:${lostEvent}:${hour}`, payload: { providerEventId: lostEvent } },
         { topic: "billing.reconcile", aggregateId: oldEvent, dedupeKey: `billing-sweep:provider_event:${oldEvent}:${hour}`, payload: { providerEventId: oldEvent } },
+        { topic: "billing.reconcile", aggregateId: stripeEvent, dedupeKey: `billing-sweep:provider_event:${stripeEvent}:${hour}`, payload: { providerEventId: stripeEvent } },
         { topic: "billing.syncUsage", aggregateId: lostUsage, dedupeKey: `billing-sweep:usage_event:${lostUsage}:${hour}`, payload: { usageEventId: lostUsage } },
         { topic: "billing.syncUsage", aggregateId: oldUsage, dedupeKey: `billing-sweep:usage_event:${oldUsage}:${hour}`, payload: { usageEventId: oldUsage } },
       ].sort((a, b) => a.dedupeKey.localeCompare(b.dedupeKey)));

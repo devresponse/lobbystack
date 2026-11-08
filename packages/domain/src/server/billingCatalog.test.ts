@@ -335,9 +335,9 @@ describe("billing link diff", () => {
       "update billing_prices starter/annual/cad",
       "update billing_prices starter/monthly/cad",
     ]);
-    expect(writes[1]).toMatchObject({ set: { polar_disc: "disc_pro-launch", status: "active" }, change: { fields: { polar_disc: { from: null, to: "disc_pro-launch" }, status: { from: "draft", to: "active" } } } });
+    expect(writes[1]).toMatchObject({ set: { provider_disc: "disc_pro-launch", status: "active" }, change: { fields: { polar_disc: { from: null, to: "disc_pro-launch" }, status: { from: "draft", to: "active" } } } });
     expect(writes[0]!.set).toEqual({ status: "active" });
-    expect(writes[4]).toMatchObject({ id: "pro-annual-cad", set: { polar_id: "prod_pro_annual" }, change: { fields: { polar_id: { from: null, to: "prod_pro_annual" } } } });
+    expect(writes[4]).toMatchObject({ id: "pro-annual-cad", set: { provider_ref: "prod_pro_annual" }, change: { fields: { polar_id: { from: null, to: "prod_pro_annual" } } } });
   });
 
   it("writes nothing when the same products are linked again", () => {
@@ -425,9 +425,9 @@ describe("billing link diff", () => {
     const replaced = link(current, plans, true);
     expect(replaced.refusals).toEqual([]);
     expect(replaced.writes.map((write) => [write.change.action, write.change.key, write.set])).toEqual([
-      ["update", "pro-launch", { polar_disc: "disc_pro-launch_2" }],
+      ["update", "pro-launch", { provider_disc: "disc_pro-launch_2" }],
       ["retire", "pro/monthly/cad", { retired_at: now }],
-      ["insert", "pro/monthly/cad", { plan: "pro", period: "monthly", currency: "cad", cents: 8700, polar_id: "prod_pro_monthly_2" }],
+      ["insert", "pro/monthly/cad", { plan: "pro", period: "monthly", currency: "cad", cents: 8700, provider_ref: "prod_pro_monthly_2" }],
     ]);
     expect(replaced.writes[1]!.id).toBe("pro-monthly-cad");
   });
@@ -442,7 +442,7 @@ describe("billing link diff", () => {
     const { writes, refusals } = link(current, linkFor(current));
     expect(refusals).toEqual([]);
     expect(writes.map((write) => [write.change.action, write.change.key, write.set])).toEqual([
-      ["update", "pro-launch", { polar_disc: null, status: "active" }],
+      ["update", "pro-launch", { provider_disc: null, status: "active" }],
     ]);
     expect(writes[0]!.change.fields.polar_disc).toEqual({ from: "disc_pro-launch", to: null });
   });

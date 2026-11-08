@@ -1,7 +1,7 @@
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
-import type { ApiBillingCatalogLink, BillingProfile, PolarEnv } from "@lobbystack/shared";
+import type { ApiBillingCatalogLink, BillingProfile } from "@lobbystack/shared";
 
-import { billingDeploymentPolar, type BillingDeploymentPolar, type DesiredBillingPlan } from "./billingCatalog";
+import { billingDeploymentPolar, providerEnvOfPolar, type BillingDeploymentPolar, type DesiredBillingPlan } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, type DesiredPolarCatalog, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "./billingPolar";
 import { verifyBillingCatalog, type BillingVerifyInput, type BillingVerifyResult } from "./billingVerify";
 
@@ -42,10 +42,8 @@ export function plannerFor(provider: BillingProviderId): typeof polarPlanner {
 /** The deployment's billing provider and its settings, as the catalog and the daily check read them. */
 export type BillingDeployment = BillingDeploymentPolar & { provider: BillingProviderId; providerEnv: "sandbox" | "live" };
 
-const providerEnvOf = (env: PolarEnv): "sandbox" | "live" => (env === "production" ? "live" : "sandbox");
-
 /** The deployment's billing settings from its variables: Polar's, the only provider until Stripe arrives. */
 export function readBillingDeployment(env: Record<string, string | undefined>, options: { withSecret: boolean } = { withSecret: true }): BillingDeployment {
   const polar = billingDeploymentPolar(env, options);
-  return { ...polar, provider: "polar", providerEnv: providerEnvOf(polar.env) };
+  return { ...polar, provider: "polar", providerEnv: providerEnvOfPolar(polar.env) };
 }

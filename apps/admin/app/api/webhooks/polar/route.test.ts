@@ -54,7 +54,7 @@ it("stores a signed UUID delivery in its business, as the worker, and says when 
 });
 
 it("names the plan through the catalog's Polar links, read as the worker", async () => {
-  mocks.catalog.mockResolvedValue({ plans: [], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, polar_id: "prod_pro_year", retired: false }] });
+  mocks.catalog.mockResolvedValue({ plans: [], prices: [{ plan: "pro", tier: "pro", status: "active", period: "annual", currency: "cad", cents: 96_000, per_month: 8_000, provider_ref: "prod_pro_year", retired: false }] });
   const body = JSON.stringify({ type: "subscription.updated", data: { id: "sub-1", status: "active", product_id: "prod_pro_year", customer: { external_id: `business:${businessId}` } } });
   expect((await POST(request(businessId, { body }))).status).toBe(200);
   expect(mocks.scope).toHaveBeenCalledWith({ actorType: "worker" });

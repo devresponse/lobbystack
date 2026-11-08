@@ -124,12 +124,12 @@ describe("the requests Polar receives", () => {
   });
 
   describe("a promo plan", () => {
-    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, polar_id: "promo-starter-monthly", retired: false };
+    const promoPrice = { plan: "salons-half-off", tier: "starter", status: "active", period: "monthly" as const, currency: "cad", cents: 3000, per_month: 3000, provider_ref: "promo-starter-monthly", retired: false };
     const planEnds = new Date("2099-11-25T00:00:00Z");
     const work = (extra: Partial<PromoEndWork> = {}): PromoEndWork => ({ planCode: "salons-half-off", planEnds, tier: "starter", interval: "monthly", subscriptionId: "sub-1", ending: "tier", endsAt: planEnds, set: true, notify: true, overdue: false, ...extra });
 
     beforeEach(() => {
-      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", polar_disc: "disc-half-off" }] } as never, process.env));
+      vi.mocked(readPolarProductLinks).mockImplementation(async () => polarProductLinks({ plans: [], prices: [promoPrice], others: [{ code: "salons-half-off", tier: "starter", status: "active", provider_disc: "disc-half-off" }] } as never, process.env));
       vi.mocked(recordPromoEnd).mockResolvedValue(1);
     });
 

@@ -12,6 +12,9 @@ describe("Stripe's errors in neutral terms", () => {
     [invalid("No such subscription: 'sub_1'", { code: "resource_missing", param: "id" }), "subscription_unavailable"],
     [invalid("No such price: 'price_1'", { code: "resource_missing", param: "items[0][price]" }), "product_unavailable"],
     [invalid("The price specified is inactive. This field only accepts active prices.", { param: "items[0][price]" }), "product_unavailable"],
+    [invalid("Archived products can't be added to a subscription."), "product_unavailable"],
+    // The words in different sentences say something else.
+    [invalid("This price can't be used here. The account is inactive."), undefined],
     [invalid("A canceled subscription can only update its cancellation_details and metadata."), "subscription_ending"],
     [invalid("The subscription is managed by the subscription schedule `sub_sched_1`, and updating any cancelation behavior directly is not allowed."), "change_pending"],
     [new Stripe.errors.StripePermissionError({ type: "invalid_request_error", message: "The provided key does not have the required permissions for this endpoint." }), "token_scope"],

@@ -34,7 +34,11 @@ export function stripeRefusalFor(error: unknown): BillingRefusal | undefined {
   if (!(error instanceof Stripe.errors.StripeInvalidRequestError)) return undefined;
   const message = error.message;
   if (error.code === "resource_missing") return /price|product/i.test(error.param ?? "") ? "product_unavailable" : "subscription_unavailable";
-  if (/(?:price|product)[^.]*(?:inactive|archived)|(?:inactive|archived)[^.]*(?:price|product)/i.test(message)) return "product_unavailable";
+  // A price or product and "inactive" or "archived" in one sentence. Split
+  // first: a regex with [^.]* between the words backtracks, which takes
+  // seconds on a long message.
+  const sentences = message.toLowerCase().split(".");
+  if (sentences.some((sentence) => (sentence.includes("price") || sentence.includes("product")) && (sentence.includes("inactive") || sentence.includes("archived")))) return "product_unavailable";
   // A schedule holds the subscription, or a pending update waits for payment.
   if (/subscription schedule|pending update/i.test(message)) return "change_pending";
   if (/cancell?ed|cancel_at|set to cancel/i.test(message)) return "subscription_ending";

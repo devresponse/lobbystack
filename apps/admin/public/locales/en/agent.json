@@ -10,7 +10,7 @@
       "description": "Greeting and transfer settings for your receptionist."
     },
     "receptionists": {
-      "title": "Receptionists",
+      "title": "AI agents",
       "description": "Who answers your calls, chats and pages. Add one for each location, team or language."
     },
     "knowledge": {

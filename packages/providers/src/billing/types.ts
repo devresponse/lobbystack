@@ -63,7 +63,7 @@ export interface BillingProvider {
     uniqueCustomerEmail: boolean;
     /** Usage goes out priced, and the daily totals check runs (Stripe). */
     meterMoney: boolean;
-    /** Overage bills on a monthly subscription of its own (Stripe directly). */
+    /** Overage bills on a subscription the worker records (Stripe): one of its own, monthly, or the plan's own when its checkout sold the overage prices. */
     separateOverage: boolean;
     /** Reconcile reads the subscription back instead of trusting the event (Stripe). */
     readBack: boolean;
@@ -77,8 +77,13 @@ export interface BillingProvider {
    * the customer to the provider (a Polar token without customers:write).
    */
   findOrCreateCustomer(input: { customer: CustomerRef; businessId: string; email: string; name: string | null; locale: string | null; requestId: string }): Promise<{ id: string; created: boolean } | null>;
-  /** A checkout page for a plan, made out to the customer, or else to the email and billing key. */
-  createCheckout(input: { customer: CustomerRef; email: string; price: PriceRef; businessId: string; requestId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
+  /**
+   * A checkout page for a plan, made out to the customer, or else to the email
+   * and billing key. On Stripe, overageOnCheckout sells the three overage
+   * prices in that currency on the plan's own checkout, and merchantOfRecord
+   * sells it with Stripe as the merchant of record (Managed Payments).
+   */
+  createCheckout(input: { customer: CustomerRef; email: string; price: PriceRef; businessId: string; requestId: string; metadata: Record<string, string>; successUrl: string; cancelUrl: string; locale: string | null; overageOnCheckout?: { currency: string }; merchantOfRecord?: boolean }): Promise<{ id: string; url: string; expiresAt: Date | null }>;
   /** The subscription, or null when the provider doesn't know it. */
   getSubscription(id: string): Promise<ProviderSubscription | null>;
 
@@ -105,12 +110,14 @@ export interface BillingProvider {
   checkAccount?(): Promise<{ expected: string; found: string } | null>;
 
   /**
-   * The plan's overage subscription, made once it goes live (Stripe directly).
-   * One the provider ended after failed payments, or left unpaid, comes back
-   * as unpaid while its invoice is open: no other is made until that invoice
-   * is collected or forgiven.
+   * The subscription that bills the plan's overage, once the plan goes live
+   * (Stripe). On Stripe directly it's an overage subscription, made once. One
+   * the provider ended after failed payments, or left unpaid, comes back as
+   * unpaid while its invoice is open: no other is made until that invoice is
+   * collected or forgiven. With onPlan, the plan's checkout sold the overage
+   * prices, so the plan subscription itself is checked to hold them and named.
    */
-  ensureOverage?(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string }): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }>;
+  ensureOverage?(input: { customerId: string; planSubscriptionId: string; businessId: string; currency: string; onPlan?: boolean }): Promise<{ subscriptionId: string } | { unpaidSubscriptionId: string }>;
   endOverage?(input: { subscriptionId: string; when: "period_end" | "now" }): Promise<void>;
 
   /**

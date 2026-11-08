@@ -110,6 +110,23 @@ describe("the billing provider contract: checkout", () => {
       expect([...stripe.state.subscriptions.values()].filter((subscription) => subscription.metadata.lobbystack_role === "overage")).toHaveLength(1);
     });
 
+    it("sells overage on the plan's own checkout with Stripe as the merchant of record, and names the plan subscription as the one that bills it", async () => {
+      const { billing, stripe } = withCatalog();
+      const made = await billing.createCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null }, overageOnCheckout: { currency: "cad" }, merchantOfRecord: true });
+      const request = stripe.requests.find((entry) => entry.call === "checkout.sessions.create")!;
+      expect(request.params).toMatchObject({ line_items: [{ price: "price_starter_month", quantity: 1 }, { price: "price_overage_voice" }, { price: "price_overage_sms" }, { price: "price_overage_transfers" }], managed_payments: { enabled: true } });
+      const plan = stripe.completeCheckout(made.id);
+      expect(plan.items.data.map((item) => item.price.id)).toEqual(["price_starter_month", "price_overage_voice", "price_overage_sms", "price_overage_transfers"]);
+      // No overage subscription: the plan's own bills the overage, and its card changes only through the portal or Link.
+      await expect(billing.ensureOverage({ customerId: "cus_1", planSubscriptionId: plan.id, businessId: "b1", currency: "cad", onPlan: true })).resolves.toEqual({ subscriptionId: plan.id });
+      expect([...stripe.state.subscriptions.values()]).toHaveLength(1);
+      await expect(stripe.subscriptions.update(plan.id, { default_payment_method: "" })).rejects.toThrow("Managed Payments");
+      // A plan subscription without the overage prices can't bill overage, which the job reports.
+      const direct = await billing.createCheckout({ ...base, requestId: "request-2", customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null } });
+      const bare = stripe.completeCheckout(direct.id);
+      await expect(billing.ensureOverage({ customerId: "cus_1", planSubscriptionId: bare.id, businessId: "b1", currency: "cad", onPlan: true })).rejects.toThrow("lacks 3 of the overage prices");
+    });
+
     it("ends the overage subscription with its usage invoiced, once, and refuses one without the overage prices", async () => {
       const { billing, stripe } = withCatalog();
       const checkout = await billing.createCheckout({ ...base, customer: { id: "cus_1", billingKey: "business:b1" }, price: { ref: "price_starter_month", discountRef: null } });

@@ -23,6 +23,8 @@ export type FakeStripeState = {
   balanceTransactions: Stripe.CustomerBalanceTransaction[];
   /** Products, prices, meters, coupons, portal configurations, endpoints and Stripe Tax: what pnpm billing makes. */
   catalog: FakeCatalogState;
+  /** Subscriptions a Managed Payments checkout made, whose card the API can't set. */
+  managedPayments: Set<string>;
 };
 
 /** One call the adapter made, with its parameters and idempotency key. */
@@ -36,7 +38,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), meterEvents: [], balanceTransactions: [], catalog: emptyFakeCatalog() };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), meterEvents: [], balanceTransactions: [], catalog: emptyFakeCatalog(), managedPayments: new Set() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

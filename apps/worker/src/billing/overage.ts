@@ -1,6 +1,6 @@
 // The overage subscription of a business paying through Stripe (the Stripe plan's step 13).
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { isLiveSubscriptionState, loadOverageWork, recordOverageSubscription, recordProductEvent } from "@lobbystack/domain";
+import { isLiveSubscriptionState, loadOverageWork, loadStripeSelling, recordOverageSubscription, recordProductEvent } from "@lobbystack/domain";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
@@ -16,7 +16,10 @@ export const OVERAGE_MISSING_AFTER_MS = 60 * 60_000;
  * plan ending in a later month, such as a yearly one, keeps its overage until
  * then. One Stripe ended after failed payments isn't replaced while its
  * invoice is open: usage stays at the allowance, as reconcile reported.
- * Reconcile queues the job with the plan's events.
+ * Reconcile queues the job with the plan's events. Sold on the plan's own
+ * checkout, as under merchant of record, overage bills on the plan
+ * subscription: the job checks that it holds the overage prices and records
+ * it, and the plan's own end ends its overage.
  */
 export async function ensureBillingOverage(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
   const businessId = businessIdOrThrow(job);
@@ -25,13 +28,14 @@ export async function ensureBillingOverage(job: JobEnvelope, dependencies: Worke
   const work = await loadOverageWork(dependencies.domain, { businessId });
   if (!work?.subscriptionId || work.source !== billing.id) return { status: "skipped", entityId: businessId };
   if (!isLiveSubscriptionState(work.subscriptionState)) {
-    if (!work.overageSubscriptionId) return { status: "skipped", entityId: businessId };
+    if (!work.overageSubscriptionId || work.overageSubscriptionId === work.subscriptionId) return { status: "skipped", entityId: businessId };
     await billing.endOverage({ subscriptionId: work.overageSubscriptionId, when: "period_end" });
     return { status: "completed", entityId: work.overageSubscriptionId };
   }
   try {
     if (!work.customerId || !work.currency) throw new Error("The billing account has no Stripe customer, or billing.json no live price, to make the overage subscription with.");
-    const overage = await billing.ensureOverage({ customerId: work.customerId, planSubscriptionId: work.subscriptionId, businessId, currency: work.currency });
+    const onPlan = (await loadStripeSelling(dependencies.domain)).overage === "checkout";
+    const overage = await billing.ensureOverage({ customerId: work.customerId, planSubscriptionId: work.subscriptionId, businessId, currency: work.currency, ...(onPlan ? { onPlan } : {}) });
     if ("unpaidSubscriptionId" in overage) return { status: "skipped", entityId: overage.unpaidSubscriptionId };
     await recordOverageSubscription(dependencies.domain, { businessId, planSubscriptionId: work.subscriptionId, overageSubscriptionId: overage.subscriptionId });
     return { status: "completed", entityId: overage.subscriptionId };

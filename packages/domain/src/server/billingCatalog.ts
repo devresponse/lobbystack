@@ -952,6 +952,17 @@ export async function loadPlanChangeProration(context: DomainContext, provider: 
   return { upgrade: pick(profile?.polar?.upgradeProration, "invoice"), downgrade: pick(profile?.polar?.downgradeProration, "next_period") };
 }
 
+/** How the last applied billing.json sells on Stripe: its stripe block's managedPayments and overage, and its currency; Stripe directly without one. */
+export async function loadStripeSelling(context: DomainContext): Promise<{ managedPayments: boolean; overage: "separate" | "checkout"; currency: string | null }> {
+  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
+  const profile = latest?.profile as { currency?: unknown; stripe?: { managedPayments?: unknown; overage?: unknown } } | null | undefined;
+  return {
+    managedPayments: profile?.stripe?.managedPayments === true,
+    overage: profile?.stripe?.overage === "checkout" ? "checkout" : "separate",
+    currency: typeof profile?.currency === "string" ? profile.currency : null,
+  };
+}
+
 const runKinds = ["catalog", "polar", "link", "verify"] as const;
 
 /** Every run, newest first, with the rows it changed: section 7.5's Q8, one row comparison per page. */

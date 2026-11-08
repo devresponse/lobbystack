@@ -1,7 +1,7 @@
 // The checkout job: a checkout page for a new plan, or a paying business's plan change (planChange.ts).
 import type { JobEnvelope } from "@lobbystack/contracts";
 import { billingProviderNames, planChangeRefusalSentence } from "@lobbystack/shared";
-import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, readPolarProductLinks, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed } from "@lobbystack/domain";
+import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, loadStripeSelling, readPolarProductLinks, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed } from "@lobbystack/domain";
 import { reportError } from "@lobbystack/telemetry/node";
 import type { JobExecution, JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
@@ -58,6 +58,8 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
     // The account's own customer, when it has one: Polar finds it by the billing key, Stripe by its ID.
     const customer = await billing.findOrCreateCustomer({ customer: { id: request.customerId, billingKey: request.externalCustomerId }, businessId, email, name: request.businessName, locale: null, requestId });
     const planUrl = `${(process.env.APP_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "")}/${request.onboardingStage === "complete" ? "settings/plan" : "onboarding/plan"}`;
+    // On Stripe, the brand's file says whether overage sells on the plan's checkout, and whether Stripe is the merchant of record.
+    const selling = billing.id === "stripe" ? await loadStripeSelling(dependencies.domain) : null;
     const checkout = await billing.createCheckout({
       customer: { id: customer?.id ?? null, billingKey: request.externalCustomerId },
       email,
@@ -69,6 +71,8 @@ export async function createBillingCheckout(job: JobEnvelope, dependencies: Work
       // Someone leaving checkout hasn't paid, so it returns to the plan page without the success marker.
       cancelUrl: planUrl,
       locale: null,
+      ...(selling?.overage === "checkout" && selling.currency ? { overageOnCheckout: { currency: selling.currency } } : {}),
+      ...(selling?.managedPayments ? { merchantOfRecord: true } : {}),
     });
     await markBillingCheckoutCreated(dependencies.domain, { businessId, requestId, checkoutUrl: checkout.url, checkoutId: checkout.id });
     return { status: "completed", entityId: requestId };

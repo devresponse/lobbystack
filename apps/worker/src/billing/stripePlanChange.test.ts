@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, loadPlanChangeProration, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
+import { claimBillingCheckoutRequest, loadBillingCheckoutRequest, loadPlanChangeProration, loadStripeSelling, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
 import { StripeBilling } from "@lobbystack/providers/stripe/adapter";
 import { createFakeStripe, FakeClock, type FakeCard } from "@lobbystack/providers/stripe/fake";
 import { planChangeRefusalSentence } from "@lobbystack/shared";
@@ -64,6 +64,25 @@ describe("billing jobs: a plan change on Stripe", () => {
     expect(markBillingCheckoutFailed).toHaveBeenCalledWith(domain, { businessId, requestId, error: planChangeRefusalSentence("stripe", "payment_failed") });
     expect(stripe.state.subscriptions.get("sub_1")).toMatchObject({ pending_update: null });
     expect(stripe.state.subscriptions.get("sub_1")!.items.data[0]!.price.id).toBe("price_starter_month");
+  });
+});
+
+describe("billing jobs: a checkout on Stripe", () => {
+  it("sells overage on the plan's own checkout, with Stripe as the merchant of record, when the brand's file says so", async () => {
+    const stripe = createFakeStripe({ accountId: "acct_1", clock: new FakeClock(Math.floor(Date.now() / 1000)) });
+    const businessId = randomUUID();
+    stripe.addCustomer({ id: "cus_1", businessId });
+    const metered = (kind: string) => ({ id: `price_overage_${kind}`, active: true, product: "prod_overage", currency: "cad", unit_amount: 100, lookup_key: `ls_overage_${kind}_cad`, tax_behavior: "exclusive" as const, recurring: { interval: "month" as const, interval_count: 1, usage_type: "metered" as const, meter: `mtr_${kind}` }, metadata: {}, created: 1 });
+    stripe.loadCatalog({ prices: [metered("voice"), metered("sms"), metered("transfers")] });
+    vi.stubEnv("POLAR_STARTER_MONTHLY_PRODUCT_ID", "price_starter_month");
+    vi.mocked(loadStripeSelling).mockResolvedValueOnce({ managedPayments: true, overage: "checkout", currency: "cad" });
+    const requestId = randomUUID();
+    vi.mocked(claimBillingCheckoutRequest).mockResolvedValue({ claimed: true });
+    vi.mocked(loadBillingCheckoutRequest).mockResolvedValue({ id: requestId, businessId, target: "starter", billingInterval: "monthly", status: "processing", checkoutId: null, checkoutUrl: null, error: null, customerEmail: "owner@example.com", customerId: "cus_1", externalCustomerId: `business:${businessId}`, billingEmail: null, businessName: "Allo Salon", onboardingStage: "complete", planCode: null, subscription: null });
+    const job: JobEnvelope = { jobId: randomUUID(), type: "billing.createCheckout", queue: "critical", businessId, payload: { requestId }, trace: {}, idempotencyKey: `test:${randomUUID()}`, scheduled: false };
+    await expect(handleJob(job, { domain: { db: undefined as never }, billing: new StripeBilling(stripe, { accountId: "acct_1", env: "sandbox" }) })).resolves.toEqual({ status: "completed", entityId: requestId });
+    const made = stripe.requests.find((request) => request.call === "checkout.sessions.create")!;
+    expect(made.params).toMatchObject({ customer: "cus_1", line_items: [{ price: "price_starter_month", quantity: 1 }, { price: "price_overage_voice" }, { price: "price_overage_sms" }, { price: "price_overage_transfers" }], managed_payments: { enabled: true } });
   });
 });
 

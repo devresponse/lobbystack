@@ -26,6 +26,24 @@ Use this page to bill a new deployment's businesses through Stripe instead of Po
 | Refunds and disputes | Done in Stripe's Dashboard; the webhook records them on the business's payments |
 | Checks | A daily comparison of `billing.json`, the tables and Stripe, and a daily comparison of what was sent with what Stripe's meters hold |
 
+That is Stripe directly, where the operator is the seller. The `stripe` block can make Stripe the merchant of record instead ([below](#sell-with-stripe-as-the-merchant-of-record)).
+
+## Sell with Stripe as the merchant of record
+
+With `managedPayments: true` and `overage: checkout` in the brand's `stripe` block, Stripe's Managed Payments sells the plans: Stripe computes, collects and files the sales tax, VAT and GST in more than 80 countries, and handles fraud, disputes and payment support. Customers buy from Link ("Sold through Link", `LINK.COM*` on their statements) and get its receipts. Stripe charges 3.5% more for it, and reviews the account and the product before turning it on.
+
+| What | Stripe directly | Merchant of record |
+| --- | --- | --- |
+| Checkout | The plan's price | The plan's price and the three overage prices, with Managed Payments on |
+| Overage | A second subscription, invoiced on the 1st | Metered items on the plan subscription, invoiced at its renewal; `billing.ensureOverage` checks they're there |
+| Yearly plans | Sold | Not sold: the deployment leaves the file's yearly prices out, which its Polar deployments still sell |
+| Usage dates | By the month's end and the grace hours | By the plan's renewal and the grace hours, and the daily totals check's open period starts at the renewal |
+| Plan changes, cancelling | **Settings > Plan**, as on Stripe directly; a renewal schedule keeps the metered items | The same |
+| Cards | The portal | The portal or Link; the API can't set a subscription's card |
+| Currency | The catalog's | The customer's own abroad: Stripe's Adaptive Pricing can't be turned off, so a transaction can be in another currency than the plans |
+
+A sandbox showed each of these on a paid test subscription ([Stripe billing](../roadmap/stripe-billing.md#merchant-of-record-as-a-second-mode)). A Stripe subscription with Managed Payments starts only from a Checkout page, so its tests start from test checkouts a person pays. Before the first live sale, the brand's website names Link as the seller in its payment terms.
+
 ## Set up a Stripe deployment
 
 1. **An account.** A Stripe account for each live deployment, grouped in a Stripe Organization when there are several, and a sandbox for each test deployment (decision 6 of [Stripe billing](../roadmap/stripe-billing.md#know-what-was-decided)). A deployment stays with the account it's first linked to: `pnpm billing` refuses another account or the other mode. Fill in the account's business details, payouts, and Stripe Tax's origin address and registrations, as an accountant advises.
@@ -138,4 +156,4 @@ Two limits: the plan subscription is made through the API with Stripe's test car
 
 - [The sandbox scenarios](#run-the-sandbox-scenarios), passing twice in a row against a real sandbox, and the checks by hand: the Checkout page in English, French and Spanish, the portal, a 3-D Secure card, receipts with their tax lines, and whether a zero overage invoice is emailed. Then step 18 of the plan takes away `BILLING_STRIPE_PREVIEW` and adds the `stripe` block to the brand of the first Stripe deployment.
 - Stripe's names for each key's permissions, from that run.
-- The legal pages: with Stripe the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments.
+- The legal pages: with Stripe directly the operator is the seller, so the operator's lawyer reviews the terms' payment clause before live payments; with Stripe as the merchant of record, the payment terms name Link as the seller. The landing's legal pages, which this fork doesn't publish, name only Polar or Stripe.

@@ -8,6 +8,7 @@ import { FakeClock } from "./clock";
 import { FakeStripeContext, type FakeStripeRequest, type FakeStripeState } from "./context";
 import { addFakeCustomer, fakeCustomers } from "./customers";
 import { stripeInvoiceObject, stripeScheduleObject, stripeSubscriptionObject, type FakeSubscriptionInput } from "./objects";
+import { fakeBalanceTransactions, fakeEventSummaries, fakeMeterEvents } from "./meterEvents";
 import { dropFakePendingUpdate, fakeInvoices, payFakeInvoice } from "./pendingUpdates";
 import { fakeAccounts, fakeBillingPortal } from "./portal";
 import { enterFakeSchedulePhase, fakeSchedules } from "./schedules";
@@ -54,7 +55,8 @@ export function createFakeStripe(options: { accountId?: string; clock?: FakeCloc
   return {
     ...catalog,
     accounts: fakeAccounts(fake),
-    customers: fakeCustomers(fake),
+    customers: { ...fakeCustomers(fake), ...fakeBalanceTransactions(fake) },
+    billing: { ...catalog.billing, meters: { ...catalog.billing.meters, ...fakeEventSummaries(fake) }, meterEvents: fakeMeterEvents(fake) },
     subscriptions: fakeSubscriptions(fake),
     subscriptionSchedules: fakeSchedules(fake),
     invoices: fakeInvoices(fake),

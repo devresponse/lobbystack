@@ -729,6 +729,7 @@ async function dispatchJob(job: JobEnvelope, dependencies: WorkerDependencies, e
     case "billing.revokeSubscription":
     case "billing.ensureOverage":
     case "billing.changeSubscription":
+    case "billing.checkUsageTotals":
     case "billing.sweep":
     case "billing.verifyCatalog":
       return await billingJobs[job.type](job, dependencies, execution);

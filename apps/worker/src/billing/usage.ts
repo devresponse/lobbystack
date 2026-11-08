@@ -1,13 +1,27 @@
-// Sending usage to Polar, and the monthly unit economics.
+// Sending usage to the billing provider, and the monthly unit economics.
 import type { JobEnvelope } from "@lobbystack/contracts";
-import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, recordProductEvent } from "@lobbystack/domain";
+import { meterEventTime, priceUsage } from "@lobbystack/shared";
+import { claimBillingUsageSync, confirmBillingUsageSync, loadBillingUsageEvent, loadUsageGraceHours, recordProductEvent } from "@lobbystack/domain";
 import { refreshUnitEconomicsMonth } from "@lobbystack/domain";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import type { JobResult, WorkerDependencies } from "../handlers";
 import { businessIdOrThrow } from "../jobInput";
 import { isMeteredUsageKind, overageKindOf } from "@lobbystack/providers/billing/usage";
 
-/** billing.syncUsage: sends a usage row's next event to Polar. */
+/**
+ * Stripe keeps a meter event's identifier for at least 24 hours, so a claimed
+ * event goes out again only within 20 of its first send; after that it counts
+ * as sent, and the daily totals check corrects the month if Stripe never had it.
+ */
+export const METER_RESEND_WITHIN_MS = 20 * 60 * 60_000;
+
+/**
+ * billing.syncUsage: sends a usage row's next event to the billing provider.
+ * On a money meter (Stripe) the event carries the row's price, from its rate
+ * as first claimed, and is dated by the grace rule (meterEventTime). Stripe
+ * takes one event at a time per customer and meter, and answers another
+ * with 429, which the job retries.
+ */
 export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDependencies): Promise<JobResult> {
   if (!dependencies.billing) {
     return { status: "skipped", entityId: String(job.payload.usageEventId ?? "") };
@@ -21,18 +35,26 @@ export async function syncBillingUsage(job: JobEnvelope, dependencies: WorkerDep
   if (event.plan !== "starter" && event.plan !== "pro") return { status: "skipped", entityId: event.id };
   const usageKind = isMeteredUsageKind(event.usageKind) ? event.usageKind : undefined;
   if (!usageKind) return { status: "skipped", entityId: event.id };
-  // The row's next Polar event: its billable quantity first, then each correction's difference.
-  const send = await claimBillingUsageSync(dependencies.domain, { businessId: event.businessId, usageEventId: event.id });
+  // The row's next event: its billable quantity first, then each correction's difference.
+  const meterMoney = dependencies.billing.can.meterMoney;
+  const send = await claimBillingUsageSync(dependencies.domain, { businessId: event.businessId, usageEventId: event.id, ...(meterMoney ? { resendWithinMs: METER_RESEND_WITHIN_MS } : {}) });
   if (!send) return { status: "completed", entityId: event.id };
+  const amountCents = meterMoney ? priceUsage(usageKind, send.quantity, send.rateCents ?? 0) : null;
+  // Past Stripe's memory of its identifier, or nothing to bill (no rate): it counts as sent.
+  if (send.expired || amountCents === 0) {
+    await confirmBillingUsageSync(dependencies.domain, { businessId: event.businessId, usageEventId: event.id, seq: send.seq });
+    return { status: "completed", entityId: event.id };
+  }
+  const occurredAt = meterMoney ? meterEventTime(event.createdAt, new Date(), await loadUsageGraceHours(dependencies.domain)) : event.createdAt;
   try {
     await dependencies.billing.reportUsage({
       customer: { id: event.customerId, billingKey: event.billingKey },
       businessId: event.businessId,
       kind: overageKindOf(usageKind),
       units: send.quantity,
-      // Polar prices usage itself; a provider metering money gets the row's price (Stripe plan, step 16).
-      amountCents: null,
-      occurredAt: event.createdAt,
+      // Polar prices usage itself; a provider metering money gets the row's price.
+      amountCents,
+      occurredAt,
       identifier: send.externalId,
     });
   } catch (error) {

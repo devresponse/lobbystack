@@ -123,6 +123,7 @@ export const OPERATIONS_EVENT_NAMES = [
   "ops.billing.overage_missing",
   "ops.billing.overage_unpaid",
   "ops.billing.provider_mismatch",
+  "ops.billing.usage_totals_mismatch",
   "ops.outbox.backlog_sample",
   "ops.outbox.flush_failed",
   "ops.service.health_check",
@@ -560,6 +561,8 @@ export const TELEMETRY_REQUIRED_PROPERTIES_BY_EVENT = {
   "ops.billing.overage_unpaid": ["businessId", "deploymentMode", "provider"],
   // The worker's startup check found a billing key of another account: deployment-wide, so no business.
   "ops.billing.provider_mismatch": ["provider", "providerEnv", "expectedAccount", "foundAccount"],
+  // The daily totals check found Stripe's meters off what was sent, and corrected the open month.
+  "ops.billing.usage_totals_mismatch": ["businessId", "deploymentMode", "provider", "kind"],
   "ops.outbox.backlog_sample": ["deploymentMode", "backlogBucket"],
   "ops.outbox.flush_failed": ["deploymentMode"],
   "ops.service.health_check": [

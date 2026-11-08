@@ -935,6 +935,13 @@ export type PlanChangeProration = (typeof prorations)[number];
  * Before the first apply, the values the brand files ship with: an upgrade is
  * invoiced at once and a downgrade waits for the next period.
  */
+/** The hours Stripe waits before finalizing a metered invoice, as the last applied billing.json's stripe block says, else Stripe's default of 1. */
+export async function loadUsageGraceHours(context: DomainContext): Promise<number> {
+  const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
+  const hours = (latest?.profile as { stripe?: { usageGraceHours?: unknown } } | null | undefined)?.stripe?.usageGraceHours;
+  return typeof hours === "number" && Number.isInteger(hours) && hours >= 1 && hours <= 72 ? hours : 1;
+}
+
 /** How the last applied billing.json charges plan changes on the deployment's provider: Polar's proration words, or the stripe block's upgrade and downgrade. */
 export async function loadPlanChangeProration(context: DomainContext, provider: BillingProviderId = "polar"): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
   const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });

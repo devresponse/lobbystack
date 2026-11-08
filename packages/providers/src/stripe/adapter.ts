@@ -11,7 +11,7 @@ import { isStripeAlreadyCanceled, isStripeMissing, stripeRefusalFor } from "./er
 import { endStripeOverage, ensureStripeOverage } from "./overage";
 import { changeStripePlan, endStripePlanAtRenewal, removeStripeDiscount } from "./planChange";
 import { providerSubscriptionFromStripe } from "./subscriptions";
-import { creditStripeBalance, reportStripeUsage, stripeInvoicedOverage, stripeUsageTotals } from "./usage";
+import { creditStripeBalance, reportStripeUsage, stripeUsageCredits, stripeUsageTotals } from "./usage";
 
 // Stripe behind the billing provider interface (ADR 0010). Step 9 of the
 // Stripe plan brings the core: the customer, reading a subscription, the
@@ -153,11 +153,11 @@ export class StripeBilling implements BillingProvider {
     return await stripeUsageTotals(this.api, input);
   }
 
-  async invoicedOverage(input: { subscriptionId: string; periodStart: Date }): Promise<{ cents: Record<OverageKind, number>; finalizedAt: Date } | null> {
-    return await stripeInvoicedOverage(this.api, input);
+  async usageCredits(input: { customerId: string }): Promise<Record<OverageKind, number>> {
+    return await stripeUsageCredits(this.api, input);
   }
 
-  async creditBalance(input: { customerId: string; cents: number; identifier: string }): Promise<void> {
+  async creditBalance(input: { customerId: string; kind: OverageKind; cents: number; currency: string; identifier: string }): Promise<void> {
     await creditStripeBalance(this.api, input);
   }
 

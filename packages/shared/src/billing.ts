@@ -41,6 +41,34 @@ export const billingUsageKinds = [
 ] as const;
 export type BillingUsageKind = (typeof billingUsageKinds)[number];
 
+/** The usage kinds overage bills, which a money meter prices (Stripe). */
+export type PricedUsageKind = Extract<BillingUsageKind, "voice_seconds" | "alert_sms_segments" | "outbound_call_attempts">;
+
+/**
+ * A usage amount's price in cents, to four decimals: a call's seconds by its
+ * minute's rate, alert text segments and call transfers by their own.
+ */
+export function priceUsage(kind: PricedUsageKind, units: number, rateCents: number): number {
+  const cents = kind === "voice_seconds" ? (units / 60) * rateCents : units * rateCents;
+  return Math.round(cents * 10_000) / 10_000;
+}
+
+/** Stripe takes a meter event dated up to 35 days back. */
+export const METER_EVENT_MAX_AGE_MS = 35 * 24 * 60 * 60_000;
+
+/**
+ * When a money meter's event says the usage happened: its own time while
+ * its month's overage invoice can still take it, the month's end plus
+ * billing.json's usageGraceHours less 30 minutes, else now, so a late
+ * correction lands on the next invoice instead of being counted and never
+ * billed. Usage past Stripe's 35 days goes out with now too.
+ */
+export function meterEventTime(occurredAt: Date, now: Date, graceHours: number): Date {
+  const monthEnd = Date.UTC(occurredAt.getUTCFullYear(), occurredAt.getUTCMonth() + 1, 1);
+  const lastChance = monthEnd + graceHours * 3_600_000 - 30 * 60_000;
+  return now.getTime() < lastChance && now.getTime() - occurredAt.getTime() < METER_EVENT_MAX_AGE_MS ? occurredAt : now;
+}
+
 /**
  * States in which a subscription is paying. `past_due` counts, so a failed charge
  * does not strip the number or the voice allowance while the provider retries.

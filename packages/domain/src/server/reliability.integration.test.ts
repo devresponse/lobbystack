@@ -6,6 +6,7 @@ import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocument
 import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
 import { createBillingSubscriptionRequestInTransaction } from "./billingSubscription";
+import { loadUsageTotalsWork, recordUsageTotalsCheck } from "./billingUsageTotals";
 import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, loadPlanChangePayment, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
@@ -1232,7 +1233,7 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       const correct = (segments: number) => correctAlertSmsUsage({ db }, { businessId, sourceKey, segments });
 
       // The first event carries the billable quantity, under the row's source key.
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: sourceKey, quantity: 1, seq: 0 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: sourceKey, quantity: 1, seq: 0 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 0 })).toBe(true);
       expect(await row()).toEqual({ status: "synced", billable: 1, synced: 1, seq: 1, sending: null });
 
@@ -1241,8 +1242,8 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       await correct(3);
       await enqueueBillingUsageSync({ db }, usage);
       expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:3:1`);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:1`, quantity: 2, seq: 1 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(true);
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 1 })).toBe(false);
       expect(await row()).toEqual({ status: "synced", billable: 3, synced: 3, seq: 2, sending: null });
@@ -1253,12 +1254,12 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
 
       // A correction while an event is on its way: confirming it queues the rest.
       await correct(2);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:2`, quantity: -1, seq: 2 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:2`, quantity: -1, seq: 2 });
       await correct(4);
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 2 })).toBe(true);
       expect(await row()).toEqual({ status: "pending", billable: 4, synced: 2, seq: 3, sending: null });
       expect(await syncs()).toContain(`billing-usage:${usageEventId}:sync:4:3`);
-      expect(await claimBillingUsageSync({ db }, usage)).toEqual({ externalId: `${sourceKey}:3`, quantity: 2, seq: 3 });
+      expect(await claimBillingUsageSync({ db }, usage)).toMatchObject({ externalId: `${sourceKey}:3`, quantity: 2, seq: 3 });
       expect(await confirmBillingUsageSync({ db }, { ...usage, seq: 3 })).toBe(true);
       expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4 });
 
@@ -1267,6 +1268,63 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       await correct(4);
       expect(await claimBillingUsageSync({ db }, usage)).toBeNull();
       expect(await row()).toMatchObject({ status: "synced", synced: 4, seq: 4, sending: null });
+    });
+  });
+
+  it("prices a usage row once, at its first claim, and lets a Stripe event go out again only within 20 hours of its send", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Usage price test", timezone: "UTC", businessType: "test" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", customerId: "cus_1", plan: "pro", subscriptionState: "active" });
+      const [usage] = await tx.insert(billingUsageEvents).values({ businessId, periodKey: periodKeyFor(), sourceKey: `voice:${randomUUID()}`, usageKind: "voice_seconds", quantity: 90, billableQuantity: 90, planAtRecordTime: "pro", isFinal: true, syncStatus: "pending" }).returning({ id: billingUsageEvents.id });
+      const db = tx as unknown as Database;
+      const input = { businessId, usageEventId: usage!.id };
+      const row = async () => (await tx.select({ rate: billingUsageEvents.rateCents, sentAt: billingUsageEvents.syncSentAt }).from(billingUsageEvents).where(eq(billingUsageEvents.id, usage!.id)))[0];
+      const sentAt = new Date("2026-11-08T08:00:00.000Z");
+      // The first claim fixes the rate from the plan the row counted under, and when the event went out.
+      const first = await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: sentAt });
+      expect(first).toMatchObject({ quantity: 90, seq: 0, sentAt, expired: false });
+      expect(first!.rateCents).toEqual(expect.any(Number));
+      expect(await row()).toEqual({ rate: first!.rateCents, sentAt });
+      // Unconfirmed, it goes out again as it was until 20 hours on, then counts as sent instead.
+      expect(await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: new Date(sentAt.getTime() + 19 * 60 * 60_000) })).toMatchObject({ seq: 0, sentAt, expired: false });
+      expect(await claimBillingUsageSync({ db }, { ...input, resendWithinMs: 20 * 60 * 60_000, now: new Date(sentAt.getTime() + 21 * 60 * 60_000) })).toMatchObject({ seq: 0, sentAt, expired: true });
+      // Polar keeps an identifier for good, so without the window it always goes out again.
+      expect(await claimBillingUsageSync({ db }, { ...input, now: new Date(sentAt.getTime() + 21 * 60 * 60_000) })).toMatchObject({ expired: false });
+      // A correction keeps the row's first rate, whatever the plan's rate is by then.
+      await confirmBillingUsageSync({ db }, { ...input, seq: 0 });
+      await tx.update(billingUsageEvents).set({ rateCents: 7, billableQuantity: 120, syncStatus: "pending" }).where(eq(billingUsageEvents.id, usage!.id));
+      expect(await claimBillingUsageSync({ db }, { ...input, now: new Date(sentAt.getTime() + 25 * 60 * 60_000) })).toMatchObject({ quantity: 30, seq: 1, rateCents: 7, expired: false });
+      expect(await row()).toEqual({ rate: 7, sentAt: new Date(sentAt.getTime() + 25 * 60 * 60_000) });
+    });
+  });
+
+  it("totals what a Stripe business confirmed sending, waiting while an event is in flight or was just sent or checked", async () => {
+    await rollbackTest(async (tx) => {
+      const businessId = randomUUID();
+      const db = tx as unknown as Database;
+      const now = new Date("2026-11-08T12:00:00.000Z");
+      await tx.insert(businesses).values({ id: businessId, slug: businessId, name: "Usage totals test", timezone: "UTC", businessType: "test" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ wait: "nothing" });
+      await tx.insert(billingAccounts).values({ businessId, billingKey: `business:${businessId}`, source: "stripe", customerId: "cus_1", plan: "pro", subscriptionState: "active" });
+      const usage = (fields: Partial<typeof billingUsageEvents.$inferInsert>) => tx.insert(billingUsageEvents).values({ businessId, periodKey: "2026-11", sourceKey: `row:${randomUUID()}`, usageKind: "voice_seconds", quantity: 0, isFinal: true, syncStatus: "synced", createdAt: new Date("2026-11-02T00:00:00.000Z"), syncSentAt: new Date("2026-11-02T00:00:00.000Z"), ...fields }).returning({ id: billingUsageEvents.id });
+      await usage({ quantity: 90, syncedQuantity: 90, rateCents: 20, createdAt: new Date("2026-10-30T00:00:00.000Z") });
+      await usage({ usageKind: "alert_sms_segments", quantity: 3, syncedQuantity: 3, rateCents: 2 });
+      await usage({ usageKind: "outbound_call_attempts", quantity: 1, syncedQuantity: 1, rateCents: 25 });
+      // Unpriced rows, as on Polar, aren't Stripe's to hold.
+      await usage({ quantity: 60, syncedQuantity: 60 });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ customerId: "cus_1", since: new Date("2026-10-30T00:00:00.000Z"), confirmed: { voice: 30, alert_sms: 6, transfer: 25 }, periodKey: "2026-11", fixSeq: 0, currency: expect.toBeOneOf([expect.any(String), null]) });
+
+      // The check keeps what it saw on the open month, and waits an hour before the next.
+      await recordUsageTotalsCheck({ db }, { businessId, periodKey: "2026-11", providerOverageCents: 61.25, fixSeq: 2, checkedAt: new Date("2026-11-08T11:30:00.000Z") });
+      expect((await tx.select({ cents: billingUsageMonths.providerOverageCents, checkedAt: billingUsageMonths.providerCheckedAt, fixSeq: billingUsageMonths.fixSeq }).from(billingUsageMonths).where(and(eq(billingUsageMonths.businessId, businessId), eq(billingUsageMonths.periodKey, "2026-11"))))[0]).toEqual({ cents: "61.2500", checkedAt: new Date("2026-11-08T11:30:00.000Z"), fixSeq: 2 });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now })).toEqual({ wait: "recent" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T13:00:00.000Z") })).toMatchObject({ fixSeq: 2 });
+      // An event sent within the hour, or one claimed and not confirmed, makes it wait.
+      await usage({ quantity: 30, syncedQuantity: 30, rateCents: 20, syncSentAt: new Date("2026-11-08T12:40:00.000Z") });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T13:00:00.000Z") })).toEqual({ wait: "recent" });
+      await usage({ quantity: 30, sendingQuantity: 30, rateCents: 20, syncStatus: "pending" });
+      expect(await loadUsageTotalsWork({ db }, { businessId, now: new Date("2026-11-08T15:00:00.000Z") })).toEqual({ wait: "in_flight" });
     });
   });
 

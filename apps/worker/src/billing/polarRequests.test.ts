@@ -173,7 +173,7 @@ describe("the requests Polar receives", () => {
     it("a row, then a correction as its difference", async () => {
       vi.mocked(loadBillingUsageEvent).mockResolvedValue(usageEvent({}) as never);
       vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
-      vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0 }).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2 });
+      vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1", quantity: 2, seq: 0, rateCents: null, sentAt: new Date(), expired: false }).mockResolvedValueOnce({ externalId: "alert_sms:operator_notification:delivery-1:2", quantity: -1, seq: 2, rateCents: null, sentAt: new Date(), expired: false });
       await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
       await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
       expect(recorded).toMatchSnapshot();
@@ -182,7 +182,7 @@ describe("the requests Polar receives", () => {
     it("a call's seconds", async () => {
       vi.mocked(loadBillingUsageEvent).mockResolvedValue(usageEvent({ usageKind: "voice_seconds", quantity: 95, plan: "pro" }) as never);
       vi.mocked(confirmBillingUsageSync).mockResolvedValue(true);
-      vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-1", quantity: 95, seq: 0 });
+      vi.mocked(claimBillingUsageSync).mockResolvedValueOnce({ externalId: "voice:call-1", quantity: 95, seq: 0, rateCents: null, sentAt: new Date(), expired: false });
       await handleJob(job("billing.syncUsage", { usageEventId: "usage-1" }), { domain, billing: polarFake(polar()) });
       expect(recorded).toMatchSnapshot();
     });

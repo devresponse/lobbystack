@@ -166,10 +166,11 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | --- | --- | --- |
 | `billing.createCheckout` | Each checkout request | Finds or makes the Polar customer, then makes the checkout or moves the subscription |
 | `billing.reconcile` | Each stored Polar event | Applies subscription and order events in the order Polar changed each subscription |
-| `billing.syncUsage` | Each final usage row | Sends Polar the billable part, numbered so Polar takes each event once |
+| `billing.syncUsage` | Each final usage row | Sends Polar the billable part, numbered so Polar takes each event once. On Stripe it sends the part's price to a money meter instead (Stripe billing's step 16) |
 | `billing.sweep` | Every 5 minutes | Queues again a Polar event, usage or checkout request a job left behind, at most once an hour each, and reports work older than an hour (fork PR #71) |
 | `billing.verifyCatalog` | Daily | Compares the file, the tables and Polar; leaves out the webhook, which `pnpm billing verify` checks |
 | `billing.endPromoPlan` | Daily, per business | Ends promo plans whose months ran out, a week ahead |
+| `billing.checkUsageTotals` | Daily, per business | Stripe only: compares what was sent with what Stripe's meters hold, and corrects a gap in the open month, crediting what the month can't take |
 | `billing.revokeSubscription` | Each delete of a business that pays | Ends its Polar subscription at once and marks it canceled, so the delete can go ahead (fork PR #101, [delete a business](../features/business-deletion.md)); tries 12 times over about 3 hours, and the delete asks again every 10 minutes. On Stripe, its overage subscription ends too, with its usage invoiced |
 | `billing.changeSubscription` | Each Cancel plan, Resume or Keep my plan | Stripe only (Stripe billing's step 15): asks Stripe to end the plan at its renewal, undo that, or drop a change waiting for the renewal |
 | `billing.ensureOverage` | A Stripe plan event that needs it | Stripe only (Stripe billing's step 13): gives a live plan its overage subscription, anchored on the 1st, and once the plan has ended, ends it with its month |
@@ -196,6 +197,7 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `ops.billing.overage_unpaid` | PostHog event from the worker, and a warning log line | Stripe ended a live plan's overage subscription after failed payments or a dispute, or left it unpaid. Usage stops at the allowance until its invoice is paid, voided or marked uncollectible in Stripe; the plan's next event then makes a new one | Any |
 | `ops.billing.provider_mismatch` | PostHog event from the worker, and an error log line, at startup | `STRIPE_API_KEY` belongs to another account than `STRIPE_ACCOUNT_ID`, so the worker runs without billing | Any |
 | `ops.billing.account_unchecked` | Warning log line from the worker, at startup | Stripe couldn't be reached to check the key's account; the worker bills on | None |
+| `ops.billing.usage_totals_mismatch` | PostHog event from the worker, and a warning log line | The daily totals check found Stripe's meters off what was sent, by `kind` and `gapCents`, and corrected the open month | Any in a day |
 | `ops.billing.plan_change_expired` | Warning log line from the worker | A Stripe upgrade waited a day for a payment the bank wanted confirmed, and Stripe dropped it; the business sees the change fail | None |
 | `ops.billing.sweep` | Log line from the worker | What each sweep that found work queued again | None |
 

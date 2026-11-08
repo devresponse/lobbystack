@@ -119,9 +119,12 @@ export interface BillingProvider {
    * money, null before usage is priced.
    */
   reportUsage(input: { customer: CustomerRef; businessId: string; kind: OverageKind; units: number; amountCents: number | null; occurredAt: Date; identifier: string }): Promise<"sent" | "duplicate">;
+  /** What the provider's money meters hold for the customer between two times, in cents by kind (Stripe). */
   usageTotals?(input: { customerId: string; from: Date; to: Date }): Promise<Record<OverageKind, number>>;
-  invoicedOverage?(input: { subscriptionId: string; periodStart: Date }): Promise<{ cents: Record<OverageKind, number>; finalizedAt: Date } | null>;
-  creditBalance?(input: { customerId: string; cents: number; identifier: string }): Promise<void>;
+  /** What creditBalance has credited the customer for each kind, in cents. */
+  usageCredits?(input: { customerId: string }): Promise<Record<OverageKind, number>>;
+  /** Credits the customer's balance with a correction a month's overage can't take; the identifier keys it. */
+  creditBalance?(input: { customerId: string; kind: OverageKind; cents: number; currency: string; identifier: string }): Promise<void>;
 
   /** A page where the customer manages cards, invoices and billing details. */
   createPortalSession(input: { customer: CustomerRef; returnUrl: string; locale: string | null }): Promise<{ url: string }>;

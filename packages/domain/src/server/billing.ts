@@ -15,7 +15,7 @@ import { recordProductEventInTransaction } from "./productEvents";
 import { enqueueReceptionistAllowanceCheck } from "./receptionists";
 import { requireBusinessAdmin } from "../authz";
 import { billingCodeCheckout, type BillingCodeRefusal } from "./billingCodes";
-import { polarProductLinks, readBillingCatalogSnapshot } from "./billingPlans";
+import { limitsFor, polarProductLinks, readBillingCatalogSnapshot, readBillingPlanLimitBook } from "./billingPlans";
 import { readBillingDeployment } from "./billingProvider";
 import { correctUsageInTransaction, enqueueUsageSyncInTransaction, getUsageStatusInTransaction, loadBillingContext, loadBusinessPlanLimits, readUsageStatusInTransaction, reserveUsageInTransaction, type UsageStatus } from "./usage";
 
@@ -669,33 +669,65 @@ export function billingUsageEventExternalId(sourceKey: string, seq: number): str
   return seq === 0 ? sourceKey : `${sourceKey}:${seq}`;
 }
 
+/** A usage row's next event to the billing provider, as claimBillingUsageSync hands it out. */
+export type BillingUsageSend = {
+  externalId: string;
+  quantity: number;
+  seq: number;
+  /** The rate the row was priced at on its first claim, from the plan it counted under; null without one. */
+  rateCents: number | null;
+  /** When this event first went out. */
+  sentAt: Date;
+  /** It went out longer ago than resendWithinMs: the provider may no longer know its identifier, so it isn't sent again. */
+  expired: boolean;
+};
+
 /**
- * Claims the next Polar event for a pending usage row: its billable quantity
- * the first time, and after a correction the difference from what Polar has,
- * as Polar keeps one event per ID and drops a second under the same one. A
+ * Claims the next event for a pending usage row: its billable quantity the
+ * first time, and after a correction the difference from what the provider
+ * has, as it keeps one event per ID and drops a second under the same one. A
  * claimed event the worker never confirmed goes out again as it was, which
- * Polar keeps once. Null when nothing is left to send, as when a correction
- * came back to what Polar has, which the row then records as synced.
+ * the provider keeps once; with resendWithinMs, as for Stripe's 24 hours of
+ * identifiers, one older than that comes back expired instead. The row's
+ * rate is fixed at its first claim, so a later price change never reprices
+ * it. Null when nothing is left to send, as when a correction came back to
+ * what the provider has, which the row then records as synced.
  */
 export async function claimBillingUsageSync(
   context: DomainContext,
-  input: { businessId: string; usageEventId: string },
-): Promise<{ externalId: string; quantity: number; seq: number } | null> {
+  input: { businessId: string; usageEventId: string; resendWithinMs?: number; now?: Date },
+): Promise<BillingUsageSend | null> {
   return await withBusinessTransaction(context.db, { businessId: input.businessId, actorType: "worker" }, async (tx) => {
+    const now = input.now ?? new Date();
     const where = and(eq(billingUsageEvents.id, input.usageEventId), eq(billingUsageEvents.businessId, input.businessId));
-    const [row] = await tx.select({ sourceKey: billingUsageEvents.sourceKey, syncStatus: billingUsageEvents.syncStatus, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq, sendingQuantity: billingUsageEvents.sendingQuantity })
+    const [row] = await tx.select({ sourceKey: billingUsageEvents.sourceKey, syncStatus: billingUsageEvents.syncStatus, usageKind: billingUsageEvents.usageKind, quantity: billingUsageEvents.quantity, billableQuantity: billingUsageEvents.billableQuantity, syncedQuantity: billingUsageEvents.syncedQuantity, syncSeq: billingUsageEvents.syncSeq, sendingQuantity: billingUsageEvents.sendingQuantity, rateCents: billingUsageEvents.rateCents, syncSentAt: billingUsageEvents.syncSentAt, plan: billingUsageEvents.planAtRecordTime, planCode: billingUsageEvents.planCodeAtRecordTime })
       .from(billingUsageEvents).where(where).limit(1).for("update");
     if (!row || row.syncStatus !== "pending") return null;
     const externalId = billingUsageEventExternalId(row.sourceKey, row.syncSeq);
-    if (row.sendingQuantity !== null) return { externalId, quantity: row.sendingQuantity, seq: row.syncSeq };
+    if (row.sendingQuantity !== null) {
+      const sentAt = row.syncSentAt ?? now;
+      const expired = input.resendWithinMs !== undefined && now.getTime() - sentAt.getTime() > input.resendWithinMs;
+      return { externalId, quantity: row.sendingQuantity, seq: row.syncSeq, rateCents: row.rateCents, sentAt, expired };
+    }
     const quantity = (row.billableQuantity ?? row.quantity) - (row.syncedQuantity ?? 0);
     if (row.syncSeq > 0 && Math.abs(quantity) < SAME_QUANTITY) {
       await tx.update(billingUsageEvents).set({ syncStatus: "synced", updatedAt: new Date() }).where(where);
       return null;
     }
-    await tx.update(billingUsageEvents).set({ sendingQuantity: quantity }).where(where);
-    return { externalId, quantity, seq: row.syncSeq };
+    const rateCents = row.rateCents ?? await usageRateCents(tx, row);
+    await tx.update(billingUsageEvents).set({ sendingQuantity: quantity, syncSentAt: now, ...(row.rateCents === null && rateCents !== null ? { rateCents } : {}) }).where(where);
+    return { externalId, quantity, seq: row.syncSeq, rateCents, sentAt: now, expired: false };
   });
+}
+
+/** A usage row's overage rate in cents, from the plan it counted under: its promo plan's own, else its tier's. Null without a rate. */
+async function usageRateCents(tx: DatabaseTransaction, row: { usageKind: string; plan: string | null; planCode: string | null }): Promise<number | null> {
+  if (row.plan !== "starter" && row.plan !== "pro") return null;
+  const limits = limitsFor(await readBillingPlanLimitBook(tx), row.plan, row.planCode);
+  if (row.usageKind === "voice_seconds") return limits.voiceOverageRatePerMinuteCents;
+  if (row.usageKind === "alert_sms_segments") return limits.alertSmsOverageRatePerSegmentCents;
+  if (row.usageKind === "outbound_call_attempts") return limits.outboundCallAttemptOverageRateCents;
+  return null;
 }
 
 /**

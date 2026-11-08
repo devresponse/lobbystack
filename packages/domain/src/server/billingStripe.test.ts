@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
-import { billingProfileSchema, perMonthCents, STRIPE_API_VERSION, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "@lobbystack/shared";
+import { billingProfileForProvider, billingProfileSchema, perMonthCents, STRIPE_API_VERSION, type ApiBillingCatalog, type ApiBillingCatalogRun, type BillingProfile } from "@lobbystack/shared";
 import { describe, expect, it } from "vitest";
 
 import { desiredBillingPlans } from "./billingCatalog";
@@ -101,11 +101,26 @@ describe("desiredStripeCatalog", () => {
     expect(() => catalogFor(withoutBlock)).toThrow("has no stripe block, which a Stripe deployment needs");
     const managed = billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, managedPayments: true } });
     expect(managed.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([["stripe.overage", "with managedPayments, overage is checkout: Managed Payments sells only through Checkout"]]);
-    const checkout = billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } });
-    expect(checkout.error?.issues.map((issue) => issue.path.join("."))).toEqual(["plans.starter.prices.annualCents", "plans.pro.prices.annualCents"]);
+    // With overage on the checkout, the file keeps its yearly prices for Polar, and a sold plan needs a monthly one.
+    expect(billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } }).success).toBe(true);
+    const yearlyOnly = JSON.parse(fileText("realinfobot"));
+    yearlyOnly.plans["starter-yearly"] = { tier: "starter", access: "code", names: { en: "Starter yearly", fr: "Starter annuel", es: "Starter anual", sr: "Starter godišnji" }, sold: true, prices: { annualCents: 30000 } };
+    const checkout = billingProfileSchema.safeParse({ ...yearlyOnly, stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } });
+    expect(checkout.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([["plans.starter-yearly.prices.monthlyCents", "with stripe.overage checkout, Stripe sells only monthly prices, so a sold plan needs one"]]);
     expect(billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, tax: { behavior: "exclusive", code: "saas" } } }).success).toBe(false);
   });
 
+  it("sells no yearly price on Stripe with overage on the checkout, as merchant of record needs, while Polar sells the file as it is", () => {
+    const file = profile("realinfobot", (raw) => Object.assign(raw.stripe, { overage: "checkout", managedPayments: true }));
+    const periods = (plans: ReturnType<typeof desiredBillingPlans>) => [...new Set(plans.flatMap((plan) => plan.prices.map((price) => price.period)))].sort();
+    expect(periods(desiredBillingPlans(billingProfileForProvider(file, "stripe")))).toEqual(["monthly"]);
+    expect(periods(desiredBillingPlans(billingProfileForProvider(file, "polar")))).toEqual(["annual", "monthly"]);
+    // With overage on a subscription of its own, Stripe sells the yearly prices too.
+    expect(periods(desiredBillingPlans(billingProfileForProvider(profile(), "stripe")))).toEqual(["annual", "monthly"]);
+    const catalog = desiredStripeCatalog({ brand: "realinfobot", profile: file, plans: desiredBillingPlans(billingProfileForProvider(file, "stripe")), webhookUrl: webhookUrl("realinfobot"), links });
+    expect(catalog.prices.map((price) => price.interval)).not.toContain("year");
+    expect([catalog.managedPayments, catalog.overageMode]).toEqual([true, "checkout"]);
+  });
   it("leaves the webhook, the meter error destination and the portal's return address unchecked without the instance's address", () => {
     const catalog = catalogFor(profile(), "realinfobot", null);
     expect(catalog.webhook).toBeNull();

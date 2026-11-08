@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import type { PolarSnapshot } from "@lobbystack/providers";
 import type { StripeSnapshot } from "@lobbystack/providers/stripe/catalog";
-import { billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
+import { billingProfileForProvider, billingProfileSchema, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalog, type ApiBillingCatalogPrice, type ApiBillingCheck, type BillingCheckCode, type BillingCheckPair, type BillingProfile, type BillingProviderEnv, type PolarEnv } from "@lobbystack/shared";
 
 import { billingCatalogDeployment, desiredBillingPlans, diffBillingCatalog, getBillingCatalogForApi, recordBillingVerifyRun, type DesiredBillingPlan, type StoredBillingPlan, type StoredBillingPrice } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarTags, type PolarStep, type PolarStepObject } from "./billingPolar";
@@ -244,7 +244,7 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   if (!latest || !catalog.profile || !catalog.provider.last_link) return { status: "skipped", reason: "nothing was linked yet" };
   const parsed = billingProfileSchema.safeParse(catalog.profile);
   if (!parsed.success) throw new Error(`The profile stored on catalog run ${latest.id} no longer passes billingProfileSchema.`);
-  const file = { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(parsed.data) };
+  const file = { brand: latest.brand, hash: latest.hash, profile: parsed.data, plans: desiredBillingPlans(billingProfileForProvider(parsed.data, deployment.provider)) };
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
   let result: BillingVerifyResult;
   if (deployment.stripe) {

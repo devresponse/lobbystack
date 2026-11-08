@@ -7,6 +7,7 @@ import { billingPlans, billingPrices, billingRuns, withBusinessTransaction, type
 import type { BillingEnv, BillingProviderId } from "@lobbystack/providers/billing/types";
 import {
   DEFAULT_PLAN_RECEPTIONISTS,
+  billingProfileForProvider,
   billingProfileHash,
   canonicalBillingProfileJson,
   canonicalJson,
@@ -555,7 +556,7 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
       refusals.push({ code: "catalog_changed", message: latestHash === null ? "Nothing was applied yet, so there is no run to replace. Run a dry run again." : `The latest catalog run has hash ${latestHash}, so someone applied in between. Run a dry run again.`, path: "replaces_hash" });
     }
     const now = new Date().toISOString();
-    const diff = diffBillingCatalog({ plans: desiredBillingPlans(profile), currency: profile.currency, current, now });
+    const diff = diffBillingCatalog({ plans: desiredBillingPlans(billingProfileForProvider(profile, own.id)), currency: profile.currency, current, now });
     refusals.push(...diff.refusals);
     const changes = diff.writes.map((write) => write.change);
     const base = {

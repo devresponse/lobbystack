@@ -30,7 +30,7 @@ import { createStripeCatalogClient, type StripeSnapshot } from "../packages/prov
 import { createStripeClient } from "../packages/providers/src/stripe/client";
 import { StripeWebhook } from "../packages/providers/src/stripe/events";
 import { BRANDS } from "../packages/shared/src/brands/generated";
-import { billingProfileSchema, priceUsage, STRIPE_WEBHOOK_EVENTS, type BillingProfile, type PricedUsageKind } from "../packages/shared/src/index";
+import { billingProfileForProvider, billingProfileSchema, priceUsage, STRIPE_WEBHOOK_EVENTS, type BillingProfile, type PricedUsageKind } from "../packages/shared/src/index";
 import {
   expectedOverageCents,
   firstOfMonth,
@@ -378,7 +378,7 @@ async function readProfile(brand: string): Promise<{ profile: BillingProfile; wi
 async function setUp(key: string, brand: string, io: ScenarioIo): Promise<Setup> {
   const { profile, withBlock } = await readProfile(brand);
   if (!withBlock) io.out(`brands/${brand}/billing.json has no stripe block yet, so the run uses Stripe billing's recommended one.`);
-  const plans = desiredBillingPlans(profile);
+  const plans = desiredBillingPlans(billingProfileForProvider(profile, "stripe"));
   const links = BRANDS[brand]?.links;
   const desired = stripePlanner.desired({ brand, profile, plans, webhookUrl: null, links: { termsUrl: links?.termsUrl ?? null, privacyUrl: links?.privacyUrl ?? null } });
   const catalog = createStripeCatalogClient(key);

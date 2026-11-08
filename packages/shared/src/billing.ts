@@ -108,6 +108,14 @@ export const billingErrorCodes = {
 export type BillingErrorCode =
   (typeof billingErrorCodes)[keyof typeof billingErrorCodes];
 
+// The billing providers a deployment can bill through (ADR 0010), and their environments.
+export const billingProviders = ["polar", "stripe"] as const;
+export type BillingProvider = (typeof billingProviders)[number];
+export const billingProviderEnvs = ["sandbox", "live"] as const;
+export type BillingProviderEnv = (typeof billingProviderEnvs)[number];
+/** How screens, messages and the CLI name each provider. */
+export const billingProviderNames: Record<BillingProvider, string> = { polar: "Polar", stripe: "Stripe" };
+
 /** The two Polar servers: sandbox for test payments, production for real ones. Each has its own organizations, ids and tokens. */
 export const polarBaseUrls = { sandbox: "https://sandbox-api.polar.sh", production: "https://api.polar.sh" } as const;
 export type PolarEnv = keyof typeof polarBaseUrls;

@@ -31,7 +31,7 @@ function client(fake: FakePolar) {
 }
 
 function run(kind: ApiBillingCatalogRun["kind"], polarOrg: string | null): ApiBillingCatalogRun {
-  return { id: "0b9d4a52-5d0b-4c4e-9a7e-9f0f3d1f0a01", kind, status: "applied", brand: "alloplace", ver: 1, hash: fileHash, prev_hash: null, code_hash: fileHash, changes: [], problems: [], blocked_by: [], polar_env: polarOrg ? "sandbox" : null, polar_org: polarOrg, key_id: null, partner: null, started_at: earlier, ended_at: earlier };
+  return { id: "0b9d4a52-5d0b-4c4e-9a7e-9f0f3d1f0a01", kind, status: "applied", brand: "alloplace", ver: 1, hash: fileHash, prev_hash: null, code_hash: fileHash, changes: [], problems: [], blocked_by: [], polar_env: polarOrg ? "sandbox" : null, polar_org: polarOrg, provider: polarOrg ? "polar" : null, provider_env: polarOrg ? "sandbox" : null, provider_account: polarOrg, key_id: null, partner: null, started_at: earlier, ended_at: earlier };
 }
 
 /** Applies the file to a fresh Polar stand-in, links it, and returns what verify reads on such an instance. */
@@ -42,18 +42,19 @@ async function syncedInstance(file = profile()) {
   const first = planPolarChanges({ catalog, snapshot: await client(fake).readSnapshot(), options: { adopt: false, allowReplace: false, allowArchive: false }, now });
   const { webhookSecret } = await runPolarSteps(client(fake), first.steps);
   const links = polarLinkPlans({ catalog, plans, snapshot: await client(fake).readSnapshot(), now });
-  const linkOf = (code: string, period: string) => links.plans.find((entry) => entry.code === code)?.prices.find((price) => price.period === period)?.polar_id ?? null;
+  const linkOf = (code: string, period: string) => links.plans.find((entry) => entry.code === code)?.prices.find((price) => price.period === period)?.provider_ref ?? null;
   const rows: ApiBillingCatalog["plans"] = plans.map(({ prices, ...plan }) => ({
     ...plan,
     status: "active",
     src: "file",
-    polar_disc: links.plans.find((entry) => entry.code === plan.code)?.polar_disc ?? null,
+    polar_disc: links.plans.find((entry) => entry.code === plan.code)?.provider_disc ?? null,
+    provider_disc: links.plans.find((entry) => entry.code === plan.code)?.provider_disc ?? null,
     frozen_at: null,
     retired_at: null,
     created_at: earlier,
     updated_at: earlier,
     discount: plan.discount as Record<string, unknown> | null,
-    prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
+    prices: prices.map((price) => ({ id: `${plan.code}-${price.period}`, period: price.period, currency: price.currency, cents: price.cents, per_month: perMonthCents(price.period, price.cents), polar_id: plan.sold ? linkOf(plan.code, price.period) : null, provider_ref: plan.sold ? linkOf(plan.code, price.period) : null, retired_at: null, created_at: earlier, updated_at: earlier })),
   }));
   // The product ID variables are optional, and an instance set up since the catalog has none.
   const productVars: Record<string, string | null> = { "starter/monthly": null, "starter/annual": null, "pro/monthly": null, "pro/annual": null };
@@ -67,6 +68,7 @@ async function syncedInstance(file = profile()) {
     currency: "cad",
     plans: rows,
     polar: { env: "sandbox", org: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
+    provider: { id: "polar", env: "sandbox", account: fake.state.organization.id, secret_sha256: sha256(webhookSecret!), objects: null, product_vars: productVars, last_link: run("polar", fake.state.organization.id) },
   };
   return { fake, file, plans, catalog: instance };
 }
@@ -222,23 +224,23 @@ describe("verifyBillingCatalog", () => {
 
   it("finds an instance on another organization, one linked elsewhere, and one without POLAR_ORGANIZATION_ID", async () => {
     const instance = await syncedInstance();
-    instance.catalog.polar.org = "org_live";
-    instance.catalog.polar.env = "production";
+    instance.catalog.polar!.org = "org_live";
+    instance.catalog.polar!.env = "production";
     const other = await verify(instance);
     expect(other.checks.find((check) => check.code === "polar_org")).toMatchObject({ level: "drift", message: "the instance uses Polar production org_live and the token reaches sandbox org_test." });
-    instance.catalog.polar.org = null;
-    instance.catalog.polar.last_link = { ...instance.catalog.polar.last_link!, polar_org: "org_old" };
+    instance.catalog.polar!.org = null;
+    instance.catalog.polar!.last_link = { ...instance.catalog.polar!.last_link!, polar_org: "org_old" };
     expect((await verify(instance)).checks.find((check) => check.code === "polar_org")!.message).toBe("POLAR_ORGANIZATION_ID isn't set on the instance; the last link went to Polar sandbox org_old.");
   });
 
   it("compares the webhook secret by its hash only when asked", async () => {
     const instance = await syncedInstance();
-    instance.catalog.polar.secret_sha256 = sha256("polar_whs_other");
+    instance.catalog.polar!.secret_sha256 = sha256("polar_whs_other");
     expect(notOk(await verify(instance))).toEqual(["drift postgres_polar webhook_secret webhook"]);
-    instance.catalog.polar.secret_sha256 = null;
+    instance.catalog.polar!.secret_sha256 = null;
     expect((await verify(instance)).checks.find((check) => check.code === "webhook_secret")!.message).toContain("POLAR_WEBHOOK_SECRET isn't set");
     delete instance.fake.state.webhooks[0]!.secret;
-    instance.catalog.polar.secret_sha256 = sha256("x");
+    instance.catalog.polar!.secret_sha256 = sha256("x");
     expect((await verify(instance)).checks.find((check) => check.code === "webhook_secret")!.message).toContain("webhooks:read");
     const worker = await verify(instance, { checkWebhookSecret: false });
     expect(worker.checks.some((check) => check.code === "webhook_secret")).toBe(false);
@@ -248,9 +250,9 @@ describe("verifyBillingCatalog", () => {
   it("never needs the product ID variables, and notes the ones a linked plan no longer reads", async () => {
     const instance = await syncedInstance();
     const linkOf = (code: string, period: string) => instance.catalog.plans.find((plan) => plan.code === code)!.prices.find((price) => price.period === period)!.polar_id!;
-    instance.catalog.polar.product_vars["starter/monthly"] = linkOf("starter", "monthly");
-    instance.catalog.polar.product_vars["pro/annual"] = linkOf("pro", "annual");
-    instance.catalog.polar.product_vars["pro/monthly"] = "product_old";
+    instance.catalog.polar!.product_vars["starter/monthly"] = linkOf("starter", "monthly");
+    instance.catalog.polar!.product_vars["pro/annual"] = linkOf("pro", "annual");
+    instance.catalog.polar!.product_vars["pro/monthly"] = "product_old";
     const result = await verify(instance);
     expect(result.status).toBe("passed");
     expect(notOk(result)).toEqual(["warn postgres_polar product_vars POLAR_PRO_MONTHLY_PRODUCT_ID", "info postgres_polar product_vars variables"]);
@@ -280,7 +282,7 @@ describe("billingVerifyReport", () => {
     expect(passed).toContain("\nPostgres and Polar\n");
     expect(passed.endsWith("Result: in sync (exit 0).")).toBe(true);
 
-    instance.catalog.polar.secret_sha256 = sha256("polar_whs_other");
+    instance.catalog.polar!.secret_sha256 = sha256("polar_whs_other");
     const drift = billingVerifyReport(await verify(instance), "Verify");
     expect(drift).toContain("  DRIFT  webhook_secret: ");
     expect(drift.endsWith("Result: drift (exit 1). Run pnpm billing apply, or change billing.json in a pull request.")).toBe(true);

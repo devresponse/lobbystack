@@ -2198,7 +2198,8 @@ Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/s
 | GET | `https://demo.alloplace.com/api/v1/billing/catalog` | `getBillingCatalog` | Get the billing catalog | `billing:manage` | Operator platform keys only. Empty until the first apply | `apps/admin/app/api/v1/billing/catalog/route.ts` |
 | GET | `https://demo.alloplace.com/api/v1/billing/catalog/runs` | `listBillingCatalogRuns` | List billing runs | `billing:manage` | Operator platform keys only. Query: `limit`, `cursor`, `kind` | `apps/admin/app/api/v1/billing/catalog/runs/route.ts` |
 | POST | `https://demo.alloplace.com/api/v1/billing/catalog/runs` | `applyBillingCatalog` | Apply a `billing.json` | `billing:manage` | Operator platform keys only. `Idempotency-Key` required unless `dry_run` is true | `apps/admin/app/api/v1/billing/catalog/runs/route.ts` |
-| POST | `https://demo.alloplace.com/api/v1/billing/catalog/polar-links` | `linkBillingCatalog` | Link Polar's products to the catalog | `billing:manage` | Operator platform keys only. `Idempotency-Key` required unless `dry_run` is true; a mismatch is a 409 listing each reason | `apps/admin/app/api/v1/billing/catalog/polar-links/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/billing/catalog/links` | `linkBillingCatalog` | Link the provider's objects to the catalog | `billing:manage` | Operator platform keys only. `Idempotency-Key` required unless `dry_run` is true; a mismatch is a 409 listing each reason | `apps/admin/app/api/v1/billing/catalog/links/route.ts` |
+| POST | `https://demo.alloplace.com/api/v1/billing/catalog/polar-links` | `linkBillingCatalog` | The same, at its path before the Stripe plan's step 6 | `billing:manage` | As above | `apps/admin/app/api/v1/billing/catalog/polar-links/route.ts` |
 | GET | `https://demo.alloplace.com/api/v1/billing/codes` | `listBillingCodes` | List promo codes | `billing:manage` | Operator platform keys only. Query: `limit`, `cursor`, `plan`, `business_id` | `apps/admin/app/api/v1/billing/codes/route.ts` |
 | POST | `https://demo.alloplace.com/api/v1/billing/codes` | `createBillingCode` | Issue a promo code | `billing:manage` | Operator platform keys only. `Idempotency-Key` optional; answers 201; a code that is taken is a 409 | `apps/admin/app/api/v1/billing/codes/route.ts` |
 | DELETE | `https://demo.alloplace.com/api/v1/billing/codes/{code_id}` | `revokeBillingCode` | Revoke a promo code | `billing:manage` | Operator platform keys only. Businesses already on its plan keep it | `apps/admin/app/api/v1/billing/codes/[code_id]/route.ts` |
@@ -2274,11 +2275,15 @@ Public API (v1) endpoint for applying a `billing.json` and for the record of eve
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/billingCatalog.ts`, `packages/db/migrations/0108_billing_catalog.sql`, `scripts/billing.ts`.
 
+**`apps/admin/app/api/v1/billing/catalog/links/route.ts`**
+
+Public API (v1) endpoint that records which billing provider object sells each price, once `pnpm billing apply` has made the provider sell what the file says.
+
+- `POST /api/v1/billing/catalog/links`: Needs `billing:manage` and an operator platform key. `readApiBody` checks the body against `apiBillingCatalogLinkSchema`: every live price of every sold plan, the catalog hash, the provider and its account, in the provider's names or, for Polar, Polar's (`polar_env`, `polar_org`, `polar_disc` and `polar_id`), which `billingCatalogLinkRequest` translates. `linkBillingCatalogForApi` (`packages/domain/src/server/billingCatalog.ts`) records each price's provider object and each plan's discount, then makes every sold plan active; anything that doesn't fit is a 409 listing each reason in `details`. Nothing at the provider changes. `dry_run` and `Idempotency-Key` work as for an apply. Other methods get 405 `method_not_allowed`.
+
 **`apps/admin/app/api/v1/billing/catalog/polar-links/route.ts`**
 
-Public API (v1) endpoint that records which Polar product sells each price, once `pnpm billing apply` has made Polar sell what the file says.
-
-- `POST /api/v1/billing/catalog/polar-links`: Needs `billing:manage` and an operator platform key. `readApiBody` checks the body against `apiBillingCatalogLinkSchema`: every live price of every sold plan, the catalog hash and the Polar organization. `linkBillingCatalogForApi` (`packages/domain/src/server/billingCatalog.ts`) records each price's Polar product and each plan's Polar discount, then makes every sold plan active; anything that doesn't fit is a 409 listing each reason in `details`. Nothing in Polar changes. `dry_run` and `Idempotency-Key` work as for an apply. Other methods get 405 `method_not_allowed`.
+The same operation at its path before the Stripe plan's step 6, kept for clients written before it.
 
 Related files: `apps/admin/src/lib/public-api/routes.ts`, `packages/domain/src/server/billingCatalog.ts`, `scripts/billing.ts`.
 

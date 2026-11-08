@@ -1887,7 +1887,7 @@
       "post": {
         "operationId": "createCheckout",
         "summary": "Start a checkout",
-        "description": "Asks Polar for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: Polar changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in Polar's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, a key 20 across the businesses it reaches, and the person the key acts for 20, with their dashboard and their other keys. Each new checkout is a call to Polar, so a business can start 10 an hour, and the person it is made out to 20 across businesses, with the dashboard's; past either it is a 429. The same plan, interval and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Otherwise a business that already pays changes plan one checkout at a time, so a new one while another of its checkouts is pending or processing is a 409. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own Polar customer, made on its first checkout with the payer's email or billing_email. Polar keeps one customer per email, so when the email already belongs to another business's customer the checkout ends in error, and another with a separate billing_email works.",
+        "description": "Asks the billing provider for a page where the customer pays for a plan. Poll GET /billing/checkout/{checkout_id} until status is ready, then send them checkout_url. As in the dashboard, a free business can buy either plan and a Starter business can move to Pro. A Starter business already pays, so its move to Pro needs no page: the provider changes that subscription and charges the difference to the saved payment method, and status becomes changed. Other changes happen in the provider's billing portal and are a 409, as are a managed plan and a plan this deployment doesn't sell. With plan promo and a promo_code, it sells the plan the code unlocks, with that plan's discount, to a free, Starter or Pro business; one that already pays has its subscription moved, as above. A code that doesn't work for the business, for any reason, is a 400 on promo_code. A business can try 10 codes an hour, a key 20 across the businesses it reaches, and the person the key acts for 20, with their dashboard and their other keys. Each new checkout is a call to the provider, so a business can start 10 an hour, and the person it is made out to 20 across businesses, with the dashboard's; past either it is a 429. The same plan, interval and billing_email asked for again while that person's checkout is still pending or processing returns that checkout, which counts nothing. Otherwise a business that already pays changes plan one checkout at a time, so a new one while another of its checkouts is pending or processing is a 409. With a platform key the checkout is made out to the business's owner, so a business nobody has claimed yet is a 409. Each business has its own customer at the provider, made on its first checkout with the payer's email or billing_email. On Polar, which keeps one customer per email, a checkout whose email already belongs to another business's customer ends in error, and another with a separate billing_email works.",
         "tags": [
           "Billing"
         ],
@@ -2250,7 +2250,7 @@
       "post": {
         "operationId": "setManagedPlan",
         "summary": "Put the business on a managed plan",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Puts the business on the enterprise plan outside Polar, which unlocks what a paid plan unlocks while the operator bills the business directly, and removes a spending cap left from an earlier plan. A business with a live Polar subscription is a 409. If the business later starts a Starter or Pro subscription in Polar, Polar takes over.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Puts the business on the enterprise plan outside the billing provider, which unlocks what a paid plan unlocks while the operator bills the business directly, and removes a spending cap left from an earlier plan. A business with a live subscription through the provider is a 409. If the business later starts a Starter or Pro subscription through the provider, that subscription takes over.",
         "tags": [
           "Billing"
         ],
@@ -2488,7 +2488,7 @@
       "delete": {
         "operationId": "endPromoPlan",
         "summary": "End the promo plan",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Ends the business's promo plan at its subscription's next renewal, as the plan's months running out would: its owners get an email, and Polar moves the subscription to the plan's tier without its discount, or cancels it for a plan that ends that way. A plan that would keep going moves to its tier. Until the renewal the business keeps the plan it paid for; plan_ends and plan_ends_with say what happens. A business without a promo plan in force is a 404.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Ends the business's promo plan at its subscription's next renewal, as the plan's months running out would: its owners get an email, and the billing provider moves the subscription to the plan's tier without its discount, or cancels it for a plan that ends that way. A plan that would keep going moves to its tier. Until the renewal the business keeps the plan it paid for; plan_ends and plan_ends_with say what happens. A business without a promo plan in force is a 404.",
         "tags": [
           "Billing"
         ],
@@ -2603,7 +2603,7 @@
       "get": {
         "operationId": "getBillingCatalog",
         "summary": "Get the billing catalog",
-        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and their Polar products, the file they came from, whether it matches the deployed code, and the Polar settings the deployment runs with (its webhook secret only as a hash). Empty until the first apply. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read it.",
+        "description": "Operator platform keys only; any other key gets a 403 forbidden. Every plan this deployment holds, standard or not, with its prices and the provider objects that sell them, the file they came from, whether it matches the deployed code, and the billing provider the deployment runs with (its webhook secret only as a hash): provider, and on a Polar deployment polar as before. Empty until the first apply. Checkout, plan changes, the provider's webhook, the plan screens and usage limits read it.",
         "tags": [
           "Platform"
         ],
@@ -2687,7 +2687,7 @@
       "post": {
         "operationId": "applyBillingCatalog",
         "summary": "Apply a billing.json",
-        "description": "Operator platform keys only. Writes the file's plans and prices in one transaction and records the run. Plans and prices left out of the file are retired, never deleted. Nothing in Polar changes. With dry_run true it changes nothing, stores no key and answers 200 with what the apply would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
+        "description": "Operator platform keys only. Writes the file's plans and prices in one transaction and records the run. Plans and prices left out of the file are retired, never deleted. Nothing at the billing provider changes. With dry_run true it changes nothing, stores no key and answers 200 with what the apply would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
         "tags": [
           "Platform"
         ],
@@ -2842,12 +2842,13 @@
           {
             "name": "kind",
             "in": "query",
-            "description": "catalog, polar or verify. Every kind when left out.",
+            "description": "catalog, polar, link or verify: polar for Polar's links, link for every link whatever the provider. Every kind when left out.",
             "schema": {
               "type": "string",
               "enum": [
                 "catalog",
                 "polar",
+                "link",
                 "verify"
               ]
             }
@@ -2938,11 +2939,136 @@
         }
       }
     },
-    "/billing/catalog/polar-links": {
+    "/billing/catalog/links": {
       "post": {
         "operationId": "linkBillingCatalog",
-        "summary": "Link Polar's products to the catalog",
-        "description": "Operator platform keys only. Records the Polar product that sells each live price of every sold plan, and the Polar discount of each plan that has one, then makes every sold plan active. pnpm billing apply calls it once Polar sells what the file says; nothing in Polar changes. The request names every live price of every sold plan, the catalog hash and the Polar organization; anything that doesn't fit is a 409 listing each reason in details. With dry_run true it changes nothing, stores no key and answers 200 with what the link would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
+        "summary": "Link the provider's objects to the catalog",
+        "description": "Operator platform keys only. Records the billing provider's object that sells each live price of every sold plan, a Polar product or a Stripe price, and the discount of each plan that has one, then makes every sold plan active. pnpm billing apply calls it once the provider sells what the file says; nothing at the provider changes. The request names every live price of every sold plan, the catalog hash, the provider and its account, which must be the deployment's; anything that doesn't fit is a 409 listing each reason in details. With provider polar, Polar's names (polar_env, polar_org, polar_disc and polar_id) are accepted for the provider's, and the refusals name the fields as the request did. POST /billing/catalog/polar-links is the same operation, kept for clients written before this path. With dry_run true it changes nothing, stores no key and answers 200 with what the link would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
+        "tags": [
+          "Platform"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "billing:manage",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "A unique value, up to 255 characters, that makes retries of this request safe for 24 hours.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingCatalogLink"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/BillingCatalogRun"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request is invalid (invalid_request).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "The API key is missing, invalid, or revoked (unauthorized).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused. insufficient_scope: the key lacks the billing:manage scope. forbidden: only platform keys can call this endpoint. key_owner_inactive: the person the key acts for can't any more: a per-business key's creator is no longer an owner or admin, or a platform key's owner_email has no verified account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The request conflicts with the current state.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The Idempotency-Key was already used with a different request body (idempotency_key_reused).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests (rate_limited). Wait for the Retry-After header's number of seconds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "headers": {
+              "Retry-After": {
+                "schema": {
+                  "type": "integer"
+                },
+                "description": "Seconds to wait."
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/catalog/polar-links": {
+      "post": {
+        "operationId": "linkBillingCatalogAlias",
+        "summary": "Link the provider's objects to the catalog (alias)",
+        "description": "The same as POST /billing/catalog/links, kept for clients written before it. Operator platform keys only. Records the billing provider's object that sells each live price of every sold plan, a Polar product or a Stripe price, and the discount of each plan that has one, then makes every sold plan active. pnpm billing apply calls it once the provider sells what the file says; nothing at the provider changes. The request names every live price of every sold plan, the catalog hash, the provider and its account, which must be the deployment's; anything that doesn't fit is a 409 listing each reason in details. With provider polar, Polar's names (polar_env, polar_org, polar_disc and polar_id) are accepted for the provider's, and the refusals name the fields as the request did. POST /billing/catalog/polar-links is the same operation, kept for clients written before this path. With dry_run true it changes nothing, stores no key and answers 200 with what the link would change and anything that would stop it. Otherwise Idempotency-Key is required: a retry with the same value returns the same run, and a different body with that value is a 422.",
         "tags": [
           "Platform"
         ],
@@ -3067,7 +3193,7 @@
       "post": {
         "operationId": "createBillingCode",
         "summary": "Issue a promo code",
-        "description": "Operator platform keys only. Makes a code that unlocks a plan whose access is code in billing.json; a business that enters it buys that plan through Polar with the plan's discount, once: a business that subscribed with a code can't use it again. A shared code needs max_uses and expires_at; a code bound to one business needs neither. With an Idempotency-Key, a retry returns the same code and a different body with that value is a 422. A code that is taken is a 409.",
+        "description": "Operator platform keys only. Makes a code that unlocks a plan whose access is code in billing.json; a business that enters it buys that plan through the billing provider with the plan's discount, once: a business that subscribed with a code can't use it again. A shared code needs max_uses and expires_at; a code bound to one business needs neither. With an Idempotency-Key, a retry returns the same code and a different body with that value is a 422. A code that is taken is a 409.",
         "tags": [
           "Platform"
         ],
@@ -15727,9 +15853,10 @@
                     "enum": [
                       "catalog",
                       "polar",
+                      "link",
                       "verify"
                     ],
-                    "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
+                    "description": "catalog: an apply. polar: a link of Polar's products. link: a link of another provider's objects. verify: the worker's daily check."
                   },
                   "status": {
                     "type": "string",
@@ -15873,7 +16000,13 @@
                             "polar_org",
                             "webhook_secret",
                             "product_vars",
-                            "unreadable"
+                            "unreadable",
+                            "account",
+                            "price",
+                            "overage",
+                            "portal",
+                            "tax",
+                            "mode"
                           ],
                           "description": "Which check found it."
                         },
@@ -15882,9 +16015,11 @@
                           "enum": [
                             "file_postgres",
                             "file_polar",
-                            "postgres_polar"
+                            "postgres_polar",
+                            "file_provider",
+                            "postgres_provider"
                           ],
-                          "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                          "description": "The two copies it compared: the repository file, the Postgres tables and the billing provider (polar on a Polar deployment)."
                         },
                         "level": {
                           "type": "string",
@@ -15897,7 +16032,7 @@
                         },
                         "subject": {
                           "type": "string",
-                          "description": "What it is about, such as a plan, a price or a Polar object."
+                          "description": "What it is about, such as a plan, a price or a provider object."
                         },
                         "message": {
                           "type": "string"
@@ -15936,7 +16071,12 @@
                             "terms_changed",
                             "discount_mismatch",
                             "id_taken",
-                            "id_changed"
+                            "id_changed",
+                            "billing_account_mismatch",
+                            "billing_account_changed",
+                            "billing_provider_changed",
+                            "provider_mismatch",
+                            "provider_block_missing"
                           ]
                         },
                         "message": {
@@ -15969,9 +16109,48 @@
                       {
                         "type": "null"
                       }
-                    ]
+                    ],
+                    "description": "A Polar link or verify's Polar server; null for any other run."
                   },
                   "polar_org": {
+                    "description": "A Polar link or verify's Polar organization; null for any other run.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "provider": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "polar",
+                          "stripe"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The billing provider a link or verify ran against. Null for an apply."
+                  },
+                  "provider_env": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "sandbox",
+                          "live"
+                        ]
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "sandbox or live: the provider's environment. Null for an apply."
+                  },
+                  "provider_account": {
+                    "description": "The provider's account: the Polar organization or the Stripe account. Null for an apply.",
                     "type": [
                       "string",
                       "null"
@@ -16029,13 +16208,16 @@
                   "blocked_by",
                   "polar_env",
                   "polar_org",
+                  "provider",
+                  "provider_env",
+                  "provider_account",
                   "key_id",
                   "partner",
                   "started_at",
                   "ended_at"
                 ],
                 "additionalProperties": false,
-                "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+                "description": "One apply of a billing.json, one link of the provider's objects, one verify, or the dry run of an apply or a link."
               },
               {
                 "type": "null"
@@ -16090,7 +16272,7 @@
                     "active",
                     "retired"
                   ],
-                  "description": "draft until Polar can sell it as defined, active, or retired."
+                  "description": "draft until the billing provider can sell it as defined, active, or retired."
                 },
                 "access": {
                   "type": "string",
@@ -16319,6 +16501,14 @@
                   ]
                 },
                 "polar_disc": {
+                  "description": "The Polar discount for a plan with a discount: provider_disc on a Polar deployment, null on any other.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "provider_disc": {
+                  "description": "The provider's discount for a plan with a discount, once linked: a Polar discount or a Stripe coupon.",
                   "type": [
                     "string",
                     "null"
@@ -16401,7 +16591,14 @@
                         "description": "cents for monthly; for annual, cents / 12 rounded to the nearest whole unit of the currency (a multiple of 100)."
                       },
                       "polar_id": {
-                        "description": "The Polar product that sells it, once Polar is seeded.",
+                        "description": "The Polar product that sells it, once linked: provider_ref on a Polar deployment, null on any other.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "provider_ref": {
+                        "description": "The provider's object that sells it, once linked: a Polar product or a Stripe price.",
                         "type": [
                           "string",
                           "null"
@@ -16438,6 +16635,7 @@
                       "cents",
                       "per_month",
                       "polar_id",
+                      "provider_ref",
                       "retired_at",
                       "created_at",
                       "updated_at"
@@ -16472,6 +16670,7 @@
                 "offer_end",
                 "discount",
                 "polar_disc",
+                "provider_disc",
                 "terms_hash",
                 "frozen_at",
                 "sort",
@@ -16485,18 +16684,484 @@
             "description": "Every plan, whatever its access or status, by sort then code."
           },
           "polar": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "env": {
+                    "type": "string",
+                    "enum": [
+                      "sandbox",
+                      "production"
+                    ],
+                    "description": "The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."
+                  },
+                  "org": {
+                    "description": "POLAR_ORGANIZATION_ID. Null when unset.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "secret_sha256": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "SHA-256 as 64 lowercase hex characters."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."
+                  },
+                  "product_vars": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "description": "The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only before its plan's first link; after that they aren't needed. Null when unset."
+                  },
+                  "last_link": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Stable identifier (UUID)."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Null for a dry run, which stores nothing."
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "catalog",
+                              "polar",
+                              "link",
+                              "verify"
+                            ],
+                            "description": "catalog: an apply. polar: a link of Polar's products. link: a link of another provider's objects. verify: the worker's daily check."
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "applied",
+                              "unchanged",
+                              "failed",
+                              "passed",
+                              "drift",
+                              "preview"
+                            ],
+                            "description": "applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."
+                          },
+                          "brand": {
+                            "type": "string"
+                          },
+                          "ver": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "The file's version."
+                          },
+                          "hash": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$",
+                            "description": "SHA-256 of the normalized file."
+                          },
+                          "prev_hash": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$",
+                                "description": "SHA-256 as 64 lowercase hex characters."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The previous run of the same kind's hash. Null on the first."
+                          },
+                          "code_hash": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$",
+                                "description": "SHA-256 as 64 lowercase hex characters."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The file hash the running code was built with. Null when the brand has no billing.json in it."
+                          },
+                          "changes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "table": {
+                                  "type": "string",
+                                  "enum": [
+                                    "billing_plans",
+                                    "billing_prices"
+                                  ]
+                                },
+                                "key": {
+                                  "type": "string",
+                                  "description": "A plan's code, or code/period/currency for a price."
+                                },
+                                "action": {
+                                  "type": "string",
+                                  "enum": [
+                                    "insert",
+                                    "update",
+                                    "retire",
+                                    "restore"
+                                  ]
+                                },
+                                "fields": {
+                                  "type": "object",
+                                  "propertyNames": {
+                                    "type": "string"
+                                  },
+                                  "additionalProperties": {
+                                    "type": "object",
+                                    "properties": {
+                                      "from": {},
+                                      "to": {}
+                                    },
+                                    "required": [
+                                      "from",
+                                      "to"
+                                    ],
+                                    "additionalProperties": false
+                                  },
+                                  "description": "For update and restore, each changed column with its old and new value. Empty otherwise."
+                                },
+                                "lowers_allowance": {
+                                  "type": "boolean",
+                                  "description": "An included amount, the storage limit, the number count or the receptionist count goes down."
+                                },
+                                "raises_price": {
+                                  "type": "boolean",
+                                  "description": "A price or an overage rate goes up."
+                                }
+                              },
+                              "required": [
+                                "table",
+                                "key",
+                                "action",
+                                "fields",
+                                "lowers_allowance",
+                                "raises_price"
+                              ],
+                              "additionalProperties": false,
+                              "description": "One row an apply writes."
+                            },
+                            "description": "Every row written, plans then prices, each by key."
+                          },
+                          "problems": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "catalog_hash",
+                                    "code_hash",
+                                    "plan_rows",
+                                    "not_linked",
+                                    "org_settings",
+                                    "meter",
+                                    "credits",
+                                    "product",
+                                    "discount",
+                                    "webhook",
+                                    "leftover",
+                                    "linked_id",
+                                    "retired_id",
+                                    "polar_org",
+                                    "webhook_secret",
+                                    "product_vars",
+                                    "unreadable",
+                                    "account",
+                                    "price",
+                                    "overage",
+                                    "portal",
+                                    "tax",
+                                    "mode"
+                                  ],
+                                  "description": "Which check found it."
+                                },
+                                "pair": {
+                                  "type": "string",
+                                  "enum": [
+                                    "file_postgres",
+                                    "file_polar",
+                                    "postgres_polar",
+                                    "file_provider",
+                                    "postgres_provider"
+                                  ],
+                                  "description": "The two copies it compared: the repository file, the Postgres tables and the billing provider (polar on a Polar deployment)."
+                                },
+                                "level": {
+                                  "type": "string",
+                                  "enum": [
+                                    "drift",
+                                    "warn",
+                                    "info"
+                                  ],
+                                  "description": "drift fails a verify; warn and info don't."
+                                },
+                                "subject": {
+                                  "type": "string",
+                                  "description": "What it is about, such as a plan, a price or a provider object."
+                                },
+                                "message": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "pair",
+                                "level",
+                                "subject",
+                                "message"
+                              ],
+                              "additionalProperties": false,
+                              "description": "Something a verify found that isn't as the file says."
+                            },
+                            "description": "Every check a verify found not ok. Always empty for an apply or a link."
+                          },
+                          "blocked_by": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "brand_mismatch",
+                                    "file_not_deployed",
+                                    "catalog_changed",
+                                    "plan_frozen",
+                                    "currency_locked",
+                                    "code_taken",
+                                    "polar_org_mismatch",
+                                    "polar_org_changed",
+                                    "links_incomplete",
+                                    "unknown_price",
+                                    "terms_changed",
+                                    "discount_mismatch",
+                                    "id_taken",
+                                    "id_changed",
+                                    "billing_account_mismatch",
+                                    "billing_account_changed",
+                                    "billing_provider_changed",
+                                    "provider_mismatch",
+                                    "provider_block_missing"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string"
+                                },
+                                "path": {
+                                  "type": "string",
+                                  "description": "The request field it is about, such as billing_file.plans.pro-launch."
+                                }
+                              },
+                              "required": [
+                                "code",
+                                "message",
+                                "path"
+                              ],
+                              "additionalProperties": false,
+                              "description": "Something that stops an apply or a link."
+                            },
+                            "description": "For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."
+                          },
+                          "polar_env": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "sandbox",
+                                  "production"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "A Polar link or verify's Polar server; null for any other run."
+                          },
+                          "polar_org": {
+                            "description": "A Polar link or verify's Polar organization; null for any other run.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "provider": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "polar",
+                                  "stripe"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The billing provider a link or verify ran against. Null for an apply."
+                          },
+                          "provider_env": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "sandbox",
+                                  "live"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "sandbox or live: the provider's environment. Null for an apply."
+                          },
+                          "provider_account": {
+                            "description": "The provider's account: the Polar organization or the Stripe account. Null for an apply.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "key_id": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "uuid",
+                                "description": "Stable identifier (UUID)."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The operator platform key that asked."
+                          },
+                          "partner": {
+                            "description": "That key's partner.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "started_at": {
+                            "type": "string",
+                            "format": "date-time",
+                            "description": "ISO 8601 timestamp in UTC."
+                          },
+                          "ended_at": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "format": "date-time",
+                                "description": "ISO 8601 timestamp in UTC."
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "kind",
+                          "status",
+                          "brand",
+                          "ver",
+                          "hash",
+                          "prev_hash",
+                          "code_hash",
+                          "changes",
+                          "problems",
+                          "blocked_by",
+                          "polar_env",
+                          "polar_org",
+                          "provider",
+                          "provider_env",
+                          "provider_account",
+                          "key_id",
+                          "partner",
+                          "started_at",
+                          "ended_at"
+                        ],
+                        "additionalProperties": false,
+                        "description": "One apply of a billing.json, one link of the provider's objects, one verify, or the dry run of an apply or a link."
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The latest link. Null before the first."
+                  }
+                },
+                "required": [
+                  "env",
+                  "org",
+                  "secret_sha256",
+                  "product_vars",
+                  "last_link"
+                ],
+                "additionalProperties": false,
+                "description": "The Polar settings this deployment runs with."
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Polar's settings, as before provider: on a Polar deployment, the same as provider; null on any other."
+          },
+          "provider": {
             "type": "object",
             "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "polar",
+                  "stripe"
+                ],
+                "description": "The deployment's billing provider: BILLING_PROVIDER, polar when unset."
+              },
               "env": {
                 "type": "string",
                 "enum": [
                   "sandbox",
-                  "production"
+                  "live"
                 ],
-                "description": "The Polar server this deployment uses: sandbox when POLAR_API_BASE_URL names sandbox-api.polar.sh, else production."
+                "description": "sandbox or live: the provider's environment the deployment uses."
               },
-              "org": {
-                "description": "POLAR_ORGANIZATION_ID. Null when unset.",
+              "account": {
+                "description": "The provider's account the deployment uses: POLAR_ORGANIZATION_ID on Polar. Null when unset.",
                 "type": [
                   "string",
                   "null"
@@ -16513,20 +17178,42 @@
                     "type": "null"
                   }
                 ],
-                "description": "SHA-256 of POLAR_WEBHOOK_SECRET, never the secret, so a check can compare it with Polar's. Null when unset."
+                "description": "SHA-256 of the provider's webhook secret, never the secret. Null when unset."
+              },
+              "objects": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "What the latest link recorded beyond plans and prices; null on Polar."
               },
               "product_vars": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "description": "The four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period, such as starter/monthly. Checkout reads one only before its plan's first link; after that they aren't needed. Null when unset."
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Polar's four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period; null on any other provider."
               },
               "last_link": {
                 "anyOf": [
@@ -16551,9 +17238,10 @@
                         "enum": [
                           "catalog",
                           "polar",
+                          "link",
                           "verify"
                         ],
-                        "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
+                        "description": "catalog: an apply. polar: a link of Polar's products. link: a link of another provider's objects. verify: the worker's daily check."
                       },
                       "status": {
                         "type": "string",
@@ -16697,7 +17385,13 @@
                                 "polar_org",
                                 "webhook_secret",
                                 "product_vars",
-                                "unreadable"
+                                "unreadable",
+                                "account",
+                                "price",
+                                "overage",
+                                "portal",
+                                "tax",
+                                "mode"
                               ],
                               "description": "Which check found it."
                             },
@@ -16706,9 +17400,11 @@
                               "enum": [
                                 "file_postgres",
                                 "file_polar",
-                                "postgres_polar"
+                                "postgres_polar",
+                                "file_provider",
+                                "postgres_provider"
                               ],
-                              "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                              "description": "The two copies it compared: the repository file, the Postgres tables and the billing provider (polar on a Polar deployment)."
                             },
                             "level": {
                               "type": "string",
@@ -16721,7 +17417,7 @@
                             },
                             "subject": {
                               "type": "string",
-                              "description": "What it is about, such as a plan, a price or a Polar object."
+                              "description": "What it is about, such as a plan, a price or a provider object."
                             },
                             "message": {
                               "type": "string"
@@ -16760,7 +17456,12 @@
                                 "terms_changed",
                                 "discount_mismatch",
                                 "id_taken",
-                                "id_changed"
+                                "id_changed",
+                                "billing_account_mismatch",
+                                "billing_account_changed",
+                                "billing_provider_changed",
+                                "provider_mismatch",
+                                "provider_block_missing"
                               ]
                             },
                             "message": {
@@ -16793,9 +17494,48 @@
                           {
                             "type": "null"
                           }
-                        ]
+                        ],
+                        "description": "A Polar link or verify's Polar server; null for any other run."
                       },
                       "polar_org": {
+                        "description": "A Polar link or verify's Polar organization; null for any other run.",
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "provider": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "polar",
+                              "stripe"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "The billing provider a link or verify ran against. Null for an apply."
+                      },
+                      "provider_env": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "sandbox",
+                              "live"
+                            ]
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "sandbox or live: the provider's environment. Null for an apply."
+                      },
+                      "provider_account": {
+                        "description": "The provider's account: the Polar organization or the Stripe account. Null for an apply.",
                         "type": [
                           "string",
                           "null"
@@ -16853,13 +17593,16 @@
                       "blocked_by",
                       "polar_env",
                       "polar_org",
+                      "provider",
+                      "provider_env",
+                      "provider_account",
                       "key_id",
                       "partner",
                       "started_at",
                       "ended_at"
                     ],
                     "additionalProperties": false,
-                    "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+                    "description": "One apply of a billing.json, one link of the provider's objects, one verify, or the dry run of an apply or a link."
                   },
                   {
                     "type": "null"
@@ -16869,14 +17612,16 @@
               }
             },
             "required": [
+              "id",
               "env",
-              "org",
+              "account",
               "secret_sha256",
+              "objects",
               "product_vars",
               "last_link"
             ],
             "additionalProperties": false,
-            "description": "The Polar settings this deployment runs with."
+            "description": "The billing provider this deployment runs with."
           }
         },
         "required": [
@@ -16888,10 +17633,11 @@
           "profile",
           "currency",
           "plans",
-          "polar"
+          "polar",
+          "provider"
         ],
         "additionalProperties": false,
-        "description": "The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read them."
+        "description": "The plans and prices this deployment holds. Checkout, plan changes, the provider's webhook, the plan screens and usage limits read them."
       },
       "BillingCatalogApply": {
         "type": "object",
@@ -17771,26 +18517,48 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64,
-            "description": "The brand whose file Polar was set up from. It must be the brand this deployment shows."
+            "description": "The brand whose file the provider was set up from. It must be the brand this deployment shows."
           },
           "hash": {
             "type": "string",
             "pattern": "^[0-9a-f]{64}$",
-            "description": "The hash of the file Polar was set up from. It must be the latest catalog run's."
+            "description": "The hash of the file the provider was set up from. It must be the latest catalog run's."
+          },
+          "provider": {
+            "description": "The billing provider whose objects sell the plans, which must be the deployment's (BILLING_PROVIDER). Defaults to polar.",
+            "type": "string",
+            "enum": [
+              "polar",
+              "stripe"
+            ]
+          },
+          "provider_env": {
+            "description": "sandbox or live: the provider's environment, which must be the deployment's. Required unless polar_env is sent.",
+            "type": "string",
+            "enum": [
+              "sandbox",
+              "live"
+            ]
+          },
+          "provider_account": {
+            "description": "The provider's account the objects are in: the Polar organization, or the Stripe account. It must be the deployment's, and the one every earlier link named. Required unless polar_org is sent.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255
           },
           "polar_env": {
+            "description": "Polar's name for provider_env: the Polar server the products are on, sandbox or production, which must be the one this deployment's POLAR_API_BASE_URL names. Only with provider polar.",
             "type": "string",
             "enum": [
               "sandbox",
               "production"
-            ],
-            "description": "The Polar server the products are on. It must be the one this deployment's POLAR_API_BASE_URL names."
+            ]
           },
           "polar_org": {
+            "description": "Polar's name for provider_account: this deployment's POLAR_ORGANIZATION_ID. Only with provider polar.",
             "type": "string",
             "minLength": 1,
-            "maxLength": 100,
-            "description": "The Polar organization the products are in. It must be this deployment's POLAR_ORGANIZATION_ID, and the one every earlier link named."
+            "maxLength": 100
           },
           "plans": {
             "maxItems": 60,
@@ -17807,9 +18575,23 @@
                 "terms_hash": {
                   "type": "string",
                   "pattern": "^[0-9a-f]{64}$",
-                  "description": "The plan's terms_hash its Polar objects were made from. It must be the row's."
+                  "description": "The plan's terms_hash its provider objects were made from. It must be the row's."
+                },
+                "provider_disc": {
+                  "description": "The provider's discount for a plan with a discount, a Polar discount or a Stripe coupon; null for any other plan. Required unless polar_disc is sent.",
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "polar_disc": {
+                  "description": "Polar's name for provider_disc. Only with provider polar.",
                   "anyOf": [
                     {
                       "type": "string",
@@ -17819,8 +18601,7 @@
                     {
                       "type": "null"
                     }
-                  ],
-                  "description": "The Polar discount for a plan with a discount; null for any other plan."
+                  ]
                 },
                 "prices": {
                   "minItems": 1,
@@ -17840,17 +18621,22 @@
                         "type": "string",
                         "pattern": "^[a-z]{3}$"
                       },
-                      "polar_id": {
+                      "provider_ref": {
+                        "description": "The provider's object that sells this price: a Polar product or a Stripe price. Required unless polar_id is sent.",
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 100,
-                        "description": "The Polar product that sells this price."
+                        "maxLength": 255
+                      },
+                      "polar_id": {
+                        "description": "Polar's name for provider_ref: the Polar product. Only with provider polar.",
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
                       }
                     },
                     "required": [
                       "period",
-                      "currency",
-                      "polar_id"
+                      "currency"
                     ],
                     "additionalProperties": false
                   },
@@ -17860,15 +18646,22 @@
               "required": [
                 "code",
                 "terms_hash",
-                "polar_disc",
                 "prices"
               ],
               "additionalProperties": false
             },
             "description": "Every sold plan that isn't retired, each with every live price."
           },
+          "objects": {
+            "description": "The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
           "replace_ids": {
-            "description": "true lets a live price or a plan that already has a Polar product or discount take another one: the old price row is retired with its product, and a new live row takes the new one. Defaults to false.",
+            "description": "true lets a live price or a plan that already has a provider object take another one: the old price row is retired with its object, and a new live row takes the new one. Defaults to false.",
             "type": "boolean"
           },
           "dry_run": {
@@ -17879,8 +18672,6 @@
         "required": [
           "brand",
           "hash",
-          "polar_env",
-          "polar_org",
           "plans"
         ],
         "additionalProperties": false
@@ -17906,9 +18697,10 @@
             "enum": [
               "catalog",
               "polar",
+              "link",
               "verify"
             ],
-            "description": "catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."
+            "description": "catalog: an apply. polar: a link of Polar's products. link: a link of another provider's objects. verify: the worker's daily check."
           },
           "status": {
             "type": "string",
@@ -18052,7 +18844,13 @@
                     "polar_org",
                     "webhook_secret",
                     "product_vars",
-                    "unreadable"
+                    "unreadable",
+                    "account",
+                    "price",
+                    "overage",
+                    "portal",
+                    "tax",
+                    "mode"
                   ],
                   "description": "Which check found it."
                 },
@@ -18061,9 +18859,11 @@
                   "enum": [
                     "file_postgres",
                     "file_polar",
-                    "postgres_polar"
+                    "postgres_polar",
+                    "file_provider",
+                    "postgres_provider"
                   ],
-                  "description": "The two copies it compared: the repository file, the Postgres tables and Polar."
+                  "description": "The two copies it compared: the repository file, the Postgres tables and the billing provider (polar on a Polar deployment)."
                 },
                 "level": {
                   "type": "string",
@@ -18076,7 +18876,7 @@
                 },
                 "subject": {
                   "type": "string",
-                  "description": "What it is about, such as a plan, a price or a Polar object."
+                  "description": "What it is about, such as a plan, a price or a provider object."
                 },
                 "message": {
                   "type": "string"
@@ -18115,7 +18915,12 @@
                     "terms_changed",
                     "discount_mismatch",
                     "id_taken",
-                    "id_changed"
+                    "id_changed",
+                    "billing_account_mismatch",
+                    "billing_account_changed",
+                    "billing_provider_changed",
+                    "provider_mismatch",
+                    "provider_block_missing"
                   ]
                 },
                 "message": {
@@ -18148,9 +18953,48 @@
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "A Polar link or verify's Polar server; null for any other run."
           },
           "polar_org": {
+            "description": "A Polar link or verify's Polar organization; null for any other run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "polar",
+                  "stripe"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The billing provider a link or verify ran against. Null for an apply."
+          },
+          "provider_env": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "sandbox",
+                  "live"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sandbox or live: the provider's environment. Null for an apply."
+          },
+          "provider_account": {
+            "description": "The provider's account: the Polar organization or the Stripe account. Null for an apply.",
             "type": [
               "string",
               "null"
@@ -18208,13 +19052,16 @@
           "blocked_by",
           "polar_env",
           "polar_org",
+          "provider",
+          "provider_env",
+          "provider_account",
           "key_id",
           "partner",
           "started_at",
           "ended_at"
         ],
         "additionalProperties": false,
-        "description": "One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link."
+        "description": "One apply of a billing.json, one link of the provider's objects, one verify, or the dry run of an apply or a link."
       },
       "BillingCode": {
         "type": "object",

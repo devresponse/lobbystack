@@ -393,6 +393,28 @@ async function link(tx: DatabaseTransaction, body: Record<string, unknown>, opti
 }
 
 describe.skipIf(!testUrl)("billing catalog Polar links", () => {
+  it("takes a link in the provider's names, refuses another provider, and replays the same link sent in Polar's names", async () => {
+    await rollbackTest(async (tx) => {
+      await apply(tx, file());
+      const { plans } = await seededPolar(file());
+      const neutral = (body: Record<string, unknown>, key: string | null = randomUUID()) => linkBillingCatalogForApi(context(tx), { caller, idempotencyKey: key, body: apiBillingCatalogLinkSchema.parse({ brand: "alloplace", hash: deployedHash, plans, ...body }), deployment: polarDeployment() });
+      // Stripe on a Polar deployment.
+      const stripe = await refusal(neutral({ provider: "stripe", provider_env: "sandbox", provider_account: "acct_test" }));
+      expect(stripe.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["provider_mismatch provider"]);
+      // Polar's refusal, naming the field as the request did.
+      const other = await refusal(neutral({ provider: "polar", provider_env: "sandbox", provider_account: "org_other" }));
+      expect(other.details!.map((detail) => `${detail.code} ${detail.path}`)).toEqual(["polar_org_mismatch provider_account"]);
+      const first = await neutral({ provider: "polar", provider_env: "sandbox", provider_account: "org_test" }, "neutral-link");
+      expect(first.run).toMatchObject({ kind: "polar", status: "applied", polar_env: "sandbox", polar_org: "org_test", provider: "polar", provider_env: "sandbox", provider_account: "org_test" });
+      // The same link in Polar's names is the same request.
+      const polarPlans = plans.map((plan) => ({ code: plan.code, terms_hash: plan.terms_hash, polar_disc: plan.provider_disc, prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, polar_id: price.provider_ref })) }));
+      expect(await link(tx, { hash: deployedHash, plans: polarPlans }, { key: "neutral-link" })).toMatchObject({ replayed: true, run: { id: first.run.id } });
+      // link lists every provider's links; polar, Polar's.
+      expect((await listBillingCatalogRunsForApi(context(tx), { kind: "link" })).data.map((run) => run.id)).toEqual([first.run.id]);
+      expect((await listBillingCatalogRunsForApi(context(tx), { kind: "polar" })).data.map((run) => run.id)).toEqual([first.run.id]);
+    });
+  });
+
   it("refuses a link before an apply, for another brand, file or organization, or without POLAR_ORGANIZATION_ID, listing every reason and writing nothing", async () => {
     await rollbackTest(async (tx) => {
       const { plans } = await seededPolar(file());
@@ -427,7 +449,7 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       expect(actions(first.run)).toEqual(["update pro", "update starter", "update pro/annual/cad", "update pro/monthly/cad", "update starter/annual/cad", "update starter/monthly/cad"]);
       expect(Object.fromEntries((await rows(tx, sql`select code, status from public.billing_plans`)).map((row) => [row.code, row.status]))).toEqual({ free_cloud: "active", starter: "active", pro: "active", enterprise: "active" });
       const linkedRows = await rows(tx, sql`select provider_ref, polar_id from public.billing_prices order by provider_ref`);
-      expect(linkedRows.map((row) => row.provider_ref)).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.polar_id)).sort());
+      expect(linkedRows.map((row) => row.provider_ref)).toEqual(plans.flatMap((plan) => plan.prices.map((price) => price.provider_ref)).sort());
       // The release before reads polar_id, which a trigger keeps equal (migration 0146).
       expect(linkedRows.every((row) => row.polar_id === row.provider_ref)).toBe(true);
       // The link run names its provider, environment and account.
@@ -456,7 +478,7 @@ describe.skipIf(!testUrl)("billing catalog Polar links", () => {
       await link(tx, { hash: deployedHash, plans });
       const [before] = (await prices(tx, "pro")).filter((row) => row.period === "monthly");
       const swapped = structuredClone(plans);
-      swapped.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "monthly")!.polar_id = "product_new";
+      swapped.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "monthly")!.provider_ref = "product_new";
       expect((await refusal(link(tx, { hash: deployedHash, plans: swapped }))).details).toEqual([expect.objectContaining({ code: "id_changed" })]);
       const replaced = await link(tx, { hash: deployedHash, plans: swapped, replace_ids: true });
       expect(actions(replaced.run)).toEqual(["retire pro/monthly/cad", "insert pro/monthly/cad"]);
@@ -509,7 +531,7 @@ describe.skipIf(!testUrl)("billing catalog at run time", () => {
 
       const { plans } = await seededPolar(file());
       await link(tx, { hash: deployedHash, plans });
-      const linked = new Map(plans.flatMap((plan) => plan.prices.map((price) => [`${plan.code}/${price.period}`, price.polar_id])));
+      const linked = new Map(plans.flatMap((plan) => plan.prices.map((price) => [`${plan.code}/${price.period}`, price.provider_ref])));
       const links = await readPolarProductLinks(context(tx), sells);
       expect(links.productFor("pro", "annual")).toBe(linked.get("pro/annual"));
       expect(links.productFor("pro", "monthly")).toBe(linked.get("pro/monthly"));
@@ -543,6 +565,12 @@ function stable(value: unknown): unknown {
     .replace(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/, "<time>"));
 }
 
+/** An answer without the fields the Stripe plan's step 6 added, to compare with what was recorded before them. */
+function withoutAdded(value: unknown): unknown {
+  const added = new Set(["provider", "provider_env", "provider_account", "provider_ref", "provider_disc"]);
+  return JSON.parse(JSON.stringify(value), (key, entry: unknown) => (added.has(key) ? undefined : entry));
+}
+
 describe.skipIf(!testUrl)("billing catalog answers on a Polar deployment", () => {
   // Recorded before the provider-neutral fields (the Stripe plan's step 6): a Polar
   // deployment's answers may gain fields, and must not change otherwise.
@@ -553,7 +581,14 @@ describe.skipIf(!testUrl)("billing catalog answers on a Polar deployment", () =>
       const { plans } = await seededPolar(billingFile);
       const linked = await link(tx, { hash: hashOf(billingFile), plans }, { key: "record-link" });
       const catalog = await getBillingCatalogForApi(context(tx), { deployment: polarDeployment({ POLAR_WEBHOOK_SECRET: "whsec_recorded" }) });
-      expect(stable({ link: linked.run, catalog })).toMatchSnapshot();
+      expect(stable(withoutAdded({ link: linked.run, catalog }))).toMatchSnapshot();
+      // What step 6 added repeats Polar's values in the provider's names.
+      expect(linked.run).toMatchObject({ kind: "polar", provider: "polar", provider_env: "sandbox", provider_account: "org_test" });
+      expect(catalog.provider).toEqual({ id: "polar", env: "sandbox", account: "org_test", secret_sha256: catalog.polar!.secret_sha256, objects: null, product_vars: catalog.polar!.product_vars, last_link: catalog.polar!.last_link });
+      for (const plan of catalog.plans) {
+        expect(plan.provider_disc).toBe(plan.polar_disc);
+        for (const price of plan.prices) expect(price.provider_ref).toBe(price.polar_id);
+      }
     });
   });
 });

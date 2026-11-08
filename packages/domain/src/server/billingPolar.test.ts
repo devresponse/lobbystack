@@ -179,8 +179,8 @@ describe("planPolarChanges", () => {
     expect(live.map((product) => [product.name, product.meter_interval])).toEqual([["Starter monthly", null], ["Pro monthly", null], ["Starter annual", "month"], ["Pro annual", "month"]]);
     const links = polarLinkPlans({ catalog: catalogFor(profile(withSetupPrices)), plans: desiredBillingPlans(profile(withSetupPrices)), snapshot: await client(fake).readSnapshot(), now });
     expect(links.missing).toEqual([]);
-    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id)).sort()).toEqual(live.map((product) => product.id).sort());
-    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.polar_id))).toEqual(expect.arrayContaining(monthlyIds));
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.provider_ref)).sort()).toEqual(live.map((product) => product.id).sort());
+    expect(links.plans.flatMap((entry) => entry.prices.map((price) => price.provider_ref))).toEqual(expect.arrayContaining(monthlyIds));
   });
 
   it("refuses each untagged lookalike without --adopt, so a forgotten flag makes no duplicate", async () => {
@@ -330,7 +330,7 @@ describe("planPolarChanges", () => {
     expect(first.steps[0]!.body).toMatchObject({ recurring_interval: "year", recurring_interval_count: 1, meter_interval: "month", meter_interval_count: 1 });
     expect(yearly.is_archived).toBe(true);
     const links = polarLinkPlans({ catalog: catalogFor(profile()), plans: desiredBillingPlans(profile()), snapshot: await client(fake).readSnapshot(), now });
-    const linked = links.plans.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "annual")!.polar_id;
+    const linked = links.plans.find((entry) => entry.code === "pro")!.prices.find((price) => price.period === "annual")!.provider_ref;
     expect(fake.state.products.find((product) => product.id === linked)).toMatchObject({ name: "Pro annual", is_archived: false, meter_interval: "month", meter_interval_count: 1 });
   });
 

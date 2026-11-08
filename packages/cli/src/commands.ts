@@ -1,4 +1,4 @@
-import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, apiKnowledgeSearchSchema, apiOperations, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate } from "@lobbystack/shared";
+import { CONTACT_PASSCODE_DEFAULT_LENGTH, CONTACT_PASSCODE_MAX_LENGTH, CONTACT_PASSCODE_MIN_LENGTH, CONTACT_PASSCODES_MAX_PER_REQUEST, apiKnowledgeSearchSchema, apiOperations, billingProviderNames, formatPublicProfileAddress, isUuid, weekdays, type ApiHoursWindow, type ApiPublicProfileUpdate, type BillingProvider } from "@lobbystack/shared";
 
 import { createClient } from "./client";
 import { stringValue, type Command, type Group } from "./command";
@@ -282,20 +282,41 @@ const knowledgeSearch = (path: string): Command => {
   };
 };
 
-/** Every plan the deployment holds with its live prices and how many Polar sells, whether the applied file is the deployed one, and the Polar organization it's linked to. */
+const providerName = (id: unknown) => billingProviderNames[id as BillingProvider] ?? String(id);
+
+/** Where a link run went: Polar's organization as before, or another provider's account. */
+function linkTarget(run: Row): string {
+  if (run.provider === undefined || run.provider === null || run.provider === "polar") return `Polar ${String(run.polar_env)} organization ${String(run.polar_org)}`;
+  return `${providerName(run.provider)} ${String(run.provider_env)} account ${String(run.provider_account)}`;
+}
+
+/** The catalog's provider account and its latest link: Polar's lines as before, any other provider's from the provider block. */
+function providerLine(data: Row): string {
+  const polar = data.polar as Row | null | undefined;
+  if (polar) {
+    const link = polar.last_link as Row | null | undefined;
+    return polar.org === null ? "\nPOLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet." : link ? `\nLinked to Polar ${String(link.polar_env)} organization ${String(link.polar_org)} ${String(link.started_at)}.` : `\nPolar ${String(polar.env)} organization ${String(polar.org)}, not linked yet: run pnpm billing apply.`;
+  }
+  const provider = data.provider as Row | undefined;
+  if (!provider) return "";
+  const name = providerName(provider.id);
+  const link = provider.last_link as Row | null;
+  if (provider.account === null) return `\nThe deployment has no ${name} account set, so nothing links ${name}'s objects yet.`;
+  return link ? `\nLinked to ${linkTarget(link)} ${String(link.started_at)}.` : `\n${name} ${String(provider.env)} account ${String(provider.account)}, not linked yet: run pnpm billing apply.`;
+}
+
+/** Every plan the deployment holds with its live prices and how many the billing provider sells, whether the applied file is the deployed one, and the provider account it's linked to. */
 function catalogTables(data: Row): string {
   const plans = (data.plans as Row[]).map((plan) => {
     const live = (plan.prices as Row[]).filter((price) => price.retired_at === null);
-    const linked = live.filter((price) => price.polar_id !== null && price.polar_id !== undefined).length;
-    return { ...plan, prices: live.map(priceText).join(", "), polar: plan.sold && live.length ? `${linked} of ${live.length} linked` : "" };
+    // provider_ref, or polar_id from a deployment older than it.
+    const linked = live.filter((price) => (price.provider_ref ?? price.polar_id ?? null) !== null).length;
+    return { ...plan, prices: live.map(priceText).join(", "), provider: plan.sold && live.length ? `${linked} of ${live.length} linked` : "" };
   });
   const run = data.last_run as Row | null;
   if (!run) return `Nothing applied yet for ${String(data.brand)}. See what applying its file would change with lobbystack billing catalog-preview ${String(data.brand)} --billing-file @brands/${String(data.brand)}/billing.json.`;
   const matches = data.matches_code ? "the file the running code was built with" : data.code_hash ? "not the file the running code was built with: apply the deployed one" : "and the running code has no billing.json for this brand";
-  const polar = data.polar as Row | undefined;
-  const link = polar?.last_link as Row | null | undefined;
-  const polarLine = !polar ? "" : polar.org === null ? "\nPOLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet." : link ? `\nLinked to Polar ${String(link.polar_env)} organization ${String(link.polar_org)} ${String(link.started_at)}.` : `\nPolar ${String(polar.env)} organization ${String(polar.org)}, not linked yet: run pnpm billing apply.`;
-  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "polar"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${polarLine}`;
+  return `${formatTable(plans, columns("code", "tier", "status", "access", "sold", "prices", "provider"))}\n\nApplied ${String(run.started_at)} from file ${String(data.hash).slice(0, 12)}, ${matches}.${providerLine(data)}`;
 }
 
 const changeTable = (changes: Row[]) => changes.length ? `${formatTable(changes.map((change) => ({ ...change, fields: Object.keys(change.fields as Row).join(", "), warns: [change.lowers_allowance ? "lowers an allowance" : "", change.raises_price ? "raises a price" : ""].filter(Boolean).join(", ") })), columns("action", "table", "key", "fields", "warns"))}\n\n` : "";
@@ -314,16 +335,17 @@ function catalogChanges(data: Row): string {
   return `${table}${data.status === "unchanged" ? "The tables already matched this file" : `Applied ${changeCount(changes)}`} in run ${String(data.id)}.`;
 }
 
-/** What a link of Polar's products changed, or with a dry run would change, and anything that stops it. */
+/** What a link of the provider's objects changed, or with a dry run would change, and anything that stops it. */
 function linkChanges(data: Row): string {
   const changes = data.changes as Row[];
   const blocked = data.blocked_by as Row[];
   const table = changeTable(changes);
+  const objects = data.provider === undefined || data.provider === null || data.provider === "polar" ? "products" : "objects";
   if (data.status === "preview") {
     if (blocked.length) return `${table}Linking would be refused, and nothing would change:\n${refusalLines(blocked)}`;
-    return `${table}${changes.length ? `Linking would make these ${changeCount(changes)}` : "The tables already have these products"}. Nothing was written.`;
+    return `${table}${changes.length ? `Linking would make these ${changeCount(changes)}` : `The tables already have these ${objects}`}. Nothing was written.`;
   }
-  return `${table}${data.status === "unchanged" ? "The tables already had these products" : `Linked Polar ${String(data.polar_env)} organization ${String(data.polar_org)} with ${changeCount(changes)}`} in run ${String(data.id)}.`;
+  return `${table}${data.status === "unchanged" ? `The tables already had these ${objects}` : `Linked ${linkTarget(data)} with ${changeCount(changes)}`} in run ${String(data.id)}.`;
 }
 
 /** The page's settings, with the address on one line. */
@@ -425,8 +447,8 @@ export const groups: Record<string, Group> = Object.fromEntries([
     catalog: { operation: "getBillingCatalog", show: catalogTables },
     "catalog-preview": { operation: "applyBillingCatalog", summary: "Show what applying a billing.json would change. Nothing is written.", args: ["brand"], fixed: { dry_run: true }, show: catalogChanges },
     "catalog-apply": { operation: "applyBillingCatalog", args: ["brand"], fixed: { dry_run: false }, show: catalogChanges },
-    "catalog-link": { operation: "linkBillingCatalog", summary: "Record the Polar products and discounts that sell the catalog. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
-    "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "polar_org", "started_at") },
+    "catalog-link": { operation: "linkBillingCatalog", summary: "Record the billing provider's objects that sell the catalog: Polar's products and discounts, or Stripe's prices and coupons. pnpm billing apply sends this for you.", args: ["brand"], show: linkChanges },
+    "catalog-runs": { operation: "listBillingCatalogRuns", columns: columns("id", "kind", "status", "brand", "hash", "provider_account", "started_at") },
     codes: { operation: "listBillingCodes", columns: columns("id", "code", "plan", "business_id", "uses", "max_uses", "expires_at", "status") },
     "code-create": { operation: "createBillingCode", args: ["plan"], show: (data) => `${showRecord(data)}\n\nSend this link, or the code ${String(data.code)} for Settings > Plan: ${String(data.link)}` },
     "code-revoke": { operation: "revokeBillingCode" },

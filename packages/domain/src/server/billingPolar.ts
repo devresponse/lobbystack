@@ -1,6 +1,6 @@
 import type { PolarDiscount, PolarMeter, PolarMetadata, PolarPrice, PolarProduct, PolarSnapshot } from "@lobbystack/providers";
 import { isPolarRef, polarRef, type PolarRef } from "@lobbystack/providers/polar/polarCatalog";
-import { billingMeterEventNames, POLAR_API_VERSION, trimTrailingSlashes, type ApiBillingCatalogLink, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
+import { billingMeterEventNames, POLAR_API_VERSION, trimTrailingSlashes, type BillingCatalogLinkRequest, type BillingInterval, type BillingProfile, type ResolvedBillingDiscount } from "@lobbystack/shared";
 
 import type { DesiredBillingPlan } from "./billingCatalog";
 
@@ -640,17 +640,17 @@ export function planPolarChanges(input: { catalog: DesiredPolarCatalog; snapshot
  * every live price of every sold plan with the live product tagged for it,
  * and each plan's discount. missing names what has no single tagged object.
  */
-export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: readonly DesiredBillingPlan[]; snapshot: PolarSnapshot; now?: string }): { plans: ApiBillingCatalogLink["plans"]; missing: string[] } {
+export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: readonly DesiredBillingPlan[]; snapshot: PolarSnapshot; now?: string }): { plans: BillingCatalogLinkRequest["plans"]; missing: string[] } {
   const now = input.now ?? new Date().toISOString();
   const brand = input.catalog.brand;
   const missing: string[] = [];
-  const plans: ApiBillingCatalogLink["plans"] = [];
+  const plans: BillingCatalogLinkRequest["plans"] = [];
   for (const plan of input.plans) {
     if (!plan.sold || !plan.prices.length) continue;
     const prices = plan.prices.map((price) => {
       const live = input.snapshot.products.filter((product) => !product.is_archived && product.metadata[polarTags.brand] === brand && product.metadata[polarTags.plan] === plan.code && product.metadata[polarTags.interval] === price.period);
       if (live.length !== 1) missing.push(`${plan.code} ${price.period}: ${live.length} live products tagged for it`);
-      return { period: price.period, currency: price.currency, polar_id: live[0]?.id ?? "" };
+      return { period: price.period, currency: price.currency, provider_ref: live[0]?.id ?? "" };
     });
     let discount: string | null = null;
     if (plan.discount) {
@@ -658,7 +658,7 @@ export function polarLinkPlans(input: { catalog: DesiredPolarCatalog; plans: rea
       if (live.length !== 1) missing.push(`${plan.code} discount: ${live.length} live discounts tagged for it`);
       discount = live[0]?.id ?? null;
     }
-    plans.push({ code: plan.code, terms_hash: plan.terms_hash, polar_disc: discount, prices });
+    plans.push({ code: plan.code, terms_hash: plan.terms_hash, provider_disc: discount, prices });
   }
   return { plans, missing };
 }

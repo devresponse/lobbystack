@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { apiOperations } from "@lobbystack/shared";
+import { apiOperations, type ApiOperation } from "@lobbystack/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const storageProvider = vi.hoisted(() => ({ name: "storage" }));
@@ -167,7 +167,8 @@ describe("v1 method handling", () => {
     expect(routes.length).toBeGreaterThan(15);
     for (const route of routes) {
       const routeModule = await import(/* @vite-ignore */ `${apiRoot}${route.slice(1)}/route.ts`) as Record<string, unknown>;
-      const supported = Object.values(apiOperations).filter((operation) => operation.path.replace(/\{([a-z_]+)\}/g, "[$1]") === route).map((operation) => operation.method as string);
+      // An alias path serves its operation's method too.
+      const supported = (Object.values(apiOperations) as ApiOperation[]).filter((operation) => [operation.path, ...(operation.aliases ?? [])].some((path) => path.replace(/\{([a-z_]+)\}/g, "[$1]") === route)).map((operation) => operation.method as string);
       if (route === "/openapi.json") supported.push("GET");
       for (const method of ["GET", "POST", "PATCH", "PUT", "DELETE"]) {
         expect(typeof routeModule[method], `${method} ${route}`).toBe("function");

@@ -93,6 +93,7 @@ import {
   type ApiWidgetKeyCreated,
   type ApiWidgetKeyUpdate,
   type PublicProfileSettings,
+  billingProviderNames,
   promoPlanEnding,
 } from "@lobbystack/shared";
 
@@ -103,6 +104,7 @@ import { listAiTraceResources, loadAiTraceResource } from "../aiTraces";
 import { createBillingCheckoutRequestInTransaction, endManagedPlanInTransaction, isManagedBillingAccount, PAID_PLAN_CHECKOUT_REFUSAL, setManagedPlanInTransaction, setOverageSpendingCapInTransaction, standardCheckoutAllowed, type BillingCheckoutLimit } from "../billing";
 import { billingCodeCheckout, type BillingCodeRefusal } from "../billingCodes";
 import { endPromoPlanInTransaction } from "../billingPromoEnd";
+import { readBillingDeployment } from "../billingProvider";
 import { limitsFor, readBillingPlanLimitBook } from "../billingPlans";
 import { bookAppointment, cancelAppointmentInTransaction, findAvailability, rescheduleAppointmentInTransaction, type ApiAudit } from "../booking";
 import { assignCalendarStaffInTransaction, disconnectCalendarInTransaction, listCalendarConnectionsInTransaction, resolveCalendarAccessToken, selectCalendarInTransaction } from "../calendar";
@@ -472,7 +474,7 @@ export async function getCheckoutForApi(context: DomainContext, caller: ApiCalle
 export async function setManagedPlanForApi(context: DomainContext, caller: ApiCaller): Promise<ApiBilling> {
   return await inBusiness(context, caller, async (tx) => {
     const outcome = await setManagedPlanInTransaction(tx, { businessId: caller.businessId });
-    if (outcome === "paid_through_polar") throw conflict("This business pays through Polar. Cancel that subscription before giving it a managed plan.");
+    if (outcome === "paid_through_provider") throw conflict(`This business pays through ${billingProviderNames[readBillingDeployment(process.env, { withSecret: false }).provider]}. Cancel that subscription before giving it a managed plan.`);
     if (outcome === "set") await audit(tx, caller, { eventType: "api.billing.managed_plan_set", entityType: "billing_account", entityId: caller.businessId, payload: { plan: "enterprise" } });
     return await loadBilling(tx, caller.businessId);
   });

@@ -95,7 +95,7 @@ curl https://app.lobbystack.com/api/v1/services \
   -H "LobbyStack-Business: 75795511-9ee2-4cb2-a89d-f173ec1dd82d"
 ```
 
-Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé. La clé d'un exploitant gère aussi le catalogue de facturation du déploiement avec `GET /billing/catalog`, `GET` et `POST /billing/catalog/runs`, et `POST /billing/catalog/polar-links`, et ses codes promo avec `GET` et `POST /billing/codes` et `DELETE /billing/codes/{code_id}`, qui n'agissent sur aucune entreprise et ne prennent pas l'en-tête.
+Sans cet en-tête, la requête renvoie `400` avec le code `business_required`. Une entreprise que la clé ne peut pas atteindre renvoie `404`. `GET /me` fonctionne sans l'en-tête et affiche le partenaire et l'accès de la clé. La clé d'un exploitant gère aussi le catalogue de facturation du déploiement avec `GET /billing/catalog`, `GET` et `POST /billing/catalog/runs`, et `POST /billing/catalog/links` (aussi servi à son ancien chemin, `/billing/catalog/polar-links`), et ses codes promo avec `GET` et `POST /billing/codes` et `DELETE /billing/codes/{code_id}`, qui n'agissent sur aucune entreprise et ne prennent pas l'en-tête.
 
 `POST /team/claim-link` remet une entreprise à son propriétaire. Une fois qu'il l'accepte, la clé d'un partenaire n'atteint plus l'entreprise, alors que celle d'un exploitant l'atteint toujours. Dans les deux cas, `GET /businesses` ne la liste plus.
 

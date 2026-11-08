@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 5 are done.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 6 are done.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -81,3 +81,13 @@ Its first commit, on the code as it was, saves what `pnpm billing` prints: `plan
 - **Tests:** `packages/domain/src/server/billingStorage.integration.test.ts` runs the migration's backfills on rows written the old way, both directions of each trigger, and the inserts the release before makes, beside the other migration tests the reliability job runs against PostgreSQL. The catalog, reconcile and sweep tests read the new columns, and the sweep's leaves a Twilio event alone.
 
 Before a deployment takes this release, check that each account's source is one the check allows, since any update to another row would fail: `select source, count(*) from billing_accounts group by source` should list only `polar` and `managed`. A Polar deployment sees nothing else change.
+
+## Step 6: neutral API fields, the links route and the CLI
+
+Its first commit, on the code as it was, records what `GET /billing/catalog` and a link answer on a Polar deployment, in `packages/domain/src/server/__snapshots__/billingCatalog.integration.test.ts.snap`. The rest of the step leaves that recording unchanged once the added fields are taken out: a Polar deployment's answers only gained fields.
+
+- **The link request** takes the provider's names: `provider`, `provider_env` (`sandbox` or `live`), `provider_account`, each plan's `provider_disc`, each price's `provider_ref`, and the other `objects` a Stripe link records. With provider `polar`, the default, Polar's names (`polar_env`, `polar_org`, `polar_disc` and `polar_id`) are still accepted, and `billingCatalogLinkRequest` in `packages/shared` translates them on arrival. A link sent in either names hashes the same, so its Idempotency-Key replays across them, and refusals name the fields as the request did.
+- **The answers:** runs add `provider`, `provider_env` and `provider_account`, and a link to another provider is of kind `link` (Polar's links keep `polar`); prices add `provider_ref`, plans `provider_disc`, and the catalog a `provider` block beside `polar`, which is null on any other provider. On a Polar deployment the Polar names keep their values.
+- **Refusals:** a link for another provider than the deployment's is `provider_mismatch`, and one for another provider than the first link's `billing_provider_changed`. A Polar deployment still answers `polar_org_mismatch` and `polar_org_changed`; any other provider `billing_account_mismatch` and `billing_account_changed`. `provider_block_missing` is for step 10's `stripe` block. Verify's check codes and pairs add the ones a Stripe deployment reports (`file_provider` and `postgres_provider`).
+- **The route:** `POST /billing/catalog/links` serves the link, and `POST /billing/catalog/polar-links` stays as its alias, documented beside it in the OpenAPI file. The runs list takes `kind=link` for every provider's links, and `polar` for Polar's.
+- **Callers:** `pnpm billing apply` sends the neutral body. The CLI's `billing catalog` shows a `provider` column and names the provider's account, `catalog-runs` shows `provider_account`, and `catalog-link` takes either body. The managed-plan 409 names the deployment's provider (`paid_through_provider`), and the billing operations' descriptions say the billing provider, with Polar's one customer per email marked as Polar's. `mintlify/api-reference/openapi.json` is regenerated.

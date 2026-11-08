@@ -141,7 +141,8 @@ export function verifyBillingCatalog(input: BillingVerifyInput): BillingVerifyRe
       if (!products.has(price.polar_id!)) add("retired_id", "postgres_polar", "info", `${row.code}/${price.period}`, `The retired ${row.code} ${price.period} price's product ${price.polar_id} isn't in Polar any more.`);
     }
   }
-  const instance = catalog.polar;
+  // A deployment that isn't on Polar has no Polar settings: the check then finds no organization.
+  const instance = catalog.polar ?? { env: "production" as const, org: null, secret_sha256: null, product_vars: {}, last_link: null };
   const lastLink = instance.last_link;
   const orgProblems = [
     ...(instance.org === null ? ["POLAR_ORGANIZATION_ID isn't set on the instance"] : instance.env !== env || instance.org !== snapshot.organization.id ? [`the instance uses Polar ${instance.env} ${instance.org} and the token reaches ${env} ${snapshot.organization.id}`] : []),
@@ -182,7 +183,7 @@ export function billingProblems(checks: readonly BillingCheckResult[]): ApiBilli
   return checks.filter((check): check is BillingCheckResult & { level: ApiBillingCheck["level"] } => check.level !== "ok").map(({ code, pair, level, subject, message }) => ({ code, pair, level, subject, message }));
 }
 
-const pairTitles: Record<BillingCheckPair, string> = { file_postgres: "File and Postgres", file_polar: "File and Polar", postgres_polar: "Postgres and Polar" };
+const pairTitles: Record<BillingCheckPair, string> = { file_postgres: "File and Postgres", file_polar: "File and Polar", postgres_polar: "Postgres and Polar", file_provider: "File and the provider", postgres_provider: "Postgres and the provider" };
 const levelLabels: Record<BillingCheckLevel, string> = { ok: "ok    ", drift: "DRIFT ", warn: "warn  ", info: "info  " };
 
 /** The report pnpm billing prints, one line per check under its pair. */
@@ -221,7 +222,7 @@ export async function runDailyBillingVerify(context: DomainContext, input: Daily
   if (!polar.org) return { status: "skipped", reason: "POLAR_ORGANIZATION_ID isn't set" };
   const catalog = await getBillingCatalogForApi(context, { deployment: { brand: input.brand, polar } });
   const latest = catalog.last_run;
-  if (!latest || !catalog.profile || !catalog.polar.last_link) return { status: "skipped", reason: "nothing was linked yet" };
+  if (!latest || !catalog.profile || !catalog.provider.last_link) return { status: "skipped", reason: "nothing was linked yet" };
   const parsed = billingProfileSchema.safeParse(catalog.profile);
   if (!parsed.success) throw new Error(`The profile stored on catalog run ${latest.id} no longer passes billingProfileSchema.`);
   let snapshot: { env: PolarEnv; snapshot: PolarSnapshot } | { env: PolarEnv; error: string };

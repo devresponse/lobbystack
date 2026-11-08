@@ -30,7 +30,7 @@ import { POLAR_WEBHOOK_PATH, type PolarPlanOptions, type PolarRefusal, type Pola
 import { plannerFor } from "../packages/domain/src/server/billingProvider";
 import { billingVerifyReport, type BillingVerifyResult } from "../packages/domain/src/server/billingVerify";
 import { PolarCatalogClient, type PolarSnapshot } from "../packages/providers/src/polar/polarCatalog";
-import { billingProfileSchema, canonicalBillingProfileJson, polarBaseUrls, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type PolarEnv } from "../packages/shared/src/index";
+import { billingProfileSchema, billingProviderNames, canonicalBillingProfileJson, polarBaseUrls, type ApiBillingCatalog, type ApiBillingCatalogChange, type ApiBillingCatalogRefusal, type BillingProfile, type PolarEnv } from "../packages/shared/src/index";
 
 export type BillingIo = {
   env: NodeJS.ProcessEnv;
@@ -191,6 +191,11 @@ function preflight(options: Options, file: BillingFile, catalog: ApiBillingCatal
   const org = snapshot.organization;
   const word = polarWord(options.polar);
   if (catalog.brand !== options.brand) reasons.push(`The instance shows the ${catalog.brand} brand, not ${options.brand}.`);
+  // An instance billed through another provider has no Polar settings to set up.
+  if (!catalog.polar) {
+    reasons.push(`The instance bills through ${billingProviderNames[catalog.provider.id]}, not Polar, so pnpm billing --polar can't set it up.`);
+    return reasons;
+  }
   if (catalog.polar.org === null) reasons.push(`The instance has no POLAR_ORGANIZATION_ID. Set it to ${org.id}, and POLAR_API_BASE_URL to ${polarBaseUrls[options.polar]}, on lobbystack-admin and worker, redeploy, then run again.`);
   else if (catalog.polar.env !== options.polar || catalog.polar.org !== org.id) reasons.push(`The instance uses Polar ${polarWord(catalog.polar.env)} organization ${catalog.polar.org}, and the token reaches ${word} organization ${org.name} (${org.id}). Use a token for the instance's organization.`);
   const link = catalog.polar.last_link;
@@ -333,7 +338,7 @@ async function planOrApply(options: Options, io: BillingIo, input: { file: Billi
   // Step 10: the links.
   const links = planner.linkBody({ desired, snapshot: after, plans: file.plans });
   if (links.missing.length) throw new Refused(links.missing, "Polar has no single object for these, so nothing was linked:");
-  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, polar_env: options.polar, polar_org: after.organization.id, plans: links.plans, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
+  const link = (await api.call("linkBillingCatalog", { body: { brand: options.brand, hash: file.hash, provider: "polar", provider_env: options.polar === "production" ? "live" : "sandbox", provider_account: after.organization.id, plans: links.plans, ...(options.plan.allowReplace ? { replace_ids: true } : {}) }, idempotencyKey: randomUUID() })).data;
   io.out(`\nLinks: ${link.status === "unchanged" ? "already recorded" : `recorded ${link.changes.length} ${link.changes.length === 1 ? "change" : "changes"}`} in run ${String(link.id)}.`);
 
   // Step 11: all three pairs.

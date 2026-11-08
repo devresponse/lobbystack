@@ -261,16 +261,16 @@ export async function lockBillingAccount(tx: DatabaseTransaction, businessId: st
 /**
  * Puts a business on the enterprise plan outside Polar, which unlocks what a
  * paid plan unlocks while the operator bills the business directly. A business
- * with a live Polar subscription, for any product, is refused, so no one pays
+ * with a live subscription through the billing provider, for any product, is refused, so no one pays
  * twice. A spending cap left from an earlier Starter or Pro plan is cleared,
  * because on enterprise a cap leaves calls nothing to reserve. Callers check
  * that an operator asked.
  */
-export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<"set" | "unchanged" | "paid_through_polar"> {
+export async function setManagedPlanInTransaction(tx: DatabaseTransaction, input: { businessId: string }): Promise<"set" | "unchanged" | "paid_through_provider"> {
   await lockBillingAccount(tx, input.businessId);
   const [account] = await tx.select({ source: billingAccounts.source, plan: billingAccounts.plan, subscriptionState: billingAccounts.subscriptionState, overageSpendingCapCents: billingAccounts.overageSpendingCapCents }).from(billingAccounts).where(eq(billingAccounts.businessId, input.businessId)).limit(1);
   if (isManagedBillingAccount(account) && account?.plan === "enterprise" && account.overageSpendingCapCents === null) return "unchanged";
-  if (account && account.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account.subscriptionState)) return "paid_through_polar";
+  if (account && account.source !== MANAGED_BILLING_SOURCE && isLiveSubscriptionState(account.subscriptionState)) return "paid_through_provider";
   const now = new Date();
   // A promo plan from an earlier subscription ends with it.
   const managed = { source: MANAGED_BILLING_SOURCE, plan: "enterprise", planCode: null, planEnds: null, codeId: null, subscriptionState: "active", billingInterval: null, subscriptionId: null, currentPeriodStart: now, currentPeriodEnd: null, overageSpendingCapCents: null };

@@ -128,8 +128,8 @@ The file's format is the input of `devops/railway-vars.mjs`; setting the values 
 | `end-promo-plan` | Ends a business's promo plan at its next renewal; its owners get an email |
 | `catalog` | The applied file, plans, prices and links |
 | `catalog-preview <brand>`, `catalog-apply <brand>` | Preview or apply a `billing.json` to the tables only; `pnpm billing apply` does both sides |
-| `catalog-link <brand>` | Records which Polar products sell the catalog; `pnpm billing apply` sends it |
-| `catalog-runs --kind catalog\|polar\|verify` | Past applies, links and daily checks |
+| `catalog-link <brand>` | Records which provider objects sell the catalog, Polar's products and discounts; `pnpm billing apply` sends it |
+| `catalog-runs --kind catalog\|polar\|link\|verify` | Past applies, links and daily checks (`link`: every provider's links) |
 | `code-create <plan>`, `codes`, `code-revoke <id>` | Issue, list and revoke promo codes |
 
 ## Sell promo codes and promo plans

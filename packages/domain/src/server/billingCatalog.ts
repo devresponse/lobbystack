@@ -14,6 +14,8 @@ import {
   planTermsJson,
   polarEnvForBaseUrl,
   resolveBillingPlans,
+  billingCatalogLinkRequest,
+  billingProviderNames,
   type ApiBillingCatalog,
   type ApiBillingCatalogApply,
   type ApiBillingCatalogChange,
@@ -21,11 +23,15 @@ import {
   type ApiBillingCatalogPlan,
   type ApiBillingCatalogPolar,
   type ApiBillingCatalogPrice,
+  type ApiBillingCatalogProvider,
   type ApiBillingCatalogRefusal,
   type ApiBillingCatalogRun,
   type ApiBillingCheck,
+  type BillingCatalogLinkRequest,
   type BillingInterval,
   type BillingProfile,
+  type BillingProvider,
+  type BillingProviderEnv,
   type PolarEnv,
   type ResolvedBillingPlan,
 } from "@lobbystack/shared";
@@ -50,11 +56,11 @@ const CATALOG_LOCK = sql`select pg_advisory_xact_lock(hashtext('lobbystack.billi
 
 type PlanStatus = "draft" | "active" | "retired";
 
-/** A billing_plans row as the diff reads it: every column, times as ISO strings. polar_disc holds provider_disc, under the name the API gives it. */
+/** A billing_plans row as the diff reads it: every column, times as ISO strings. */
 export type StoredBillingPlan = Omit<ResolvedBillingPlan, "prices"> & {
   status: PlanStatus;
   src: "file" | "api";
-  polar_disc: string | null;
+  provider_disc: string | null;
   terms_hash: string;
   frozen_at: string | null;
   run_id: string | null;
@@ -63,7 +69,7 @@ export type StoredBillingPlan = Omit<ResolvedBillingPlan, "prices"> & {
   updated_at: string;
 };
 
-/** A billing_prices row as the diff reads it. polar_id holds provider_ref, under the name the API gives it. */
+/** A billing_prices row as the diff reads it. */
 export type StoredBillingPrice = {
   id: string;
   plan: string;
@@ -71,7 +77,7 @@ export type StoredBillingPrice = {
   currency: string;
   cents: number;
   per_month: number;
-  polar_id: string | null;
+  provider_ref: string | null;
   run_id: string | null;
   retired_at: string | null;
   created_at: string;
@@ -220,7 +226,7 @@ export function diffBillingCatalog(input: { plans: DesiredBillingPlan[]; currenc
 
   // Prices: matched by plan, period and currency.
   const livePrices = input.current.prices.filter((price) => price.retired_at === null && filePlanCodes.has(price.plan));
-  const lockedCurrencies = [...new Set(livePrices.filter((price) => price.currency !== input.currency && price.polar_id !== null).map((price) => price.currency))].sort();
+  const lockedCurrencies = [...new Set(livePrices.filter((price) => price.currency !== input.currency && price.provider_ref !== null).map((price) => price.currency))].sort();
   if (lockedCurrencies.length) {
     refusals.push({ code: "currency_locked", message: `Polar already sells live prices in ${lockedCurrencies.join(", ")}, so the currency can't change to ${input.currency} while those prices are live.`, path: "billing_file.currency" });
   }
@@ -299,7 +305,7 @@ function storedPlan(row: Row): StoredBillingPlan {
     ends: (row.ends ?? null) as StoredBillingPlan["ends"],
     offer_end: isoOrNull(row.offer_end),
     discount: (row.discount ?? null) as StoredBillingPlan["discount"],
-    polar_disc: (row.provider_disc ?? null) as string | null,
+    provider_disc: (row.provider_disc ?? null) as string | null,
     terms_hash: String(row.terms_hash),
     frozen_at: isoOrNull(row.frozen_at),
     sort: Number(row.sort),
@@ -318,7 +324,7 @@ function storedPrice(row: Row): StoredBillingPrice {
     currency: String(row.currency),
     cents: Number(row.cents),
     per_month: Number(row.per_month),
-    polar_id: (row.provider_ref ?? null) as string | null,
+    provider_ref: (row.provider_ref ?? null) as string | null,
     run_id: (row.run_id ?? null) as string | null,
     retired_at: isoOrNull(row.retired_at),
     created_at: iso(row.created_at),
@@ -329,16 +335,27 @@ function storedPrice(row: Row): StoredBillingPrice {
 /** Polar's sandbox or production as the provider columns name it. */
 export const providerEnvOfPolar = (env: PolarEnv): BillingEnv => (env === "production" ? "live" : "sandbox");
 
-/** A Polar run's environment and organization, from the provider columns, under the names the API gives them; null for any other run. */
+/** The provider columns' sandbox or live as Polar names it. */
+const polarEnvOf = (env: BillingProviderEnv): PolarEnv => (env === "live" ? "production" : "sandbox");
+
+/** The provider, environment and account a link or verify run ran against; null for an apply. */
+function runAccount(row: Row): { provider: BillingProvider | null; env: BillingProviderEnv | null; account: string | null } {
+  return { provider: (row.provider ?? null) as BillingProvider | null, env: (row.provider_env ?? null) as BillingProviderEnv | null, account: (row.provider_account ?? null) as string | null };
+}
+
+/** A Polar run's environment and organization, under the names the API gave them before other providers; null for any other run. */
 function polarRunAccount(row: Row): Pick<ApiBillingCatalogRun, "polar_env" | "polar_org"> {
-  if (row.provider !== "polar") return { polar_env: null, polar_org: null };
-  return { polar_env: row.provider_env === "live" ? "production" : "sandbox", polar_org: (row.provider_account ?? null) as string | null };
+  const run = runAccount(row);
+  if (run.provider !== "polar") return { polar_env: null, polar_org: null };
+  return { polar_env: run.env === null ? null : polarEnvOf(run.env), polar_org: run.account };
 }
 
 function runResource(row: Row): ApiBillingCatalogRun {
+  const run = runAccount(row);
   return {
     id: String(row.id),
-    kind: row.kind as ApiBillingCatalogRun["kind"],
+    // Polar's links keep the kind polar in the API, whatever the row says.
+    kind: (row.kind === "link" && run.provider === "polar" ? "polar" : row.kind) as ApiBillingCatalogRun["kind"],
     status: row.status as ApiBillingCatalogRun["status"],
     brand: String(row.brand),
     ver: Number(row.ver),
@@ -350,6 +367,9 @@ function runResource(row: Row): ApiBillingCatalogRun {
     // A refused apply stores nothing, so a stored run was never blocked.
     blocked_by: [],
     ...polarRunAccount(row),
+    provider: run.provider,
+    provider_env: run.env,
+    provider_account: run.account,
     key_id: (row.key_id ?? null) as string | null,
     partner: (row.partner ?? null) as string | null,
     started_at: iso(row.started_at),
@@ -359,8 +379,10 @@ function runResource(row: Row): ApiBillingCatalogRun {
 
 type CatalogState = { plans: StoredBillingPlan[]; prices: StoredBillingPrice[]; latest: Row | null; latestLink: Row | null };
 
-async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "polar" | "verify"): Promise<Row | null> {
-  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind = ${kind} order by started_at desc, id desc limit 1`)).rows;
+/** The latest run of a kind; link means a link to any provider, whether its row says polar or link. */
+async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "link" | "verify"): Promise<Row | null> {
+  const kinds = kind === "link" ? ["polar", "link"] : [kind];
+  const [row] = (await tx.execute<Row>(sql`select * from public.billing_runs where kind in (${sql.join(kinds.map((entry) => sql`${entry}`), sql`, `)}) order by started_at desc, id desc limit 1`)).rows;
   return row ?? null;
 }
 
@@ -368,7 +390,7 @@ async function latestRun(tx: DatabaseTransaction, kind: "catalog" | "polar" | "v
 async function readCatalog(tx: DatabaseTransaction): Promise<CatalogState> {
   const plans = (await tx.execute<Row>(sql`select * from public.billing_plans order by sort, code`)).rows.map(storedPlan);
   const prices = (await tx.execute<Row>(sql`select * from public.billing_prices order by plan, period, retired_at nulls first`)).rows.map(storedPrice);
-  return { plans, prices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "polar") };
+  return { plans, prices, latest: await latestRun(tx, "catalog"), latestLink: await latestRun(tx, "link") };
 }
 
 /** A run's start: when it holds the lock, to the millisecond, and after the latest run of its kind, so that run is always the last one written. */
@@ -448,6 +470,12 @@ export function billingDeploymentPolar(env: Record<string, string | undefined>, 
 
 const noPolar: BillingDeploymentPolar = { env: "production", org: null, secretSha256: null, productVars: Object.fromEntries(productVarKeys.map((key) => [key, null])) };
 
+/** The billing provider a deployment runs with: Polar, from its settings, until Stripe's join them. */
+function deploymentProvider(deployment: BillingCatalogDeployment): { id: BillingProvider; env: BillingProviderEnv; account: string | null; secretSha256: string | null } {
+  const polar = deployment.polar ?? noPolar;
+  return { id: "polar", env: providerEnvOfPolar(polar.env), account: polar.org, secretSha256: polar.secretSha256 };
+}
+
 /** The operator key that asks for an apply. */
 export type BillingCatalogCaller = { platformKeyId: string; partnerId: string };
 
@@ -507,6 +535,9 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
       problems: [],
       polar_env: null,
       polar_org: null,
+      provider: null,
+      provider_env: null,
+      provider_account: null,
       key_id: caller.platformKeyId,
       partner: caller.partnerId,
     };
@@ -540,29 +571,47 @@ export async function applyBillingCatalogForApi(context: DomainContext, input: {
   }, dryRun ? { accessMode: "read only" } : {});
 }
 
-// Links: which Polar product sells each live price.
+// Links: which provider object sells each live price.
+
+/** How a link's refusals name the request's fields: as Polar does when the request was sent with Polar's names. */
+function linkFieldNames(names: BillingCatalogLinkRequest["names"]) {
+  return names === "polar"
+    ? { env: "polar_env", account: "polar_org", disc: "polar_disc", ref: "polar_id" }
+    : { env: "provider_env", account: "provider_account", disc: "provider_disc", ref: "provider_ref" };
+}
+
+/** What a link calls the provider's objects, and the names its run records changes under: a Polar link's as before other providers. */
+const linkWords: Record<BillingProvider, { object: string; discount: string; changes: { disc: string; ref: string } }> = {
+  polar: { object: "product", discount: "discount", changes: { disc: "polar_disc", ref: "polar_id" } },
+  stripe: { object: "Stripe price", discount: "coupon", changes: { disc: "provider_disc", ref: "provider_ref" } },
+};
+
+const sentence = (text: string) => `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
 
 /**
  * The rows a link writes, and the refusals the tables alone can find. A link
- * names every live price of every sold plan that isn't retired, each with its
- * product, and each plan's discount. A row that has no product gets the one
- * sent; a row with another product keeps it unless replace_ids is sent, which
- * retires the row with its product and puts a new live row beside it, so a
- * subscriber on the old product can still be matched. A sold plan in draft
- * becomes active, since the link is complete. Pure, like the catalog diff.
+ * names every live price of every sold plan that isn't retired, each with the
+ * provider's object that sells it, and each plan's discount. A row that has
+ * none gets the one sent; a row with another keeps it unless replace_ids is
+ * sent, which retires the row with its object and puts a new live row beside
+ * it, so a subscriber on the old object can still be matched. A sold plan in
+ * draft becomes active, since the link is complete. Pure, like the catalog diff.
  */
-export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "plans" | "replace_ids">; current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }; now: string }): BillingCatalogDiff {
+export function diffBillingLinks(input: { body: Pick<BillingCatalogLinkRequest, "plans" | "replace_ids" | "provider" | "names">; current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }; now: string }): BillingCatalogDiff {
   const writes: BillingCatalogWrite[] = [];
   const refusals: ApiBillingCatalogRefusal[] = [];
   const replace = input.body.replace_ids === true;
+  const field = linkFieldNames(input.body.names);
+  const words = linkWords[input.body.provider];
+  const name = billingProviderNames[input.body.provider];
   const refuse = (code: ApiBillingCatalogRefusal["code"], path: string, message: string) => refusals.push({ code, message, path });
   const targets = new Map(input.current.plans.filter((plan) => plan.sold && plan.status !== "retired").map((plan) => [plan.code, plan]));
   const livePrices = (code: string) => input.current.prices.filter((price) => price.plan === code && price.retired_at === null);
-  const owner = (polarId: string) => input.current.prices.find((price) => price.polar_id === polarId);
+  const owner = (ref: string) => input.current.prices.find((price) => price.provider_ref === ref);
   const sentIds = new Map<string, number>();
-  for (const plan of input.body.plans) for (const price of plan.prices) sentIds.set(price.polar_id, (sentIds.get(price.polar_id) ?? 0) + 1);
+  for (const plan of input.body.plans) for (const price of plan.prices) sentIds.set(price.provider_ref, (sentIds.get(price.provider_ref) ?? 0) + 1);
   const sentDiscounts = new Map<string, number>();
-  for (const plan of input.body.plans) if (plan.polar_disc !== null) sentDiscounts.set(plan.polar_disc, (sentDiscounts.get(plan.polar_disc) ?? 0) + 1);
+  for (const plan of input.body.plans) if (plan.provider_disc !== null) sentDiscounts.set(plan.provider_disc, (sentDiscounts.get(plan.provider_disc) ?? 0) + 1);
 
   // Every sold plan, and every live price of it, is named: a half-linked plan could be sold at a price nobody linked.
   const named = new Set(input.body.plans.map((plan) => plan.code));
@@ -573,7 +622,7 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
     }
     const sent = input.body.plans.find((entry) => entry.code === plan.code)!;
     for (const price of livePrices(plan.code)) {
-      if (!sent.prices.some((entry) => entry.period === price.period && entry.currency === price.currency)) refuse("links_incomplete", `plans.${plan.code}`, `${priceKey(price)} is a live price of ${plan.code} and has no product in the link.`);
+      if (!sent.prices.some((entry) => entry.period === price.period && entry.currency === price.currency)) refuse("links_incomplete", `plans.${plan.code}`, `${priceKey(price)} is a live price of ${plan.code} and has no ${words.object} in the link.`);
     }
   }
 
@@ -588,11 +637,11 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
     seen.add(sent.code);
     if (!plan) {
       const stored = input.current.plans.find((entry) => entry.code === sent.code);
-      refuse("unknown_price", `${path}.code`, !stored ? `There's no plan ${sent.code}.` : stored.status === "retired" ? `${sent.code} is retired, so nothing sells it.` : `${sent.code} isn't sold through Polar.`);
+      refuse("unknown_price", `${path}.code`, !stored ? `There's no plan ${sent.code}.` : stored.status === "retired" ? `${sent.code} is retired, so nothing sells it.` : `${sent.code} isn't sold through ${name}.`);
       return;
     }
-    if (sent.terms_hash !== plan.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `${plan.code}'s terms are ${plan.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its Polar objects were made from other terms. Set Polar up from the latest file again.`);
-    if ((plan.discount === null) !== (sent.polar_disc === null)) refuse("discount_mismatch", `${path}.polar_disc`, plan.discount === null ? `${plan.code} has no discount, so it takes no Polar discount.` : `${plan.code} has a discount, so name its Polar discount.`);
+    if (sent.terms_hash !== plan.terms_hash) refuse("terms_changed", `${path}.terms_hash`, `${plan.code}'s terms are ${plan.terms_hash.slice(0, 12)} now, not ${sent.terms_hash.slice(0, 12)}: its ${name} objects were made from other terms. Set ${name} up from the latest file again.`);
+    if ((plan.discount === null) !== (sent.provider_disc === null)) refuse("discount_mismatch", `${path}.${field.disc}`, plan.discount === null ? `${plan.code} has no discount, so it takes no ${name} ${words.discount}.` : `${plan.code} has a discount, so name its ${name} ${words.discount}.`);
 
     const periods = new Set<string>();
     const set: Record<string, unknown> = {};
@@ -605,37 +654,37 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
         return;
       }
       periods.add(price.period);
-      const taken = owner(price.polar_id);
-      if ((taken && taken.id !== row.id) || (sentIds.get(price.polar_id) ?? 0) > 1) {
-        refuse("id_taken", `${pricePath}.polar_id`, taken && taken.id !== row.id ? `Product ${price.polar_id} is already linked to ${priceKey(taken)}${taken.retired_at ? ", a retired price" : ""}. One product sells one price.` : `Product ${price.polar_id} is named for more than one price. One product sells one price.`);
+      const taken = owner(price.provider_ref);
+      if ((taken && taken.id !== row.id) || (sentIds.get(price.provider_ref) ?? 0) > 1) {
+        refuse("id_taken", `${pricePath}.${field.ref}`, taken && taken.id !== row.id ? `${sentence(words.object)} ${price.provider_ref} is already linked to ${priceKey(taken)}${taken.retired_at ? ", a retired price" : ""}. One ${words.object} sells one price.` : `${sentence(words.object)} ${price.provider_ref} is named for more than one price. One ${words.object} sells one price.`);
         return;
       }
-      if (row.polar_id === price.polar_id) return;
-      if (row.polar_id === null) {
-        writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "update", fields: { polar_id: { from: null, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { provider_ref: price.polar_id }, id: row.id });
+      if (row.provider_ref === price.provider_ref) return;
+      if (row.provider_ref === null) {
+        writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "update", fields: { [words.changes.ref]: { from: null, to: price.provider_ref } }, lowers_allowance: false, raises_price: false }, set: { provider_ref: price.provider_ref }, id: row.id });
         return;
       }
       if (!replace) {
-        refuse("id_changed", `${pricePath}.polar_id`, `${priceKey(row)} is sold by product ${row.polar_id}. Send replace_ids to retire that row with its product and link ${price.polar_id} to a new one.`);
+        refuse("id_changed", `${pricePath}.${field.ref}`, `${priceKey(row)} is sold by ${words.object} ${row.provider_ref}. Send replace_ids to retire that row with its ${words.object} and link ${price.provider_ref} to a new one.`);
         return;
       }
       writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "retire", fields: {}, lowers_allowance: false, raises_price: false }, set: { retired_at: input.now }, id: row.id });
-      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "insert", fields: { polar_id: { from: row.polar_id, to: price.polar_id } }, lowers_allowance: false, raises_price: false }, set: { plan: row.plan, period: row.period, currency: row.currency, cents: row.cents, provider_ref: price.polar_id } });
+      writes.push({ change: { table: "billing_prices", key: priceKey(row), action: "insert", fields: { [words.changes.ref]: { from: row.provider_ref, to: price.provider_ref } }, lowers_allowance: false, raises_price: false }, set: { plan: row.plan, period: row.period, currency: row.currency, cents: row.cents, provider_ref: price.provider_ref } });
     });
 
-    if (sent.polar_disc !== null && plan.discount !== null && sent.polar_disc !== plan.polar_disc) {
-      const taken = input.current.plans.find((entry) => entry.polar_disc === sent.polar_disc);
-      if (taken || (sentDiscounts.get(sent.polar_disc) ?? 0) > 1) refuse("id_taken", `${path}.polar_disc`, `Discount ${sent.polar_disc} is already ${taken ? `linked to ${taken.code}` : "named for another plan"}. One discount belongs to one plan.`);
-      else if (plan.polar_disc !== null && !replace) refuse("id_changed", `${path}.polar_disc`, `${plan.code} has discount ${plan.polar_disc}. Send replace_ids to link ${sent.polar_disc} instead.`);
+    if (sent.provider_disc !== null && plan.discount !== null && sent.provider_disc !== plan.provider_disc) {
+      const taken = input.current.plans.find((entry) => entry.provider_disc === sent.provider_disc);
+      if (taken || (sentDiscounts.get(sent.provider_disc) ?? 0) > 1) refuse("id_taken", `${path}.${field.disc}`, `${sentence(words.discount)} ${sent.provider_disc} is already ${taken ? `linked to ${taken.code}` : "named for another plan"}. One ${words.discount} belongs to one plan.`);
+      else if (plan.provider_disc !== null && !replace) refuse("id_changed", `${path}.${field.disc}`, `${plan.code} has ${words.discount} ${plan.provider_disc}. Send replace_ids to link ${sent.provider_disc} instead.`);
       else {
-        set.provider_disc = sent.polar_disc;
-        fields.polar_disc = { from: plan.polar_disc, to: sent.polar_disc };
+        set.provider_disc = sent.provider_disc;
+        fields[words.changes.disc] = { from: plan.provider_disc, to: sent.provider_disc };
       }
     }
-    // A plan whose discount the file dropped no longer sells with the one Polar ended.
-    if (plan.discount === null && sent.polar_disc === null && plan.polar_disc !== null) {
+    // A plan whose discount the file dropped no longer sells with the one the provider ended.
+    if (plan.discount === null && sent.provider_disc === null && plan.provider_disc !== null) {
       set.provider_disc = null;
-      fields.polar_disc = { from: plan.polar_disc, to: null };
+      fields[words.changes.disc] = { from: plan.provider_disc, to: null };
     }
     if (plan.status === "draft") {
       set.status = "active";
@@ -648,20 +697,35 @@ export function diffBillingLinks(input: { body: Pick<ApiBillingCatalogLink, "pla
   return { writes, refusals };
 }
 
+/** A Polar link's plans in Polar's names, as its request was hashed before the provider's names. */
+const polarLinkPlan = (plan: BillingCatalogLinkRequest["plans"][number]) => ({
+  code: plan.code,
+  terms_hash: plan.terms_hash,
+  polar_disc: plan.provider_disc,
+  prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, polar_id: price.provider_ref })),
+});
+
 /**
- * Records the Polar products and discounts that sell the catalog, or with
- * dry_run shows what it would record. It refuses a link made from another
- * file than the latest catalog run, from another Polar organization than the
- * deployment's or the first link's, or that leaves a sold plan half linked;
- * each reason is a detail of one 409. Idempotency as for an apply.
+ * Records the provider's objects that sell the catalog, or with dry_run shows
+ * what it would record. It refuses a link made from another file than the
+ * latest catalog run, for another provider or account than the deployment's
+ * or the first link's, or that leaves a sold plan half linked; each reason is
+ * a detail of one 409. Polar keeps its refusal codes and words. Idempotency as
+ * for an apply.
  */
 export async function linkBillingCatalogForApi(context: DomainContext, input: { caller: BillingCatalogCaller; idempotencyKey: string | null; body: ApiBillingCatalogLink; deployment: BillingCatalogDeployment }): Promise<{ run: ApiBillingCatalogRun; replayed: boolean; status: 200 | 201 }> {
-  const { body, caller, deployment } = input;
-  const dryRun = body.dry_run === true;
+  const { caller, deployment } = input;
+  const link = billingCatalogLinkRequest(input.body);
+  const field = linkFieldNames(link.names);
+  const name = billingProviderNames[link.provider];
+  const dryRun = link.dry_run;
   if (!dryRun && !input.idempotencyKey) throw missingKey();
-  const polar = deployment.polar ?? noPolar;
-  const codeHash = billingProfileHash(body.brand, deployment.codeHashes);
-  const requestHash = idempotencyRequestHash({ operation: "linkBillingCatalog", brand: body.brand, hash: body.hash, polar_env: body.polar_env, polar_org: body.polar_org, plans: body.plans, replace_ids: body.replace_ids === true });
+  const own = deploymentProvider(deployment);
+  const codeHash = billingProfileHash(link.brand, deployment.codeHashes);
+  // A Polar link hashes as it did before the provider's names, so a retry sent either way matches.
+  const requestHash = idempotencyRequestHash(link.provider === "polar"
+    ? { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, polar_env: polarEnvOf(link.provider_env), polar_org: link.provider_account, plans: link.plans.map(polarLinkPlan), replace_ids: link.replace_ids }
+    : { operation: "linkBillingCatalog", brand: link.brand, hash: link.hash, provider: link.provider, provider_env: link.provider_env, provider_account: link.provider_account, plans: link.plans, objects: link.objects, replace_ids: link.replace_ids });
 
   return await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => {
     if (!dryRun) {
@@ -676,52 +740,66 @@ export async function linkBillingCatalogForApi(context: DomainContext, input: { 
     const current = await readCatalog(tx);
     const latestHash = (current.latest?.hash ?? null) as string | null;
     const refusals: ApiBillingCatalogRefusal[] = [];
-    if (body.brand !== deployment.brand) refusals.push({ code: "brand_mismatch", message: `This deployment shows the ${deployment.brand} brand, not ${body.brand}.`, path: "brand" });
-    if (body.hash !== latestHash) refusals.push({ code: "catalog_changed", message: latestHash === null ? "Nothing was applied yet. Apply the file before linking Polar to it." : `The latest catalog run has hash ${latestHash}, so Polar was set up from another file. Run pnpm billing apply again.`, path: "hash" });
-    if (polar.org === null) refusals.push({ code: "polar_org_mismatch", message: "POLAR_ORGANIZATION_ID isn't set on this deployment, so it can't take products from any Polar organization.", path: "polar_org" });
-    else if (body.polar_env !== polar.env || body.polar_org !== polar.org) refusals.push({ code: "polar_org_mismatch", message: `This deployment uses Polar ${polar.env} organization ${polar.org}, not ${body.polar_env} ${body.polar_org}.`, path: body.polar_env !== polar.env ? "polar_env" : "polar_org" });
+    if (link.brand !== deployment.brand) refusals.push({ code: "brand_mismatch", message: `This deployment shows the ${deployment.brand} brand, not ${link.brand}.`, path: "brand" });
+    if (link.hash !== latestHash) refusals.push({ code: "catalog_changed", message: latestHash === null ? `Nothing was applied yet. Apply the file before linking ${name} to it.` : `The latest catalog run has hash ${latestHash}, so ${name} was set up from another file. Run pnpm billing apply again.`, path: "hash" });
+    if (link.provider !== own.id) refusals.push({ code: "provider_mismatch", message: `This deployment bills through ${billingProviderNames[own.id]}, not ${name}.`, path: "provider" });
+    else if (link.provider === "polar") {
+      // Polar's refusals keep their codes and words.
+      const polar = deployment.polar ?? noPolar;
+      if (polar.org === null) refusals.push({ code: "polar_org_mismatch", message: "POLAR_ORGANIZATION_ID isn't set on this deployment, so it can't take products from any Polar organization.", path: field.account });
+      else if (polarEnvOf(link.provider_env) !== polar.env || link.provider_account !== polar.org) refusals.push({ code: "polar_org_mismatch", message: `This deployment uses Polar ${polar.env} organization ${polar.org}, not ${polarEnvOf(link.provider_env)} ${link.provider_account}.`, path: polarEnvOf(link.provider_env) !== polar.env ? field.env : field.account });
+    } else if (own.account === null) refusals.push({ code: "billing_account_mismatch", message: `This deployment has no ${name} account set, so it can't take objects from any.`, path: field.account });
+    else if (link.provider_env !== own.env || link.provider_account !== own.account) refusals.push({ code: "billing_account_mismatch", message: `This deployment uses ${name} ${own.env} account ${own.account}, not ${link.provider_env} ${link.provider_account}.`, path: link.provider_env !== own.env ? field.env : field.account });
     const latestLink = current.latestLink;
-    const linked = latestLink ? polarRunAccount(latestLink) : null;
-    if (linked && (linked.polar_env !== body.polar_env || linked.polar_org !== body.polar_org)) {
-      refusals.push({ code: "polar_org_changed", message: `This deployment was linked to Polar ${String(linked.polar_env)} organization ${String(linked.polar_org)}, and it stays with it. Live payments get a deployment of their own.`, path: "polar_org" });
+    const linked = latestLink ? runAccount(latestLink) : null;
+    if (linked && linked.provider !== link.provider) refusals.push({ code: "billing_provider_changed", message: `This deployment was linked to ${linked.provider ? billingProviderNames[linked.provider] : "another provider"}, and it stays with it. Another provider gets a deployment of its own.`, path: "provider" });
+    else if (linked && (linked.env !== link.provider_env || linked.account !== link.provider_account)) {
+      refusals.push(link.provider === "polar"
+        ? { code: "polar_org_changed", message: `This deployment was linked to Polar ${linked.env ? polarEnvOf(linked.env) : "null"} organization ${String(linked.account)}, and it stays with it. Live payments get a deployment of their own.`, path: field.account }
+        : { code: "billing_account_changed", message: `This deployment was linked to ${name} ${String(linked.env)} account ${String(linked.account)}, and it stays with it. Live payments get a deployment of their own.`, path: field.account });
     }
     const now = new Date().toISOString();
-    const diff = diffBillingLinks({ body, current, now });
+    const diff = diffBillingLinks({ body: link, current, now });
     refusals.push(...diff.refusals);
     const changes = diff.writes.map((write) => write.change);
     const base = {
-      kind: "polar" as const,
-      brand: body.brand,
+      // Polar's links keep the kind polar in the API.
+      kind: (link.provider === "polar" ? "polar" : "link") as ApiBillingCatalogRun["kind"],
+      brand: link.brand,
       ver: Number(current.latest?.ver ?? 1),
-      hash: body.hash,
+      hash: link.hash,
       prev_hash: (latestLink?.hash ?? null) as string | null,
       code_hash: codeHash,
       changes,
       problems: [],
-      polar_env: body.polar_env,
-      polar_org: body.polar_org,
+      polar_env: link.provider === "polar" ? polarEnvOf(link.provider_env) : null,
+      polar_org: link.provider === "polar" ? link.provider_account : null,
+      provider: link.provider,
+      provider_env: link.provider_env,
+      provider_account: link.provider_account,
       key_id: caller.platformKeyId,
       partner: caller.partnerId,
     };
     if (dryRun) return { run: { id: null, status: "preview" as const, ...base, blocked_by: refusals, started_at: now, ended_at: now }, replayed: false, status: 200 as const };
-    if (refusals.length) throw new PublicApiError(409, "conflict", `Polar's products can't be linked: ${[...new Set(refusals.map((refusal) => refusal.code))].join(", ")}. details lists each reason.`, refusals.map((refusal) => ({ path: refusal.path, message: refusal.message, code: refusal.code })));
+    if (refusals.length) throw new PublicApiError(409, "conflict", `${link.provider === "polar" ? "Polar's products" : `${name}'s objects`} can't be linked: ${[...new Set(refusals.map((refusal) => refusal.code))].join(", ")}. details lists each reason.`, refusals.map((refusal) => ({ path: refusal.path, message: refusal.message, code: refusal.code })));
 
     const [run] = await tx.insert(billingRuns).values({
-      kind: "polar",
+      kind: base.kind,
       startedAt: runStart(latestLink),
       status: changes.length ? "applied" : "unchanged",
-      brand: body.brand,
+      brand: link.brand,
       ver: base.ver,
-      hash: body.hash,
+      hash: link.hash,
       prevHash: base.prev_hash,
       codeHash,
       // The catalog run with the same hash holds the profile.
       profile: {},
       changes,
       problems: [],
-      provider: "polar",
-      providerEnv: providerEnvOfPolar(body.polar_env),
-      providerAccount: body.polar_org,
+      provider: link.provider,
+      providerEnv: link.provider_env,
+      providerAccount: link.provider_account,
+      providerObjects: link.objects,
       keyId: caller.platformKeyId,
       partner: caller.partnerId,
       idemKey: input.idempotencyKey,
@@ -763,25 +841,42 @@ export async function recordBillingVerifyRun(context: DomainContext, input: { ca
   });
 }
 
-function priceResource(price: StoredBillingPrice): ApiBillingCatalogPrice {
+// Polar's names repeat the provider's on a Polar deployment, as the API showed them before other providers, and are null on any other.
+function priceResource(price: StoredBillingPrice, provider: BillingProvider): ApiBillingCatalogPrice {
   const { plan: _plan, run_id: _runId, ...rest } = price;
-  return rest;
+  return { ...rest, polar_id: provider === "polar" ? price.provider_ref : null };
 }
 
-function planResource(plan: StoredBillingPlan, prices: StoredBillingPrice[]): ApiBillingCatalogPlan {
+function planResource(plan: StoredBillingPlan, prices: StoredBillingPrice[], provider: BillingProvider): ApiBillingCatalogPlan {
   const { run_id: _runId, ...rest } = plan;
   // Live prices first, then the retired ones, latest first.
   const ordered = prices.filter((price) => price.plan === plan.code).sort((a, b) => Number(a.retired_at !== null) - Number(b.retired_at !== null) || byKey(b.retired_at ?? "", a.retired_at ?? "") || byKey(a.period, b.period));
-  return { ...rest, discount: rest.discount as Record<string, unknown> | null, prices: ordered.map(priceResource) };
+  return { ...rest, polar_disc: provider === "polar" ? plan.provider_disc : null, discount: rest.discount as Record<string, unknown> | null, prices: ordered.map((price) => priceResource(price, provider)) };
 }
 
-/** Every plan and price the deployment holds, the latest apply, whether it matches the file in the running code, and the Polar settings it runs with. */
+/** Every plan with its prices, as GET /billing/catalog shows them on a deployment billed through provider. */
+export function billingCatalogPlans(current: { plans: StoredBillingPlan[]; prices: StoredBillingPrice[] }, provider: BillingProvider): ApiBillingCatalogPlan[] {
+  return current.plans.map((plan) => planResource(plan, current.prices, provider));
+}
+
+/** Every plan and price the deployment holds, the latest apply, whether it matches the file in the running code, and the billing provider it runs with. */
 export async function getBillingCatalogForApi(context: DomainContext, input: { deployment: BillingCatalogDeployment }): Promise<ApiBillingCatalog> {
   const current = await withBusinessTransaction(context.db, { actorType: "worker" }, readCatalog, { accessMode: "read only" });
   const codeHash = billingProfileHash(input.deployment.brand, input.deployment.codeHashes);
   const latest = current.latest ? runResource(current.latest) : null;
+  const own = deploymentProvider(input.deployment);
+  const lastLink = current.latestLink ? runResource(current.latestLink) : null;
   const polar = input.deployment.polar ?? noPolar;
-  const polarBlock: ApiBillingCatalogPolar = { env: polar.env, org: polar.org, secret_sha256: polar.secretSha256, product_vars: polar.productVars, last_link: current.latestLink ? runResource(current.latestLink) : null };
+  const polarBlock: ApiBillingCatalogPolar | null = own.id === "polar" ? { env: polar.env, org: polar.org, secret_sha256: polar.secretSha256, product_vars: polar.productVars, last_link: lastLink } : null;
+  const providerBlock: ApiBillingCatalogProvider = {
+    id: own.id,
+    env: own.env,
+    account: own.account,
+    secret_sha256: own.secretSha256,
+    objects: own.id === "polar" ? null : ((current.latestLink?.provider_objects ?? null) as Record<string, unknown> | null),
+    product_vars: own.id === "polar" ? polar.productVars : null,
+    last_link: lastLink,
+  };
   return {
     brand: input.deployment.brand,
     code_hash: codeHash,
@@ -790,8 +885,9 @@ export async function getBillingCatalogForApi(context: DomainContext, input: { d
     last_run: latest,
     profile: (current.latest?.profile ?? null) as Record<string, unknown> | null,
     currency: current.prices.find((price) => price.retired_at === null)?.currency ?? null,
-    plans: current.plans.map((plan) => planResource(plan, current.prices)),
+    plans: billingCatalogPlans(current, own.id),
     polar: polarBlock,
+    provider: providerBlock,
   };
 }
 
@@ -811,16 +907,19 @@ export async function loadPlanChangeProration(context: DomainContext): Promise<{
   return { upgrade: pick(polar?.upgradeProration, "invoice"), downgrade: pick(polar?.downgradeProration, "next_period") };
 }
 
-const runKinds = ["catalog", "polar", "verify"] as const;
+const runKinds = ["catalog", "polar", "link", "verify"] as const;
 
 /** Every run, newest first, with the rows it changed: section 7.5's Q8, one row comparison per page. */
 export async function listBillingCatalogRunsForApi(context: DomainContext, input: PageRequest & { kind?: string | undefined }): Promise<Page<ApiBillingCatalogRun>> {
   const limit = pageSize(input.limit);
   const cursor = decodeCursor(input.cursor);
-  if (input.kind !== undefined && !(runKinds as readonly string[]).includes(input.kind)) throw invalidRequest("kind must be catalog, polar or verify.", [{ path: "kind", message: "One of catalog, polar or verify." }]);
+  if (input.kind !== undefined && !(runKinds as readonly string[]).includes(input.kind)) throw invalidRequest("kind must be catalog, polar, link or verify.", [{ path: "kind", message: "One of catalog, polar, link or verify." }]);
   // Run times are stored to the millisecond, as the cursor carries them, so the comparison is exact.
   const conditions: SQL[] = [];
-  if (input.kind !== undefined) conditions.push(sql`kind = ${input.kind}`);
+  // polar: Polar's links, whether the row says polar or link. link: every provider's links.
+  if (input.kind === "polar") conditions.push(sql`(kind = 'polar' or (kind = 'link' and provider = 'polar'))`);
+  else if (input.kind === "link") conditions.push(sql`kind in ('polar', 'link')`);
+  else if (input.kind !== undefined) conditions.push(sql`kind = ${input.kind}`);
   if (cursor) conditions.push(sql`(started_at, id) < (${cursor.at.toISOString()}::timestamptz, ${cursor.id}::uuid)`);
   const where = conditions.length ? sql`where ${sql.join(conditions, sql` and `)}` : sql``;
   const rows = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => (await tx.execute<Row>(sql`select * from public.billing_runs ${where} order by started_at desc, id desc limit ${limit + 1}`)).rows, { accessMode: "read only" });

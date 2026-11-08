@@ -1,5 +1,5 @@
 import type { BillingProviderId } from "@lobbystack/providers/billing/types";
-import type { ApiBillingCatalogLink, BillingProfile } from "@lobbystack/shared";
+import type { BillingCatalogLinkRequest, BillingProfile } from "@lobbystack/shared";
 
 import { billingDeploymentPolar, providerEnvOfPolar, type BillingDeploymentPolar, type DesiredBillingPlan } from "./billingCatalog";
 import { desiredPolarCatalog, planPolarChanges, polarLinkPlans, type DesiredPolarCatalog, type PolarPlanOptions, type PolarRefusal, type PolarStep } from "./billingPolar";
@@ -20,8 +20,8 @@ export interface CatalogPlanner<Desired, Snapshot, Step> {
   plan(input: { desired: Desired; snapshot: Snapshot; options: CatalogPlanOptions }): { steps: Step[]; refusals: CatalogRefusal[] };
   /** The file, the tables and the provider's account, compared two at a time. */
   verify(input: BillingVerifyInput): BillingVerifyResult;
-  /** The link request's plans for a snapshot taken once the account sells what's desired, and what has no single object. */
-  linkBody(input: { desired: Desired; snapshot: Snapshot; plans: readonly DesiredBillingPlan[] }): { plans: ApiBillingCatalogLink["plans"]; missing: string[] };
+  /** The link request's plans, in the provider's names, for a snapshot taken once the account sells what's desired, and what has no single object. */
+  linkBody(input: { desired: Desired; snapshot: Snapshot; plans: readonly DesiredBillingPlan[] }): { plans: BillingCatalogLinkRequest["plans"]; missing: string[] };
 }
 
 /** Polar's planner: today's functions, unchanged. */

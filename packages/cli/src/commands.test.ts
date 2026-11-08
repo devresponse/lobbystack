@@ -448,11 +448,32 @@ describe("billing catalog", () => {
     expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out.endsWith("POLAR_ORGANIZATION_ID isn't set, so nothing links Polar's products yet.")).toBe(true);
   });
 
+  it("names another provider's account, counts the prices it links, and says where a link went", async () => {
+    const price = (period: string, ref: string | null) => ({ period, currency: "cad", cents: 3000, polar_id: null, provider_ref: ref, retired_at: null });
+    const plans = [{ code: "starter", tier: "starter", status: "active", access: "public", sold: true, prices: [price("monthly", "price_1"), price("annual", null)] }];
+    const base = { brand: "alloplace", code_hash: hash, hash, matches_code: true, last_run: run, plans, polar: null };
+    const provider = { id: "stripe", env: "live", account: "acct_1", secret_sha256: null, objects: null, product_vars: null, last_link: null };
+    const linkRun = { ...run, kind: "link", polar_env: null, polar_org: null, provider: "stripe", provider_env: "live", provider_account: "acct_1", started_at: "2026-11-08T09:00:00.000Z" };
+    const api = fakeApi({
+      "GET /api/v1/billing/catalog": [
+        { body: { data: { ...base, provider: { ...provider, last_link: linkRun } } } },
+        { body: { data: { ...base, provider } } },
+      ],
+      "POST /api/v1/billing/catalog/links": { status: 201, body: { data: { ...linkRun, status: "applied", changes: [] } } },
+    });
+    const linked = (await runCli(["billing", "catalog"], { fetch: api.fetch })).out;
+    expect(linked).toMatch(/starter .*1 of 2 linked/);
+    expect(linked.endsWith("Linked to Stripe live account acct_1 2026-11-08T09:00:00.000Z.")).toBe(true);
+    expect((await runCli(["billing", "catalog"], { fetch: api.fetch })).out.endsWith("Stripe live account acct_1, not linked yet: run pnpm billing apply.")).toBe(true);
+    const body = JSON.stringify({ hash, provider: "stripe", provider_env: "live", provider_account: "acct_1", plans: [] });
+    expect((await runCli(["billing", "catalog-link", "alloplace", "--data", body, "--idempotency-key", "link-2"], { fetch: api.fetch })).out).toBe(`Linked Stripe live account acct_1 with 0 changes in run ${run.id}.`);
+  });
+
   it("links Polar's products from a file, with an Idempotency-Key, and says what it changed or what stops it", async () => {
-    const linkRun = { ...run, kind: "polar", polar_env: "sandbox", polar_org: "org_test" };
+    const linkRun = { ...run, kind: "polar", polar_env: "sandbox", polar_org: "org_test", provider: "polar", provider_env: "sandbox", provider_account: "org_test" };
     const priceChange = { table: "billing_prices", key: "pro/monthly/cad", action: "update", fields: { polar_id: { from: null, to: "prod_1" } }, lowers_allowance: false, raises_price: false };
     const api = fakeApi({
-      "POST /api/v1/billing/catalog/polar-links": [
+      "POST /api/v1/billing/catalog/links": [
         { status: 201, body: { data: { ...linkRun, changes: [priceChange] } } },
         { body: { data: { ...linkRun, id: null, status: "preview", changes: [], blocked_by: [{ code: "polar_org_changed", message: "It stays with org_test.", path: "polar_org" }] } } },
         { status: 201, body: { data: { ...linkRun, status: "unchanged", changes: [] } } },

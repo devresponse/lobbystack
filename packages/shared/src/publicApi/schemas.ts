@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { billingPlanSlugs, cloudBillingPlanSlugs, type PolarEnv } from "../billing";
+import { billingPlanSlugs, billingProviderEnvs, billingProviders, cloudBillingPlanSlugs, type BillingProvider, type BillingProviderEnv, type PolarEnv } from "../billing";
 import { billingPlanAccessLevels, billingPlanEndings, billingPlanTiers, billingProfileSchema } from "../billingProfile";
 import { callTranscriptContentChoices, callTranscriptRecipientChoices } from "../callTranscripts";
 import { interfaceLocales, runtimeLocales } from "../locales";
@@ -241,7 +241,9 @@ const sha256Hex = z.string().regex(/^[0-9a-f]{64}$/).describe("SHA-256 as 64 low
 const nullableCount = z.number().int().nullable();
 
 // The first six stop an apply, catalog_changed and brand_mismatch a link too, and the rest only a link.
-export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken", "polar_org_mismatch", "polar_org_changed", "links_incomplete", "unknown_price", "terms_changed", "discount_mismatch", "id_taken", "id_changed"] as const;
+// A Polar deployment answers polar_org_mismatch and polar_org_changed; any other provider
+// billing_account_mismatch and billing_account_changed.
+export const billingCatalogRefusalCodes = ["brand_mismatch", "file_not_deployed", "catalog_changed", "plan_frozen", "currency_locked", "code_taken", "polar_org_mismatch", "polar_org_changed", "links_incomplete", "unknown_price", "terms_changed", "discount_mismatch", "id_taken", "id_changed", "billing_account_mismatch", "billing_account_changed", "billing_provider_changed", "provider_mismatch", "provider_block_missing"] as const;
 export type BillingCatalogRefusalCode = (typeof billingCatalogRefusalCodes)[number];
 
 export const apiBillingCatalogApplySchema = z.strictObject({
@@ -255,35 +257,103 @@ export const apiBillingCatalogApplySchema = z.strictObject({
 export const billingPolarEnvs = ["sandbox", "production"] as const satisfies ReadonlyArray<PolarEnv>;
 const polarObjectId = z.string().min(1).max(100);
 
+const providerObjectId = z.string().min(1).max(255);
+const polarNamesOnly = "Polar's names go only with provider polar.";
+
 export const apiBillingCatalogLinkSchema = z.strictObject({
-  brand: z.string().min(1).max(64).describe("The brand whose file Polar was set up from. It must be the brand this deployment shows."),
-  hash: sha256Hex.describe("The hash of the file Polar was set up from. It must be the latest catalog run's."),
-  polar_env: z.enum(billingPolarEnvs).describe("The Polar server the products are on. It must be the one this deployment's POLAR_API_BASE_URL names."),
-  polar_org: polarObjectId.describe("The Polar organization the products are in. It must be this deployment's POLAR_ORGANIZATION_ID, and the one every earlier link named."),
+  brand: z.string().min(1).max(64).describe("The brand whose file the provider was set up from. It must be the brand this deployment shows."),
+  hash: sha256Hex.describe("The hash of the file the provider was set up from. It must be the latest catalog run's."),
+  provider: z.enum(billingProviders).optional().describe("The billing provider whose objects sell the plans, which must be the deployment's (BILLING_PROVIDER). Defaults to polar."),
+  provider_env: z.enum(billingProviderEnvs).optional().describe("sandbox or live: the provider's environment, which must be the deployment's. Required unless polar_env is sent."),
+  provider_account: providerObjectId.optional().describe("The provider's account the objects are in: the Polar organization, or the Stripe account. It must be the deployment's, and the one every earlier link named. Required unless polar_org is sent."),
+  polar_env: z.enum(billingPolarEnvs).optional().describe("Polar's name for provider_env: the Polar server the products are on, sandbox or production, which must be the one this deployment's POLAR_API_BASE_URL names. Only with provider polar."),
+  polar_org: polarObjectId.optional().describe("Polar's name for provider_account: this deployment's POLAR_ORGANIZATION_ID. Only with provider polar."),
   plans: z.array(z.strictObject({
     code: z.string().min(1).max(64).describe("A sold plan that isn't retired."),
-    terms_hash: sha256Hex.describe("The plan's terms_hash its Polar objects were made from. It must be the row's."),
-    polar_disc: polarObjectId.nullable().describe("The Polar discount for a plan with a discount; null for any other plan."),
+    terms_hash: sha256Hex.describe("The plan's terms_hash its provider objects were made from. It must be the row's."),
+    provider_disc: providerObjectId.nullable().optional().describe("The provider's discount for a plan with a discount, a Polar discount or a Stripe coupon; null for any other plan. Required unless polar_disc is sent."),
+    polar_disc: polarObjectId.nullable().optional().describe("Polar's name for provider_disc. Only with provider polar."),
     prices: z.array(z.strictObject({
       period: z.enum(["monthly", "annual"]),
       currency: z.string().regex(/^[a-z]{3}$/),
-      polar_id: polarObjectId.describe("The Polar product that sells this price."),
+      provider_ref: providerObjectId.optional().describe("The provider's object that sells this price: a Polar product or a Stripe price. Required unless polar_id is sent."),
+      polar_id: polarObjectId.optional().describe("Polar's name for provider_ref: the Polar product. Only with provider polar."),
     })).min(1).max(2).describe("Every live price of the plan."),
   })).max(60).describe("Every sold plan that isn't retired, each with every live price."),
-  replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a Polar product or discount take another one: the old price row is retired with its product, and a new live row takes the new one. Defaults to false."),
+  objects: z.record(z.string(), z.unknown()).optional().describe("The provider's objects beyond plans and prices, which a Stripe link records: its meters, overage prices, billing portal configuration and webhook endpoint, with the endpoint secret's SHA-256. Not with provider polar."),
+  replace_ids: z.boolean().optional().describe("true lets a live price or a plan that already has a provider object take another one: the old price row is retired with its object, and a new live row takes the new one. Defaults to false."),
   dry_run: z.boolean().optional().describe("true shows what the link would change and anything that would stop it, and changes nothing. Defaults to false."),
+}).superRefine((value, context) => {
+  const issue = (path: Array<string | number>, message: string) => context.addIssue({ code: "custom", path, message });
+  // Each value by either name: one of them is required, and both must say the same.
+  const either = (path: Array<string | number>, neutral: unknown, polar: unknown, polarName: string, same: boolean) => {
+    if (neutral === undefined && polar === undefined) issue(path, `Required, or ${polarName} with provider polar.`);
+    else if (neutral !== undefined && polar !== undefined && !same) issue(path, `It and ${polarName} name different values.`);
+  };
+  if ((value.provider ?? "polar") !== "polar") {
+    if (value.polar_env !== undefined) issue(["polar_env"], polarNamesOnly);
+    if (value.polar_org !== undefined) issue(["polar_org"], polarNamesOnly);
+    value.plans.forEach((plan, index) => {
+      if (plan.polar_disc !== undefined) issue(["plans", index, "polar_disc"], polarNamesOnly);
+      plan.prices.forEach((price, priceIndex) => { if (price.polar_id !== undefined) issue(["plans", index, "prices", priceIndex, "polar_id"], polarNamesOnly); });
+    });
+  } else if (value.objects !== undefined) issue(["objects"], "A Polar link records no other objects.");
+  either(["provider_env"], value.provider_env, value.polar_env, "polar_env", value.provider_env === (value.polar_env === "production" ? "live" : "sandbox"));
+  either(["provider_account"], value.provider_account, value.polar_org, "polar_org", value.provider_account === value.polar_org);
+  value.plans.forEach((plan, index) => {
+    either(["plans", index, "provider_disc"], plan.provider_disc, plan.polar_disc, "polar_disc", plan.provider_disc === plan.polar_disc);
+    plan.prices.forEach((price, priceIndex) => either(["plans", index, "prices", priceIndex, "provider_ref"], price.provider_ref, price.polar_id, "polar_id", price.provider_ref === price.polar_id));
+  });
 });
 
-export const billingCheckCodes = ["catalog_hash", "code_hash", "plan_rows", "not_linked", "org_settings", "meter", "credits", "product", "discount", "webhook", "leftover", "linked_id", "retired_id", "polar_org", "webhook_secret", "product_vars", "unreadable"] as const;
+/** A link request in the provider's names, whichever names it was sent with. */
+export type BillingCatalogLinkRequest = {
+  brand: string;
+  hash: string;
+  provider: BillingProvider;
+  provider_env: BillingProviderEnv;
+  provider_account: string;
+  plans: Array<{ code: string; terms_hash: string; provider_disc: string | null; prices: Array<{ period: "monthly" | "annual"; currency: string; provider_ref: string }> }>;
+  objects: Record<string, unknown> | null;
+  replace_ids: boolean;
+  dry_run: boolean;
+  /** polar when the request named its fields as Polar does (polar_env, polar_disc, polar_id...), so refusals name them the same way. */
+  names: "polar" | "provider";
+};
+
+/** Translates a link request on arrival: Polar's names become the provider's. The schema has already checked that one name of each pair was sent. */
+export function billingCatalogLinkRequest(body: ApiBillingCatalogLink): BillingCatalogLinkRequest {
+  const polarNames = body.polar_env !== undefined || body.polar_org !== undefined || body.plans.some((plan) => plan.polar_disc !== undefined || plan.prices.some((price) => price.polar_id !== undefined));
+  return {
+    brand: body.brand,
+    hash: body.hash,
+    provider: body.provider ?? "polar",
+    provider_env: body.provider_env ?? (body.polar_env === "production" ? "live" : "sandbox"),
+    provider_account: body.provider_account ?? body.polar_org ?? "",
+    plans: body.plans.map((plan) => ({
+      code: plan.code,
+      terms_hash: plan.terms_hash,
+      provider_disc: plan.provider_disc !== undefined ? plan.provider_disc : plan.polar_disc ?? null,
+      prices: plan.prices.map((price) => ({ period: price.period, currency: price.currency, provider_ref: price.provider_ref ?? price.polar_id ?? "" })),
+    })),
+    objects: body.objects ?? null,
+    replace_ids: body.replace_ids === true,
+    dry_run: body.dry_run === true,
+    names: polarNames ? "polar" : "provider",
+  };
+}
+
+export const billingCheckCodes = ["catalog_hash", "code_hash", "plan_rows", "not_linked", "org_settings", "meter", "credits", "product", "discount", "webhook", "leftover", "linked_id", "retired_id", "polar_org", "webhook_secret", "product_vars", "unreadable", "account", "price", "overage", "portal", "tax", "mode"] as const;
 export type BillingCheckCode = (typeof billingCheckCodes)[number];
-export const billingCheckPairs = ["file_postgres", "file_polar", "postgres_polar"] as const;
+// A Polar deployment's checks compare with Polar (file_polar, postgres_polar); any other provider's with file_provider and postgres_provider.
+export const billingCheckPairs = ["file_postgres", "file_polar", "postgres_polar", "file_provider", "postgres_provider"] as const;
 export type BillingCheckPair = (typeof billingCheckPairs)[number];
 
 export const apiBillingCheckSchema = z.object({
   code: z.enum(billingCheckCodes).describe("Which check found it."),
-  pair: z.enum(billingCheckPairs).describe("The two copies it compared: the repository file, the Postgres tables and Polar."),
+  pair: z.enum(billingCheckPairs).describe("The two copies it compared: the repository file, the Postgres tables and the billing provider (polar on a Polar deployment)."),
   level: z.enum(["drift", "warn", "info"]).describe("drift fails a verify; warn and info don't."),
-  subject: z.string().describe("What it is about, such as a plan, a price or a Polar object."),
+  subject: z.string().describe("What it is about, such as a plan, a price or a provider object."),
   message: z.string(),
 }).describe("Something a verify found that isn't as the file says.");
 
@@ -304,7 +374,7 @@ export const apiBillingCatalogRefusalSchema = z.object({
 
 export const apiBillingCatalogRunSchema = z.object({
   id: id.nullable().describe("Null for a dry run, which stores nothing."),
-  kind: z.enum(["catalog", "polar", "verify"]).describe("catalog: an apply. polar: a link of Polar's products. verify: the worker's daily check."),
+  kind: z.enum(["catalog", "polar", "link", "verify"]).describe("catalog: an apply. polar: a link of Polar's products. link: a link of another provider's objects. verify: the worker's daily check."),
   status: z.enum(["applied", "unchanged", "failed", "passed", "drift", "preview"]).describe("applied or unchanged for an apply or a link; passed, drift or failed for a verify; preview for a dry run."),
   brand: z.string(),
   ver: z.number().int().describe("The file's version."),
@@ -314,13 +384,16 @@ export const apiBillingCatalogRunSchema = z.object({
   changes: z.array(apiBillingCatalogChangeSchema).describe("Every row written, plans then prices, each by key."),
   problems: z.array(apiBillingCheckSchema).describe("Every check a verify found not ok. Always empty for an apply or a link."),
   blocked_by: z.array(apiBillingCatalogRefusalSchema).describe("For a dry run, everything that would stop the apply; empty means it would go through. Always empty for a stored run."),
-  polar_env: z.enum(["sandbox", "production"]).nullable(),
-  polar_org: z.string().nullable(),
+  polar_env: z.enum(["sandbox", "production"]).nullable().describe("A Polar link or verify's Polar server; null for any other run."),
+  polar_org: z.string().nullable().describe("A Polar link or verify's Polar organization; null for any other run."),
+  provider: z.enum(billingProviders).nullable().describe("The billing provider a link or verify ran against. Null for an apply."),
+  provider_env: z.enum(billingProviderEnvs).nullable().describe("sandbox or live: the provider's environment. Null for an apply."),
+  provider_account: z.string().nullable().describe("The provider's account: the Polar organization or the Stripe account. Null for an apply."),
   key_id: id.nullable().describe("The operator platform key that asked."),
   partner: z.string().nullable().describe("That key's partner."),
   started_at: timestamp,
   ended_at: nullableTimestamp,
-}).describe("One apply of a billing.json, one link of Polar's products, one verify, or the dry run of an apply or a link.");
+}).describe("One apply of a billing.json, one link of the provider's objects, one verify, or the dry run of an apply or a link.");
 
 export const billingCodeStatuses = ["active", "expired", "used_up", "revoked"] as const;
 
@@ -363,7 +436,8 @@ export const apiBillingCatalogPriceSchema = z.object({
   currency: z.string(),
   cents: z.number().int().describe("The price for one period."),
   per_month: z.number().int().describe("cents for monthly; for annual, cents / 12 rounded to the nearest whole unit of the currency (a multiple of 100)."),
-  polar_id: z.string().nullable().describe("The Polar product that sells it, once Polar is seeded."),
+  polar_id: z.string().nullable().describe("The Polar product that sells it, once linked: provider_ref on a Polar deployment, null on any other."),
+  provider_ref: z.string().nullable().describe("The provider's object that sells it, once linked: a Polar product or a Stripe price."),
   retired_at: nullableTimestamp.describe("When it stopped being sold. Null for a live price."),
   created_at: timestamp,
   updated_at: timestamp,
@@ -372,7 +446,7 @@ export const apiBillingCatalogPriceSchema = z.object({
 export const apiBillingCatalogPlanSchema = z.object({
   code: z.string().describe("The plan's permanent code, its key in billing.json."),
   tier: z.enum(billingPlanTiers).describe("The built-in tier the code treats it as. Equals code for the four standard plans."),
-  status: z.enum(["draft", "active", "retired"]).describe("draft until Polar can sell it as defined, active, or retired."),
+  status: z.enum(["draft", "active", "retired"]).describe("draft until the billing provider can sell it as defined, active, or retired."),
   access: z.enum(billingPlanAccessLevels).describe("public, code (promo code only) or hidden (operator only)."),
   sold: z.boolean(),
   custom: z.boolean(),
@@ -393,7 +467,8 @@ export const apiBillingCatalogPlanSchema = z.object({
   ends: z.enum(billingPlanEndings).nullable(),
   offer_end: nullableTimestamp,
   discount: z.record(z.string(), z.unknown()).nullable(),
-  polar_disc: z.string().nullable(),
+  polar_disc: z.string().nullable().describe("The Polar discount for a plan with a discount: provider_disc on a Polar deployment, null on any other."),
+  provider_disc: z.string().nullable().describe("The provider's discount for a plan with a discount, once linked: a Polar discount or a Stripe coupon."),
   terms_hash: sha256Hex,
   frozen_at: nullableTimestamp,
   sort: z.number().int(),
@@ -411,6 +486,16 @@ export const apiBillingCatalogPolarSchema = z.object({
   last_link: apiBillingCatalogRunSchema.nullable().describe("The latest link. Null before the first."),
 }).describe("The Polar settings this deployment runs with.");
 
+export const apiBillingCatalogProviderSchema = z.object({
+  id: z.enum(billingProviders).describe("The deployment's billing provider: BILLING_PROVIDER, polar when unset."),
+  env: z.enum(billingProviderEnvs).describe("sandbox or live: the provider's environment the deployment uses."),
+  account: z.string().nullable().describe("The provider's account the deployment uses: POLAR_ORGANIZATION_ID on Polar. Null when unset."),
+  secret_sha256: sha256Hex.nullable().describe("SHA-256 of the provider's webhook secret, never the secret. Null when unset."),
+  objects: z.record(z.string(), z.unknown()).nullable().describe("What the latest link recorded beyond plans and prices; null on Polar."),
+  product_vars: z.record(z.string(), z.string().nullable()).nullable().describe("Polar's four optional POLAR_<PLAN>_<INTERVAL>_PRODUCT_ID values, by plan/period; null on any other provider."),
+  last_link: apiBillingCatalogRunSchema.nullable().describe("The latest link. Null before the first."),
+}).describe("The billing provider this deployment runs with.");
+
 export const apiBillingCatalogSchema = z.object({
   brand: z.string().describe("The brand this deployment shows."),
   code_hash: sha256Hex.nullable().describe("The hash of the brand's billing.json in the running code. Null when it has none."),
@@ -420,8 +505,9 @@ export const apiBillingCatalogSchema = z.object({
   profile: z.record(z.string(), z.unknown()).nullable().describe("The latest applied file, normalized, in its own camel case."),
   currency: z.string().nullable().describe("The live prices' currency."),
   plans: z.array(apiBillingCatalogPlanSchema).describe("Every plan, whatever its access or status, by sort then code."),
-  polar: apiBillingCatalogPolarSchema,
-}).describe("The plans and prices this deployment holds. Checkout, plan changes, Polar's webhook, the plan screens and usage limits read them.");
+  polar: apiBillingCatalogPolarSchema.nullable().describe("Polar's settings, as before provider: on a Polar deployment, the same as provider; null on any other."),
+  provider: apiBillingCatalogProviderSchema,
+}).describe("The plans and prices this deployment holds. Checkout, plan changes, the provider's webhook, the plan screens and usage limits read them.");
 
 export const apiBillingPlanPriceSchema = z.object({
   interval: z.enum(billingIntervals),
@@ -1277,6 +1363,7 @@ export type ApiBillingCatalog = z.infer<typeof apiBillingCatalogSchema>;
 export type ApiBillingCatalogApply = z.infer<typeof apiBillingCatalogApplySchema>;
 export type ApiBillingCatalogLink = z.infer<typeof apiBillingCatalogLinkSchema>;
 export type ApiBillingCatalogPolar = z.infer<typeof apiBillingCatalogPolarSchema>;
+export type ApiBillingCatalogProvider = z.infer<typeof apiBillingCatalogProviderSchema>;
 export type ApiBillingCheck = z.infer<typeof apiBillingCheckSchema>;
 export type ApiBillingCatalogChange = z.infer<typeof apiBillingCatalogChangeSchema>;
 export type ApiBillingCatalogPlan = z.infer<typeof apiBillingCatalogPlanSchema>;

@@ -215,7 +215,7 @@ describe("managed plan writes", () => {
 
   it("refuses a business with any live Polar subscription, even one for an unmapped product", async () => {
     const { tx, writes } = transaction([{ source: "polar", plan: null, subscriptionState: "active", overageSpendingCapCents: null }]);
-    expect(await setManagedPlanInTransaction(tx, { businessId: "biz_1" })).toBe("paid_through_polar");
+    expect(await setManagedPlanInTransaction(tx, { businessId: "biz_1" })).toBe("paid_through_provider");
     expect(writes).toEqual([]);
   });
 

@@ -97,16 +97,17 @@ describe("desiredStripeCatalog", () => {
   });
 
   it("needs a stripe block, and checks one in the file", () => {
-    const withoutBlock = billingProfileSchema.parse(JSON.parse(fileText("realinfobot")));
+    const { stripe: _block, ...raw } = JSON.parse(fileText("realinfobot"));
+    const withoutBlock = billingProfileSchema.parse(raw);
     expect(() => catalogFor(withoutBlock)).toThrow("has no stripe block, which a Stripe deployment needs");
     const managed = billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, managedPayments: true } });
     expect(managed.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([["stripe.overage", "with managedPayments, overage is checkout: Managed Payments sells only through Checkout"]]);
-    // With overage on the checkout, the file keeps its yearly prices for Polar, and a sold plan needs a monthly one.
-    expect(billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } }).success).toBe(true);
+    // With overage on the checkout, the file keeps its yearly prices for Polar; a yearly-only plan just isn't sold on Stripe.
     const yearlyOnly = JSON.parse(fileText("realinfobot"));
     yearlyOnly.plans["starter-yearly"] = { tier: "starter", access: "code", names: { en: "Starter yearly", fr: "Starter annuel", es: "Starter anual", sr: "Starter godišnji" }, sold: true, prices: { annualCents: 30000 } };
-    const checkout = billingProfileSchema.safeParse({ ...yearlyOnly, stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } });
-    expect(checkout.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([["plans.starter-yearly.prices.monthlyCents", "with stripe.overage checkout, Stripe sells only monthly prices, so a sold plan needs one"]]);
+    const checkout = billingProfileSchema.parse({ ...yearlyOnly, stripe: { ...stripeBlock, overage: "checkout", managedPayments: true } });
+    const soldOn = (provider: "polar" | "stripe") => desiredBillingPlans(billingProfileForProvider(checkout, provider)).find((plan) => plan.code === "starter-yearly")?.sold;
+    expect([soldOn("polar"), soldOn("stripe")]).toEqual([true, undefined]);
     expect(billingProfileSchema.safeParse({ ...JSON.parse(fileText("realinfobot")), stripe: { ...stripeBlock, tax: { behavior: "exclusive", code: "saas" } } }).success).toBe(false);
   });
 

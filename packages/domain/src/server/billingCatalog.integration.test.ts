@@ -748,7 +748,8 @@ function seededStripe(billingFile: Record<string, any>) {
 describe.skipIf(!testUrl)("billing catalog on Stripe", () => {
   it("refuses a file without a stripe block, then takes a Stripe link with its objects, refusing Polar's, another account and a new one later", async () => {
     await rollbackTest(async (tx) => {
-      const blocked = await apply(tx, file(), { dryRun: true, key: null, deployment: stripeDeployment() });
+      // The brand files have their stripe block since step 18: this one is taken off.
+      const blocked = await apply(tx, file((value) => { delete value.stripe; }), { dryRun: true, key: null, deployment: stripeDeployment() });
       expect(blocked.run.blocked_by.map((item) => [item.code, item.path])).toEqual([["provider_block_missing", "billing_file.stripe"]]);
       const withStripe = file((value) => { value.stripe = stripeBlock; });
       await apply(tx, withStripe, { deployment: stripeDeployment() });

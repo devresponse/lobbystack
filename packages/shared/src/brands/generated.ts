@@ -108,8 +108,8 @@ export const BRANDS: Record<string, BrandDefinition> = {
 
 /** The SHA-256 of each brand's normalized billing.json, which a catalog apply compares with the file it is sent. */
 export const BILLING_PROFILE_HASHES: Record<string, string> = {
-  "alloplace": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199",
-  "realinfobot": "2847caeb51f8d5df74c0ff46e1c0c8b1d79ec9290da2a6f4802c6e1aaca3d199"
+  "alloplace": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b",
+  "realinfobot": "eaa1ff9d23698c357492756a9b93aa06953dd71cc664e4afb32175664e36e01b"
 };
 
 /** The four standard plans of each brand's billing.json, which a deployment shows and enforces until its first catalog apply. */

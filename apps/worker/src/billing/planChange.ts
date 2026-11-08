@@ -1,6 +1,6 @@
 // Moving a paying business's subscription to another plan, and what checkout and promo endings share with it.
 import { billingProviderNames, planChangeDirection, planChangeRefusalSentence, type PlanChangeRefusal } from "@lobbystack/shared";
-import { claimBillingSubscription, loadPlanChangeProration, releaseBillingCheckoutRequest, releaseBillingSubscription, type PolarProductLinks, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
+import { claimBillingSubscription, loadPlanChangeProration, releaseBillingCheckoutRequest, releaseBillingSubscription, type PolarProductLinks, markBillingCheckoutCreated, markBillingCheckoutFailed, markBillingPlanChanged } from "@lobbystack/domain";
 import { isLiveSubscriptionState } from "@lobbystack/domain";
 import { reportWarning } from "@lobbystack/telemetry/node";
 import type { JobResult, WorkerDependencies } from "../handlers";
@@ -21,11 +21,14 @@ const planChangeTimings = {
 } as const;
 
 /**
- * Moves a paying business's Polar subscription to the plan it asked for. A
- * downgrade is charged as billing.json's polar.downgradeProration says, and
- * any other change, an upgrade or a move between a promo plan and its tier's
- * standard plan, as upgradeProration. Null when Polar's subscription has
- * ended or isn't live, so the business needs a new checkout after all.
+ * Moves a paying business's subscription to the plan it asked for. A
+ * downgrade is charged as billing.json's polar.downgradeProration, or the
+ * stripe block's downgrade, says, and any other change, an upgrade or a move
+ * between a promo plan and its tier's standard plan, as the upgrade word.
+ * A payment the bank wants confirmed (Stripe's 3-D Secure) puts the request
+ * in ready with the invoice's page, which the dashboard opens as it opens a
+ * checkout. Null when the subscription has ended or isn't live, so the
+ * business needs a new checkout after all.
  */
 export async function changeBillingPlan(
   dependencies: WorkerDependencies,
@@ -72,12 +75,14 @@ export async function changeBillingPlan(
     // Polar's own product says what the business pays for now; the account can lag a webhook behind it.
     const current = links.planFor(subscription.priceRef) ?? { plan: input.subscription.plan, interval: input.subscription.billingInterval ?? input.billingInterval };
     const direction = planChangeDirection(current, { plan: input.target, interval: input.billingInterval });
-    const proration = await loadPlanChangeProration(dependencies.domain);
+    const proration = await loadPlanChangeProration(dependencies.domain, billing.id);
     // A promo plan brings its discount. Leaving one for a standard plan drops its discount, which no standard product takes.
     const discount = input.promo ? "price" : input.subscription.planCode ? "remove" : "keep";
     const timing = planChangeTimings[direction === "downgrade" ? proration.downgrade : proration.upgrade];
-    await billing.changePlan({ subscriptionId: subscription.id, to: { ref: productId, discountRef: input.promo?.discountId ?? null }, discount, ...timing, ...(input.promo ? { metadata: input.promo.metadata } : {}), requestId });
-    await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
+    const result = await billing.changePlan({ subscriptionId: subscription.id, to: { ref: productId, discountRef: input.promo?.discountId ?? null }, discount, ...timing, ...(input.promo ? { metadata: input.promo.metadata } : {}), requestId });
+    // The request names the subscription, so the event that applies the change, or lets it expire, finds it.
+    if (result.status === "needs_action") await markBillingCheckoutCreated(dependencies.domain, { businessId, requestId, checkoutId: subscription.id, checkoutUrl: result.url });
+    else await markBillingPlanChanged(dependencies.domain, { businessId, requestId });
     return { status: "completed", entityId: requestId };
   } catch (error) {
     const refusal = planChangeRefusalFor(billing, error);
@@ -88,7 +93,7 @@ export async function changeBillingPlan(
       if (refusal === "token_scope" || refusal === "product_unavailable") await reportWarning(new Error(`${billingProviderNames[billing.id]} refused a plan change: ${planChangeRefusalSentence(billing.id, refusal)}`), { operation: "job.billing.createCheckout", businessId, requestId });
       return { status: "skipped", entityId: requestId };
     }
-    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: "Polar plan change failed.", retrying: input.retrying });
+    await failBillingCheckoutTry(dependencies, { businessId, requestId, error: `${billingProviderNames[billing.id]} plan change failed.`, retrying: input.retrying });
     throw error;
   } finally {
     await handBackBillingSubscription(dependencies, { businessId, claimId: hold.claimId });

@@ -194,6 +194,7 @@ Polar's request budget is the whole organization's, and past it Polar refuses ev
 | `ops.billing.overage_unpaid` | PostHog event from the worker, and a warning log line | Stripe ended a live plan's overage subscription after failed payments or a dispute, or left it unpaid. Usage stops at the allowance until its invoice is paid, voided or marked uncollectible in Stripe; the plan's next event then makes a new one | Any |
 | `ops.billing.provider_mismatch` | PostHog event from the worker, and an error log line, at startup | `STRIPE_API_KEY` belongs to another account than `STRIPE_ACCOUNT_ID`, so the worker runs without billing | Any |
 | `ops.billing.account_unchecked` | Warning log line from the worker, at startup | Stripe couldn't be reached to check the key's account; the worker bills on | None |
+| `ops.billing.plan_change_expired` | Warning log line from the worker | A Stripe upgrade waited a day for a payment the bank wanted confirmed, and Stripe dropped it; the business sees the change fail | None |
 | `ops.billing.sweep` | Log line from the worker | What each sweep that found work queued again | None |
 
 Log lines reach PostHog only once the `OTEL_EXPORTER_OTLP_*` variables are set ([observability](../features/observability.md)). The daily checks' history is also on the deployment: `pnpm lobbystack --profile ops billing catalog-runs --kind verify`.

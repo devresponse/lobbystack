@@ -21,6 +21,7 @@ import { Skeleton } from "./ui/skeleton";
 import { Surface } from "./ui/surface";
 import { Table, TableBody, TableCard, TableCell, TableHead, TableHeader, TableRow } from "./ui/table";
 import { formatDateTime } from "@/lib/locale";
+import { setUpgradeInProgress } from "@/lib/upgrade-in-progress";
 import { PromoCodeEntry, promoDiscountText } from "./promo-code-entry";
 
 type Billing = {
@@ -30,6 +31,8 @@ type Billing = {
   cancelsAt: string | null;
   /** A change waiting for the renewal: the plan's code, and its tier and names when the business can read them. */
   nextChange: { plan: string; tier: string | null; names: Record<string, string> | null; interval: string; at: string } | null;
+  /** The page where the customer confirms an upgrade's payment, as their bank asks; null when none waits. */
+  paymentActionUrl?: string | null;
   availableCheckoutPlans: Array<"starter" | "pro">;
   availableCheckoutIntervals: { starter: string[]; pro: string[] };
   plans: BillingPlanList;
@@ -79,6 +82,9 @@ export function LivePlanSurface() {
 
   useEffect(() => { if (searchParams.get("checkout") && business?.businessId) void queryClient.invalidateQueries({ queryKey: ["billing", business.businessId] }); }, [business?.businessId, queryClient, searchParams]);
 
+  // The bank wants the upgrade's payment confirmed: its page opens as a checkout does.
+  function openPaymentPage(url: string) { setUpgradeInProgress(true); window.location.assign(url); }
+
   async function openPortal() { if (!business) return; setPortalPending(true); try { const result = await requestJson<{ url: string }>(`/api/billing/portal?businessId=${encodeURIComponent(business.businessId)}`, { method: "POST", body: JSON.stringify({}) }); window.location.assign(result.url); } catch (error) { toast.error(t(isBillingRateLimited(error) ? "billing.toast.rateLimited" : "billing.toast.portalFailed")); } finally { setPortalPending(false); } }
 
   if (businesses.isLoading || billing.isLoading) return <PageSurface title={t("sections.billing")}><BillingSkeleton t={t} /></PageSurface>;
@@ -104,6 +110,7 @@ export function LivePlanSurface() {
   const canUpgrade = permissions?.hasCheckoutAccess && billing.data?.availableCheckoutPlans.some(target =>
     (plan === "free_cloud" || (plan === "starter" && target === "pro")) && billing.data.availableCheckoutIntervals[target].length > 0);
   const canManage = permissions?.hasCustomerPortalAccess === true;
+  const paymentActionUrl = billing.data.paymentActionUrl ?? null;
   // Anyone who could buy a plan here can enter a code, except on a plan billed outside Polar.
   const canEnterCode = permissions?.hasCheckoutAccess === true && (plan === "free_cloud" || plan === "starter" || plan === "pro");
 
@@ -163,6 +170,11 @@ export function LivePlanSurface() {
                     {t("billing.currentPlan.planChangesOn", { plan: nextPlanName(billing.data.nextChange, i18n.language, t), date: formatBillingDate(billing.data.nextChange.at, i18n.language) })}
                   </span>
                 ) : null}
+                {paymentActionUrl ? (
+                  <span className="text-sm text-muted-foreground">
+                    {t("billing.currentPlan.completePaymentHint")}
+                  </span>
+                ) : null}
               </div>
             </div>
 
@@ -181,8 +193,18 @@ export function LivePlanSurface() {
             </div>}
           </div>
           {canEnterCode ? <PromoCodeEntry key={business.businessId} businessId={business.businessId} changesPlan={plan === "starter" || plan === "pro"} /> : null}
-          {(canUpgrade || canManage) && (
+          {(canUpgrade || canManage || paymentActionUrl) && (
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              {paymentActionUrl && (
+                <Button
+                  className="w-full sm:w-auto"
+                  size="sm"
+                  onClick={() => openPaymentPage(paymentActionUrl)}
+                >
+                  {t("billing.actions.completePayment")}
+                  <ArrowUpRight className="size-3.5" />
+                </Button>
+              )}
               {canUpgrade && (
                 <Button
                   className="w-full sm:w-auto"

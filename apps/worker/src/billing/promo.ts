@@ -41,7 +41,7 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
     // A plan change or a discount's removal is changing the subscription: this waits for it.
     const hold = await claimBillingSubscription(dependencies.domain, { businessId });
     if ("retryAt" in hold) return { status: "deferred", entityId: businessId, retryAt: hold.retryAt };
-    if (work.overdue) await reportWarning(new Error("A promo plan is still in force after the renewal that should have ended it, so Polar is told again."), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
+    if (work.overdue) await reportWarning(new Error(`A promo plan is still in force after the renewal that should have ended it, so ${billingProviderNames[billing.id]} is told again.`), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
     try {
       const subscription = await billing.getSubscription(work.subscriptionId);
       // An ended subscription takes the plan with it, and its webhook tells the account.
@@ -66,7 +66,7 @@ async function endPromoPlan(dependencies: WorkerDependencies, input: { businessI
       } else {
         const productId = links.productFor(tier, interval);
         if (!productId) {
-          await reportWarning(new Error(`No Polar product sells ${work.tier} ${interval}, so a promo plan can't move to it. Link the catalog with pnpm billing apply.`), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
+          await reportWarning(new Error(`${billingProviderNames[billing.id]} sells no ${work.tier} ${interval} plan, so a promo plan can't move to it. Link the catalog with pnpm billing apply.`), { operation: "job.billing.endPromoPlan", businessId, plan: work.planCode });
           return { status: "skipped", entityId: businessId };
         }
         if (subscription.priceRef !== productId) await billing.endAtRenewal({ subscriptionId: subscription.id, then: { ref: productId, discountRef: null }, requestId: `promo-end:${businessId}:${work.planCode}` });

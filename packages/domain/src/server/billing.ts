@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, gte, inArray, isNull, lt, or, sql, type SQL, type SQLWrapper } from "drizzle-orm";
 
 import { auditLogs, billingAccounts, billingCheckoutRequests, billingCodeRedemptions, billingTransactions, billingUsageEvents, businesses, enqueueOutbox, providerEvents, users, withBusinessTransaction, type DatabaseTransaction } from "@lobbystack/db";
-import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, type BillingPlanSlug } from "@lobbystack/shared";
+import { billingErrorCodes, DEFAULT_WEB_CALL_MAX_DURATION_MS, isPaidSubscription, isUuid, liveSubscriptionStates, MAX_WEB_CALL_MAX_DURATION_MS, planChangeRefusalSentence, type BillingPlanSlug } from "@lobbystack/shared";
 import { getPostHogDistinctIdForBusinessSystem } from "@lobbystack/telemetry";
 import { logEvent } from "@lobbystack/telemetry/node";
 
@@ -915,6 +915,35 @@ function billingEventKindOf(eventType: string): string {
   return "other";
 }
 
+/** How long an upgrade waits for its payment: Stripe drops a pending update within 23 hours. */
+const PLAN_CHANGE_PAYMENT_MS = 24 * 60 * 60_000;
+
+/**
+ * The requests whose upgrade waited for the customer's payment, which name
+ * the subscription: changed once the change applied, and failed as
+ * payment_failed once it expired unpaid, which ops.billing.plan_change_expired logs.
+ */
+async function settlePlanChangePayment(tx: DatabaseTransaction, input: { businessId: string; subscriptionId: string; applied: boolean }): Promise<void> {
+  const status = input.applied ? "changed" : "error";
+  const settled = await tx.update(billingCheckoutRequests)
+    .set({ status, error: input.applied ? null : planChangeRefusalSentence("stripe", "payment_failed"), updatedAt: new Date() })
+    .where(and(eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "ready"), eq(billingCheckoutRequests.checkoutId, input.subscriptionId)))
+    .returning({ id: billingCheckoutRequests.id });
+  for (const request of settled) {
+    await enqueueOutbox(tx, { topic: "realtime.publish", businessId: input.businessId, aggregateType: "billing_checkout_request", aggregateId: request.id, dedupeKey: `billing-checkout:${request.id}:${status}`, payload: { type: "billing.updated", entityId: request.id } });
+    if (!input.applied) logEvent("warn", "ops.billing.plan_change_expired", { businessId: input.businessId, requestId: request.id, subscriptionId: input.subscriptionId });
+  }
+}
+
+/** The page that pays an upgrade waiting for the customer, as Settings > Plan and GET /billing show it; null when none waits. */
+export async function loadPlanChangePayment(tx: DatabaseTransaction, input: { businessId: string; subscriptionId: string | null }): Promise<string | null> {
+  if (!input.subscriptionId) return null;
+  const [waiting] = await tx.select({ url: billingCheckoutRequests.checkoutUrl }).from(billingCheckoutRequests)
+    .where(and(eq(billingCheckoutRequests.businessId, input.businessId), eq(billingCheckoutRequests.status, "ready"), eq(billingCheckoutRequests.checkoutId, input.subscriptionId), gte(billingCheckoutRequests.createdAt, new Date(Date.now() - PLAN_CHANGE_PAYMENT_MS))))
+    .orderBy(desc(billingCheckoutRequests.createdAt)).limit(1);
+  return waiting?.url ?? null;
+}
+
 /** What billing.ensureOverage reads: the account's plan subscription, its overage subscription, and the catalog's currency. */
 export type OverageWork = {
   source: string | null;
@@ -1142,6 +1171,10 @@ export async function reconcileBillingProviderEvent(
       if (event.provider === "stripe" && planEvent && subscriptionId && !stale && !keepsManagedPlan) {
         const overageWork = live ? !existing?.overageSubscriptionId || !isLiveSubscriptionState(existing.subscriptionState) : Boolean(existing?.overageSubscriptionId);
         if (overageWork) await enqueueOutbox(tx, { topic: "billing.ensureOverage", businessId: input.businessId, aggregateType: "billing_account", aggregateId: input.businessId, dedupeKey: `ensure-overage:${event.id}`, payload: { subscriptionId } });
+      }
+      // An upgrade that waited for the customer's payment (the Stripe plan's step 14) was applied, or expired unpaid.
+      if (event.provider === "stripe" && subscriptionId && (event.eventType === "customer.subscription.pending_update_applied" || event.eventType === "customer.subscription.pending_update_expired")) {
+        await settlePlanChangePayment(tx, { businessId: input.businessId, subscriptionId, applied: event.eventType === "customer.subscription.pending_update_applied" });
       }
     }
 

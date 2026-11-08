@@ -4,6 +4,7 @@ import type { StripeApi } from "../client";
 import { idOf, type FakeStripeContext } from "./context";
 import { invalid, missing } from "./errors";
 import { stripeInvoiceObject, stripeSubscriptionObject } from "./objects";
+import { updateWithPayment } from "./pendingUpdates";
 
 /** The subscription as Stripe answers a read: the objects named in expand in full, the rest by ID. */
 function expanded(fake: FakeStripeContext, subscription: Stripe.Subscription, expand: readonly string[]): Stripe.Subscription {
@@ -38,21 +39,27 @@ export function fakeSubscriptions(fake: FakeStripeContext): StripeApi["subscript
         return made;
       });
     },
-    /** Its end, metadata and default card; one that ended takes none of them. */
-    async update(id: string, params: Stripe.SubscriptionUpdateParams = {}) {
-      return await fake.call("subscriptions.update", { id, ...params }, null, () => {
+    /**
+     * Its items, discounts and cycle, with a payment when the change invoices
+     * now (pendingUpdates.ts), and its end, metadata and default card. One
+     * that ended takes none of them, and one a schedule holds takes no end.
+     */
+    async update(id: string, params: Stripe.SubscriptionUpdateParams = {}, options: Stripe.RequestOptions = {}) {
+      return await fake.call("subscriptions.update", { id, ...params }, options.idempotencyKey ?? null, () => {
         const found = fake.state.subscriptions.get(id);
         if (!found) throw missing("subscription", id);
         if (found.status === "canceled") throw invalid("A canceled subscription can only update its cancellation_details and metadata.");
+        if (found.schedule && (params.cancel_at_period_end !== undefined || params.cancel_at !== undefined)) throw invalid(`The subscription is managed by the subscription schedule \`${idOf(found.schedule)}\`, and updating any cancelation behavior directly is not allowed. Please update the schedule instead.`);
+        const changes = params.items?.length || params.discounts !== undefined || params.billing_cycle_anchor?.type === "now";
+        const base = changes ? updateWithPayment(fake, found, params) : { ...found, metadata: { ...found.metadata, ...((params.metadata ?? {}) as Record<string, string>) } } as Stripe.Subscription;
         const updated = {
-          ...found,
+          ...base,
           ...(params.cancel_at_period_end !== undefined ? { cancel_at_period_end: params.cancel_at_period_end } : {}),
           ...(params.cancel_at !== undefined ? { cancel_at: params.cancel_at === "" ? null : params.cancel_at } : {}),
           ...(params.default_payment_method !== undefined ? { default_payment_method: params.default_payment_method === "" ? null : params.default_payment_method } : {}),
-          metadata: { ...found.metadata, ...((params.metadata ?? {}) as Record<string, string>) },
         } as Stripe.Subscription;
         fake.state.subscriptions.set(id, updated);
-        return updated;
+        return expanded(fake, updated, params.expand ?? []);
       });
     },
     /** A customer's subscriptions; status all includes the ended ones, and expand names data.latest_invoice and the like. */

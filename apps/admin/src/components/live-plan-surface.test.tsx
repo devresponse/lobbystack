@@ -13,10 +13,10 @@ vi.mock("react-i18next", () => ({ useTranslation: () => ({ i18n: { language: "en
 const clients: QueryClient[] = [];
 beforeEach(() => { route.search = new URLSearchParams(); vi.stubGlobal("localStorage", { getItem: () => null, setItem: vi.fn() }); });
 afterEach(() => { cleanup(); clients.forEach(client => client.clear()); clients.length = 0; vi.unstubAllGlobals(); vi.clearAllMocks(); });
-function setup({ cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null } = {}) {
+function setup({ paymentActionUrl = null as string | null, cancelsAt = null as string | null, nextChange = null as Record<string, unknown> | null, synced = false, checkoutFails = false, billingFails = false, plan = "pro" as BillingPlanSlug, admin = true, configured = false, transactions = false, accountMissing = false, interval = "monthly", plans = builtInBillingPlanList() as BillingPlanList, limits = undefined as BillingPlanLimits | undefined, promoPlan = null as BillingPromoPlanView | null } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } }); clients.push(client);
   client.setQueryData(["businesses"], { businesses: [{ businessId: "business", active: true }] });
-  const billing = { provider: "polar", providerName: "Polar", cancelsAt, nextChange, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
+  const billing = { provider: "polar", providerName: "Polar", cancelsAt, nextChange, paymentActionUrl, permissions: { hasBillingManagementAccess: admin, hasCheckoutAccess: admin, hasCustomerPortalAccess: admin }, effectivePlan: accountMissing ? "free_cloud" : plan, limits: limits ?? builtInBillingPlanLimits[accountMissing ? "free_cloud" : plan], promoPlan, account: accountMissing ? null : { plan, billingInterval: interval, subscriptionState: "active", overageSpendingCapCents: null }, plans, availableCheckoutPlans: configured ? ["pro"] : [], availableCheckoutIntervals: { starter: [], pro: configured ? ["monthly"] : [] }, transactions: transactions ? [{ kind: "refund", sourceId: "refund", status: "succeeded", amountCents: 1250, currency: "usd", description: "Usage credit", invoiceUrl: "https://example.invalid/invoice", occurredAt: "2026-09-04T12:00:00Z" }, { kind: "order", sourceId: "order", status: "partially_refunded", amountCents: 105_600, refundedAmountCents: 52_800, currency: "usd", description: "Pro annual", invoiceUrl: null, occurredAt: "2026-09-05T12:00:00Z" }] : [] };
   if (!billingFails) client.setQueryData(["billing", "business"], billing);
   const fetchMock = vi.fn(async (url: string) => url.includes("/checkout?") ? checkoutFails ? Response.json({ error: "Provider unavailable" }, { status: 503 }) : Response.json({ synced }) : Response.json(billing));
   if (billingFails) fetchMock.mockResolvedValueOnce(Response.json({ error: "Unavailable" }, { status: 503 }));
@@ -103,6 +103,18 @@ describe("original billing overview behavior", () => {
     setup({ nextChange: { plan: "starter", tier: "starter", names: null, interval: "annual", at: "2026-12-01T12:00:00.000Z" } });
     expect(translate).toHaveBeenCalledWith("billing.currentPlan.planChangesOn", { plan: "billing.planLabels.starter", date: expect.stringContaining("2026") });
     expect(translate).not.toHaveBeenCalledWith("billing.currentPlan.planEndsOn", expect.anything());
+  });
+  it("opens the page where the bank confirms an upgrade's payment, as a checkout opens", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("location", { ...window.location, assign });
+    setup({ paymentActionUrl: "https://invoice.stripe.com/i/in_1" });
+    expect(translate).toHaveBeenCalledWith("billing.currentPlan.completePaymentHint");
+    await userEvent.click(screen.getByRole("button", { name: "billing.actions.completePayment" }));
+    expect(assign).toHaveBeenCalledWith("https://invoice.stripe.com/i/in_1");
+  });
+  it("shows no payment to complete when none waits", () => {
+    setup();
+    expect(screen.queryByRole("button", { name: "billing.actions.completePayment" })).toBeNull();
   });
   it("names a waiting promo plan by its own name", () => {
     setup({ nextChange: { plan: "salons-half-off", tier: "starter", names: { en: "Salon offer" }, interval: "monthly", at: "2026-12-01T12:00:00.000Z" } });

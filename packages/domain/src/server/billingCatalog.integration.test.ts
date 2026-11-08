@@ -161,6 +161,10 @@ describe.skipIf(!testUrl)("billing catalog apply", () => {
       // After one, as the latest file says.
       await apply(tx, file((value) => { value.polar.upgradeProration = "prorate"; }));
       expect(await loadPlanChangeProration(context(tx))).toEqual({ upgrade: "prorate", downgrade: "next_period" });
+      // A Stripe deployment goes by the stripe block's words (the Stripe plan's step 14), and before it has one, by the defaults.
+      expect(await loadPlanChangeProration(context(tx), "stripe")).toEqual({ upgrade: "invoice", downgrade: "next_period" });
+      await apply(tx, file((value) => { value.stripe = { upgrade: "reset", downgrade: "prorate", portalPlanChanges: false, portalCancel: false, tax: { behavior: "exclusive", code: "txcd_10103001" }, usageGraceHours: 1, overage: "separate", managedPayments: false }; }));
+      expect(await loadPlanChangeProration(context(tx), "stripe")).toEqual({ upgrade: "reset", downgrade: "prorate" });
     });
   });
 

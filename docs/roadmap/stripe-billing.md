@@ -2,7 +2,7 @@
 
 Billing runs through Polar, which is the merchant of record and handles sales tax. A study on 2026-11-05 designed letting a new deployment bill through Stripe instead: one provider per deployment, chosen at setup, with Polar moved behind the same interfaces first ([ADR 0010](../adr/0010-billing-provider-per-deployment.md)).
 
-- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 13 are done: phases 1 and 2, and steps 9 to 13 of phase 3.
+- **Status:** being built on `feature/receptionists`, one step at a time; nothing goes to `main`. Steps 1 to 14 are done: phases 1 and 2, and steps 9 to 14 of phase 3.
 - **Effort:** 19 steps in four phases, about 40 to 46 developer-days. Phases 1 and 2 (steps 1 to 8) help even if Stripe waits: Polar runs behind the seam, and storage, the API and the wording stop assuming Polar.
 - **Migrations:** `0146` (step 5) adds provider-neutral columns beside the Polar ones, and `0147` (step 19) drops the Polar ones a release later.
 
@@ -23,18 +23,18 @@ Each step lands on `feature/receptionists` once its checks pass, and leaves Pola
 | 3. Stripe, behind `BILLING_STRIPE_PREVIEW` | 9 the Stripe client, adapter, fake and contract tests; 10 the catalog planner and the `stripe` block of `billing.json`; 11 `pnpm billing` on Stripe; 12 the webhook and read-back reconcile; 13 checkout, the overage subscription and deletion; 14 plan changes and promo endings; 15 cancel, resume and keep my plan; 16 usage as money and the daily totals check |
 | 4. Deploy, switch on, contract | 17 deployment tooling, provider docs and legal pages; 18 the sandbox scenarios, and Stripe switched on; 19 the contract migration (`0147`), once every deployment runs step 5 |
 
-## Decide these
+## Know what was decided
 
-Phases 1 and 2 need none of them. Each has a recommendation:
+Each decision was taken as the study recommended, on 2026-11-08:
 
-1. **Merchant of record:** Stripe directly, with Stripe Tax, where the operator registers for, collects and files the taxes; or Stripe's Managed Payments, where Stripe is the merchant for 3.5% more and overage fits only monthly plans. Needed before step 10.
-2. **Yearly plans:** keep them. With Stripe directly they work unchanged.
-3. **How overage is billed:** a second subscription, monthly and anchored to the 1st (UTC). Needed before step 10.
-4. **Who changes plans:** **Settings > Plan** for upgrades, downgrades and cancelling; Stripe's portal for cards, invoices and billing details. Needed before step 15.
+1. **Merchant of record:** Stripe directly, with Stripe Tax: the operator registers for, collects and files the taxes, once an accountant confirms which registrations are needed. Stripe's Managed Payments, the merchant for 3.5% more, wasn't taken.
+2. **Yearly plans:** kept. With Stripe directly they work unchanged.
+3. **How overage is billed:** a second subscription, monthly and anchored to the 1st (UTC).
+4. **Who changes plans:** **Settings > Plan** for upgrades, downgrades and cancelling; Stripe's portal for cards, invoices and billing details, with its plan switches and cancelling off.
 5. **A customer per business,** not per payer, for now.
 6. **Stripe accounts:** one per live deployment, grouped in a Stripe Organization, and a sandbox per test deployment.
 7. **Upstream's partner billing:** not now.
-8. **Which provider the live deployment starts on:** Stripe, if the launch can wait for step 18. Needed before step 18.
+8. **Which provider the live deployment starts on:** Stripe, once step 18 is done.
 
 ## Step 1: the worker's billing jobs in their own folder
 
@@ -129,7 +129,7 @@ No app path calls Stripe yet: a deployment only reaches it with `BILLING_PROVIDE
 
 Nothing runs it yet: `pnpm billing` and the daily check run Stripe's planner from step 11, and no brand's `billing.json` has a `stripe` block until its first Stripe deployment (step 18), since adding one changes the file's hash.
 
-- **The `stripe` block** (`packages/shared/src/billingProfile.ts`, and `brands/billing.schema.json` from `pnpm brands:build`): `upgrade` (`invoice`, `prorate` or `reset`) and `downgrade` (`next_period`, `invoice` or `prorate`) in Polar's words; `portalPlanChanges` and `portalCancel` for Stripe's billing portal; `tax` (`exclusive`, and a Stripe product tax code such as `txcd_10103001`); `usageGraceHours`, the Dashboard rule for finalizing a metered invoice, which the API can't read; `overage` (`separate` or `checkout`); and `managedPayments`. The block holds the answers to decisions 1 and 3, so another answer changes the block, not the code: with `managedPayments` the overage must be `checkout`, and with `checkout` no plan can be annual. Step 10 went ahead on the recommended answers, Stripe Tax and a second subscription.
+- **The `stripe` block** (`packages/shared/src/billingProfile.ts`, and `brands/billing.schema.json` from `pnpm brands:build`): `upgrade` (`invoice`, `prorate` or `reset`) and `downgrade` (`next_period`, `invoice` or `prorate`) in Polar's words; `portalPlanChanges` and `portalCancel` for Stripe's billing portal; `tax` (`exclusive`, and a Stripe product tax code such as `txcd_10103001`); `usageGraceHours`, the Dashboard rule for finalizing a metered invoice, which the API can't read; `overage` (`separate` or `checkout`); and `managedPayments`. The block holds the answers to decisions 1 and 3, so another answer changes the block, not the code: with `managedPayments` the overage must be `checkout`, and with `checkout` no plan can be annual. Step 10 went ahead on the recommended answers, Stripe Tax and a second subscription, which were then taken.
 - **The `polar` block is optional.** An apply refuses a file without the block of its deployment's provider (`provider_block_missing`), so a Polar deployment still needs one.
 - **The planner** (`packages/domain/src/server/billingStripe.ts`, `stripePlanner`): the objects a file needs, the calls that get a Stripe account there, the link body and verify, pure as Polar's are. The snapshot, step and call types are in `packages/providers/src/stripe/catalog.ts`, for the client of step 11.
   - A product per sold plan, tagged with the brand and the plan; a promo plan gets its own, since the portal can't hold two prices of one product with the same interval.
@@ -186,7 +186,18 @@ The check for this step: sandbox events forwarded by the Stripe CLI reconcile on
 - **Without one:** a Stripe account without an overage subscription bills no overage, so usage stops at the allowance (`noOverage` in `usage.ts`). A job that fails an hour or more into the plan's period reports `ops.billing.overage_missing`. Reconcile drops an overage subscription Stripe ended or left unpaid. One Stripe ended after failed payments or a dispute, or left unpaid, while the plan is live is reported as `ops.billing.overage_unpaid`, and the job makes no other while its invoice is open. Once that invoice is paid, voided or marked uncollectible, the plan's next event makes a new one, as it does for one canceled by hand.
 - **Deletion:** `billing.revokeSubscription` ends the plan subscription and the overage subscription at once, each with its last invoice.
 - **Startup:** the worker reads its key's own account (`checkAccount`). With another account's key than `STRIPE_ACCOUNT_ID`, it runs without billing and sends `ops.billing.provider_mismatch`; when Stripe can't be reached, it bills on and logs `ops.billing.account_unchecked`.
-- **Decision 3:** this builds its recommended answer, a second subscription. The other answer, `overage: checkout` in the `stripe` block, needs its own change first: checkout would still make the overage subscription.
+- **Overage on the checkout:** the `stripe` block's `overage: checkout`, the answer to decision 3 that wasn't taken, isn't built: checkout would still make the overage subscription.
 - **Tests:** on the fake, the checkout's call and its retry, and the overage subscription made once, found again, kept while it's owing and replaced once it isn't, and ended at once and with its month. The job's cases and a deleted business's two subscriptions run on the in-memory Stripe (`overage.test.ts`), beside the startup check (`account.test.ts`). On PostgreSQL: the plan events that queue the job, the overage subscription stored, dropped and reported, and usage held to the allowance without one.
 
 The check for this step, on a Stripe sandbox: a checkout starts the plan, the overage subscription appears anchored on the 1st, and deleting the business ends both with their invoices.
+
+## Step 14: plan changes and promo endings
+
+- **A change now** (`stripe/planChange.ts`): the plan's item moves to the new price with `payment_behavior: pending_if_incomplete`, so Stripe applies it only once the invoice it makes is paid. The `stripe` block's words set the charge: `invoice` invoices the difference now, `prorate` puts it on the next invoice, and `reset` starts a new period today, crediting what's left of the old one. A promo plan's coupon and metadata go in the same call, and leaving a promo plan for a standard one removes the discount. A change now releases a schedule waiting for the renewal, as Polar's replaces a waiting change.
+- **Its payment:** paid at once, the plan changes. A payment the bank wants confirmed, as with 3-D Secure, comes back as `needs_action` with the invoice's page. The worker puts the request in `ready` with that page, and the subscription as its checkout ID, so the dashboard opens the page as it opens a checkout. A declined payment's invoice is voided, which drops the waiting update, and the change is refused as `payment_failed`. Stripe answers a declined payment and one the bank must confirm alike, so the adapter reads the payment intent on the invoice's payments to tell them apart.
+- **Settling the request:** `customer.subscription.pending_update_applied` marks the request changed, and its read-back moves the plan. `pending_update_expired` fails the request as `payment_failed` and logs `ops.billing.plan_change_expired`. Until one of them, Settings > Plan shows **Complete payment** with the bank's hint, and `GET /v1/billing` the page as `payment_action_url`, for a day at most.
+- **At the renewal:** a downgrade, and a promo plan's end on its tier's price, are a subscription schedule, made from the subscription unless it has one: the current phase to the period's end, then a second on the new price, after which the schedule lets the subscription go. A change at the renewal while an upgrade waits for its payment is refused as `change_pending`, since the phase would drop the upgrade. A promo plan that ends cancelled releases any schedule, then sets the subscription to cancel at the period's end. Removing a discount clears the subscription's discounts.
+- **The worker:** `loadPlanChangeProration` reads the `stripe` block's `upgrade` and `downgrade` on a Stripe deployment. The promo ending job already called `endAtRenewal` and `removeDiscount`, and its warnings now name the provider.
+- **Tests:** on the fake, an upgrade paid at once, declined, and needing 3-D Secure, then paid or expired, with a retried job getting the same page; the prorations and a promo price's coupon; a downgrade at the renewal and its phase taking effect, and a change now releasing a schedule; both promo endings and a discount removed. The fake gained `payInvoice`, `expirePendingUpdate` and `enterSchedulePhase` for them. The worker's three outcomes run on the in-memory Stripe, and the plan page's **Complete payment** in the admin's tests. On PostgreSQL: the request settled both ways, `payment_action_url`, and the `stripe` block's words.
+
+The check for this step, on a Stripe sandbox with Stripe's test cards: an upgrade, a downgrade, a declined upgrade and a 3-D Secure upgrade each end as the tests say.

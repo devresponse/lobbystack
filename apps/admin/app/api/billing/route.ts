@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { and, desc, eq } from "drizzle-orm";
 
 import { billingAccounts, billingPlans, billingTransactions, billingUsageEvents } from "@lobbystack/db";
-import { billingAccess, billingPlanList, isLiveSubscriptionState, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
+import { billingAccess, billingPlanList, isLiveSubscriptionState, deploymentBrandCatalog, getKnowledgeStorageUsageBytes, loadBillingCatalog, loadBusinessPlanLimits, loadBusinessPromoPlan, loadPlanChangePayment, polarCheckoutConfigured, readUsageStatusInTransaction, requireBusinessMembership, setOverageSpendingCap } from "@lobbystack/domain";
 import { asApiResponse, jsonError, readJson, requireOperatorBusiness, withOperatorTransaction } from "@/lib/api-helpers";
 import { createDomainContext } from "@/lib/domain-context";
 
@@ -41,9 +41,11 @@ export async function GET(request: Request) {
       const cancelsAt = own?.cancelAt && isLiveSubscriptionState(own.subscriptionState) ? own.cancelAt : null;
       const [nextPlan] = own?.nextPlanCode ? await tx.select({ tier: billingPlans.tier, names: billingPlans.names }).from(billingPlans).where(eq(billingPlans.code, own.nextPlanCode)).limit(1) : [];
       const nextChange = own?.nextPlanCode && own.nextInterval && own.nextChangeAt ? { plan: own.nextPlanCode, tier: nextPlan?.tier ?? null, names: nextPlan?.names ?? null, interval: own.nextInterval, at: own.nextChangeAt } : null;
+      // An upgrade waiting for the customer to confirm its payment, for those who can buy plans.
+      const paymentActionUrl = permissions.hasCheckoutAccess ? await loadPlanChangePayment(tx, { businessId, subscriptionId: own?.subscriptionId ?? null }) : null;
       // The deployment's billing provider, which the plan screens name.
       const provider = billingProviderOf(process.env);
-      return { provider, providerName: billingProviderNames[provider], cancelsAt, nextChange, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
+      return { provider, providerName: billingProviderNames[provider], cancelsAt, nextChange, paymentActionUrl, availableCheckoutPlans, availableCheckoutIntervals, plans, promoPlan, account: account[0] ?? null, effectivePlan, limits, knowledgeStorageBytesUsed, permissions, checkoutAvailable: permissions.hasCheckoutAccess, widgetIssuanceEnabled: isWidgetKeyIssuanceEnabled(process.env), usage, usageStatus, transactions: permissions.hasBillingManagementAccess ? transactions : [] };
     }));
   } catch (error) {
     return asApiResponse(error);

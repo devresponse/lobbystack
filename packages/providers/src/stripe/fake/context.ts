@@ -13,8 +13,10 @@ export type FakeStripeState = {
   invoices: Map<string, Stripe.Invoice>;
   portalSessions: Stripe.BillingPortal.Session[];
   checkoutSessions: Map<string, Stripe.Checkout.Session>;
-  /** Which invoice each payment intent paid. */
-  invoicePayments: Array<{ invoice: string; paymentIntent: string }>;
+  /** Which invoice each payment intent paid, and where its payment stands: succeeded, requires_action or requires_payment_method. */
+  invoicePayments: Array<{ invoice: string; paymentIntent: string; status?: string }>;
+  /** The pending update on each subscription that has one: the invoice it waits on, and the update it applies once that's paid. */
+  pendingUpdates: Map<string, { invoice: string; params: Stripe.SubscriptionUpdateParams }>;
   /** Products, prices, meters, coupons, portal configurations, endpoints and Stripe Tax: what pnpm billing makes. */
   catalog: FakeCatalogState;
 };
@@ -30,7 +32,7 @@ export class FakeStripeContext {
   private counter = 0;
 
   constructor(readonly clock: FakeClock, accountId: string) {
-    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], catalog: emptyFakeCatalog() };
+    this.state = { accountId, customers: new Map(), subscriptions: new Map(), schedules: new Map(), invoices: new Map(), portalSessions: [], checkoutSessions: new Map(), invoicePayments: [], pendingUpdates: new Map(), catalog: emptyFakeCatalog() };
   }
 
   /** A new ID with Stripe's prefix for the kind of object, numbered in the order the fake made them. */

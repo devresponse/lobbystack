@@ -3,12 +3,12 @@ import { readFileSync } from "node:fs";
 import { and, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { businessHours, calls, conversations, knowledgeChunks, knowledgeDocuments, knowledgeSnippets, messages, receptionistProfiles, storageObjects, transcripts, websiteIngestionJobs } from "@lobbystack/db";
-import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
+import { affiliateCommissions, affiliatePayoutItems, affiliateProfiles, billingAccounts, billingCheckoutRequests, billingTransactions, billingUsageEvents, billingUsageMonths, appointments, auditLogs, businessMemberships, contacts, productEvents, providerEvents, services, staff, users, businesses, notifications, outboxMessages, withBusinessTransaction, claimOutboxBatch, createDatabaseClient, enqueueOutbox, markOutboxFailed, listReembedBusinesses, listSchedulerBusinesses, listSummaryBackfillBusinesses, markOutboxPublished, prunePublishedOutbox, sessions, type Database, type DatabaseTransaction } from "@lobbystack/db";
 import { generateAffiliatePayoutRun } from "./affiliates";
-import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
+import { claimBillingSubscription, claimBillingUsageSync, confirmBillingUsageSync, correctAlertSmsUsage, enqueueBillingUsageSync, getBillingUsageStatus, getWebVoiceBillingAllowance, getWidgetChatAllowance, loadOverageWork, loadPlanChangePayment, reconcileBillingProviderEvent, recordOverageSubscription, releaseBillingSubscription, reserveAlertSmsUsage } from "./billing";
 import { periodKeyFor } from "./usage";
 import type { ProviderSubscription } from "@lobbystack/providers/billing/types";
-import { DASHBOARD_TEST_CALL_WIDGET_ID } from "@lobbystack/shared";
+import { DASHBOARD_TEST_CALL_WIDGET_ID, planChangeRefusalSentence } from "@lobbystack/shared";
 import { currentWebsiteIngestion } from "./activation";
 import { createBusiness } from "./tenancy";
 import { bookAppointment, cancelAppointment } from "./booking";
@@ -893,6 +893,49 @@ it("applies a Stripe subscription as its read-back says, in any order of its eve
       expect(await jobs()).toHaveLength(3);
     } finally {
       await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+    }
+  });
+
+  it("settles a plan change that waited for the customer's payment once Stripe applies it, or once it expires unpaid", async () => {
+    const env = { POLAR_STARTER_MONTHLY_PRODUCT_ID: "price_starter_month", POLAR_PRO_MONTHLY_PRODUCT_ID: "price_pro_month" };
+    const context = { db: client!.db as unknown as Database };
+    let seconds = 0;
+    const read = (priceRef: string): ProviderSubscription => ({ id: "sub_1", customerId: "cus_1", state: "active", priceRef, interval: "monthly", discountRef: null, periodStart: new Date("2026-11-01T00:00:00Z"), periodEnd: new Date("2026-12-01T00:00:00Z"), cancelAt: null, endedAt: null, next: null, pendingPayment: null, metadata: {}, readAt: new Date(Date.UTC(2026, 10, 8, 12, 0, seconds++)) });
+    const businessId = randomUUID();
+    const userId = randomUUID();
+    await client!.db.insert(businesses).values({ id: businessId, slug: businessId, name: "Stripe pending update test", timezone: "UTC", businessType: "test" });
+    await client!.db.insert(users).values({ id: userId, email: `${userId}@example.invalid`, normalizedEmail: `${userId}@example.invalid` });
+    const reconcile = async (eventType: string, fresh: ProviderSubscription) => {
+      const [event] = await client!.db.insert(providerEvents).values({ provider: "stripe", providerEventId: `evt_${randomUUID()}`, eventType, businessId, payload: { kind: "subscription", subscriptionId: "sub_1", customerId: "cus_1" } }).returning({ id: providerEvents.id });
+      await reconcileBillingProviderEvent(context, { businessId, providerEventId: event!.id, fresh }, env);
+    };
+    // The worker's needs_action: the request ready on the invoice's page, naming the subscription.
+    const waiting = async () => (await client!.db.insert(billingCheckoutRequests).values({ businessId, requestedByUserId: userId, target: "pro", billingInterval: "monthly", status: "ready", checkoutId: "sub_1", checkoutUrl: "https://invoice.stripe.com/i/in_1" }).returning({ id: billingCheckoutRequests.id }))[0]!.id;
+    const request = async (id: string) => (await client!.db.select({ status: billingCheckoutRequests.status, error: billingCheckoutRequests.error }).from(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, id)))[0];
+    const payment = async () => await withBusinessTransaction(client!.db, { businessId, actorType: "worker" }, async (tx) => await loadPlanChangePayment(tx, { businessId, subscriptionId: "sub_1" }));
+    const published = async (id: string) => (await client!.db.select({ dedupeKey: outboxMessages.dedupeKey }).from(outboxMessages).where(and(eq(outboxMessages.businessId, businessId), eq(outboxMessages.aggregateId, id)))).map((row) => row.dedupeKey);
+    try {
+      await reconcile("customer.subscription.created", read("price_starter_month"));
+      expect(await payment()).toBeNull();
+
+      // The customer confirms with the bank: Stripe applies the upgrade, and the request is done.
+      const applied = await waiting();
+      expect(await payment()).toBe("https://invoice.stripe.com/i/in_1");
+      await reconcile("customer.subscription.pending_update_applied", read("price_pro_month"));
+      expect(await request(applied)).toEqual({ status: "changed", error: null });
+      expect(await published(applied)).toEqual([`billing-checkout:${applied}:changed`]);
+      expect((await client!.db.select({ plan: billingAccounts.plan }).from(billingAccounts).where(eq(billingAccounts.businessId, businessId)))[0]?.plan).toBe("pro");
+      expect(await payment()).toBeNull();
+
+      // Another one never paid: Stripe drops it within a day, and the business hears the card wasn't charged.
+      const expired = await waiting();
+      await reconcile("customer.subscription.pending_update_expired", read("price_pro_month"));
+      expect(await request(expired)).toEqual({ status: "error", error: planChangeRefusalSentence("stripe", "payment_failed") });
+      expect(await published(expired)).toEqual([`billing-checkout:${expired}:error`]);
+      expect(await payment()).toBeNull();
+    } finally {
+      await client!.db.delete(businesses).where(eq(businesses.id, businessId));
+      await client!.db.delete(users).where(eq(users.id, userId));
     }
   });
 

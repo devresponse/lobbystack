@@ -204,6 +204,7 @@ export const apiBillingSchema = z.object({
     interval: z.enum(billingIntervals),
     at: timestamp.describe("When the change takes effect, at the renewal."),
   }).nullable().describe("A plan change waiting for the renewal, such as a downgrade. Null when none waits."),
+  payment_action_url: z.string().url().nullable().describe("The page where the customer confirms the payment for an upgrade, when their bank asks them to, as with 3-D Secure. The upgrade applies once it's paid, and expires unpaid within a day. Null when no payment waits."),
   spending_cap_cents: z.number().int().nullable().describe("The most a Starter or Pro plan spends on usage over its allowance each month. Null means no cap, and is always null on other plans."),
   overage_spend_cents: z.number().int().describe("Usage over the allowance this month."),
   spending_cap_reached: z.boolean().describe("true once this month's overage reached the cap, which stops further billable usage."),

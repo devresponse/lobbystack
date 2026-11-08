@@ -935,11 +935,13 @@ export type PlanChangeProration = (typeof prorations)[number];
  * Before the first apply, the values the brand files ship with: an upgrade is
  * invoiced at once and a downgrade waits for the next period.
  */
-export async function loadPlanChangeProration(context: DomainContext): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
+/** How the last applied billing.json charges plan changes on the deployment's provider: Polar's proration words, or the stripe block's upgrade and downgrade. */
+export async function loadPlanChangeProration(context: DomainContext, provider: BillingProviderId = "polar"): Promise<{ upgrade: PlanChangeProration; downgrade: PlanChangeProration }> {
   const latest = await withBusinessTransaction(context.db, { actorType: "worker" }, async (tx) => await latestRun(tx, "catalog"), { accessMode: "read only" });
-  const polar = (latest?.profile as { polar?: Record<string, unknown> } | null | undefined)?.polar;
+  const profile = latest?.profile as { polar?: Record<string, unknown>; stripe?: Record<string, unknown> } | null | undefined;
   const pick = (value: unknown, fallback: PlanChangeProration): PlanChangeProration => (prorations as readonly unknown[]).includes(value) ? value as PlanChangeProration : fallback;
-  return { upgrade: pick(polar?.upgradeProration, "invoice"), downgrade: pick(polar?.downgradeProration, "next_period") };
+  if (provider === "stripe") return { upgrade: pick(profile?.stripe?.upgrade, "invoice"), downgrade: pick(profile?.stripe?.downgrade, "next_period") };
+  return { upgrade: pick(profile?.polar?.upgradeProration, "invoice"), downgrade: pick(profile?.polar?.downgradeProration, "next_period") };
 }
 
 const runKinds = ["catalog", "polar", "link", "verify"] as const;

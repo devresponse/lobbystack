@@ -117,13 +117,9 @@ describe("the billing provider contract: a subscription", () => {
 
     it("answers not_supported, naming the step, for the flows later steps add", async () => {
       const { billing, stripe } = stripeHarness();
-      const to = { ref: "price_pro_monthly", discountRef: null };
-      await expect(billing.changePlan({ subscriptionId: "sub_1", to, discount: "keep", when: "now", proration: "invoice_now", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 14") });
       await expect(billing.cancel({ subscriptionId: "sub_1", when: "renewal", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported", message: expect.stringContaining("step 15") });
       await expect(billing.resume({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
       await expect(billing.keepPlan({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
-      await expect(billing.endAtRenewal({ subscriptionId: "sub_1", then: "cancel", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
-      await expect(billing.removeDiscount({ subscriptionId: "sub_1", requestId: "r1" })).rejects.toMatchObject({ code: "not_supported" });
       expect(stripe.requests).toEqual([]);
       expect(billing.can).toEqual({ uniqueCustomerEmail: false, meterMoney: true, separateOverage: true, readBack: true, inAppCancel: true });
     });

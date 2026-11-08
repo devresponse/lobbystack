@@ -15645,6 +15645,18 @@
             ],
             "description": "A plan change waiting for the renewal, such as a downgrade. Null when none waits."
           },
+          "payment_action_url": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page where the customer confirms the payment for an upgrade, when their bank asks them to, as with 3-D Secure. The upgrade applies once it's paid, and expires unpaid within a day. Null when no payment waits."
+          },
           "spending_cap_cents": {
             "anyOf": [
               {
@@ -15692,6 +15704,7 @@
           "current_period_end",
           "cancels_at",
           "next_change",
+          "payment_action_url",
           "spending_cap_cents",
           "overage_spend_cents",
           "spending_cap_reached",

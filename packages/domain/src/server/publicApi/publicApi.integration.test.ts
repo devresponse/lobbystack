@@ -954,6 +954,15 @@ describe.skipIf(!testUrl)("public API against PostgreSQL with RLS", () => {
       await admin!.db.update(billingAccounts).set({ subscriptionState: "canceled" }).where(eq(billingAccounts.businessId, businessId));
       expect(await getBillingForApi(context, caller)).toMatchObject({ cancels_at: null });
       await admin!.db.update(billingAccounts).set({ cancelAt: null }).where(eq(billingAccounts.businessId, businessId));
+      // An upgrade waiting for the bank names its page, as the worker left it ready (the Stripe plan's step 14).
+      await admin!.db.update(billingAccounts).set({ subscriptionId: "sub_1" }).where(eq(billingAccounts.businessId, businessId));
+      expect(await getBillingForApi(context, caller)).toMatchObject({ payment_action_url: null });
+      const [waiting] = await admin!.db.insert(billingCheckoutRequests).values({ businessId, requestedByUserId: ownerId, target: "pro", billingInterval: "monthly", status: "ready", checkoutId: "sub_1", checkoutUrl: "https://invoice.stripe.com/i/in_1" }).returning({ id: billingCheckoutRequests.id });
+      const paying = await getBillingForApi(context, caller);
+      expect(paying).toMatchObject({ payment_action_url: "https://invoice.stripe.com/i/in_1" });
+      expect(apiBillingSchema.safeParse(paying).success).toBe(true);
+      await admin!.db.delete(billingCheckoutRequests).where(eq(billingCheckoutRequests.id, waiting!.id));
+      await admin!.db.update(billingAccounts).set({ subscriptionId: null }).where(eq(billingAccounts.businessId, businessId));
       // A checkout queued before the managed plan stops, so Polar never sells a plan the operator bills.
       const queued = await createCheckoutForApi(context, caller, { plan: "starter", interval: "monthly" }, { available: true });
       const managed = await setManagedPlanForApi(context, operator);

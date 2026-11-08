@@ -3,7 +3,7 @@ import { vi } from "vitest";
 import { PolarBilling } from "../../polar/adapter";
 import { PolarBillingProvider } from "../../polar/polarBilling";
 import { StripeBilling } from "../../stripe/adapter";
-import { createFakeStripe, type FakeStripe } from "../../stripe/fake";
+import { createFakeStripe, type FakeClock, type FakeStripe } from "../../stripe/fake";
 import type { BillingProvider } from "../types";
 
 // The contract suite runs each flow's file against every adapter. Polar runs
@@ -43,8 +43,9 @@ export function polarHarness(): PolarHarness {
 export type StripeHarness = { billing: StripeBilling; stripe: FakeStripe };
 
 /** The Stripe adapter over the in-memory fake, on a sandbox account. */
-export function stripeHarness(options: { portalConfiguration?: string } = {}): StripeHarness {
-  const stripe = createFakeStripe({ accountId: "acct_1" });
+/** The adapter over the in-memory Stripe; `clock` sets its time, such as today's for a read-back that compares with the time it's read. */
+export function stripeHarness(options: { portalConfiguration?: string; clock?: FakeClock } = {}): StripeHarness {
+  const stripe = createFakeStripe({ accountId: "acct_1", ...(options.clock ? { clock: options.clock } : {}) });
   return { stripe, billing: new StripeBilling(stripe, { accountId: "acct_1", env: "sandbox", deployment: "https://app.example", ...(options.portalConfiguration ? { portalConfiguration: options.portalConfiguration } : {}) }) };
 }
 
